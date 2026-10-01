@@ -1,0 +1,8 @@
+[package]
+name = "streamdeck-plus-monitor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossterm = "0.28"
+hidapi = "2.6"
