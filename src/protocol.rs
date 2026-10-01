@@ -15,17 +15,36 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
     }
     let payload = &report[4..4 + length];
     match report[1] {
-        0x00 => payload.iter().take(8).enumerate().filter_map(|(index, &state)| {
-            (state <= 1).then_some(Event::Key { index, pressed: state == 1 })
-        }).collect(),
+        0x00 => payload
+            .iter()
+            .take(8)
+            .enumerate()
+            .filter_map(|(index, &state)| {
+                (state <= 1).then_some(Event::Key {
+                    index,
+                    pressed: state == 1,
+                })
+            })
+            .collect(),
         0x03 if payload.len() >= 5 => match payload[0] {
-            0x00 => payload[1..5].iter().enumerate().filter_map(|(index, &state)| {
-                (state <= 1).then_some(Event::EncoderButton { index, pressed: state == 1 })
-            }).collect(),
-            0x01 => payload[1..5].iter().enumerate().filter_map(|(index, &ticks)| {
-                let ticks = ticks as i8;
-                (ticks != 0).then_some(Event::Rotation { index, ticks })
-            }).collect(),
+            0x00 => payload[1..5]
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &state)| {
+                    (state <= 1).then_some(Event::EncoderButton {
+                        index,
+                        pressed: state == 1,
+                    })
+                })
+                .collect(),
+            0x01 => payload[1..5]
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &ticks)| {
+                    let ticks = ticks as i8;
+                    (ticks != 0).then_some(Event::Rotation { index, ticks })
+                })
+                .collect(),
             _ => Vec::new(),
         },
         _ => Vec::new(),
@@ -44,24 +63,79 @@ mod tests {
 
     #[test]
     fn decodes_key_states() {
-        assert_eq!(decode_report(&report(0, &[1, 0, 1, 0, 0, 0, 0, 0])), vec![
-            Event::Key { index: 0, pressed: true }, Event::Key { index: 1, pressed: false },
-            Event::Key { index: 2, pressed: true }, Event::Key { index: 3, pressed: false },
-            Event::Key { index: 4, pressed: false }, Event::Key { index: 5, pressed: false },
-            Event::Key { index: 6, pressed: false }, Event::Key { index: 7, pressed: false },
-        ]);
+        assert_eq!(
+            decode_report(&report(0, &[1, 0, 1, 0, 0, 0, 0, 0])),
+            vec![
+                Event::Key {
+                    index: 0,
+                    pressed: true
+                },
+                Event::Key {
+                    index: 1,
+                    pressed: false
+                },
+                Event::Key {
+                    index: 2,
+                    pressed: true
+                },
+                Event::Key {
+                    index: 3,
+                    pressed: false
+                },
+                Event::Key {
+                    index: 4,
+                    pressed: false
+                },
+                Event::Key {
+                    index: 5,
+                    pressed: false
+                },
+                Event::Key {
+                    index: 6,
+                    pressed: false
+                },
+                Event::Key {
+                    index: 7,
+                    pressed: false
+                },
+            ]
+        );
     }
 
     #[test]
     fn decodes_encoder_buttons_and_signed_rotations() {
-        assert_eq!(decode_report(&report(3, &[0, 1, 0, 1, 0])), vec![
-            Event::EncoderButton { index: 0, pressed: true }, Event::EncoderButton { index: 1, pressed: false },
-            Event::EncoderButton { index: 2, pressed: true }, Event::EncoderButton { index: 3, pressed: false },
-        ]);
-        assert_eq!(decode_report(&report(3, &[1, 2, 0xfe, 0, 1])), vec![
-            Event::Rotation { index: 0, ticks: 2 }, Event::Rotation { index: 1, ticks: -2 },
-            Event::Rotation { index: 3, ticks: 1 },
-        ]);
+        assert_eq!(
+            decode_report(&report(3, &[0, 1, 0, 1, 0])),
+            vec![
+                Event::EncoderButton {
+                    index: 0,
+                    pressed: true
+                },
+                Event::EncoderButton {
+                    index: 1,
+                    pressed: false
+                },
+                Event::EncoderButton {
+                    index: 2,
+                    pressed: true
+                },
+                Event::EncoderButton {
+                    index: 3,
+                    pressed: false
+                },
+            ]
+        );
+        assert_eq!(
+            decode_report(&report(3, &[1, 2, 0xfe, 0, 1])),
+            vec![
+                Event::Rotation { index: 0, ticks: 2 },
+                Event::Rotation {
+                    index: 1,
+                    ticks: -2
+                },
+                Event::Rotation { index: 3, ticks: 1 },
+            ]
+        );
     }
 
     #[test]

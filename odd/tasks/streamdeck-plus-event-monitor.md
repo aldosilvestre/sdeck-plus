@@ -43,8 +43,9 @@ The empty project needs a small, useful first milestone before full device confi
 - [ ] `SDP-1` — Implement the Rust Stream Deck + HID event monitor, polished terminal interface, protocol decoder tests, and README.
   - Route: delegated direct.
   - Trigger evidence: the implementation requires multiple non-trivial source/documentation files and protocol/library research; one bounded writer owns the write.
-  - Progress: implementation and README added in `Cargo.toml`, `src/`, and `README.md`. Not closed: `cargo`/`rustc` are unavailable in this environment, so formatting, compilation, tests, clippy, and runtime smoke check could not be performed.
-  - Verification evidence: `cargo fmt && cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings` attempted in the foreground; stopped immediately with `zsh:1: command not found: cargo`. `command -v cargo` and `command -v rustc` returned no paths. Git staged-diff whitespace check passed (`git diff --cached --check`). Hardware behavior remains unverified.
+  - Progress: implementation and README added in `Cargo.toml`, `src/`, and `README.md`. Initial compile exposed an uninferred event-list type in `src/main.rs`; fixed with an explicit `Vec<(String, Color)>` annotation.
+  - Verification evidence: `cargo fmt --check` passed; `cargo test` passed (3 unit tests); `cargo clippy --all-targets --all-features -- -D warnings` passed. `timeout 5s cargo run` exited successfully and displayed the expected missing-device message; no Stream Deck + was connected, so hardware event behavior remains unverified.
+  - Review status: RDD is enabled. Native assessment requires a base ref for this single-root-commit repository; selectorless STATUS returned `empty_candidate_base_ref_required`. No native review approval is claimed.
 
 ## Progress and next step
-Task `SDP-1` implementation is present but remains unchecked pending Rust toolchain verification. Local delivery is on `feature/streamdeck-plus-event-monitor`; no remote operations were performed.
+Task `SDP-1` implementation is present and Rust checks pass, but remains unchecked pending resolution of the native review base-ref requirement and hardware verification. Local delivery is on `feature/streamdeck-plus-event-monitor`; no remote operations were performed.
