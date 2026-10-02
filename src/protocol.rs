@@ -71,19 +71,19 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
             _ => Vec::new(),
         },
         0x02 if payload.len() >= 2 => match payload[0] {
-            0x01 if payload.len() >= 10 => vec![Event::TouchTap {
-                x: u16::from_le_bytes([payload[6], payload[7]]),
-                y: u16::from_le_bytes([payload[8], payload[9]]),
+            0x01 if payload.len() >= 6 => vec![Event::TouchTap {
+                x: u16::from_le_bytes([payload[2], payload[3]]),
+                y: u16::from_le_bytes([payload[4], payload[5]]),
             }],
-            0x02 if payload.len() >= 10 => vec![Event::TouchPress {
-                x: u16::from_le_bytes([payload[6], payload[7]]),
-                y: u16::from_le_bytes([payload[8], payload[9]]),
+            0x02 if payload.len() >= 6 => vec![Event::TouchPress {
+                x: u16::from_le_bytes([payload[2], payload[3]]),
+                y: u16::from_le_bytes([payload[4], payload[5]]),
             }],
-            0x03 if payload.len() >= 14 => vec![Event::TouchFlick {
-                start_x: u16::from_le_bytes([payload[6], payload[7]]),
-                start_y: u16::from_le_bytes([payload[8], payload[9]]),
-                end_x: u16::from_le_bytes([payload[10], payload[11]]),
-                end_y: u16::from_le_bytes([payload[12], payload[13]]),
+            0x03 if payload.len() >= 10 => vec![Event::TouchFlick {
+                start_x: u16::from_le_bytes([payload[2], payload[3]]),
+                start_y: u16::from_le_bytes([payload[4], payload[5]]),
+                end_x: u16::from_le_bytes([payload[6], payload[7]]),
+                end_y: u16::from_le_bytes([payload[8], payload[9]]),
             }],
             _ => Vec::new(),
         },
@@ -188,15 +188,18 @@ mod tests {
     #[test]
     fn decodes_touch_strip_gestures_with_little_endian_coordinates() {
         assert_eq!(
-            decode_report(&report(2, &[1, 0, 0, 0, 0, 0, 0x20, 0x03, 0x64, 0])),
-            vec![Event::TouchTap { x: 800, y: 100 }]
+            decode_report(&report(
+                2,
+                &[1, 1, 0x4b, 0, 0x23, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            )),
+            vec![Event::TouchTap { x: 75, y: 35 }]
         );
         assert_eq!(
-            decode_report(&report(2, &[2, 0, 0, 0, 0, 0, 1, 0, 2, 0])),
+            decode_report(&report(2, &[2, 0, 1, 0, 2, 0])),
             vec![Event::TouchPress { x: 1, y: 2 }]
         );
         assert_eq!(
-            decode_report(&report(2, &[3, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0x20, 3, 100, 0])),
+            decode_report(&report(2, &[3, 0, 1, 0, 2, 0, 0x20, 3, 100, 0])),
             vec![Event::TouchFlick {
                 start_x: 1,
                 start_y: 2,
@@ -208,8 +211,8 @@ mod tests {
 
     #[test]
     fn rejects_truncated_touch_reports() {
-        assert!(decode_report(&report(2, &[1, 0, 0, 0, 0, 0, 1, 0, 2])).is_empty());
-        assert!(decode_report(&report(2, &[3, 0, 0, 0, 0, 0, 1, 0, 2, 0, 3, 0, 4])).is_empty());
+        assert!(decode_report(&report(2, &[1, 0, 1, 0, 2])).is_empty());
+        assert!(decode_report(&report(2, &[3, 0, 1, 0, 2, 0, 3, 0, 4])).is_empty());
         assert!(decode_report(&report(2, &[4; 14])).is_empty());
     }
 }

@@ -1,9 +1,14 @@
-mod event_api;
-mod protocol;
+use streamdeck_plus_monitor::{
+    local_artwork::{ArtworkStore, ArtworkTarget},
+    protocol,
+};
 
-use event_api::{ConnectionState, MonitorEvent};
-use gtk::{glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Label, Orientation};
+use gtk::{
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, FileChooserAction,
+    FileChooserNative, Label, Orientation, Picture, ResponseType,
+};
 use std::{cell::RefCell, rc::Rc, sync::mpsc, time::Duration};
+use streamdeck_plus_monitor::event_api::{self, ArtworkCommand, ConnectionState, MonitorEvent};
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 
@@ -15,7 +20,7 @@ fn main() -> glib::ExitCode {
 
 fn build_ui(app: &Application) {
     let (sender, receiver) = mpsc::channel();
-    event_api::start_hid_monitor(sender);
+    let artwork_sender = event_api::start_hid_monitor(sender);
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -23,6 +28,21 @@ fn build_ui(app: &Application) {
         .default_width(920)
         .default_height(760)
         .build();
+    let artwork = match ArtworkStore::open() {
+        Ok(store) => Rc::new(RefCell::new(store)),
+        Err(error) => {
+            eprintln!("Could not open local artwork store: {error}");
+            Rc::new(RefCell::new(
+                ArtworkStore::open_at(
+                    std::env::temp_dir().join("streamdeck-plus-monitor-fallback"),
+                )
+                .expect("temporary artwork fallback could not be opened"),
+            ))
+        }
+    };
+    for diagnostic in artwork.borrow().diagnostics() {
+        eprintln!("Artwork: {diagnostic}");
+    }
 
     let root = GtkBox::new(Orientation::Vertical, 22);
     root.set_margin_top(28);
@@ -36,7 +56,7 @@ fn build_ui(app: &Application) {
     let title = Label::new(Some("STREAM DECK +"));
     title.add_css_class("title");
     title.set_xalign(0.0);
-    let subtitle = Label::new(Some("Live input monitor  ·  Read-only observer"));
+    let subtitle = Label::new(Some("Live input monitor  ·  scoped artwork uploads"));
     subtitle.add_css_class("muted");
     subtitle.set_xalign(0.0);
     heading.append(&title);
@@ -73,9 +93,25 @@ fn build_ui(app: &Application) {
         line.set_homogeneous(true);
         for col in 0..4 {
             let index = row * 4 + col;
+            let tile = GtkBox::new(Orientation::Vertical, 6);
+            tile.add_css_class("artwork-tile");
+            let picture = Picture::new();
+            picture.set_size_request(100, 74);
+            picture.set_visible(false);
             let label = Label::new(Some(&format!("KEY {}\nIDLE", index + 1)));
             label.add_css_class("control-tile");
-            line.append(&label);
+            label.set_hexpand(true);
+            tile.append(&picture);
+            tile.append(&label);
+            add_artwork_controls(
+                &tile,
+                &window,
+                &artwork,
+                &artwork_sender,
+                ArtworkTarget::Keypad((index + 1) as u8),
+                &picture,
+            );
+            line.append(&tile);
             key_labels.push(label);
         }
         key_grid.append(&line);
@@ -115,6 +151,47 @@ fn build_ui(app: &Application) {
     let touch_status = Label::new(Some("Tap, press and flick gestures will appear here"));
     touch_status.add_css_class("touch-display");
     touch_status.set_xalign(0.0);
+    let strip = gtk::Overlay::new();
+    strip.set_child(Some(&Picture::new()));
+    let background = Picture::new();
+    background.set_size_request(-1, 88);
+    background.set_can_shrink(true);
+    background.set_hexpand(true);
+    strip.set_child(Some(&background));
+    let zones = GtkBox::new(Orientation::Horizontal, 0);
+    zones.set_homogeneous(true);
+    let mut zone_pictures = Vec::new();
+    for zone in 1..=4 {
+        let holder = GtkBox::new(Orientation::Vertical, 4);
+        holder.add_css_class("strip-zone");
+        let zone_picture = Picture::new();
+        zone_picture.set_size_request(-1, 64);
+        zone_picture.set_visible(false);
+        holder.append(&zone_picture);
+        let zone_label = Label::new(Some(&format!("ENCODER {zone}")));
+        zone_label.add_css_class("strip-zone-label");
+        holder.append(&zone_label);
+        add_artwork_controls(
+            &holder,
+            &window,
+            &artwork,
+            &artwork_sender,
+            ArtworkTarget::EncoderZone(zone),
+            &zone_picture,
+        );
+        zones.append(&holder);
+        zone_pictures.push(zone_picture);
+    }
+    strip.add_overlay(&zones);
+    touch.append(&strip);
+    add_artwork_controls(
+        &touch,
+        &window,
+        &artwork,
+        &artwork_sender,
+        ArtworkTarget::TouchStripBackground,
+        &background,
+    );
     touch.append(&touch_status);
     root.append(&touch);
 
@@ -140,12 +217,29 @@ fn build_ui(app: &Application) {
     events_card.append(&scroller);
     root.append(&events_card);
 
+    // Restore images after all target widgets have been created.
+    for (index, label) in key_labels.iter().enumerate() {
+        let parent = label.parent().and_downcast::<GtkBox>().expect("key tile");
+        if let Some(picture) = parent.first_child().and_downcast::<Picture>() {
+            restore_picture(&artwork, ArtworkTarget::Keypad((index + 1) as u8), &picture);
+        }
+    }
+    restore_picture(&artwork, ArtworkTarget::TouchStripBackground, &background);
+    for (index, picture) in zone_pictures.iter().enumerate() {
+        restore_picture(
+            &artwork,
+            ArtworkTarget::EncoderZone((index + 1) as u8),
+            picture,
+        );
+    }
+
     install_style(&window);
     window.set_child(Some(&root));
     window.present();
 
     let ticks = Rc::new(RefCell::new([0i64; 4]));
     let history = Rc::new(RefCell::new(Vec::<String>::new()));
+    let artwork_sender = artwork_sender.clone();
     glib::timeout_add_local(Duration::from_millis(40), move || {
         while let Ok(message) = receiver.try_recv() {
             match message {
@@ -160,7 +254,26 @@ fn build_ui(app: &Application) {
                         status.set_text("CONNECTED");
                         status.remove_css_class("status-idle");
                         status.add_css_class("status-online");
-                        connection_detail.set_text("Stream Deck + connected · HID input active");
+                        connection_detail
+                            .set_text("Stream Deck + connected · HID input and artwork active");
+                        for key in 1..=8 {
+                            let target = ArtworkTarget::Keypad(key);
+                            if let Some(path) = artwork.borrow().assigned_path(target) {
+                                let _ =
+                                    artwork_sender.send(ArtworkCommand::Assign { target, path });
+                            }
+                        }
+                        let has_touch_artwork = {
+                            let store = artwork.borrow();
+                            ArtworkTarget::ALL
+                                .iter()
+                                .skip(8)
+                                .any(|target| store.assigned_path(*target).is_some())
+                        };
+                        if has_touch_artwork {
+                            let _ =
+                                queue_touch_strip_composition(&artwork.borrow(), &artwork_sender);
+                        }
                     }
                     ConnectionState::Unavailable(detail) => {
                         status.set_text("UNAVAILABLE");
@@ -227,24 +340,212 @@ fn build_ui(app: &Application) {
                             "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
                         )),
                     }
-                    let mut entries = history.borrow_mut();
-                    entries.insert(0, text);
-                    entries.truncate(20);
-                    event_count.set_text(&format!("{} EVENTS", entries.len()));
-                    while let Some(child) = event_list.first_child() {
-                        event_list.remove(&child);
-                    }
-                    for entry in entries.iter() {
-                        let row = Label::new(Some(entry));
-                        row.add_css_class("event-row");
-                        row.set_xalign(0.0);
-                        event_list.append(&row);
-                    }
+                    record_recent_event(&history, &event_list, &event_count, text);
                 }
+                MonitorEvent::ArtworkResult { target, result } => match result {
+                    Ok(()) => record_recent_event(
+                        &history,
+                        &event_list,
+                        &event_count,
+                        format!("ARTWORK UPLOADED  ·  {target:?}"),
+                    ),
+                    Err(error) => {
+                        connection_detail.set_text(&format!(
+                            "Artwork update failed for {target:?} (local assignment retained): {error}",
+                        ));
+                        record_recent_event(
+                            &history,
+                            &event_list,
+                            &event_count,
+                            format!("ARTWORK UPLOAD FAILED  ·  {target:?}"),
+                        );
+                    }
+                },
             }
         }
         glib::ControlFlow::Continue
     });
+}
+
+fn record_recent_event(
+    history: &Rc<RefCell<Vec<String>>>,
+    event_list: &GtkBox,
+    event_count: &Label,
+    text: String,
+) {
+    let mut entries = history.borrow_mut();
+    entries.insert(0, text);
+    entries.truncate(20);
+    event_count.set_text(&format!("{} EVENTS", entries.len()));
+    while let Some(child) = event_list.first_child() {
+        event_list.remove(&child);
+    }
+    for entry in entries.iter() {
+        let row = Label::new(Some(entry));
+        row.add_css_class("event-row");
+        row.set_xalign(0.0);
+        event_list.append(&row);
+    }
+}
+
+fn restore_picture(store: &Rc<RefCell<ArtworkStore>>, target: ArtworkTarget, picture: &Picture) {
+    if let Some(path) = store.borrow().assigned_path(target) {
+        picture.set_filename(Some(path));
+        picture.set_visible(true);
+    }
+}
+
+fn add_artwork_controls(
+    parent: &GtkBox,
+    window: &ApplicationWindow,
+    store: &Rc<RefCell<ArtworkStore>>,
+    output: &mpsc::Sender<ArtworkCommand>,
+    target: ArtworkTarget,
+    picture: &Picture,
+) {
+    let controls = GtkBox::new(Orientation::Horizontal, 4);
+    let choose = gtk::Button::with_label("Choose image…");
+    let clear = gtk::Button::with_label("Clear");
+    controls.append(&choose);
+    controls.append(&clear);
+    parent.append(&controls);
+    let parent_window = window.clone();
+    let store_ref = store.clone();
+    let image = picture.clone();
+    let choose_output = output.clone();
+    choose.connect_clicked(move |_| {
+        let chooser = FileChooserNative::new(
+            Some("Choose artwork"),
+            Some(&parent_window),
+            FileChooserAction::Open,
+            Some("Open"),
+            Some("Cancel"),
+        );
+        let png_gif_filter = gtk::FileFilter::new();
+        png_gif_filter.set_name(Some("PNG and GIF images"));
+        png_gif_filter.add_mime_type("image/png");
+        png_gif_filter.add_mime_type("image/gif");
+        chooser.add_filter(&png_gif_filter);
+        let supported_filter = gtk::FileFilter::new();
+        supported_filter.set_name(Some("All supported image formats"));
+        supported_filter.add_pixbuf_formats();
+        chooser.add_filter(&supported_filter);
+        let store_ref = store_ref.clone();
+        let image = image.clone();
+        let output = choose_output.clone();
+        let error_parent = parent_window.clone();
+        chooser.connect_response(move |dialog, response| {
+            if response == ResponseType::Accept {
+                if let Some(path) = dialog.file().and_then(|file| file.path()) {
+                    let assignment = store_ref.borrow_mut().assign(target, &path);
+                    match assignment {
+                        Ok(saved) => {
+                            image.set_filename(Some(&saved));
+                            image.set_visible(true);
+                            let queued = if target == ArtworkTarget::TouchStripBackground {
+                                queue_touch_strip_composition(&store_ref.borrow(), &output)
+                            } else {
+                                output
+                                    .send(ArtworkCommand::Assign {
+                                        target,
+                                        path: saved,
+                                    })
+                                    .map_err(|error| error.to_string())
+                            };
+                            if let Err(error) = queued {
+                                show_artwork_error(
+                                    &error_parent,
+                                    &format!(
+                                        "Image saved locally but device upload could not be queued: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                        Err(error) => show_artwork_error(
+                            &error_parent,
+                            &format!("Could not assign image: {error}"),
+                        ),
+                    }
+                }
+            }
+        });
+        chooser.show();
+    });
+    let store_ref = store.clone();
+    let image = picture.clone();
+    let parent_window = window.clone();
+    let output = output.clone();
+    clear.connect_clicked(move |_| {
+        let cleared = store_ref.borrow_mut().clear(target);
+        match cleared {
+            Ok(()) => {
+                image.set_filename(None::<&std::path::Path>);
+                image.set_visible(false);
+                let queued = match target {
+                    ArtworkTarget::TouchStripBackground | ArtworkTarget::EncoderZone(_) => {
+                        queue_touch_strip_composition(&store_ref.borrow(), &output)
+                    }
+                    ArtworkTarget::Keypad(_) => output
+                        .send(ArtworkCommand::Clear { target })
+                        .map_err(|error| error.to_string()),
+                };
+                if let Err(error) = queued {
+                    show_artwork_error(
+                        &parent_window,
+                        &format!(
+                            "Artwork cleared locally but device upload could not be queued: {error}"
+                        ),
+                    );
+                }
+            }
+            Err(error) => {
+                show_artwork_error(&parent_window, &format!("Could not clear artwork: {error}"))
+            }
+        }
+    });
+}
+
+fn queue_touch_strip_composition(
+    store: &ArtworkStore,
+    output: &mpsc::Sender<ArtworkCommand>,
+) -> Result<(), String> {
+    for command in touch_strip_commands(store) {
+        output.send(command).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn touch_strip_commands(store: &ArtworkStore) -> Vec<ArtworkCommand> {
+    let mut commands = Vec::new();
+    let background = store.assigned_path(ArtworkTarget::TouchStripBackground);
+    match background {
+        Some(path) => commands.push(ArtworkCommand::Assign {
+            target: ArtworkTarget::TouchStripBackground,
+            path,
+        }),
+        None => commands.push(ArtworkCommand::Clear {
+            target: ArtworkTarget::TouchStripBackground,
+        }),
+    }
+    for zone in 1..=4 {
+        let target = ArtworkTarget::EncoderZone(zone);
+        if let Some(path) = store.assigned_path(target) {
+            commands.push(ArtworkCommand::Assign { target, path });
+        }
+    }
+    commands
+}
+
+fn show_artwork_error(window: &ApplicationWindow, message: &str) {
+    let dialog = gtk::MessageDialog::builder()
+        .transient_for(window)
+        .modal(true)
+        .message_type(gtk::MessageType::Error)
+        .buttons(gtk::ButtonsType::Close)
+        .text(message)
+        .build();
+    dialog.connect_response(|dialog, _| dialog.close());
+    dialog.show();
 }
 
 fn set_active(label: &Label, active: bool) {
@@ -300,7 +601,7 @@ fn section_title(text: &str) -> Label {
 
 fn install_style(window: &ApplicationWindow) {
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(".app-shell { background: #10141d; color: #edf1fb; } .title { color: #f4f6ff; font-size: 25px; font-weight: 800; letter-spacing: 1px; } .muted { color: #929db2; font-size: 12px; } .status { padding: 8px 14px; border-radius: 18px; font-size: 11px; font-weight: 800; letter-spacing: 1px; } .status-idle { color: #f3c77b; background: #392e1d; } .status-online { color: #78e0ae; background: #18372f; } .card { background: #191f2c; border: 1px solid #293246; border-radius: 15px; padding: 16px; } .section-label { color: #9ca9c1; font-size: 11px; font-weight: 800; letter-spacing: 1.3px; } .control-tile { background: #202838; border: 1px solid #303b50; border-radius: 11px; color: #c2ccdc; font-size: 12px; font-weight: 700; padding: 13px 8px; } .control-active { background: #174936; border-color: #38d996; color: #9af2c4; } .touch-display { background: #202838; border-radius: 10px; color: #8fe7ca; font-size: 14px; font-weight: 700; padding: 16px; } .event-row { background: #202838; border-radius: 7px; color: #d9e1ef; font-size: 12px; padding: 8px 10px; }");
+    provider.load_from_data(".app-shell { background: #10141d; color: #edf1fb; } .title { color: #f4f6ff; font-size: 25px; font-weight: 800; letter-spacing: 1px; } .muted { color: #929db2; font-size: 12px; } .status { padding: 8px 14px; border-radius: 18px; font-size: 11px; font-weight: 800; letter-spacing: 1px; } .status-idle { color: #f3c77b; background: #392e1d; } .status-online { color: #78e0ae; background: #18372f; } .card { background: #191f2c; border: 1px solid #293246; border-radius: 15px; padding: 16px; } .section-label { color: #9ca9c1; font-size: 11px; font-weight: 800; letter-spacing: 1.3px; } .artwork-tile { background: #202838; border: 1px solid #303b50; border-radius: 11px; padding: 8px; } .strip-zone { background: alpha(#10141d, 0.62); padding: 4px; } .strip-zone-label { color: white; font-size: 10px; font-weight: 800; } .control-tile { background: #202838; border: 1px solid #303b50; border-radius: 11px; color: #c2ccdc; font-size: 12px; font-weight: 700; padding: 13px 8px; } .control-active { background: #174936; border-color: #38d996; color: #9af2c4; } .touch-display { background: #202838; border-radius: 10px; color: #8fe7ca; font-size: 14px; font-weight: 700; padding: 16px; } .event-row { background: #202838; border-radius: 7px; color: #d9e1ef; font-size: 12px; padding: 8px 10px; }");
     gtk::style_context_add_provider_for_display(
         &gtk::gdk::Display::default().expect("GTK display"),
         &provider,
@@ -326,5 +627,57 @@ mod tests {
             end_y: 4
         })
         .contains("(1, 2) → (3, 4)"));
+    }
+
+    #[test]
+    fn touch_strip_composition_uploads_background_before_saved_zones() {
+        let root = std::env::temp_dir().join(format!("touch-artwork-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.png");
+        let image =
+            gtk::gdk_pixbuf::Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, false, 8, 2, 2).unwrap();
+        image.savev(&source, "png", &[]).unwrap();
+        let mut store = ArtworkStore::open_at(root.join("store")).unwrap();
+        store
+            .assign(ArtworkTarget::TouchStripBackground, &source)
+            .unwrap();
+        store
+            .assign(ArtworkTarget::EncoderZone(2), &source)
+            .unwrap();
+
+        let commands = touch_strip_commands(&store);
+        assert!(matches!(
+            commands.first(),
+            Some(ArtworkCommand::Assign {
+                target: ArtworkTarget::TouchStripBackground,
+                ..
+            })
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(ArtworkCommand::Assign {
+                target: ArtworkTarget::EncoderZone(2),
+                ..
+            })
+        ));
+        assert_eq!(commands.len(), 2);
+
+        store.clear(ArtworkTarget::TouchStripBackground).unwrap();
+        let commands = touch_strip_commands(&store);
+        assert!(matches!(
+            commands.first(),
+            Some(ArtworkCommand::Clear {
+                target: ArtworkTarget::TouchStripBackground
+            })
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(ArtworkCommand::Assign {
+                target: ArtworkTarget::EncoderZone(2),
+                ..
+            })
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
