@@ -14,7 +14,7 @@ From this directory:
 cargo run
 ```
 
-The interface lists key press/release, encoder button press/release, and signed encoder rotation ticks. Press `q` or `Esc` to exit. If the device is absent or cannot be opened, a readable diagnostic is shown. A read failure while monitoring is reported as a disconnect/read error.
+The interface lists key press/release, encoder button press/release, signed encoder rotation ticks, and Touch Strip Tap, Tap-and-hold, and Swipe gestures with coordinates (800 × 100 logical pixels). Touch gestures are reported after interaction completion, not as separate touch-down/up events. Press `q` or `Esc` to exit. If the device is absent or cannot be opened, a readable diagnostic is shown. A read failure while monitoring is reported as a disconnect/read error.
 
 ## Development
 

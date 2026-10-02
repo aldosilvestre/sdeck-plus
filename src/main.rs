@@ -130,5 +130,19 @@ fn describe(event: Event) -> (String, Color) {
             format!("ENCODER {}  ROTATED  {ticks:+} ticks", index + 1),
             Color::Magenta,
         ),
+        Event::TouchTap { x, y } => (format!("TOUCH STRIP  TAP  ({x}, {y})"), Color::Green),
+        Event::TouchPress { x, y } => (
+            format!("TOUCH STRIP  TAP-AND-HOLD  ({x}, {y})"),
+            Color::Yellow,
+        ),
+        Event::TouchFlick {
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+        } => (
+            format!("TOUCH STRIP  SWIPE  ({start_x}, {start_y}) → ({end_x}, {end_y})"),
+            Color::Magenta,
+        ),
     }
 }
