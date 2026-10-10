@@ -8,7 +8,10 @@ use crate::{
 };
 use std::{
     path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, Condvar, Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -32,10 +35,18 @@ pub enum MonitorEvent {
         target: ArtworkTarget,
         result: Result<(), String>,
     },
+    AppEvent {
+        name: String,
+    },
+    LayerError(String),
+    /// Liveness probe; consumers ignore this message.
+    Heartbeat,
 }
 
 #[derive(Debug, Clone)]
 pub enum ArtworkCommand {
+    /// Complete desired image state. A newer pending snapshot supersedes older work.
+    Replace(Vec<ArtworkCommand>),
     Assign {
         target: ArtworkTarget,
         path: PathBuf,
@@ -45,49 +56,216 @@ pub enum ArtworkCommand {
     },
 }
 
-/// Start the blocking HID producer on a dedicated thread. Consumers receive typed events.
-pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> Sender<ArtworkCommand> {
-    let (artwork_sender, artwork_receiver) = std::sync::mpsc::channel();
-    thread::Builder::new()
-        .name("streamdeck-hid".into())
-        .spawn(move || monitor(sender, artwork_receiver))
-        .expect("failed to start HID reader thread");
-    artwork_sender
+/// Cooperative cancellation and report admission share one lock. The lock is never
+/// held across HID calls: an admitted call may finish, and callbacks may request stop.
+#[derive(Clone, Default)]
+struct StopSignal(Arc<(Mutex<bool>, Condvar)>);
+
+impl StopSignal {
+    fn request(&self) {
+        *self.0 .0.lock().unwrap() = true;
+        self.0 .1.notify_all();
+    }
+
+    fn live(&self) -> bool {
+        !*self.0 .0.lock().unwrap()
+    }
+
+    fn wait(&self, duration: Duration) -> bool {
+        let (stopped, _) = self
+            .0
+             .1
+            .wait_timeout_while(self.0 .0.lock().unwrap(), duration, |stopped| !*stopped)
+            .unwrap();
+        !*stopped
+    }
 }
 
-fn monitor(sender: Sender<MonitorEvent>, commands: Receiver<ArtworkCommand>) {
-    loop {
-        let _ = sender.send(MonitorEvent::Connection(ConnectionState::Searching));
-        let api = match hidapi::HidApi::new() {
-            Ok(api) => api,
-            Err(error) => {
-                let _ = sender.send(MonitorEvent::Connection(ConnectionState::Unavailable(
-                    format!("HID initialization failed: {error}"),
-                )));
-                thread::sleep(Duration::from_secs(2));
-                continue;
-            }
+/// Owns the HID worker; dropping it cancels, joins and releases the device.
+pub struct HidController {
+    stop: StopSignal,
+    worker: Option<thread::JoinHandle<()>>,
+    artwork: Sender<ArtworkCommand>,
+}
+
+impl HidController {
+    pub fn artwork_sender(&self) -> Sender<ArtworkCommand> {
+        self.artwork.clone()
+    }
+
+    pub fn request_stop(&self) {
+        self.stop.request();
+    }
+
+    pub fn shutdown(&mut self) {
+        self.request_stop();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for HidController {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// Start the blocking HID producer on a dedicated, owned thread.
+pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
+    let (artwork, commands) = std::sync::mpsc::channel();
+    let stop = StopSignal::default();
+    let worker_stop = stop.clone();
+    let worker = thread::Builder::new()
+        .name("streamdeck-hid".into())
+        .spawn(move || {
+            monitor(
+                sender,
+                commands,
+                worker_stop,
+                discover_device,
+                prepare_artwork,
+            )
+        })
+        .expect("failed to start HID reader thread");
+    HidController {
+        stop,
+        worker: Some(worker),
+        artwork,
+    }
+}
+
+fn pending_artwork(commands: &Receiver<ArtworkCommand>) -> Vec<ArtworkCommand> {
+    let mut pending = Vec::new();
+    for command in commands.try_iter() {
+        match command {
+            ArtworkCommand::Replace(snapshot) => pending = snapshot,
+            command => pending.push(command),
+        }
+    }
+    pending
+}
+
+trait Device {
+    fn read(&self, buffer: &mut [u8]) -> Result<usize, String>;
+    fn write(&self, report: &[u8]) -> Result<usize, String>;
+}
+
+impl Device for hidapi::HidDevice {
+    fn read(&self, buffer: &mut [u8]) -> Result<usize, String> {
+        self.read_timeout(buffer, 100)
+            .map_err(|error| error.to_string())
+    }
+
+    fn write(&self, report: &[u8]) -> Result<usize, String> {
+        self.write(report).map_err(|error| error.to_string())
+    }
+}
+
+fn discover_device(stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
+    if !stop.live() {
+        return Err("HID discovery cancelled".into());
+    }
+    let api =
+        hidapi::HidApi::new().map_err(|error| format!("HID initialization failed: {error}"))?;
+    let info = api
+        .device_list()
+        .find(|device| device.vendor_id() == VID && device.product_id() == PID)
+        .ok_or_else(|| {
+            "Device not found · connect Stream Deck + (VID 0FD9 / PID 0084)".to_string()
+        })?;
+    if !stop.live() {
+        return Err("HID discovery cancelled".into());
+    }
+    info.open_device(&api)
+        .map_err(|error| format!("Device found but could not open: {error}"))
+}
+
+fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String> {
+    let (target, jpeg) = match command {
+        ArtworkCommand::Assign { target, path } => {
+            (target, image_output::prepare_jpeg(target, path)?)
+        }
+        ArtworkCommand::Clear { target } => (target, image_output::prepare_clear_jpeg(target)?),
+        ArtworkCommand::Replace(_) => unreachable!("snapshots contain target commands"),
+    };
+    image_output::encode_reports(target, &jpeg)
+}
+
+fn process_artwork(
+    commands: &Receiver<ArtworkCommand>,
+    stop: &StopSignal,
+    sender: &Sender<MonitorEvent>,
+    mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
+    mut write: impl FnMut(&[u8]) -> Result<usize, String>,
+) {
+    if !stop.live() {
+        return;
+    }
+    for command in pending_artwork(commands) {
+        if !stop.live() {
+            return;
+        }
+        let target = match &command {
+            ArtworkCommand::Assign { target, .. } | ArtworkCommand::Clear { target } => *target,
+            ArtworkCommand::Replace(_) => continue,
         };
-        let Some(info) = api
-            .device_list()
-            .find(|device| device.vendor_id() == VID && device.product_id() == PID)
-        else {
-            let _ = sender.send(MonitorEvent::Connection(ConnectionState::Unavailable(
-                "Device not found · connect Stream Deck + (VID 0FD9 / PID 0084)".into(),
-            )));
-            thread::sleep(Duration::from_secs(2));
-            continue;
-        };
-        let device = match info.open_device(&api) {
+        let result = prepare(command).and_then(|reports| {
+            transmit_reports(&reports, stop, |report| {
+                if sender.send(MonitorEvent::Heartbeat).is_err() {
+                    stop.request();
+                    return Err("HID consumer disconnected".into());
+                }
+                write(report)
+            })
+        });
+        if !stop.live() {
+            return;
+        }
+        if sender
+            .send(MonitorEvent::ArtworkResult { target, result })
+            .is_err()
+        {
+            stop.request();
+            return;
+        }
+    }
+}
+
+fn monitor<D: Device>(
+    sender: Sender<MonitorEvent>,
+    commands: Receiver<ArtworkCommand>,
+    stop: StopSignal,
+    mut discover: impl FnMut(&StopSignal) -> Result<D, String>,
+    mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
+) {
+    while stop.live() {
+        if sender
+            .send(MonitorEvent::Connection(ConnectionState::Searching))
+            .is_err()
+        {
+            return;
+        }
+        let device = match discover(&stop) {
             Ok(device) => device,
             Err(error) => {
-                let _ = sender.send(MonitorEvent::Connection(ConnectionState::Unavailable(
-                    format!("Device found but could not open: {error}"),
-                )));
-                thread::sleep(Duration::from_secs(2));
+                if sender
+                    .send(MonitorEvent::Connection(ConnectionState::Unavailable(
+                        error,
+                    )))
+                    .is_err()
+                {
+                    return;
+                }
+                if !stop.wait(Duration::from_secs(2)) {
+                    return;
+                }
                 continue;
             }
         };
+        if !stop.live() {
+            return;
+        }
         if sender
             .send(MonitorEvent::Connection(ConnectionState::Connected))
             .is_err()
@@ -95,29 +273,18 @@ fn monitor(sender: Sender<MonitorEvent>, commands: Receiver<ArtworkCommand>) {
             return;
         }
         let mut buffer = [0u8; 64];
-        loop {
-            for command in commands.try_iter() {
-                let target = match &command {
-                    ArtworkCommand::Assign { target, .. } => *target,
-                    ArtworkCommand::Clear { target } => *target,
-                };
-                let result = (|| {
-                    let jpeg = match command {
-                        ArtworkCommand::Assign { target, path } => {
-                            image_output::prepare_jpeg(target, path)?
-                        }
-                        ArtworkCommand::Clear { target } => {
-                            image_output::prepare_clear_jpeg(target)?
-                        }
-                    };
-                    let reports = image_output::encode_reports(target, &jpeg)?;
-                    transmit_reports(&reports, |report| {
-                        device.write(report).map_err(|error| error.to_string())
-                    })
-                })();
-                let _ = sender.send(MonitorEvent::ArtworkResult { target, result });
+        while stop.live() {
+            // A heartbeat detects consumer loss even when there is no input.
+            if sender.send(MonitorEvent::Heartbeat).is_err() {
+                return;
             }
-            match device.read_timeout(&mut buffer, 100) {
+            process_artwork(&commands, &stop, &sender, &mut prepare, |report| {
+                device.write(report)
+            });
+            if !stop.live() {
+                return;
+            }
+            match device.read(&mut buffer) {
                 Ok(0) => {}
                 Ok(size) => {
                     for event in decode_report(&buffer[..size]) {
@@ -134,15 +301,23 @@ fn monitor(sender: Sender<MonitorEvent>, commands: Receiver<ArtworkCommand>) {
                 }
             }
         }
-        thread::sleep(Duration::from_secs(1));
+        if !stop.wait(Duration::from_secs(1)) {
+            return;
+        }
     }
 }
 
 fn transmit_reports<E: std::fmt::Display>(
     reports: &[image_output::OutputReport],
+    stop: &StopSignal,
     mut write: impl FnMut(&[u8]) -> Result<usize, E>,
 ) -> Result<(), String> {
     for (index, report) in reports.iter().enumerate() {
+        // This locked check is admission; stop serializes with it. Do not hold
+        // the lock during the admitted synchronous call (including fake callbacks).
+        if !stop.live() {
+            return Err("HID upload cancelled".into());
+        }
         let written = write(&report.0)
             .map_err(|error| format!("HID write failed on report {}: {error}", index + 1))?;
         if written != report.0.len() {
@@ -159,6 +334,262 @@ fn transmit_reports<E: std::fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_from_write_callback_prevents_remaining_reports() {
+        let stop = StopSignal::default();
+        let reports = vec![image_output::OutputReport(vec![1]); 3];
+        let mut writes = 0;
+        let result = transmit_reports(&reports, &stop, |bytes| {
+            writes += 1;
+            stop.request();
+            Ok::<_, String>(bytes.len())
+        });
+        assert!(result.is_err());
+        assert_eq!(writes, 1);
+        stop.request();
+        assert!(!stop.wait(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn stopped_snapshot_is_discarded_without_preparing_or_writing() {
+        let stop = StopSignal::default();
+        stop.request();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(ArtworkCommand::Clear {
+                target: ArtworkTarget::Keypad(1),
+            })
+            .unwrap();
+        process_artwork(
+            &receiver,
+            &stop,
+            &std::sync::mpsc::channel().0,
+            |_| panic!("must not prepare"),
+            |_| panic!("must not write"),
+        );
+    }
+
+    #[test]
+    fn stop_during_preparation_prevents_upload_and_next_target() {
+        let stop = StopSignal::default();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for index in 1..=2 {
+            sender
+                .send(ArtworkCommand::Clear {
+                    target: ArtworkTarget::Keypad(index),
+                })
+                .unwrap();
+        }
+        let mut prepared = 0;
+        process_artwork(
+            &receiver,
+            &stop,
+            &std::sync::mpsc::channel().0,
+            |_| {
+                prepared += 1;
+                stop.request();
+                Ok(vec![image_output::OutputReport(vec![1])])
+            },
+            |_| panic!("must not write"),
+        );
+        assert_eq!(prepared, 1);
+    }
+
+    #[test]
+    fn first_report_stop_or_consumer_loss_prevents_other_reports_and_targets() {
+        for explicit_stop in [true, false] {
+            let stop = StopSignal::default();
+            let (sender, commands) = std::sync::mpsc::channel();
+            sender
+                .send(ArtworkCommand::Replace(vec![
+                    ArtworkCommand::Clear {
+                        target: ArtworkTarget::Keypad(1),
+                    },
+                    ArtworkCommand::Clear {
+                        target: ArtworkTarget::Keypad(2),
+                    },
+                ]))
+                .unwrap();
+            let (events, receiver) = std::sync::mpsc::channel();
+            let mut receiver = Some(receiver);
+            let mut prepared = 0;
+            let mut written = 0;
+            process_artwork(
+                &commands,
+                &stop,
+                &events,
+                |_| {
+                    prepared += 1;
+                    Ok(vec![image_output::OutputReport(vec![1]); 3])
+                },
+                |bytes| {
+                    written += 1;
+                    if explicit_stop {
+                        stop.request();
+                    } else {
+                        receiver.take();
+                    }
+                    Ok(bytes.len())
+                },
+            );
+            assert_eq!(prepared, 1);
+            assert_eq!(written, 1);
+            assert!(!stop.live());
+        }
+    }
+
+    struct FakeDevice {
+        read_started: Sender<()>,
+        read_release: Receiver<Result<usize, String>>,
+    }
+
+    impl Device for FakeDevice {
+        fn read(&self, _: &mut [u8]) -> Result<usize, String> {
+            self.read_started.send(()).unwrap();
+            self.read_release.recv().unwrap()
+        }
+        fn write(&self, _: &[u8]) -> Result<usize, String> {
+            panic!("unexpected write")
+        }
+    }
+
+    #[test]
+    fn cancellation_interrupts_retry_wait_and_discovery() {
+        for during_discovery in [false, true] {
+            let stop = StopSignal::default();
+            let worker_stop = stop.clone();
+            let (events, receiver) = std::sync::mpsc::channel();
+            let (_commands, commands) = std::sync::mpsc::channel();
+            let (entered, entry) = std::sync::mpsc::channel();
+            let (release, released) = std::sync::mpsc::channel();
+            let worker = thread::spawn(move || {
+                monitor::<FakeDevice>(
+                    events,
+                    commands,
+                    worker_stop,
+                    |_| {
+                        entered.send(()).unwrap();
+                        released.recv().unwrap();
+                        Err("not found".into())
+                    },
+                    |_| panic!("unexpected preparation"),
+                )
+            });
+            entry.recv().unwrap();
+            if during_discovery {
+                stop.request();
+            }
+            release.send(()).unwrap();
+            if !during_discovery {
+                loop {
+                    if matches!(
+                        receiver.recv().unwrap(),
+                        MonitorEvent::Connection(ConnectionState::Unavailable(_))
+                    ) {
+                        break;
+                    }
+                }
+                stop.request();
+            }
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn idle_worker_stops_and_controller_join_is_idempotent() {
+        let stop = StopSignal::default();
+        let worker_stop = stop.clone();
+        let (events, _receiver) = std::sync::mpsc::channel();
+        let (artwork, commands) = std::sync::mpsc::channel();
+        let (entered, entry) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let mut device = Some(FakeDevice {
+            read_started: entered,
+            read_release: released,
+        });
+        let worker = thread::spawn(move || {
+            monitor(
+                events,
+                commands,
+                worker_stop,
+                |_| Ok(device.take().unwrap()),
+                |_| panic!("unexpected preparation"),
+            )
+        });
+        let mut controller = HidController {
+            stop,
+            worker: Some(worker),
+            artwork,
+        };
+        entry.recv().unwrap();
+        controller.request_stop();
+        release.send(Ok(0)).unwrap();
+        controller.shutdown();
+        controller.shutdown();
+        assert!(controller.worker.is_none());
+    }
+
+    #[test]
+    fn reconnect_recovers_until_consumer_disappears() {
+        let stop = StopSignal::default();
+        let (events, receiver) = std::sync::mpsc::channel();
+        let (_artwork, commands) = std::sync::mpsc::channel();
+        let (entered, entry) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let (entered2, entry2) = std::sync::mpsc::channel();
+        let (release2, released2) = std::sync::mpsc::channel();
+        let mut devices = vec![
+            FakeDevice {
+                read_started: entered2,
+                read_release: released2,
+            },
+            FakeDevice {
+                read_started: entered,
+                read_release: released,
+            },
+        ];
+        let worker = thread::spawn(move || {
+            monitor(
+                events,
+                commands,
+                stop,
+                |_| Ok(devices.pop().unwrap()),
+                |_| panic!("unexpected preparation"),
+            )
+        });
+        entry.recv().unwrap();
+        release.send(Err("unplugged".into())).unwrap();
+        entry2.recv().unwrap();
+        drop(receiver);
+        release2.send(Ok(0)).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn disconnected_snapshots_keep_only_latest_complete_state() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(ArtworkCommand::Replace(vec![ArtworkCommand::Assign {
+                target: ArtworkTarget::Keypad(1),
+                path: "obsolete.png".into(),
+            }]))
+            .unwrap();
+        sender
+            .send(ArtworkCommand::Replace(vec![ArtworkCommand::Clear {
+                target: ArtworkTarget::Keypad(1),
+            }]))
+            .unwrap();
+        let pending = pending_artwork(&receiver);
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            pending[0],
+            ArtworkCommand::Clear {
+                target: ArtworkTarget::Keypad(1)
+            }
+        ));
+        assert!(pending_artwork(&receiver).is_empty());
+    }
 
     #[test]
     fn api_messages_are_typed_and_cloneable() {
@@ -180,18 +611,24 @@ mod tests {
             image_output::OutputReport(vec![3, 4]),
         ];
         let mut seen = Vec::new();
-        transmit_reports(&reports, |bytes| {
+        transmit_reports(&reports, &StopSignal::default(), |bytes| {
             seen.push(bytes.to_vec());
             Ok::<_, &'static str>(bytes.len())
         })
         .unwrap();
         assert_eq!(seen, [vec![1, 2], vec![3, 4]]);
 
-        assert!(transmit_reports(&reports, |_| Ok::<_, &'static str>(1))
+        assert!(
+            transmit_reports(&reports, &StopSignal::default(), |_| Ok::<_, &'static str>(
+                1
+            ))
             .unwrap_err()
-            .contains("short HID write"));
-        assert!(transmit_reports(&reports, |_| Err("device gone"))
-            .unwrap_err()
-            .contains("device gone"));
+            .contains("short HID write")
+        );
+        assert!(
+            transmit_reports(&reports, &StopSignal::default(), |_| Err("device gone"))
+                .unwrap_err()
+                .contains("device gone")
+        );
     }
 }

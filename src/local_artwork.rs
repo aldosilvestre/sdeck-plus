@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CONFIG_VERSION: &str = "streamdeck-artwork-v1";
+const LAYER_VERSION: &str = "streamdeck-artwork-v2";
+type Assignments = HashMap<(String, ArtworkTarget), String>;
 
 /// The complete set of stable artwork destinations supported by the app.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -51,13 +53,16 @@ impl ArtworkTarget {
 /// Manages the versioned assignment file and copied, app-owned image assets.
 pub struct ArtworkStore {
     root: PathBuf,
-    assignments: HashMap<ArtworkTarget, String>,
+    assignments: Assignments,
     diagnostics: Vec<String>,
+    legacy: bool,
+    compatibility_layer: String,
 }
 
 impl ArtworkStore {
-    /// Open the default app-specific XDG data directory (with a HOME fallback).
-    /// Invalid/missing configuration is ignored; the store starts empty.
+    /// Compatibility API: v1 stays global and is never implicitly migrated.
+    /// With v2, compatibility operations address Base. Invalid configurations
+    /// produce diagnostics and cannot be overwritten by mutations.
     pub fn open() -> io::Result<Self> {
         Self::open_at(default_root()?)
     }
@@ -66,11 +71,44 @@ impl ArtworkStore {
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(root.join("assets"))?;
-        let (assignments, diagnostics) = load_assignments(&root)?;
+        let (assignments, legacy, diagnostics) = load_assignments(&root, false)?;
+        let compatibility_layer = if legacy { "" } else { "Base" }.into();
         Ok(Self {
             root,
             assignments,
             diagnostics,
+            legacy,
+            compatibility_layer,
+        })
+    }
+
+    /// Open layer-aware storage, migrating all v1 artwork into the supplied
+    /// active layer. None falls back to Base; other layers remain empty.
+    pub fn open_for_layer(active_layer: Option<&str>) -> io::Result<Self> {
+        Self::open_at_for_layer(default_root()?, active_layer)
+    }
+
+    pub fn open_at_for_layer(
+        root: impl Into<PathBuf>,
+        active_layer: Option<&str>,
+    ) -> io::Result<Self> {
+        let root = root.into();
+        let active_layer = active_layer.unwrap_or("Base");
+        let (mut assignments, legacy, diagnostics) = load_assignments(&root, true)?;
+        fs::create_dir_all(root.join("assets"))?;
+        if legacy {
+            assignments = assignments
+                .into_iter()
+                .map(|((_, target), name)| ((active_layer.to_owned(), target), name))
+                .collect();
+            persist(&root, &assignments, false)?;
+        }
+        Ok(Self {
+            root,
+            assignments,
+            diagnostics,
+            legacy: false,
+            compatibility_layer: active_layer.to_owned(),
         })
     }
 
@@ -80,8 +118,12 @@ impl ArtworkStore {
     }
 
     pub fn assigned_path(&self, target: ArtworkTarget) -> Option<PathBuf> {
+        self.assigned_path_in_layer(&self.compatibility_layer, target)
+    }
+
+    pub fn assigned_path_in_layer(&self, layer: &str, target: ArtworkTarget) -> Option<PathBuf> {
         self.assignments
-            .get(&target)
+            .get(&(layer.to_owned(), target))
             .map(|name| self.root.join("assets").join(name))
     }
 
@@ -92,6 +134,17 @@ impl ArtworkStore {
         target: ArtworkTarget,
         source: impl AsRef<Path>,
     ) -> io::Result<PathBuf> {
+        self.assign_in_layer(&self.compatibility_layer.clone(), target, source)
+    }
+
+    /// Assign to an explicit layer. Requires a layer-aware open API for v1.
+    pub fn assign_in_layer(
+        &mut self,
+        layer: &str,
+        target: ArtworkTarget,
+        source: impl AsRef<Path>,
+    ) -> io::Result<PathBuf> {
+        self.check_mutation(layer)?;
         if target.id().is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -114,19 +167,23 @@ impl ArtworkStore {
         let name = format!("{}-{stamp}.{extension}", target.id());
         let assets = self.root.join("assets");
         let destination = assets.join(&name);
-        let temp = assets.join(format!(".{name}.tmp"));
-        fs::copy(source, &temp)?;
-        if let Err(error) = fs::rename(&temp, &destination) {
-            let _ = fs::remove_file(&temp);
+        // Never overwrite an existing owned asset, even on a name collision.
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)?;
+        let copied = (|| {
+            let mut input = fs::File::open(source)?;
+            io::copy(&mut input, &mut output)?;
+            output.sync_all()
+        })();
+        if let Err(error) = copied {
+            let _ = fs::remove_file(&destination);
             return Err(error);
         }
-        let old = self.assignments.insert(target, name.clone());
-        if let Err(error) = persist(&self.root, &self.assignments) {
-            if let Some(old_name) = old {
-                self.assignments.insert(target, old_name);
-            } else {
-                self.assignments.remove(&target);
-            }
+        let mut next = self.assignments.clone();
+        next.insert((layer.to_owned(), target), name);
+        if let Err(error) = self.commit(next) {
             let _ = fs::remove_file(destination);
             return Err(error);
         }
@@ -134,15 +191,43 @@ impl ArtworkStore {
     }
 
     pub fn clear(&mut self, target: ArtworkTarget) -> io::Result<()> {
-        let old = self.assignments.remove(&target);
-        if let Err(error) = persist(&self.root, &self.assignments) {
-            if let Some(name) = old {
-                self.assignments.insert(target, name);
-            }
-            return Err(error);
+        self.clear_in_layer(&self.compatibility_layer.clone(), target)
+    }
+
+    pub fn clear_in_layer(&mut self, layer: &str, target: ArtworkTarget) -> io::Result<()> {
+        self.check_mutation(layer)?;
+        let mut next = self.assignments.clone();
+        next.remove(&(layer.to_owned(), target));
+        self.commit(next)
+    }
+
+    /// Remove all assignments before layer deletion. Reusing its name starts empty.
+    /// Assets still referenced by any other layer or target are retained.
+    pub fn remove_layer(&mut self, layer: &str) -> io::Result<()> {
+        self.check_mutation(layer)?;
+        let mut next = self.assignments.clone();
+        next.retain(|(name, _), _| name != layer);
+        self.commit(next)
+    }
+
+    fn check_mutation(&self, layer: &str) -> io::Result<()> {
+        if !self.diagnostics.is_empty() || (self.legacy && !layer.is_empty()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "artwork requires valid configuration and explicit layer-aware migration",
+            ));
         }
-        if let Some(name) = old {
-            let _ = fs::remove_file(self.root.join("assets").join(name));
+        Ok(())
+    }
+
+    fn commit(&mut self, next: Assignments) -> io::Result<()> {
+        persist(&self.root, &next, self.legacy)?;
+        let old = std::mem::replace(&mut self.assignments, next);
+        for name in old.values() {
+            if !self.assignments.values().any(|remaining| remaining == name) {
+                // Cleanup is best effort after the configuration commit, never before.
+                let _ = fs::remove_file(self.root.join("assets").join(name));
+            }
         }
         Ok(())
     }
@@ -162,69 +247,125 @@ fn default_root() -> io::Result<PathBuf> {
     Ok(base.join("streamdeck-plus-monitor"))
 }
 
-fn load_assignments(root: &Path) -> io::Result<(HashMap<ArtworkTarget, String>, Vec<String>)> {
+fn load_assignments(root: &Path, strict: bool) -> io::Result<(Assignments, bool, Vec<String>)> {
     let text = match fs::read_to_string(root.join("artwork.conf")) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok((HashMap::new(), Vec::new()))
+            return Ok((HashMap::new(), true, Vec::new()))
         }
         Err(error) => return Err(error),
     };
     let mut lines = text.lines();
-    if lines.next() != Some(CONFIG_VERSION) {
-        return Ok((HashMap::new(), vec!["Artwork configuration has an unsupported or invalid version; assignments were ignored".into()]));
-    }
+    let legacy = match lines.next() {
+        Some(CONFIG_VERSION) => true,
+        Some(LAYER_VERSION) => false,
+        _ => return invalid_config(strict, "unsupported artwork version"),
+    };
     let mut result = HashMap::new();
     let mut diagnostics = Vec::new();
     for line in lines {
-        let Some((id, name)) = line.split_once('\t') else {
-            return Ok((
-                HashMap::new(),
-                vec!["Artwork configuration is malformed; assignments were ignored".into()],
-            ));
+        let fields: Vec<_> = line.split('\t').collect();
+        let (layer, id, name) = match fields.as_slice() {
+            [id, name] if legacy => (String::new(), *id, *name),
+            [layer, id, name] if !legacy => {
+                let Some(layer) = decode_layer(layer) else {
+                    return invalid_config(strict, "invalid encoded layer name");
+                };
+                (layer, *id, *name)
+            }
+            _ => return invalid_config(strict, "malformed artwork row"),
         };
         let Some(target) = ArtworkTarget::from_id(id) else {
-            return Ok((
-                HashMap::new(),
-                vec![
-                    "Artwork configuration contains an unknown target; assignments were ignored"
-                        .into(),
-                ],
-            ));
+            return invalid_config(strict, "unknown artwork target");
         };
-        if name.is_empty() || Path::new(name).components().count() != 1 || name.starts_with('.') {
-            return Ok((
-                HashMap::new(),
-                vec![
-                    "Artwork configuration contains an unsafe asset path; assignments were ignored"
-                        .into(),
-                ],
-            ));
+        if name.is_empty()
+            || name.starts_with('.')
+            || name.contains(['/', '\\', '\t', '\n', '\r'])
+            || Path::new(name).components().count() != 1
+        {
+            return invalid_config(strict, "unsafe artwork asset path");
         }
-        if !root.join("assets").join(name).is_file() {
+        let key = (layer, target);
+        if result.contains_key(&key) {
+            return invalid_config(strict, "duplicate artwork assignment");
+        }
+        let path = root.join("assets").join(name);
+        if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file()) {
+            if strict {
+                return invalid_config(true, "missing or non-regular artwork asset");
+            }
             diagnostics.push(format!(
-                "Artwork asset for {} is missing; that assignment was ignored",
-                target.id()
+                "Artwork asset for {id} is missing; assignment ignored"
             ));
             continue;
         }
-        result.insert(target, name.to_owned());
+        if strict {
+            Pixbuf::from_file(&path)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        }
+        result.insert(key, name.to_owned());
     }
-    Ok((result, diagnostics))
+    Ok((result, legacy, diagnostics))
 }
 
-fn persist(root: &Path, assignments: &HashMap<ArtworkTarget, String>) -> io::Result<()> {
+fn invalid_config(strict: bool, message: &str) -> io::Result<(Assignments, bool, Vec<String>)> {
+    if strict {
+        Err(io::Error::new(io::ErrorKind::InvalidData, message))
+    } else {
+        Ok((HashMap::new(), true, vec![message.into()]))
+    }
+}
+
+// Hex-encoded UTF-8 makes arbitrary layer identities safe in tab-separated rows.
+fn encode_layer(layer: &str) -> String {
+    layer
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn decode_layer(encoded: &str) -> Option<String> {
+    if !encoded.len().is_multiple_of(2) || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes: Option<Vec<_>> = (0..encoded.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).ok())
+        .collect();
+    String::from_utf8(bytes?).ok()
+}
+
+fn persist(root: &Path, assignments: &Assignments, legacy: bool) -> io::Result<()> {
     let mut rows: Vec<_> = assignments.iter().collect();
-    rows.sort_by_key(|(target, _)| target.id());
-    let mut text = format!("{CONFIG_VERSION}\n");
-    for (target, name) in rows {
+    rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id()));
+    let version = if legacy {
+        CONFIG_VERSION
+    } else {
+        LAYER_VERSION
+    };
+    let mut text = format!("{version}\n");
+    for ((layer, target), name) in rows {
+        if !legacy {
+            text.push_str(&encode_layer(layer));
+            text.push('\t');
+        }
         text.push_str(&format!("{}\t{}\n", target.id(), name));
     }
     let temp = root.join("artwork.conf.tmp");
-    let mut file = fs::File::create(&temp)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()?;
-    fs::rename(temp, root.join("artwork.conf"))
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)?;
+    let result = (|| {
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp, root.join("artwork.conf"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -246,6 +387,155 @@ mod tests {
         let pixbuf = Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, true, 8, 2, 2).unwrap();
         pixbuf.fill(u32::from_str_radix(color, 16).unwrap());
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn layer_migration_unicode_isolation_and_recreation() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut legacy = ArtworkStore::open_at(&root).unwrap();
+        let original = legacy.assign(ArtworkTarget::Keypad(1), &source).unwrap();
+        let before = fs::read(root.join("artwork.conf")).unwrap();
+        drop(ArtworkStore::open_at(&root).unwrap());
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), before);
+        let layer = "工作\tdeck\n🎛/..";
+        let mut store = ArtworkStore::open_at_for_layer(&root, Some(layer)).unwrap();
+        assert_eq!(
+            store.assigned_path_in_layer(layer, ArtworkTarget::Keypad(1)),
+            Some(original)
+        );
+        assert!(store
+            .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1))
+            .is_none());
+        let other = store
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), &source)
+            .unwrap();
+        store
+            .clear_in_layer(layer, ArtworkTarget::Keypad(1))
+            .unwrap();
+        assert!(other.is_file());
+        store
+            .assign_in_layer(layer, ArtworkTarget::EncoderZone(1), &source)
+            .unwrap();
+        store.remove_layer(layer).unwrap();
+        let mut reopened = ArtworkStore::open_at_for_layer(&root, Some(layer)).unwrap();
+        assert!(reopened
+            .assigned_path_in_layer(layer, ArtworkTarget::EncoderZone(1))
+            .is_none());
+        assert_eq!(
+            reopened.assigned_path_in_layer("Base", ArtworkTarget::Keypad(1)),
+            Some(other)
+        );
+        reopened
+            .assign_in_layer(layer, ArtworkTarget::Keypad(2), &source)
+            .unwrap();
+        let reopened = ArtworkStore::open_at_for_layer(&root, Some(layer)).unwrap();
+        assert!(reopened
+            .assigned_path_in_layer(layer, ArtworkTarget::Keypad(2))
+            .is_some());
+    }
+
+    #[test]
+    fn migration_validation_and_persistence_failures_preserve_originals() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut legacy = ArtworkStore::open_at(&root).unwrap();
+        let asset = legacy.assign(ArtworkTarget::Keypad(1), &source).unwrap();
+        let original = fs::read(root.join("artwork.conf")).unwrap();
+        fs::create_dir(root.join("artwork.conf.tmp")).unwrap();
+        assert!(ArtworkStore::open_at_for_layer(&root, Some("Live")).is_err());
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), original);
+        assert!(asset.is_file());
+        let mut corrupt = original.clone();
+        corrupt.extend_from_slice(b"keypad-2\t../unsafe.png\n");
+        fs::write(root.join("artwork.conf"), &corrupt).unwrap();
+        assert!(ArtworkStore::open_at_for_layer(&root, Some("Live")).is_err());
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), corrupt);
+        assert!(asset.is_file());
+    }
+
+    #[test]
+    fn failed_layer_mutations_and_shared_asset_cleanup() {
+        let root = temp();
+        fs::create_dir_all(root.join("assets")).unwrap();
+        let asset = root.join("assets/shared.png");
+        png(&asset, "ff0000ff");
+        fs::write(
+            root.join("artwork.conf"),
+            "streamdeck-artwork-v2\n41\tkeypad-1\tshared.png\n41\tkeypad-2\tshared.png\n42\tkeypad-1\tshared.png\n",
+        )
+        .unwrap();
+        let mut store = ArtworkStore::open_at_for_layer(&root, Some("A")).unwrap();
+        store.clear_in_layer("A", ArtworkTarget::Keypad(1)).unwrap();
+        assert!(asset.is_file());
+        let replacement = store
+            .assign_in_layer("A", ArtworkTarget::Keypad(2), &asset)
+            .unwrap();
+        assert!(asset.is_file());
+        store.remove_layer("A").unwrap();
+        assert!(!replacement.exists());
+        assert!(asset.is_file());
+        let prior = fs::read(root.join("artwork.conf")).unwrap();
+        fs::create_dir(root.join("artwork.conf.tmp")).unwrap();
+        assert!(store
+            .assign_in_layer("B", ArtworkTarget::Keypad(1), &asset)
+            .is_err());
+        assert!(store.clear_in_layer("B", ArtworkTarget::Keypad(1)).is_err());
+        assert!(store.remove_layer("B").is_err());
+        assert_eq!(
+            store.assigned_path_in_layer("B", ArtworkTarget::Keypad(1)),
+            Some(asset.clone())
+        );
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), prior);
+        assert_eq!(fs::read_dir(root.join("assets")).unwrap().count(), 1);
+        // A new root exercises successful removal of the final shared reference.
+        let second = temp();
+        fs::create_dir_all(second.join("assets")).unwrap();
+        fs::copy(&asset, second.join("assets/shared.png")).unwrap();
+        fs::write(second.join("artwork.conf"), &prior).unwrap();
+        let mut store = ArtworkStore::open_at_for_layer(&second, None).unwrap();
+        store.remove_layer("B").unwrap();
+        assert!(!second.join("assets/shared.png").exists());
+    }
+
+    #[test]
+    fn fallback_migration_and_invalid_configs_are_non_destructive() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut legacy = ArtworkStore::open_at(&root).unwrap();
+        let asset = legacy.assign(ArtworkTarget::Keypad(1), &source).unwrap();
+        assert!(legacy
+            .assign_in_layer("Live", ArtworkTarget::Keypad(1), &source)
+            .is_err());
+        let store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        assert_eq!(
+            store.assigned_path_in_layer("Base", ArtworkTarget::Keypad(1)),
+            Some(asset.clone())
+        );
+        let name = asset.file_name().unwrap().to_str().unwrap();
+        for text in [
+            format!("{CONFIG_VERSION}\nkeypad-1\tmissing.png\n"),
+            format!("{CONFIG_VERSION}\nkeypad-1\t{name}\nkeypad-1\t{name}\n"),
+            format!("{LAYER_VERSION}\nff\tkeypad-1\t{name}\n"),
+            format!("{LAYER_VERSION}\néé\tkeypad-1\t{name}\n"),
+            format!("{LAYER_VERSION}\n4\tkeypad-1\t{name}\n"),
+        ] {
+            fs::write(root.join("artwork.conf"), &text).unwrap();
+            assert!(ArtworkStore::open_at_for_layer(&root, None).is_err());
+            let mut compatibility = ArtworkStore::open_at(&root).unwrap();
+            assert!(compatibility.clear(ArtworkTarget::Keypad(1)).is_err());
+            assert_eq!(fs::read_to_string(root.join("artwork.conf")).unwrap(), text);
+            assert!(asset.is_file());
+        }
+        fs::write(&asset, b"corrupt image").unwrap();
+        let text = format!("{CONFIG_VERSION}\nkeypad-1\t{name}\n");
+        fs::write(root.join("artwork.conf"), &text).unwrap();
+        assert!(ArtworkStore::open_at_for_layer(&root, None).is_err());
+        assert_eq!(fs::read_to_string(root.join("artwork.conf")).unwrap(), text);
+        assert_eq!(fs::read(asset).unwrap(), b"corrupt image");
     }
 
     #[test]

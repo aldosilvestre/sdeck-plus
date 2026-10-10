@@ -1,0 +1,27 @@
+# Unified full-window layout
+
+## Intent
+Remove the last-event panel. Fit all application controls without scrolling at the existing normal 1000x700 logical-pixel initial client allocation. Apply 10mm reference padding (38 logical px at 96dpi) on every outer edge and unify all inactive backgrounds, including window/viewport exposed by margins. Actual physical millimeters depend on monitor scale/DPI.
+
+## Constraints
+Preserve every pre-existing dirty change, device shutdown, reconnect, shortcut-only compatibility, artwork targets and live/selection/focus visibility. Keep event API/action execution; remove only obsolete event display and descriptions. No hiding/clipping required controls or disabling scrollbars to fake fit. Preserve small-window scroll fallback (640x480). Do not silently enlarge default window. Smaller previews/spacing are authorized layout levers, keeping square keys/8:1 strip and usable controls. No staging, commits, installs, hardware launches or publishing; commits pending explicit authorization. Engram unavailable, mirror odd/streamdeck-plus-unified-no-scroll-layout/tasks pending.
+
+## Tasks
+- [x] L1: Remove event panel/plumbing, apply unified backgrounds and 38px margins, compact layout based on actual GTK allocations until all controls fit at 1000x700; add deterministic allocation regressions and update README. Status: functional implementation and independent acceptance passed. True incremental diff baseline unavailable (reporting limitation); commit pending authorization. Route: delegated worker; non-trivial UI/test/docs edits. Allowed: src/main.rs, README.md.
+- [x] L2: Independently verify no-scroll normal size, margins/backgrounds, retained controls/artwork/keyboard and lifecycle regressions. Status: passed, no scoped regressions. Route: delegated verifier per native risk plan.
+
+## Acceptance and verification
+At 1000x700, every action configuration and all artwork/layer controls fit within client bounds without adjusting scrollers: both adjustment upper values <= page size, zero offsets, required widgets wholly contained. Cover loaded/empty/cleared artwork and long values where applicable. Same default-size constants production/tests. Assert margin 38 each side, matching inactive backgrounds, no last-event heading/card, focus and selected/live distinction. Test actual vertical height-for-width, not only horizontal fit. At 640x480 preserve scroll reachability. Use existing serialized GTK test (no parallel GTK init). Observe runtime assertion RED then GREEN; CSS aesthetic fidelity still manual.
+Commands: cargo fmt --check; cargo test --offline --bin streamdeck-plus-monitor binding_editor_hides_labeled_rows_for_inactive_controls_and_actions -- --nocapture; cargo test --offline; cargo clippy --offline --all-targets --all-features -- -D warnings; cargo build --offline; git diff --check. Require GTK executed markers, never equate skip with verification. Use existing display; no installs or xvfb assumption.
+
+## Delivery and evidence
+Forecast 180–350 authored incremental diff lines, ask-on-risk; do not code-golf or omit tests to meet advisory size. Separate UI revision from device-shutdown unit. Current branch feature/streamdeck-plus-event-monitor. Native review tooling previously unavailable; reassess final candidate and inspect without repairing tooling.
+
+## Writer evidence
+main.rs and README changed. Executed GTK runtime RED: original height-for-width 1060, vertical upper/page 1060/700. GREEN: all five actions with empty/loaded/cleared artwork pass at explicit 1000x700 client allocation; minimum height 688, inner 924x624, horizontal upper/page 1000/1000 and vertical 700/700, offsets zero. Bounds, rendered background equality, focus/live/selection, 640x480 fallback, shutdown and legacy assertions executed. Fmt, focused GTK, full 76 tests, clippy, build and diff check passed. WM actually assigned 950x1034 despite requested startup size, so no-scroll guarantee pertains to tested client dimensions, not every WM allocation. True incremental baseline unavailable; HEAD count growth is not isolated feature diff. Manual visual/hardware acceptance remains unperformed. Fresh assess unassessable and inspect blocked due missing native package binary, no lineage/mutation; independent verifier required.
+
+## Independent acceptance
+All exact commands and final focused GTK rerun passed; 76 tests, no failures, GTK executed twice. Actual explicit 1000x700 client: inner 924x624 at 38,38, height-for-width minimum 688; both upper/page equal and offsets zero across five actions and empty/loaded/cleared long-value artwork. Attached production controls checked without scrolling; all 13 image/clear pairs retained, square 51px keys and 8:1 strip preserved. Rendered inactive window/scroller/viewport/shell/panel/device background equality and selected/live/focus distinction verified. 640x480 fallback still scrolls to all controls. Lifecycle/legacy regressions passed. WM startup allocation varied (950x1034 and 1000x700), independent of explicit client-size proof. No historical RED or incremental baseline reconstruction claimed.
+
+## Next step
+Functional implementation and independent automated checks complete. Human visual/startup acceptance on actual desktop and hardware checks remain pending. 10mm is reference approximation, not physical guarantee across DPI. Missing baseline remains reporting limitation. Native review tooling unavailable, no repair authorized. No staging/commits/publishing; Engram mirror pending.
