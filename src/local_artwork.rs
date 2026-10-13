@@ -244,7 +244,7 @@ fn default_root() -> io::Result<PathBuf> {
                 "no absolute XDG_DATA_HOME or HOME available",
             )
         })?;
-    Ok(base.join("streamdeck-plus-monitor"))
+    Ok(base.join("sdeck-plus"))
 }
 
 fn load_assignments(root: &Path, strict: bool) -> io::Result<(Assignments, bool, Vec<String>)> {
@@ -387,6 +387,32 @@ mod tests {
         let pixbuf = Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, true, 8, 2, 2).unwrap();
         pixbuf.fill(u32::from_str_radix(color, 16).unwrap());
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn jpeg_key_backgrounds_survive_reopening_without_the_source() {
+        let root = temp();
+        let image = Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, false, 8, 2, 2).unwrap();
+        image.fill(0x4488ffff);
+        for extension in ["jpg", "jpeg"] {
+            let source = root.join(format!("source.{extension}"));
+            image.savev(&source, "jpeg", &[]).unwrap();
+            let bytes = fs::read(&source).unwrap();
+            let mut store = ArtworkStore::open_at_for_layer(&root, Some("Base")).unwrap();
+            let assigned = store
+                .assign_in_layer("Base", ArtworkTarget::Keypad(1), &source)
+                .unwrap();
+            fs::remove_file(source).unwrap();
+            let reopened = ArtworkStore::open_at_for_layer(&root, Some("Base")).unwrap();
+            assert_eq!(
+                reopened.assigned_path_in_layer("Base", ArtworkTarget::Keypad(1)),
+                Some(assigned.clone())
+            );
+            assert_eq!(fs::read(&assigned).unwrap(), bytes);
+            let decoded = Pixbuf::from_file(assigned).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (2, 2));
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

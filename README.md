@@ -1,15 +1,25 @@
-# Stream Deck + Event Monitor
+# sdeck-plus
 
-A GTK4 desktop monitor for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`). It displays live input and can send explicitly assigned artwork to physical keys and the Touch Strip over USB HID. It does not alter profiles, key mappings, brightness, sleep, or other device configuration.
+![Platform: Linux](https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> [!NOTE]
+> This project is still under construction.
+
+sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`) on Arch Linux. Configure actions for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, assign artwork, control device brightness and connect to OBS Studio.
 
 ## Requirements
 
 - Rust stable toolchain and Cargo.
 - GTK 4.8 or newer development files and a C toolchain. On Arch Linux: `sudo pacman -S gtk4 base-devel`.
+- A desktop tray supporting StatusNotifierItem (for example, the Omarchy tray).
 - Stream Deck + connected over USB for live device events.
 - Permission to open the device's HID node. If access is denied, use the distribution's supported device-access mechanism (for example, an administrator-installed narrowly scoped udev rule for this VID/PID with `TAG+="uaccess"`), then reconnect the device. The application does not change host permissions.
+- Action-specific tools: `xdg-utils` for opening files/websites, `wireplumber` (`wpctl`) for PipeWire volume, `wl-clipboard` for Wayland text pasting, `procps-ng` for closing a named process, and `mpv` for soundboard playback. Keyboard and mouse-wheel actions require effective `/dev/uinput` access; media transport requires an MPRIS-capable player. Missing tools or access are reported; the app never installs packages or changes permissions.
 
 ## Build and run
+
+Run these commands from the `sdeck-plus` checkout:
 
 ```sh
 cargo run
@@ -17,17 +27,54 @@ cargo run
 
 The UI displays connection state, eight keypad states, four encoder button/rotation states, and Touch Strip Tap, Press, and Flick coordinates in Elgato's 800 × 100 logical-pixel space. Touch gestures are reported after the interaction completes, not as separate contact start/release events. If the device is absent, inaccessible, or disconnected, the UI remains open and reports the state; it retries detection after connection failures.
 
+## System tray and session startup
+
+Closing the configuration window hides it. Device communication, bindings,
+artwork replay, timers, and app-owned playback remain active until **Quit**.
+Left-click or right-click the tray icon to open the same menu:
+
+- **Open configuration** reopens the existing configuration window.
+- **Start at login** enables or disables per-user session autostart; its checkmark reflects the saved state.
+- **About** opens the native sdeck-plus dialog with its version, description, author, copyright, and complete MIT license.
+- **Quit** stops the application and removes its tray icon.
+
+Autostart uses `$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop`,
+or `$HOME/.config/autostart/sdeck-plus.desktop` when XDG config
+home is unset or relative. It starts the current executable with `--background`,
+without opening configuration. Keep that executable at the same path, or
+disable and re-enable autostart after moving it. For a quiet manual startup:
+
+```sh
+cargo run -- --background
+```
+
+Repeated launches reuse the running application and configuration window.
+If connecting to the session bus fails, configuration remains accessible and
+reports the error; closing it exits instead of hiding an unreachable application.
+When autostart precedes the desktop tray, the notifier waits for the host.
+
+### Existing configuration
+
+The application, Cargo package and executable are named **sdeck-plus**.
+The application ID remains stable so repeated launches reuse the same instance.
+The XDG data directory is now `sdeck-plus` and the autostart entry is
+`sdeck-plus.desktop`. When upgrading from the previous name, quit the old
+application and move its data directory to the new path before launching
+to retain profiles, artwork and OBS settings. Disable the previous autostart
+entry and re-enable **Start at login** with the new executable.
+Existing files are not migrated automatically.
+
 ## Graceful shutdown
 
-Closing the application window stops device communication, discards pending artwork uploads, removes UI polling, and joins the HID worker to release the device. Application shutdown repeats this cleanup safely as a fallback. A synchronous HID call already admitted before cancellation may finish; shutdown waits for it, so a blocked driver call can delay closing. No new reports are admitted after cancellation.
+**Quit** stops device communication, discards pending artwork uploads, removes UI polling, and joins the HID worker to release the device. Application shutdown repeats this cleanup safely as a fallback. A synchronous HID call already admitted before cancellation may finish; shutdown waits for it, so a blocked driver call can delay exiting. No new reports are admitted after cancellation.
 
-Shutdown does not clear the displays or send shutdown artwork. The device may retain its last pixels; retained images do not mean the application is still transmitting. Unplug/reconnect retries and artwork replay remain active while the application is open. External action subprocesses are not cancelled or synchronously joined on close.
+Shutdown does not clear the displays or send shutdown artwork. The device may retain its last pixels; retained images do not mean the application is still transmitting. Unplug/reconnect retries and artwork replay remain active while the application is running, even with configuration hidden. Quitting cancels the timer and explicitly stops the action worker, which releases app-owned soundboard playback. Independently opened applications remain open.
 
 ## Local artwork
 
 Select **Artwork target (active layer)** in the right settings panel, then use the shared **Image…** or **×** (Clear artwork) controls. All thirteen targets are available: eight keys, the Touch Strip background, and four touch zones. Clicking a key or touch zone also selects its artwork target. Clicking an encoder selects only its action binding; use the artwork selector explicitly to choose an image region. PNG and GIF files are explicitly available in the picker; a separate filter includes all image formats supported by the installed GdkPixbuf loaders. GIF artwork is uploaded as a static still image; animation is not supported by the hardware JPEG upload format. Artwork previews preserve aspect ratio and are center-cropped to fill their surfaces. Images are center-cropped to cover the device target and sent as correctly sized JPEGs over USB HID. The eight keys use 120 × 120 images; the Touch Strip background uses 800 × 100 and each encoder overlay uses a 200 × 100 region. The background and zone images can be layered. A failed import leaves the current assignment unchanged. **×** (Clear artwork) removes the local assignment; clearing a key sends a black key image, while clearing a Touch Strip image rebuilds the strip from its saved background (or black) and remaining zone images. It does not issue a separate device clear command.
 
-Images are copied into the application's XDG data directory, so the original files may be moved or deleted after assignment. The assignment manifest is stored beside the copied assets. The default path is `$XDG_DATA_HOME/streamdeck-plus-monitor` (normally `~/.local/share/streamdeck-plus-monitor`); when `XDG_DATA_HOME` is unset, the application uses `$HOME/.local/share/streamdeck-plus-monitor`. Artwork is independent per layer. Legacy global assignments migrate into the active layer (or `Base` if unavailable); other layers start empty. Selecting a layer refreshes all thirteen previews and replaces the device's complete image state: unassigned keys become black, and the strip is rebuilt from its background (or black) followed by assigned zones. The same state is replayed after reconnect, so empty layers clear previous images. A chooser saves to the artwork target and layer captured when it was opened, even if you change the selected control, artwork target, or layer before accepting; acceptance is rejected if that layer was removed, even if another layer was created with the same name. Storage open or migration failures show a repair message and disable artwork writes and layer removal rather than saving an empty fallback. Layer removal is aborted if artwork cleanup cannot be persisted. Upload failures are shown in the connection status; local assignments remain saved if a device write fails.
+Images are copied into the application's XDG data directory, so the original files may be moved or deleted after assignment. The assignment manifest is stored beside the copied assets. The default path is `$XDG_DATA_HOME/sdeck-plus` (normally `~/.local/share/sdeck-plus`); when `XDG_DATA_HOME` is unset, the application uses `$HOME/.local/share/sdeck-plus`. Artwork is independent per layer. Legacy global assignments migrate into the active layer (or `Base` if unavailable); other layers start empty. Selecting a layer refreshes all thirteen previews and replaces the device's complete image state: unassigned keys become black, and the strip is rebuilt from its background (or black) followed by assigned zones. The same state is replayed after reconnect, so empty layers clear previous images. A chooser saves to the artwork target and layer captured when it was opened, even if you change the selected control, artwork target, or layer before accepting; acceptance is rejected if that layer was removed, even if another layer was created with the same name. Storage open or migration failures show a repair message and disable artwork writes and layer removal rather than saving an empty fallback. Layer removal is aborted if artwork cleanup cannot be persisted. Upload failures are shown in the connection status; local assignments remain saved if a device write fails.
 
 ## Application layers and actions
 
@@ -37,10 +84,99 @@ To configure an action, choose the layer at the top, then select a physical cont
 
 1. Click one of the eight buttons (two rows of four), the horizontal touch strip, or one of the four encoders beneath it. Clicking an artwork zone also selects the whole touch strip; zones are image regions, not separate gesture bindings.
 2. Pick an event valid for that control: button press; encoder press/clockwise/counterclockwise; or touch tap, press-and-hold, generic swipe/flick, and directional swipes.
-3. Pick an action and fill only the fields shown for it. **Move to layer** uses the destination layer selector, **Run command** uses shell text, **Open application** uses an executable plus one escaped argument per line, **Shortcut** is the sole keyboard action and accepts a full chord such as `CTRL + D` or `SUPER + RETURN`, or one key with optional modifier checkboxes, and **Emit legacy event** keeps compatibility with older in-process event bindings.
-4. Click **Save binding** to create or update that control event, or **Remove binding** to clear it. Selecting an already configured control event loads its saved action for inspection and editing.
+3. Pick an action and fill only its visible fields. The existing layer, command, application, shortcut and legacy-event choices remain available. **More actions** opens typed category-specific fields described below. Shortcuts accept a full chord such as `CTRL + D` or one key with optional modifier checkboxes.
+4. Click **Save binding** to create or update that control event, or **Remove binding** to clear it. A floating toast confirms success only after the binding is written to disk; validation or saving problems show an error toast. Success disappears after five seconds; errors remain until dismissed or replaced by another notification. Saving never executes the action. Selecting an already configured control event loads its saved action for inspection and editing.
 
 Hover a physical control to see assignments for the selected layer, including **Unassigned** events: encoders include **Press**, **CW** (clockwise), and **CCW** (counterclockwise); the touch strip includes tap, hold, flick, and directional swipes. Legacy exact-tick rotation overrides appear separately. Long action text is shortened; select the event to inspect its full saved fields. Summaries refresh after saving/removing bindings, selecting/creating/removing layers, and input-driven **Move to layer** actions. Selection highlighting is separate from live pressed-state highlighting, and live input does not replace assignment summaries. The shared **Image…** and **×** edit the explicitly selected artwork target, independently of the binding editor.
+
+### Extended actions on Arch Linux
+
+Choose **More actions**, a category, and an action. Saving or inspecting an
+assignment never executes it. **Test action** explicitly runs the selected
+action and can affect the desktop, device or OBS; test only the action you
+intend to perform.
+
+For a sound button, choose **Play sound** directly in **Action**, then use
+**Choose file...** or enter an audio file path and click **Save binding**.
+WAV, MP3, FLAC, OGG, M4A/AAC, Opus and other formats decoded by mpv are supported.
+Choosing a file or saving never starts playback; press the assigned control or
+use **Test action** to play it. Playback replaces the app's previous sound.
+**More actions > Multimedia > Stop audio file** stops only app-owned playback.
+
+| Category | Actions |
+| --- | --- |
+| System | Alternate two shortcuts, paste Unicode text with optional Enter, open files/folders or HTTP(S) websites, close an exact process basename, scroll the mouse wheel |
+| Multimedia | Play/pause, stop, next/previous track, PipeWire volume up/down and mute, play a local audio file, stop app-owned soundboard playback |
+| Organization | Next/previous/specific page, enter a named child folder, return to the parent; existing layers remain root profiles |
+| Device | Absolute or relative brightness, sleep and wake; timer actions show countdown and completion |
+| OBS | Select a scene, toggle recording/streaming, toggle input mute, show/hide a named source in a scene |
+
+Text uses the Wayland clipboard and a physical Ctrl+V chord, not synthetic
+Unicode keycodes. It replaces clipboard contents and requires the focused
+application to support Ctrl+V. Closing an application targets its exact Linux
+process basename (1-15 ASCII bytes), not a window title or a shell pattern.
+Volume uses the default PipeWire output in 5% steps, capped at 100%.
+Media transport uses the session's MPRIS player interface. Soundboard playback
+belongs to this app and stopping it does not stop unrelated media players.
+
+The four dials support independent press, clockwise and counterclockwise
+assignments. For example, assign volume up/down to rotation and mute to press;
+use relative brightness actions for another dial. Mouse wheel directions are
+vertical or horizontal. The touch strip retains tap, hold and directional
+swipe assignments. Device brightness is the Stream Deck's display brightness,
+not monitor backlight. Sleep sets brightness to zero and wake restores the
+remembered level; before an explicit absolute level, relative/wake actions use
+a 100% baseline because the device protocol has no brightness readback.
+
+Profiles appear as native tabs, with **Base** always available. Create another
+profile in **Organize** using **New profile name** and **Save new profile**. Pages and
+folders belong to their profile and do not create additional profile tabs.
+Switching tabs restores that profile's last selected page for the current session.
+
+To make a profile application-specific, open **Organize**, choose it under
+**Profile to save**, enter a window class or executable name under
+**Application (optional)**, and click **Save profile**. Both save buttons confirm
+success only after writing the configuration, and report disk errors. For example,
+`kitty`, `firefox`, or `obs` can match executable names; a precise window class
+can distinguish windows belonging to the same executable. Leave the field
+empty to disable automatic selection. All configured profiles remain visible and
+manually selectable, including when their associated application is not focused.
+Base cannot require an application. Unsaved application input survives focus changes.
+
+Application detection uses Hyprland's IPC focus events, not running-process
+polling. A matching external application selects its profile;
+unmatched or unavailable focus returns to Base. When configuration itself
+has focus, the last external application context remains active. Closing that
+external window clears its retained context. A manual tab choice is retained
+until the next changed external application context. Selecting a profile
+never launches its application. Associations survive restarting the app.
+
+Use **New page** beside the page indicator or **New folder** in **Organize**. Every view has
+its own existing layer-backed bindings and artwork. Navigation stays within
+the current profile and folder; the indicator shows the current page.
+To rename the current page, open **Organize**, edit **Page name**, and click
+**Rename page** (or press Enter in the name field). Names must be nonblank,
+contain no control characters, and fit within 64 UTF-8 bytes. Surrounding
+spaces are trimmed. The saved name appears in the page indicator and survives
+restarts; page numbers, navigation, bindings and artwork remain unchanged.
+`organization.json` stores this hierarchy beside `layers.conf`. Existing flat
+layers load as independent profiles. Invalid metadata is retained and
+organization writes are disabled until repaired. Legacy `brightness-v1` and
+`scroll-v1` action records now load as the corresponding typed actions.
+
+### OBS Studio
+
+In OBS, enable its built-in WebSocket server under **Tools > WebSocket Server
+Settings**. In this app, click **OBS** in the profile bar, enter the local endpoint
+(normally `ws://127.0.0.1:4455`) and password, then save and test the connection.
+The connection test queries actual scenes and recording/streaming state; it
+does not start either output. Scene/source/input names must match OBS.
+
+OBS operations run on the worker with bounded network waits and surface
+authentication, connection and request failures in the UI. Only local
+loopback endpoints are accepted. Credentials are stored in owner-only
+`obs.json`, not action bindings, and are masked in the editor and diagnostics.
+The application does not enable OBS's server or alter its configuration.
 
 ### Window layout
 
@@ -80,3 +216,55 @@ cargo clippy --offline --all-targets --all-features -- -D warnings
 The single GTK widget test uses the production widget constructor without starting HID/action workers. Run `cargo test --offline -- --nocapture` in a display session to see the executed sizing/reachability markers; without a display it explicitly reports a skip. Measurements are layout checks, not a substitute for manual visual, chooser, and device verification.
 
 The protocol decoder validates report ID and declared little-endian payload length before decoding supported input commands. Hardware event behavior requires a connected, accessible Stream Deck +.
+
+### Opt-in real-device checks
+
+Close other instances before these checks so one production HID worker owns
+the device. The first command sends real feature reports: brightness 50%,
+relative adjustment, sleep and wake. It leaves the remembered brightness at
+50%. The second waits up to 60 seconds for a physical key press, dial rotation
+and touch-strip gesture.
+
+```sh
+cargo run --offline --example verify_streamdeck -- --device-controls
+cargo run --offline --example verify_streamdeck -- --input
+```
+
+To check a running local OBS instance without starting recording or streaming:
+
+```sh
+cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
+```
+
+The OBS check authenticates, queries scenes/output state, then reselects its
+already-current scene. Configure `obs.json` through the app first.
+
+The other opt-in checks paste exact Unicode into their own GTK window and
+exercise mpv on an isolated D-Bus session. The multimedia fixture must be a
+local silent audio file; it requires the `mpv-mpris` plugin.
+
+```sh
+cargo run --offline --example verify_desktop
+dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav
+```
+
+## Code organization
+
+| File | Responsibility |
+| --- | --- |
+| `src/main.rs` | Application startup, configuration window, worker lifecycle and the single GTK-owner test fixture |
+| `src/tray.rs` | StatusNotifier menu, GTK command dispatch and native About dialog |
+| `src/autostart.rs` | Per-user XDG session startup entry |
+| `src/ui.rs` | Shared native controls, feedback and secondary panels |
+| `DESIGN.md` | Native layout, interaction and accessibility contract |
+
+Keep device work off the GTK thread. Closing configuration must not stop
+bindings, polling or timers; application shutdown owns cleanup. GTK widget
+checks must keep a single owning test thread, even when test helpers move
+to separate files. Run the development checks above after changing either
+production code or its tests.
+
+## License
+
+sdeck-plus is distributed under the [MIT license](LICENSE).
+Copyright (c) 2026 Aldo Silvestre. The license also appears in **About**.

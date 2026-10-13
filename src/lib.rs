@@ -1,9 +1,18 @@
 //! In-process API for observing Stream Deck + HID input.
 
 pub mod binding_editor;
+pub mod desktop_actions;
+pub mod device_control;
 pub mod event_api;
+pub mod features;
 pub mod image_output;
 pub mod keyboard;
 pub mod layers;
 pub mod local_artwork;
+pub mod obs;
+pub mod organization;
 pub mod protocol;
+
+pub mod app_focus;
+#[cfg(test)]
+mod feature_persistence_tests;

@@ -39,6 +39,7 @@ pub enum ActionKind {
     OpenApplication,
     Shortcut,
     EmitLegacy,
+    Extended,
 }
 
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
@@ -191,6 +192,9 @@ pub fn action_from_fields(
             key: text_value.into(),
         },
         ActionKind::EmitLegacy => Action::Emit(text_value.into()),
+        ActionKind::Extended => {
+            return Err("configure the selected action in its category fields".into())
+        }
     };
     crate::layers::normalize_keyboard_action(action).map_err(|error| EditorError(error.to_string()))
 }
@@ -258,6 +262,7 @@ fn action_summary(action: Option<&Action>) -> String {
             format!("Shortcut {}", keys.join("+"))
         }
         Some(Action::Emit(name)) => format!("Emit {name}"),
+        Some(Action::Feature(action)) => action.summary(),
     };
     // Normalize whitespace and truncate by characters, never UTF-8 byte offsets.
     let single_line = text.split_whitespace().collect::<Vec<_>>().join(" ");

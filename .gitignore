@@ -1,3 +1,16 @@
+# Rust build output
 /target/
-# Local Pi runtime state
+
+# Local agent runtime state
 .atl/
+/.omo/
+
+# Editor temporary files and backups
+*.swp
+*.swo
+*~
+*.rs.bk
+
+# Desktop metadata
+.DS_Store
+Thumbs.db

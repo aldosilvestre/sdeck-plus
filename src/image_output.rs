@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn png_and_gif_sources_convert_to_target_sized_decodable_jpegs() {
+    fn png_jpeg_and_gif_sources_convert_to_target_sized_decodable_jpegs() {
         let root = std::env::temp_dir().join(format!(
             "image-format-test-{}-{}",
             std::process::id(),
@@ -245,7 +245,15 @@ mod tests {
         )
         .unwrap();
 
-        for path in [&png_path, &gif_path] {
+        let jpg_path = root.join("source.jpg");
+        let jpeg_path = root.join("source.jpeg");
+        for path in [&jpg_path, &jpeg_path] {
+            Pixbuf::from_file(&png_path)
+                .unwrap()
+                .savev(path, "jpeg", &[])
+                .unwrap();
+        }
+        for path in [&png_path, &jpg_path, &jpeg_path, &gif_path] {
             let jpeg = prepare_jpeg(ArtworkTarget::Keypad(1), path).unwrap();
             let decoded = Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
             assert_eq!((decoded.width(), decoded.height()), (120, 120));

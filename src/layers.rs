@@ -8,11 +8,11 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command},
 };
 
 const VERSION: &str = "streamdeck-layers-v1";
-const DEFAULT_LAYER: &str = "Base";
+pub const DEFAULT_LAYER: &str = "Base";
 const LEGACY_DEFAULT_LAYER: &str = "default";
 const MAX_LAYERS: usize = 64;
 const MAX_FIELD: usize = 4096;
@@ -127,6 +127,7 @@ pub enum Action {
         key: String,
     },
     Emit(String),
+    Feature(crate::features::FeatureAction),
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +151,7 @@ impl LayerStore {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/share")))
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no app data directory"))?;
-        Self::open_at(base.join("streamdeck-plus-monitor"))
+        Self::open_at(base.join("sdeck-plus"))
     }
 
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
@@ -181,6 +182,10 @@ impl LayerStore {
     }
     pub fn active(&self) -> &str {
         &self.active
+    }
+    /// Shared storage root for organization and integration settings.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
     pub fn diagnostics(&self) -> &[String] {
         &self.diagnostics
@@ -259,10 +264,21 @@ impl LayerStore {
             .is_some())
     }
     pub fn matching_action(&self, event: &Event) -> Option<Action> {
+        self.matching_binding(event).map(|(_, action)| action)
+    }
+
+    /// Return the winning trigger as well as its action for per-binding state.
+    pub fn matching_binding(&self, event: &Event) -> Option<(Trigger, Action)> {
         let layer = self.layers.get(&self.active)?;
         Trigger::event_triggers(event)
             .into_iter()
-            .find_map(|trigger| layer.bindings.get(&trigger).cloned())
+            .find_map(|trigger| {
+                layer
+                    .bindings
+                    .get(&trigger)
+                    .cloned()
+                    .map(|action| (trigger, action))
+            })
     }
     pub fn apply_switch(&mut self, target: &str) -> bool {
         self.select(target)
@@ -336,6 +352,7 @@ fn validate_trigger(t: &Trigger) -> io::Result<()> {
 }
 fn validate_action(a: &Action) -> io::Result<()> {
     match a {
+        Action::Feature(action) => action.encode().map(|_| ()),
         Action::SwitchLayer(n) => validate_name(n),
         Action::Launch { executable, args }
             if executable.as_os_str().is_empty()
@@ -514,10 +531,37 @@ fn encode_action(a: &Action) -> io::Result<String> {
                 .join(","),
             hex(key.as_bytes())
         ),
+        Action::Feature(action) => format!("feature-v1:{}", hex(action.encode()?.as_bytes())),
     })
 }
 fn decode_action(s: &str) -> Result<Action, String> {
-    let action = if let Some(n) = s.strip_prefix("switch:") {
+    let action = if let Some(value) = s.strip_prefix("feature-v1:") {
+        Action::Feature(
+            crate::features::FeatureAction::decode(&unhex(value)?)
+                .map_err(|error| error.to_string())?,
+        )
+    } else if let Some(value) = s.strip_prefix("brightness-v1:") {
+        Action::Feature(crate::features::FeatureAction::Device(
+            crate::device_control::DeviceAction::Brightness(
+                value.parse().map_err(|_| "invalid brightness")?,
+            ),
+        ))
+    } else if let Some(value) = s.strip_prefix("scroll-v1:") {
+        let (direction, ticks) = value.split_once(':').ok_or("invalid scroll action")?;
+        let direction = match direction {
+            "up" => crate::desktop_actions::ScrollDirection::Up,
+            "down" => crate::desktop_actions::ScrollDirection::Down,
+            "left" => crate::desktop_actions::ScrollDirection::Left,
+            "right" => crate::desktop_actions::ScrollDirection::Right,
+            _ => return Err("invalid scroll direction".into()),
+        };
+        Action::Feature(crate::features::FeatureAction::Desktop(
+            crate::desktop_actions::DesktopAction::MouseScroll {
+                direction,
+                ticks: ticks.parse().map_err(|_| "invalid scroll ticks")?,
+            },
+        ))
+    } else if let Some(n) = s.strip_prefix("switch:") {
         Action::SwitchLayer(unhex(n)?)
     } else if let Some(n) = s.strip_prefix("emit:") {
         Action::Emit(unhex(n)?)
@@ -652,6 +696,11 @@ fn canonical_layer_name(name: &str) -> String {
 
 pub trait ProcessRunner {
     fn run(&mut self, argv: &[String]) -> io::Result<()>;
+    /// Launch independently; test adapters can acknowledge without a real child.
+    fn launch(&mut self, argv: &[String]) -> io::Result<Option<Child>> {
+        self.run(argv)?;
+        Ok(None)
+    }
 }
 
 #[derive(Default)]
@@ -669,6 +718,13 @@ impl ProcessRunner for SystemProcessRunner {
             Err(io::Error::other(format!("process exited with {status}")))
         }
     }
+
+    fn launch(&mut self, argv: &[String]) -> io::Result<Option<Child>> {
+        let Some((program, args)) = argv.split_first() else {
+            return Err(invalid("empty process argv"));
+        };
+        Command::new(program).args(args).spawn().map(Some)
+    }
 }
 
 pub trait KeyboardSender {
@@ -685,16 +741,38 @@ impl KeyboardSender for Keyboard {
 pub struct ActionExecutor<P, K> {
     process: P,
     keyboard: K,
+    desktop: crate::desktop_actions::DesktopRuntime,
+    applications: Vec<(PathBuf, Child)>,
 }
 
 impl<P: ProcessRunner, K: KeyboardSender> ActionExecutor<P, K> {
     pub fn new(process: P, keyboard: K) -> Self {
-        Self { process, keyboard }
+        Self {
+            process,
+            keyboard,
+            desktop: crate::desktop_actions::DesktopRuntime::new(),
+            applications: Vec::new(),
+        }
     }
 
     pub fn execute(&mut self, action: &Action) -> io::Result<()> {
+        self.execute_for("legacy", action)
+    }
+
+    /// Keep stateful desktop actions independent for each physical binding.
+    pub fn execute_for(&mut self, binding_id: &str, action: &Action) -> io::Result<()> {
         validate_action(action)?;
         match action {
+            Action::Launch { executable, .. } => {
+                if let Some(child) = self.process.launch(&action_argv(action)?)? {
+                    self.applications.push((executable.clone(), child));
+                }
+                Ok(())
+            }
+            Action::Feature(crate::features::FeatureAction::Desktop(action)) => self
+                .desktop
+                .execute_for(binding_id, action, &mut self.keyboard),
+            Action::Feature(_) => Err(invalid("action requires the application runtime")),
             Action::KeyPress { key } => {
                 let chord = parse_chord(&[], key).map_err(|error| invalid(&error))?;
                 if !chord.modifiers().is_empty() {
@@ -711,6 +789,29 @@ impl<P: ProcessRunner, K: KeyboardSender> ActionExecutor<P, K> {
             _ => self.process.run(&action_argv(action)?),
         }
     }
+
+    /// Report delayed adapter failures without waiting for an application exit.
+    pub fn poll_errors(&mut self) -> Vec<String> {
+        let mut errors = self.desktop.poll_errors();
+        let mut index = 0;
+        while index < self.applications.len() {
+            match self.applications[index].1.try_wait() {
+                Ok(None) => index += 1,
+                outcome => {
+                    let (executable, _) = self.applications.swap_remove(index);
+                    match outcome {
+                        Ok(Some(status)) if !status.success() => {
+                            errors.push(format!("{} exited with {status}", executable.display()))
+                        }
+                        Err(error) => errors.push(format!("{}: {error}", executable.display())),
+                        Ok(Some(_)) => {}
+                        Ok(None) => unreachable!("running children are retained"),
+                    }
+                }
+            }
+        }
+        errors
+    }
 }
 
 fn action_argv(action: &Action) -> io::Result<Vec<String>> {
@@ -725,11 +826,16 @@ fn action_argv(action: &Action) -> io::Result<Vec<String>> {
         Action::KeyPress { .. }
         | Action::Shortcut { .. }
         | Action::SwitchLayer(_)
-        | Action::Emit(_) => {
+        | Action::Emit(_)
+        | Action::Feature(_) => {
             return Err(invalid("action does not execute an external process"));
         }
     })
 }
+
+#[cfg(test)]
+#[path = "launch_tests.rs"]
+mod launch_tests;
 
 #[cfg(test)]
 mod tests {

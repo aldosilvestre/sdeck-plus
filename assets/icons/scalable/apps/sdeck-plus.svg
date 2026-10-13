@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Icono de Stream Deck multicolor">
+ <defs>
+  <linearGradient id="body" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#39445b"/><stop offset="1" stop-color="#111827"/></linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4fd1ff"/><stop offset="1" stop-color="#3867ff"/></linearGradient>
+  <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff83c5"/><stop offset="1" stop-color="#b43cff"/></linearGradient>
+  <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#68f5b4"/><stop offset="1" stop-color="#0ea88c"/></linearGradient>
+  <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffdc70"/><stop offset="1" stop-color="#ff7a38"/></linearGradient>
+ </defs>
+ <rect x="14" y="28" width="228" height="200" rx="34" fill="url(#body)" stroke="#66738d" stroke-width="3"/>
+ <rect x="24" y="38" width="208" height="180" rx="26" fill="#0a1020"/>
+ <g stroke="#ffffff" stroke-opacity=".17" stroke-width="2">
+  <rect x="39" y="53" width="50" height="50" rx="11" fill="url(#blue)"/>
+  <rect x="103" y="53" width="50" height="50" rx="11" fill="url(#pink)"/>
+  <rect x="167" y="53" width="50" height="50" rx="11" fill="url(#green)"/>
+  <rect x="39" y="117" width="50" height="50" rx="11" fill="url(#orange)"/>
+  <rect x="103" y="117" width="50" height="50" rx="11" fill="url(#green)"/>
+  <rect x="167" y="117" width="50" height="50" rx="11" fill="url(#blue)"/>
+ </g>
+ <g fill="none" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M53 78h22m-11-11v22"/>
+  <path d="m119 78 8-9 8 9-8 9z"/>
+  <path d="M181 79l8-8 8 8-8 8z"/>
+  <path d="m53 143 9 9 14-19"/>
+  <circle cx="128" cy="142" r="12"/><path d="M128 134v16m-8-8h16"/>
+  <path d="M181 142h22m-11-11v22"/>
+ </g>
+ <rect x="72" y="183" width="112" height="13" rx="6.5" fill="#28354f"/>
+ <rect x="76" y="186" width="65" height="7" rx="3.5" fill="#56d7ff"/>
+ <circle cx="166" cy="189.5" r="4" fill="#ff71bf"/>
+</svg>

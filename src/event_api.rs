@@ -2,6 +2,7 @@
 //! External transports can be attached behind this API in a later phase.
 
 use crate::{
+    device_control::DeviceAction,
     image_output,
     local_artwork::ArtworkTarget,
     protocol::{decode_report, Event},
@@ -19,6 +20,13 @@ use std::{
 const VID: u16 = 0x0FD9;
 const PID: u16 = 0x0084;
 
+#[path = "device_control/worker.rs"]
+mod device_controls;
+
+#[cfg(test)]
+#[path = "device_control/monitor_tests.rs"]
+mod control_monitor_tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     Searching,
@@ -35,10 +43,19 @@ pub enum MonitorEvent {
         target: ArtworkTarget,
         result: Result<(), String>,
     },
+    DeviceResult {
+        action: DeviceAction,
+        result: Result<(), String>,
+    },
     AppEvent {
         name: String,
     },
     LayerError(String),
+    /// Result of an explicit Save binding request, after persistence finishes.
+    BindingSaveResult(Result<(), String>),
+    /// Result of an explicit profile save, after persistence finishes.
+    ProfileSaveResult(Result<(), String>),
+    ApplicationFocus(Result<Option<crate::app_focus::FocusedApplication>, String>),
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
 }
@@ -86,9 +103,14 @@ pub struct HidController {
     stop: StopSignal,
     worker: Option<thread::JoinHandle<()>>,
     artwork: Sender<ArtworkCommand>,
+    controls: Sender<DeviceAction>,
 }
 
 impl HidController {
+    pub fn control_sender(&self) -> Sender<DeviceAction> {
+        self.controls.clone()
+    }
+
     pub fn artwork_sender(&self) -> Sender<ArtworkCommand> {
         self.artwork.clone()
     }
@@ -114,6 +136,7 @@ impl Drop for HidController {
 /// Start the blocking HID producer on a dedicated, owned thread.
 pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
     let (artwork, commands) = std::sync::mpsc::channel();
+    let (controls, control_commands) = std::sync::mpsc::channel();
     let stop = StopSignal::default();
     let worker_stop = stop.clone();
     let worker = thread::Builder::new()
@@ -121,7 +144,7 @@ pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
         .spawn(move || {
             monitor(
                 sender,
-                commands,
+                (commands, control_commands),
                 worker_stop,
                 discover_device,
                 prepare_artwork,
@@ -132,6 +155,7 @@ pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
         stop,
         worker: Some(worker),
         artwork,
+        controls,
     }
 }
 
@@ -149,6 +173,7 @@ fn pending_artwork(commands: &Receiver<ArtworkCommand>) -> Vec<ArtworkCommand> {
 trait Device {
     fn read(&self, buffer: &mut [u8]) -> Result<usize, String>;
     fn write(&self, report: &[u8]) -> Result<usize, String>;
+    fn write_feature(&self, report: &[u8]) -> Result<usize, String>;
 }
 
 impl Device for hidapi::HidDevice {
@@ -159,6 +184,14 @@ impl Device for hidapi::HidDevice {
 
     fn write(&self, report: &[u8]) -> Result<usize, String> {
         self.write(report).map_err(|error| error.to_string())
+    }
+
+    fn write_feature(&self, report: &[u8]) -> Result<usize, String> {
+        // hidapi checks the native byte count and returns IncompleteSendError
+        // for short sends; its safe API exposes success as ().
+        self.send_feature_report(report)
+            .map(|()| report.len())
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -234,12 +267,18 @@ fn process_artwork(
 
 fn monitor<D: Device>(
     sender: Sender<MonitorEvent>,
-    commands: Receiver<ArtworkCommand>,
+    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
     stop: StopSignal,
     mut discover: impl FnMut(&StopSignal) -> Result<D, String>,
     mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
 ) {
+    let (commands, controls) = commands;
+    let mut controls = device_controls::Controls::new(controls);
     while stop.live() {
+        controls.drain(&stop, &sender, None);
+        if !stop.live() {
+            return;
+        }
         if sender
             .send(MonitorEvent::Connection(ConnectionState::Searching))
             .is_err()
@@ -273,11 +312,13 @@ fn monitor<D: Device>(
             return;
         }
         let mut buffer = [0u8; 64];
+        controls.replay(&stop, &sender, &device);
         while stop.live() {
             // A heartbeat detects consumer loss even when there is no input.
             if sender.send(MonitorEvent::Heartbeat).is_err() {
                 return;
             }
+            controls.drain(&stop, &sender, Some(&device));
             process_artwork(&commands, &stop, &sender, &mut prepare, |report| {
                 device.write(report)
             });
@@ -452,6 +493,9 @@ mod tests {
         fn write(&self, _: &[u8]) -> Result<usize, String> {
             panic!("unexpected write")
         }
+        fn write_feature(&self, _: &[u8]) -> Result<usize, String> {
+            panic!("unexpected feature write")
+        }
     }
 
     #[test]
@@ -466,7 +510,7 @@ mod tests {
             let worker = thread::spawn(move || {
                 monitor::<FakeDevice>(
                     events,
-                    commands,
+                    (commands, std::sync::mpsc::channel().1),
                     worker_stop,
                     |_| {
                         entered.send(()).unwrap();
@@ -502,6 +546,7 @@ mod tests {
         let worker_stop = stop.clone();
         let (events, _receiver) = std::sync::mpsc::channel();
         let (artwork, commands) = std::sync::mpsc::channel();
+        let (controls, control_commands) = std::sync::mpsc::channel();
         let (entered, entry) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let mut device = Some(FakeDevice {
@@ -511,7 +556,7 @@ mod tests {
         let worker = thread::spawn(move || {
             monitor(
                 events,
-                commands,
+                (commands, control_commands),
                 worker_stop,
                 |_| Ok(device.take().unwrap()),
                 |_| panic!("unexpected preparation"),
@@ -521,13 +566,17 @@ mod tests {
             stop,
             worker: Some(worker),
             artwork,
+            controls,
         };
         entry.recv().unwrap();
+        let controls = controller.control_sender();
+        controls.send(DeviceAction::Sleep).unwrap();
         controller.request_stop();
         release.send(Ok(0)).unwrap();
         controller.shutdown();
         controller.shutdown();
         assert!(controller.worker.is_none());
+        assert!(controls.send(DeviceAction::Wake).is_err());
     }
 
     #[test]
@@ -552,7 +601,7 @@ mod tests {
         let worker = thread::spawn(move || {
             monitor(
                 events,
-                commands,
+                (commands, std::sync::mpsc::channel().1),
                 stop,
                 |_| Ok(devices.pop().unwrap()),
                 |_| panic!("unexpected preparation"),
