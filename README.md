@@ -27,6 +27,48 @@ cargo run
 
 The UI displays connection state, eight keypad states, four encoder button/rotation states, and Touch Strip Tap, Press, and Flick coordinates in Elgato's 800 × 100 logical-pixel space. Touch gestures are reported after the interaction completes, not as separate contact start/release events. If the device is absent, inaccessible, or disconnected, the UI remains open and reports the state; it retries detection after connection failures.
 
+## Install for the current user
+
+After installing the build requirements above, run:
+
+```sh
+./install.sh
+```
+
+The installer builds the native release binary using `Cargo.lock` and installs:
+
+- Executable: `~/.local/bin/sdeck-plus`.
+- Application-menu launcher: `~/.local/share/applications/dev.streamdeck.EventMonitor.desktop`.
+- Icon: `~/.local/share/icons/hicolor/scalable/apps/sdeck-plus.svg`.
+- MIT license: `~/.local/share/doc/sdeck-plus/LICENSE`.
+
+`PREFIX` overrides the executable prefix, and an absolute `XDG_DATA_HOME`
+overrides the desktop-data directory. `CARGO_TARGET_DIR` controls build output.
+Run `./install.sh --help` for usage. The installer can be invoked from any
+working directory; it refuses to run as root and does not install system
+packages, change device permissions, enable autostart or launch the application.
+Re-running it updates the installed files.
+
+After installing, it reports anything that needs your attention:
+
+- The executable directory is missing from `PATH`.
+- A running sdeck-plus still uses the previous executable.
+- **Start at login** points at another executable; disable it and re-enable it
+  from the installed application to update the saved path.
+- Optional action tools (`mpv`, `wpctl`, `wl-copy`, `xdg-open`) are missing.
+- A connected Stream Deck + cannot be opened by your user; it prints the udev
+  rule an administrator can install, without running it.
+
+To remove the installed files:
+
+```sh
+./install.sh --uninstall
+```
+
+Uninstalling keeps configuration, profiles, artwork and any **Start at login**
+entry, and does not stop a running instance. Use the same `PREFIX` and
+`XDG_DATA_HOME` values that were used to install.
+
 ## System tray and session startup
 
 Closing the configuration window hides it. Device communication, bindings,
