@@ -72,7 +72,7 @@ window, scrolledwindow, viewport, .app-shell {
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
 .profile-tabs > stack { background-color: transparent; }
-.artwork-controls button { min-height: 20px; padding: 4px 8px; }
+.artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
 
 .hardware-chassis {
     background: linear-gradient(135deg, #f0f0f2, #c5c5ca);

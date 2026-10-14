@@ -136,7 +136,7 @@ pub(crate) fn assert_toast_lifecycle(toast: &Toast) {
     assert!(!toast.root.reveals_child());
 }
 
-fn icon_caption(icon: &str, caption: &str) -> GtkBox {
+pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
     let content = GtkBox::new(Orientation::Horizontal, 8);
     content.set_halign(gtk::Align::Center);
     let image = Image::from_icon_name(icon);

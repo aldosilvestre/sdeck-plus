@@ -1,7 +1,9 @@
 //! Pure artwork preparation and Stream Deck + image-report encoding.
 
+use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
+use gtk::pango::prelude::*;
 use std::path::Path;
 
 pub const REPORT_SIZE: usize = 1024;
@@ -39,6 +41,10 @@ pub fn dimensions(target: ArtworkTarget) -> Result<ImageDimensions, String> {
 /// Decode an image, center-crop to cover, resize, and encode as an in-memory JPEG.
 pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<Vec<u8>, String> {
     let size = dimensions(target)?;
+    encode_jpeg(&prepare_background(size, source.as_ref())?)
+}
+
+fn prepare_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
     let image = Pixbuf::from_file(source).map_err(|error| error.to_string())?;
     let width = image.width();
     let height = image.height();
@@ -65,7 +71,8 @@ pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<V
     // an RGB canvas so transparent source pixels encode consistently as black.
     let rgb = Pixbuf::new(Colorspace::Rgb, false, 8, target_w, target_h)
         .ok_or_else(|| "could not allocate JPEG image".to_string())?;
-    let pixels = unsafe { scaled.pixels() };
+    let pixel_bytes = scaled.read_pixel_bytes();
+    let pixels = pixel_bytes.as_ref();
     let channels = scaled.n_channels() as usize;
     let stride = scaled.rowstride() as usize;
     for y in 0..target_h {
@@ -86,13 +93,129 @@ pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<V
             );
         }
     }
-    let bytes = rgb
+    Ok(rgb)
+}
+
+fn encode_jpeg(image: &Pixbuf) -> Result<Vec<u8>, String> {
+    let bytes = image
         .save_to_bufferv("jpeg", &[("quality", "92")])
         .map_err(|error| error.to_string())?;
     if bytes.is_empty() {
         return Err("JPEG encoder returned an empty image".into());
     }
     Ok(bytes)
+}
+
+/// Compose one physical 120x120 keypad image, without initializing GTK.
+/// Text is clipped to the button, with a thin black outline.
+pub fn compose_button_image(source: Option<&Path>, text: &ButtonText) -> Result<Pixbuf, String> {
+    text.validate().map_err(|error| error.to_string())?;
+    let background = match source {
+        Some(source) => prepare_background(
+            ImageDimensions {
+                width: 120,
+                height: 120,
+            },
+            source,
+        )?,
+        None => {
+            let image = Pixbuf::new(Colorspace::Rgb, false, 8, 120, 120)
+                .ok_or_else(|| "could not allocate button image".to_string())?;
+            image.fill(0x000000ff);
+            image
+        }
+    };
+    if text.text.is_empty() {
+        return Ok(background);
+    }
+    // RGB24 is native-endian 0x00RRGGBB. Work through safe owned bytes rather
+    // than GDK Cairo helpers, which require GTK's initialized main thread.
+    let bytes = background.read_pixel_bytes();
+    let stride = usize::try_from(background.rowstride()).map_err(|error| error.to_string())?;
+    let mut canvas = Vec::with_capacity(120 * 120 * 4);
+    for y in 0..120 {
+        for x in 0..120 {
+            let offset = y * stride + x * 3;
+            let pixel = u32::from(bytes[offset]) << 16
+                | u32::from(bytes[offset + 1]) << 8
+                | u32::from(bytes[offset + 2]);
+            canvas.extend_from_slice(&pixel.to_ne_bytes());
+        }
+    }
+    let mut surface =
+        gtk::cairo::ImageSurface::create_for_data(canvas, gtk::cairo::Format::Rgb24, 120, 120, 480)
+            .map_err(|error| error.to_string())?;
+    let cairo = gtk::cairo::Context::new(&surface).map_err(|error| error.to_string())?;
+    // PangoCairo's default font map is per-thread; no display or GTK init is used.
+    let context = pangocairo::FontMap::default().create_context();
+    let layout = gtk::pango::Layout::new(&context);
+    let mut font = gtk::pango::FontDescription::new();
+    font.set_family(&text.font_family);
+    font.set_absolute_size(f64::from(text.font_size) * f64::from(gtk::pango::SCALE));
+    layout.set_font_description(Some(&font));
+    layout.set_text(&text.text);
+    let (width, _) = layout.pixel_size();
+    layout.set_width(width * gtk::pango::SCALE);
+    layout.set_alignment(match text.horizontal_alignment {
+        HorizontalAlignment::Left => gtk::pango::Alignment::Left,
+        HorizontalAlignment::Center => gtk::pango::Alignment::Center,
+        HorizontalAlignment::Right => gtk::pango::Alignment::Right,
+    });
+    let (ink, _) = layout.pixel_extents();
+    let width = f64::from(ink.width());
+    let height = f64::from(ink.height());
+    let (output_width, output_height) = match text.orientation {
+        TextOrientation::Horizontal => (width, height),
+        TextOrientation::Vertical => (height, width),
+    };
+    let x = match text.horizontal_alignment {
+        HorizontalAlignment::Left => 2.0,
+        HorizontalAlignment::Center => (120.0 - output_width) / 2.0,
+        HorizontalAlignment::Right => 118.0 - output_width,
+    };
+    let y = match text.vertical_alignment {
+        VerticalAlignment::Top => 2.0,
+        VerticalAlignment::Center => (120.0 - output_height) / 2.0,
+        VerticalAlignment::Bottom => 118.0 - output_height,
+    };
+    cairo.translate(x, y);
+    match text.orientation {
+        TextOrientation::Horizontal => {}
+        TextOrientation::Vertical => {
+            cairo.translate(height, 0.0);
+            cairo.rotate(std::f64::consts::FRAC_PI_2);
+        }
+    }
+    cairo.move_to(-f64::from(ink.x()), -f64::from(ink.y()));
+    pangocairo::functions::layout_path(&cairo, &layout);
+    cairo.set_source_rgb(0.0, 0.0, 0.0);
+    cairo.set_line_width(3.0);
+    cairo.set_line_join(gtk::cairo::LineJoin::Round);
+    cairo.stroke_preserve().map_err(|error| error.to_string())?;
+    cairo.set_source_rgb(1.0, 1.0, 1.0);
+    cairo.fill().map_err(|error| error.to_string())?;
+    drop(cairo);
+    let data = surface.data().map_err(|error| error.to_string())?;
+    let mut rgb = Vec::with_capacity(120 * 120 * 3);
+    for pixel in data.as_chunks::<4>().0 {
+        let value = u32::from_ne_bytes(*pixel);
+        let channels = value.to_be_bytes();
+        rgb.extend_from_slice(&channels[1..]);
+    }
+    Ok(Pixbuf::from_bytes(
+        &gtk::glib::Bytes::from_owned(rgb),
+        Colorspace::Rgb,
+        false,
+        8,
+        120,
+        120,
+        360,
+    ))
+}
+
+/// Encode the same composed pixels used by GTK preview as a device-ready JPEG.
+pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<Vec<u8>, String> {
+    encode_jpeg(&compose_button_image(source, text)?)
 }
 
 /// Prepare a black JPEG for the target, suitable for the same image command as artwork.
@@ -200,10 +323,165 @@ mod tests {
     fn pixel(image: &Pixbuf, x: usize, y: usize) -> [u8; 3] {
         let stride = image.rowstride() as usize;
         let channels = image.n_channels() as usize;
-        // The returned slice belongs to the pixbuf and is read-only for this test.
-        let data = unsafe { image.pixels() };
+        let data = image.read_pixel_bytes();
         let offset = y * stride + x * channels;
         [data[offset], data[offset + 1], data[offset + 2]]
+    }
+
+    fn white_bounds(image: &Pixbuf) -> (usize, usize, usize, usize, usize) {
+        let mut bounds = (120, 120, 0, 0, 0);
+        for y in 0..120 {
+            for x in 0..120 {
+                if pixel(image, x, y).iter().all(|channel| *channel > 220) {
+                    bounds.0 = bounds.0.min(x);
+                    bounds.1 = bounds.1.min(y);
+                    bounds.2 = bounds.2.max(x);
+                    bounds.3 = bounds.3.max(y);
+                    bounds.4 += 1;
+                }
+            }
+        }
+        assert!(bounds.4 > 0, "text must produce white pixels");
+        bounds
+    }
+
+    #[test]
+    fn button_text_is_headless_multiline_and_composited_into_jpeg() {
+        std::thread::spawn(|| {
+            let path = fixture(400, 100);
+            let text = ButtonText {
+                text: "Hello\nDeck".into(),
+                ..ButtonText::default()
+            };
+            let plain = compose_button_image(Some(&path), &ButtonText::default()).unwrap();
+            assert_eq!((plain.width(), plain.height()), (120, 120));
+            assert_eq!(pixel(&plain, 0, 60), [255, 0, 0]);
+            assert_eq!(pixel(&plain, 119, 60), [0, 0, 255]);
+            let composed = compose_button_image(Some(&path), &text).unwrap();
+            white_bounds(&composed);
+            assert_eq!(pixel(&composed, 0, 60), [255, 0, 0]);
+            assert_eq!(pixel(&composed, 119, 60), [0, 0, 255]);
+            let decoded = Pixbuf::from_read(std::io::Cursor::new(
+                prepare_button_jpeg(Some(&path), &text).unwrap(),
+            ))
+            .unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (120, 120));
+            white_bounds(&decoded);
+            assert!(pixel(&decoded, 0, 60)[0] > 220);
+            assert!(pixel(&decoded, 119, 60)[2] > 220);
+            fs::remove_file(path).unwrap();
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn physical_alignment_rotation_size_and_family_change_pixels() {
+        let mut text = ButtonText {
+            text: "Wi\nii".into(),
+            font_size: 20,
+            ..ButtonText::default()
+        };
+        for horizontal in [
+            HorizontalAlignment::Left,
+            HorizontalAlignment::Center,
+            HorizontalAlignment::Right,
+        ] {
+            for vertical in [
+                VerticalAlignment::Top,
+                VerticalAlignment::Center,
+                VerticalAlignment::Bottom,
+            ] {
+                text.horizontal_alignment = horizontal;
+                text.vertical_alignment = vertical;
+                let (left, top, right, bottom, _) =
+                    white_bounds(&compose_button_image(None, &text).unwrap());
+                match horizontal {
+                    HorizontalAlignment::Left => assert!(left <= 4),
+                    HorizontalAlignment::Center => assert!(left.abs_diff(119 - right) <= 3),
+                    HorizontalAlignment::Right => assert!(right >= 115),
+                }
+                match vertical {
+                    VerticalAlignment::Top => assert!(top <= 4),
+                    VerticalAlignment::Center => assert!(top.abs_diff(119 - bottom) <= 3),
+                    VerticalAlignment::Bottom => assert!(bottom >= 115),
+                }
+            }
+        }
+        text.horizontal_alignment = HorizontalAlignment::Center;
+        text.vertical_alignment = VerticalAlignment::Center;
+        text.text = "Wi".into();
+        let horizontal = compose_button_image(None, &text).unwrap();
+        let h = white_bounds(&horizontal);
+        text.orientation = TextOrientation::Vertical;
+        let v = white_bounds(&compose_button_image(None, &text).unwrap());
+        assert!((h.2 - h.0).abs_diff(v.3 - v.1) <= 2);
+        assert!((h.3 - h.1).abs_diff(v.2 - v.0) <= 2);
+        // Clockwise rotation of the entire shaped layout, not stacked glyphs.
+        let vertical = compose_button_image(None, &text).unwrap();
+        let mut difference = 0usize;
+        for y in 0..120 {
+            for x in 0..120 {
+                difference += usize::from(
+                    pixel(&horizontal, x, y)[0].abs_diff(pixel(&vertical, 119 - y, x)[0]) > 80,
+                );
+            }
+        }
+        assert!(difference < 160, "rotation mismatch: {difference} pixels");
+        text.orientation = TextOrientation::Horizontal;
+        text.font_size = 40;
+        let large = white_bounds(&compose_button_image(None, &text).unwrap());
+        assert!(large.4 > h.4 * 2);
+        assert!(large.2 - large.0 > h.2 - h.0);
+        text.font_family = "Monospace".into();
+        let mono = compose_button_image(None, &text)
+            .unwrap()
+            .read_pixel_bytes();
+        text.font_family = "Serif".into();
+        let serif = compose_button_image(None, &text)
+            .unwrap()
+            .read_pixel_bytes();
+        assert_ne!(mono.as_ref(), serif.as_ref());
+    }
+
+    #[test]
+    fn outline_alpha_and_invalid_render_configuration() {
+        let path = fixture(120, 120);
+        let white = Pixbuf::new(Colorspace::Rgb, true, 8, 120, 120).unwrap();
+        white.fill(0xffffffff);
+        white.savev(&path, "png", &[]).unwrap();
+        let text = ButtonText {
+            text: "Outline".into(),
+            ..ButtonText::default()
+        };
+        let composed = compose_button_image(Some(&path), &text).unwrap();
+        assert_eq!(pixel(&composed, 0, 0), [255, 255, 255]);
+        let black = (0..120)
+            .flat_map(|y| (0..120).map(move |x| (x, y)))
+            .filter(|(x, y)| pixel(&composed, *x, *y).iter().all(|value| *value < 20))
+            .count();
+        assert!(black > 100, "black outline should remain visible on white");
+        white.fill(0xff000000);
+        white.savev(&path, "png", &[]).unwrap();
+        let transparent = compose_button_image(Some(&path), &ButtonText::default()).unwrap();
+        assert_eq!(pixel(&transparent, 60, 60), [0, 0, 0]);
+        assert!(compose_button_image(
+            None,
+            &ButtonText {
+                font_size: 0,
+                ..text.clone()
+            }
+        )
+        .is_err());
+        assert!(prepare_button_jpeg(
+            None,
+            &ButtonText {
+                font_family: "".into(),
+                ..text
+            }
+        )
+        .is_err());
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

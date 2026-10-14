@@ -104,6 +104,25 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Never open one automatically at startup.
 - **Artwork disclosure:** independent key/strip/zone artwork editing remains
   reachable in a clearly named expandable section of the selected editor.
+- **Button text:** the configuration inspector contains one keypad-only
+  Add text / Edit text button. Both states open the same anchored popup,
+  prefilled with the selected key's saved settings. The editor fields and
+  enlarged preview appear only in the popup. A compact two-column body keeps
+  the entire 120px live preview next to the form, with no popup scrolling at
+  640x480 or larger. Only a long multiline text input may scroll internally.
+  Use a native font chooser button, a 6–120px size spinner and linked, grouped
+  toggle buttons for horizontal/vertical orientation and separate
+  left/center/right and top/center/bottom alignment. Vertical text
+  rotates the layout 90 degrees clockwise. White glyphs with a thin black
+  outline sit above the existing background image. An enlarged 120px preview
+  and the physical key preview share the device compositor. Save text is
+  explicit; removing text preserves the background, and clearing the background
+  preserves text. Closing without saving discards the draft preview. Changing
+  key or profile closes the popup and reloads that context. Editor chrome
+  continues to use the GTK system font and existing spacing/field primitives.
+  This editing popover is non-modal: opening the native font dialog must not
+  dismiss it or discard its draft. Close, the trigger, Save/Remove and a
+  key/profile change provide explicit exits.
 - **Profile removal confirmation:** name the exact profile and loss of
   bindings/artwork, provide Keep/Remove choices, and never default to Remove.
 - **Feedback:** countdown, completion, connection and errors use inline text

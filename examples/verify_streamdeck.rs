@@ -14,9 +14,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args
         .iter()
-        .any(|arg| arg != "--device-controls" && arg != "--input")
+        .any(|arg| arg != "--device-controls" && arg != "--input" && arg != "--button-text")
     {
-        return Err("Supported options: --device-controls (sets brightness 50, sleeps and wakes), --input (waits for key, dial and touch input)".into());
+        return Err("Supported options: --device-controls (sets brightness 50, sleeps and wakes), --input (waits for key, dial and touch input), --button-text (uploads horizontal and vertical keypad text)".into());
     }
     let (sender, events) = mpsc::channel();
     let mut hid = event_api::start_hid_monitor(sender);
@@ -51,6 +51,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                     } if received == action => {
                         result.map_err(std::io::Error::other)?;
                         println!("DEVICE_OK: {action:?}");
+                        break;
+                    }
+                    MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {
+                        return Err(error.into());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if args.iter().any(|arg| arg == "--button-text") {
+        use sdeck_plus::button_text::{ButtonText, TextOrientation};
+        for orientation in [TextOrientation::Horizontal, TextOrientation::Vertical] {
+            hid.artwork_sender()
+                .send(event_api::ArtworkCommand::ComposeButton {
+                    key: 1,
+                    path: None,
+                    text: ButtonText {
+                        text: "Play".into(),
+                        orientation,
+                        ..Default::default()
+                    },
+                })?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match events.recv_timeout(deadline.saturating_duration_since(Instant::now()))? {
+                    MonitorEvent::ArtworkResult {
+                        target: sdeck_plus::local_artwork::ArtworkTarget::Keypad(1),
+                        result,
+                    } => {
+                        result.map_err(std::io::Error::other)?;
+                        println!("BUTTON_TEXT_OK: {orientation:?}");
                         break;
                     }
                     MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {

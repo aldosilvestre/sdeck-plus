@@ -71,6 +71,11 @@ pub enum ArtworkCommand {
     Clear {
         target: ArtworkTarget,
     },
+    ComposeButton {
+        key: u8,
+        path: Option<PathBuf>,
+        text: crate::button_text::ButtonText,
+    },
 }
 
 /// Cooperative cancellation and report admission share one lock. The lock is never
@@ -220,6 +225,10 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
             (target, image_output::prepare_jpeg(target, path)?)
         }
         ArtworkCommand::Clear { target } => (target, image_output::prepare_clear_jpeg(target)?),
+        ArtworkCommand::ComposeButton { key, path, text } => (
+            ArtworkTarget::Keypad(key),
+            image_output::prepare_button_jpeg(path.as_deref(), &text)?,
+        ),
         ArtworkCommand::Replace(_) => unreachable!("snapshots contain target commands"),
     };
     image_output::encode_reports(target, &jpeg)
@@ -241,6 +250,7 @@ fn process_artwork(
         }
         let target = match &command {
             ArtworkCommand::Assign { target, .. } | ArtworkCommand::Clear { target } => *target,
+            ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
             ArtworkCommand::Replace(_) => continue,
         };
         let result = prepare(command).and_then(|reports| {
@@ -302,48 +312,89 @@ fn monitor<D: Device>(
                 continue;
             }
         };
-        if !stop.live() {
-            return;
-        }
-        if sender
-            .send(MonitorEvent::Connection(ConnectionState::Connected))
-            .is_err()
-        {
-            return;
-        }
-        let mut buffer = [0u8; 64];
-        controls.replay(&stop, &sender, &device);
-        while stop.live() {
-            // A heartbeat detects consumer loss even when there is no input.
-            if sender.send(MonitorEvent::Heartbeat).is_err() {
-                return;
-            }
-            controls.drain(&stop, &sender, Some(&device));
-            process_artwork(&commands, &stop, &sender, &mut prepare, |report| {
-                device.write(report)
-            });
+        // Keep shutdown writes on the HID owner, after ordinary work is cancelled.
+        // The session returns on unplug without blanking a disconnected device.
+        (|| {
             if !stop.live() {
                 return;
             }
-            match device.read(&mut buffer) {
-                Ok(0) => {}
-                Ok(size) => {
-                    for event in decode_report(&buffer[..size]) {
-                        if sender.send(MonitorEvent::Input(event)).is_err() {
-                            return;
+            if sender
+                .send(MonitorEvent::Connection(ConnectionState::Connected))
+                .is_err()
+            {
+                stop.request();
+                return;
+            }
+            let mut buffer = [0u8; 64];
+            controls.replay(&stop, &sender, &device);
+            while stop.live() {
+                // A heartbeat detects consumer loss even when there is no input.
+                if sender.send(MonitorEvent::Heartbeat).is_err() {
+                    stop.request();
+                    return;
+                }
+                controls.drain(&stop, &sender, Some(&device));
+                process_artwork(&commands, &stop, &sender, &mut prepare, |report| {
+                    device.write(report)
+                });
+                if !stop.live() {
+                    return;
+                }
+                match device.read(&mut buffer) {
+                    Ok(0) => {}
+                    Ok(size) => {
+                        for event in decode_report(&buffer[..size]) {
+                            if sender.send(MonitorEvent::Input(event)).is_err() {
+                                stop.request();
+                                return;
+                            }
                         }
                     }
-                }
-                Err(error) => {
-                    let _ = sender.send(MonitorEvent::Connection(ConnectionState::Disconnected(
-                        format!("HID read ended: {error}"),
-                    )));
-                    break;
+                    Err(error) => {
+                        let _ = sender.send(MonitorEvent::Connection(
+                            ConnectionState::Disconnected(format!("HID read ended: {error}")),
+                        ));
+                        break;
+                    }
                 }
             }
+        })();
+        if !stop.live() {
+            blank_device(&device);
+            return;
         }
+        drop(device);
         if !stop.wait(Duration::from_secs(1)) {
             return;
+        }
+    }
+}
+
+fn blank_device(device: &impl Device) {
+    let mut sleep = [0; 32];
+    sleep[0] = 0x03;
+    sleep[1] = 0x08;
+    match device.write_feature(&sleep) {
+        Ok(32) => {}
+        Ok(size) => eprintln!("HID shutdown brightness write was short: {size} of 32 bytes"),
+        Err(error) => eprintln!("Could not turn off Stream Deck displays: {error}"),
+    }
+    // Clearing the full strip also replaces all four overlaid touch zones.
+    for target in (1..=8)
+        .map(ArtworkTarget::Keypad)
+        .chain(std::iter::once(ArtworkTarget::TouchStripBackground))
+    {
+        let result = prepare_artwork(ArtworkCommand::Clear { target }).and_then(|reports| {
+            for report in reports {
+                let size = device.write(&report.0)?;
+                if size != report.0.len() {
+                    return Err(format!("short HID shutdown image write: {size} bytes"));
+                }
+            }
+            Ok(())
+        });
+        if let Err(error) = result {
+            eprintln!("Could not clear Stream Deck {target:?} during shutdown: {error}");
         }
     }
 }
@@ -375,6 +426,34 @@ fn transmit_reports<E: std::fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composed_text_is_encoded_for_the_requested_key() {
+        // Given
+        let text = crate::button_text::ButtonText {
+            text: "Play".into(),
+            ..Default::default()
+        };
+        // When
+        let reports = prepare_artwork(ArtworkCommand::ComposeButton {
+            key: 3,
+            path: None,
+            text,
+        })
+        .unwrap();
+        // Then
+        let mut jpeg = Vec::new();
+        for report in &reports {
+            assert_eq!(report.0[..3], [0x02, 0x07, 2]);
+            let size = usize::from(u16::from_le_bytes([report.0[4], report.0[5]]));
+            jpeg.extend_from_slice(&report.0[8..8 + size]);
+        }
+        let image = gtk::gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
+        assert_eq!((image.width(), image.height()), (120, 120));
+        let pixels = image.read_pixel_bytes();
+        assert!(pixels.as_ref().iter().any(|byte| *byte > 240));
+        assert!(pixels.as_ref().iter().any(|byte| *byte < 10));
+    }
 
     #[test]
     fn stop_from_write_callback_prevents_remaining_reports() {
@@ -491,10 +570,10 @@ mod tests {
             self.read_release.recv().unwrap()
         }
         fn write(&self, _: &[u8]) -> Result<usize, String> {
-            panic!("unexpected write")
+            Ok(image_output::REPORT_SIZE)
         }
-        fn write_feature(&self, _: &[u8]) -> Result<usize, String> {
-            panic!("unexpected feature write")
+        fn write_feature(&self, report: &[u8]) -> Result<usize, String> {
+            Ok(report.len())
         }
     }
 

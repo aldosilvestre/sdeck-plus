@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sdeck-plus - Stream Deck + control desk for Linux</title>
+<meta name="description" content="sdeck-plus is a native GTK4 control desk for the Elgato Stream Deck + on Arch Linux: keys, dials, touch strip, profiles, artwork and OBS Studio.">
+<meta property="og:title" content="sdeck-plus">
+<meta property="og:description" content="Native GTK4 control desk for the Elgato Stream Deck + on Linux.">
+<meta property="og:image" content="screenshots/main-window.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #08090b;
+    --surface: #16161b;
+    --surface-2: #202026;
+    --border: #36363a;
+    --text: #f0f0f2;
+    --muted: #b5b5bd;
+    --accent: #c329b3;
+    --accent-deep: #710c72;
+    --ok: #38a979;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  a { color: inherit; }
+  img { max-width: 100%; height: auto; display: block; }
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.92em;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.1em 0.4em;
+  }
+  .wrap { width: min(1120px, 100% - 2.5rem); margin-inline: auto; }
+  .wrap > *, .hero .wrap > *, .feature > *, .pair > *, .install > * { min-width: 0; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(8, 9, 11, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  header.nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; text-decoration: none; }
+  .brand img { width: 28px; height: 28px; }
+  nav.links { display: flex; gap: 1.4rem; font-size: 0.95rem; }
+  nav.links a { text-decoration: none; color: var(--muted); }
+  nav.links a:hover { color: var(--text); }
+
+  .hero {
+    padding: 5rem 0 3rem;
+    background:
+      radial-gradient(60% 50% at 80% 0%, rgba(195, 41, 179, 0.25), transparent 70%),
+      radial-gradient(40% 40% at 0% 30%, rgba(113, 12, 114, 0.25), transparent 70%);
+  }
+  .hero .wrap { display: grid; grid-template-columns: 1fr 1.1fr; gap: 3rem; align-items: center; }
+  .badge {
+    display: inline-block; font-size: 0.8rem; letter-spacing: 0.04em;
+    color: #9af2c4; background: #174936; border-radius: 999px; padding: 0.2rem 0.75rem;
+  }
+  h1 { font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1.1; margin: 1rem 0; }
+  h1 span { color: var(--accent); }
+  .lead { color: var(--muted); font-size: 1.15rem; max-width: 34rem; }
+  .cta { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 1.8rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.75rem 1.3rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    border: 1px solid var(--border); background: var(--surface-2);
+  }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-deep)); border-color: transparent; }
+  .btn:hover { filter: brightness(1.12); }
+  .shot {
+    border-radius: var(--radius); border: 1px solid var(--border);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  }
+  .note { margin-top: 1.4rem; font-size: 0.9rem; color: var(--muted); }
+
+  section { padding: 4.5rem 0; }
+  section.alt { background: var(--surface); border-block: 1px solid var(--border); }
+  h2 { font-size: 2rem; margin: 0 0 0.5rem; }
+  .section-lead { color: var(--muted); margin: 0 0 2.5rem; max-width: 46rem; }
+
+  .highlights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  .card {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.3rem;
+  }
+  .card h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+  .feature { display: grid; grid-template-columns: 1fr 1.2fr; gap: 3rem; align-items: center; margin-bottom: 4.5rem; }
+  .feature:last-child { margin-bottom: 0; }
+  .feature:nth-child(even) .feature-text { order: 2; }
+  .feature h3 { font-size: 1.5rem; margin: 0 0 0.6rem; }
+  .feature p { color: var(--muted); margin: 0 0 0.8rem; }
+  .feature ul { color: var(--muted); padding-left: 1.2rem; margin: 0; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+  .actions-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  .actions-table th, .actions-table td { text-align: left; padding: 0.8rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .actions-table th { color: var(--accent); width: 9rem; }
+  .actions-table td { color: var(--muted); }
+
+  pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.2rem; overflow-x: auto; margin: 0.6rem 0 1.2rem;
+  }
+  pre code { background: none; border: 0; padding: 0; }
+  .install { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; }
+  .install h3 { margin: 0 0 0.4rem; }
+  .install ul { color: var(--muted); padding-left: 1.2rem; }
+
+  footer { padding: 2.5rem 0; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+
+  @media (max-width: 880px) {
+    .hero .wrap, .feature, .install { grid-template-columns: 1fr; }
+    .feature:nth-child(even) .feature-text { order: 0; }
+    .highlights { grid-template-columns: 1fr 1fr; }
+    nav.links a.optional { display: none; }
+    .hero { padding-top: 3rem; }
+  }
+  @media (max-width: 520px) {
+    .highlights, .pair { grid-template-columns: 1fr; }
+    nav.links { gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.svg" alt="">sdeck-plus</a>
+    <nav class="links">
+      <a href="#features">Features</a>
+      <a class="optional" href="#actions">Actions</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="badge">Linux · GTK4 · Rust</span>
+        <h1>Your Stream Deck +, <span>native on Linux</span>.</h1>
+        <p class="lead">
+          sdeck-plus is a GTK4 control desk for the Elgato Stream Deck +. Configure
+          its eight keys, four dials and touch strip, organize profiles, pages and
+          folders, assign artwork and text, control device brightness and drive OBS Studio.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="#install">Install</a>
+          <a class="btn" href="https://github.com/aldosilvestre/sdeck-plus">View on GitHub</a>
+        </div>
+        <p class="note">This project is still under construction. Developed and tested on Arch Linux with Hyprland.</p>
+      </div>
+      <img class="shot" src="screenshots/main-window.png" width="956" height="876"
+           alt="sdeck-plus main window with the hardware preview and the binding editor">
+    </div>
+  </section>
+
+  <section class="alt">
+    <div class="wrap">
+      <div class="highlights">
+        <div class="card"><h3>Every control</h3><p>8 keys, 4 dials with press and rotation, and touch-strip tap, hold, flick and swipes.</p></div>
+        <div class="card"><h3>Profiles</h3><p>Profile tabs with pages and folders, switched automatically by the focused application.</p></div>
+        <div class="card"><h3>Artwork and text</h3><p>Images for keys, the strip and touch zones, plus styled text drawn on each key.</p></div>
+        <div class="card"><h3>Runs in the tray</h3><p>Bindings stay active with the window closed, with optional start at login.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Features</h2>
+      <p class="section-lead">Every screenshot below is the real application running against a connected Stream Deck +.</p>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Configure any control</h3>
+          <p>Click a key, dial or the touch strip on the hardware preview, choose an event and an action, then save.
+             Saving never runs the action; <strong>Test action</strong> runs it on demand.</p>
+          <ul>
+            <li>Move to a profile or page, run a command, open an application</li>
+            <li>Keyboard shortcuts through a virtual keyboard</li>
+            <li>Play sounds and the categorized <strong>More actions</strong></li>
+          </ul>
+        </div>
+        <img class="shot" src="screenshots/action-types.png" width="956" height="935" loading="lazy"
+             alt="Action menu listing every action type">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Dials and touch strip</h3>
+          <p>Each dial has independent <strong>Press</strong>, <strong>Clockwise</strong> and <strong>Counterclockwise</strong> bindings,
+             perfect for volume or brightness. The touch strip binds tap, hold, flick and directional swipes.</p>
+        </div>
+        <div class="pair">
+          <img class="shot" src="screenshots/encoder-events.png" width="956" height="935" loading="lazy"
+               alt="Event menu for a dial with press, clockwise and counterclockwise">
+          <img class="shot" src="screenshots/touch-strip.png" width="956" height="876" loading="lazy"
+               alt="Touch strip selected in the binding editor">
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>More actions</h3>
+          <p>Extended actions are grouped into System, Multimedia, Organization, Device and OBS.
+             Each action shows only its own fields and a short description of what it does.</p>
+        </div>
+        <div class="pair">
+          <img class="shot" src="screenshots/more-actions-categories.png" width="956" height="876" loading="lazy"
+               alt="More actions category menu">
+          <img class="shot" src="screenshots/more-actions-obs.png" width="956" height="876" loading="lazy"
+               alt="Key bound to OBS toggle recording">
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Button text</h3>
+          <p>Draw text on any key with an installed font, a size from 6 to 120 px, horizontal or vertical orientation
+             and independent alignment. The preview matches exactly what is sent to the device.</p>
+        </div>
+        <img class="shot" src="screenshots/button-text-editor.png" width="956" height="935" loading="lazy"
+             alt="Button text editor with a live preview">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Artwork and touch zones</h3>
+          <p>Assign PNG, GIF or any image supported by GdkPixbuf to thirteen targets: eight keys, the touch-strip
+             background and four touch zones. Images are copied into the app's data directory and replayed on reconnect.</p>
+        </div>
+        <img class="shot" src="screenshots/artwork-touch-zones.png" width="956" height="876" loading="lazy"
+             alt="Artwork target selector with image and clear buttons">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Profiles, pages and folders</h3>
+          <p>Each profile is a tab with its own pages, folders, bindings and artwork. Associate a profile with a window
+             class or executable and it is selected automatically when that application gets focus (Hyprland IPC).</p>
+        </div>
+        <div class="pair">
+          <img class="shot" src="screenshots/organize-profiles-pages.png" width="956" height="876" loading="lazy"
+               alt="Organize panel for profiles, pages and application association">
+          <img class="shot" src="screenshots/application-profile-tab.png" width="956" height="876" loading="lazy"
+               alt="OBS application profile tab with its own keys">
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>OBS Studio</h3>
+          <p>Connect to OBS's built-in WebSocket server on a local endpoint. Switch scenes, toggle recording or streaming,
+             mute inputs and show or hide sources. The connection test only queries state; it never starts an output.</p>
+        </div>
+        <img class="shot" src="screenshots/obs-settings.png" width="1075" height="876" loading="lazy"
+             alt="OBS settings with endpoint, masked password and connection test">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Built-in help</h3>
+          <p>A three-step guide is always one click away: select a control, configure an action, then save or test it.</p>
+        </div>
+        <img class="shot" src="screenshots/setup-help.png" width="1075" height="876" loading="lazy"
+             alt="Setup help popover">
+      </div>
+    </div>
+  </section>
+
+  <section id="actions" class="alt">
+    <div class="wrap">
+      <h2>Actions</h2>
+      <p class="section-lead">Beyond layers, commands, applications, shortcuts and sounds, <strong>More actions</strong> provides:</p>
+      <table class="actions-table">
+        <tr><th>System</th><td>Alternate two shortcuts, paste Unicode text with optional Enter, open files, folders or websites, close a process, scroll the mouse wheel</td></tr>
+        <tr><th>Multimedia</th><td>Play/pause, stop, next/previous track, PipeWire volume up/down and mute, play a local audio file, stop soundboard playback</td></tr>
+        <tr><th>Organization</th><td>Next, previous or specific page, enter a child folder, return to the parent</td></tr>
+        <tr><th>Device</th><td>Absolute or relative brightness, sleep and wake, timers with countdown</td></tr>
+        <tr><th>OBS</th><td>Select a scene, toggle recording or streaming, toggle input mute, show/hide a source</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <p class="section-lead">Builds from source with Cargo and installs for the current user only. It never installs system packages or changes device permissions.</p>
+      <div class="install">
+        <div>
+          <h3>Build and install</h3>
+<pre><code>sudo pacman -S gtk4 base-devel
+git clone https://github.com/aldosilvestre/sdeck-plus.git
+cd sdeck-plus
+./install.sh</code></pre>
+          <p>Or run it directly from the checkout:</p>
+<pre><code>cargo run</code></pre>
+          <p>Remove it with <code>./install.sh --uninstall</code>; your profiles and artwork are kept.</p>
+        </div>
+        <div>
+          <h3>Requirements</h3>
+          <ul>
+            <li>Rust stable toolchain and Cargo</li>
+            <li>GTK 4.8 or newer and a C toolchain</li>
+            <li>A StatusNotifierItem tray (for example, Omarchy's)</li>
+            <li>Stream Deck + over USB, with permission to open its HID node</li>
+            <li>Optional, per action: <code>xdg-utils</code>, <code>wireplumber</code>, <code>wl-clipboard</code>, <code>procps-ng</code>, <code>mpv</code></li>
+            <li>Keyboard and mouse-wheel actions need <code>/dev/uinput</code> access</li>
+          </ul>
+          <p>See the <a href="https://github.com/aldosilvestre/sdeck-plus#readme">README</a> for the full documentation.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>sdeck-plus · MIT License · © 2026 Aldo Silvestre</span>
+    <span>Not affiliated with Elgato or Corsair.</span>
+  </div>
+</footer>
+
+</body>
+</html>

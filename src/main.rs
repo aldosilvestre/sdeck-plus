@@ -23,6 +23,7 @@ use std::{
 
 mod app_icon;
 mod autostart;
+mod button_text_editor;
 mod feature_editor;
 mod feature_runtime;
 mod tray;
@@ -280,6 +281,7 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         last_layer: Rc::new(RefCell::new(None)),
         chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+        text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
     };
     let widgets = build_widgets(
         window.clone(),
@@ -353,6 +355,8 @@ struct MonitorWidgets {
     touch_status: Label,
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
+    // Keep the weakly referenced editor callbacks alive with the monitor widgets.
+    _text_editor: Rc<button_text_editor::ButtonTextEditor>,
 }
 
 fn build_widgets(
@@ -606,6 +610,17 @@ fn build_widgets(
     settings_card.append(&binding_ui.status);
     let artwork_content = GtkBox::new(Orientation::Vertical, 8);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
+    let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
+    *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
+    settings_card.append(&text_editor.root);
+    let editor = Rc::downgrade(&text_editor);
+    binding_ui
+        .control_picker
+        .connect_selected_notify(move |picker| {
+            if let Some(editor) = editor.upgrade() {
+                editor.set_control_available(picker.selected() == 0);
+            }
+        });
     let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
     artwork_section.set_child(Some(&artwork_content));
     settings_card.append(&artwork_section);
@@ -904,6 +919,7 @@ fn build_widgets(
         let select_button = Button::new();
         select_button.add_css_class("control-selectable");
         select_button.add_css_class("key-surface");
+        select_button.set_overflow(gtk::Overflow::Hidden);
         select_button.update_property(&[gtk::accessible::Property::Label(&format!(
             "Button {}",
             index + 1
@@ -1145,6 +1161,7 @@ fn build_widgets(
         touch_status,
         feature_runtime,
         organization_writes: vec![create_layer, remove_layer],
+        _text_editor: text_editor,
     }
 }
 
@@ -1156,19 +1173,19 @@ fn start_event_updates(
     _layer_sender: mpsc::Sender<LayerCommand>,
     _app_event_sender: mpsc::Sender<MonitorEvent>,
 ) -> glib::SourceId {
-    let MonitorWidgets {
-        status,
-        toast,
-        binding_status,
-        connection_detail,
-        feature_runtime,
-        key_labels,
-        encoder_labels,
-        touch_status,
-        ..
-    } = widgets;
     let ticks = Rc::new(RefCell::new([0i64; 4]));
     glib::timeout_add_local(Duration::from_millis(40), move || {
+        let MonitorWidgets {
+            status,
+            toast,
+            binding_status,
+            connection_detail,
+            feature_runtime,
+            key_labels,
+            encoder_labels,
+            touch_status,
+            ..
+        } = &widgets;
         let pending: Vec<_> = receiver.try_iter().collect();
         for message in &pending {
             if let MonitorEvent::ApplicationFocus(result) = message {
@@ -1285,7 +1302,7 @@ fn start_event_updates(
                         Err(error) => (format!("Could not save binding: {error}"), true),
                     };
                     binding_status.set_text(&message);
-                    ui::feedback(&binding_status, failed);
+                    ui::feedback(binding_status, failed);
                     toast.show(&message, failed);
                 }
                 MonitorEvent::ProfileSaveResult(result) => {
@@ -2017,6 +2034,7 @@ struct ArtworkUi {
     last_layer: Rc<RefCell<Option<String>>>,
     chooser_owners: Rc<RefCell<std::collections::BTreeMap<String, Rc<()>>>>,
     selected_target: Rc<Cell<ArtworkTarget>>,
+    text_editor: Rc<RefCell<std::rc::Weak<button_text_editor::ButtonTextEditor>>>,
 }
 
 impl ArtworkUi {
@@ -2065,16 +2083,40 @@ impl ArtworkUi {
                     (
                         picture.clone(),
                         store.assigned_path_in_layer(&layer, *target),
+                        store.button_text_in_layer(&layer, *target).cloned(),
                     )
                 })
                 .collect::<Vec<_>>();
             (paths, desired_artwork_commands(store, &layer))
         };
-        for (picture, path) in paths {
-            set_picture_path(&picture, path);
+        for (picture, path, text) in paths {
+            set_button_picture(&picture, path, text.as_ref());
         }
         let _ = self.output.send(ArtworkCommand::Replace(commands));
         *self.last_layer.borrow_mut() = Some(layer);
+        if let Some(editor) = self.text_editor.borrow().upgrade() {
+            editor.load_context(false);
+            editor.refresh_preview();
+        }
+    }
+
+    fn restore_button_preview(&self, target: &ArtworkTarget) {
+        let layer = self.layers.borrow().active().to_owned();
+        let (path, text) = {
+            let store = self.store.borrow();
+            let Some(store) = store.as_ref() else {
+                return;
+            };
+            (
+                store.assigned_path_in_layer(&layer, *target),
+                store.button_text_in_layer(&layer, *target).cloned(),
+            )
+        };
+        for (picture_target, picture) in self.pictures.borrow().iter() {
+            if picture_target == target {
+                set_button_picture(picture, path.clone(), text.as_ref());
+            }
+        }
     }
 
     fn import(&self, owner: &ChooserOwner, path: &std::path::Path) -> Result<(), String> {
@@ -2098,6 +2140,23 @@ impl ArtworkUi {
             self.refresh(true);
         }
         Ok(())
+    }
+}
+
+fn set_button_picture(
+    picture: &Picture,
+    path: Option<std::path::PathBuf>,
+    text: Option<&sdeck_plus::button_text::ButtonText>,
+) {
+    match text {
+        Some(text) => match sdeck_plus::image_output::compose_button_image(path.as_deref(), text) {
+            Ok(image) => {
+                picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                picture.set_visible(true);
+            }
+            Err(error) => eprintln!("Could not compose button preview: {error}"),
+        },
+        None => set_picture_path(picture, path),
     }
 }
 
@@ -2189,10 +2248,13 @@ fn add_artwork_controls(
     let picker = gtk::DropDown::new(Some(targets), gtk::Expression::NONE);
     picker.add_css_class("artwork-target");
     parent.append(&labeled("Artwork target (active layer)", &picker));
-    let selected = artwork.selected_target.clone();
+    let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {
         if let Some(target) = ArtworkTarget::ALL.get(picker.selected() as usize) {
-            selected.set(*target);
+            artwork_selection.selected_target.set(*target);
+            if let Some(editor) = artwork_selection.text_editor.borrow().upgrade() {
+                editor.load_context(false);
+            }
         }
     });
     let controls = GtkBox::new(Orientation::Horizontal, 4);
@@ -2274,6 +2336,13 @@ fn desired_artwork_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCom
     let mut commands = (1..=8)
         .map(|key| {
             let target = ArtworkTarget::Keypad(key);
+            if let Some(text) = store.button_text_in_layer(layer, target) {
+                return ArtworkCommand::ComposeButton {
+                    key,
+                    path: store.assigned_path_in_layer(layer, target),
+                    text: text.clone(),
+                };
+            }
             match store.assigned_path_in_layer(layer, target) {
                 Some(path) => ArtworkCommand::Assign { target, path },
                 None => ArtworkCommand::Clear { target },
@@ -2441,6 +2510,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     static GTK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    include!("button_text_editor_tests.rs");
 
     fn gtk_test_lock() -> MutexGuard<'static, ()> {
         GTK_TEST_LOCK
@@ -2781,6 +2851,7 @@ mod tests {
         assert!(picture.file().is_none());
         assert_gif_artwork_preview();
         assert_artwork_refresh_switch_and_reconnect();
+        assert_button_text_editor();
         eprintln!("GTK artwork preview assertions executed");
         assert_summaries_refresh_for_binding_and_layer_changes(&ui);
         eprintln!("GTK assertions executed: selection, styles, summaries and refresh paths");
@@ -2811,6 +2882,7 @@ mod tests {
             last_layer: Rc::new(RefCell::new(None)),
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         };
         let (requests, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork, requests);
@@ -3004,6 +3076,7 @@ mod tests {
             last_layer: Rc::new(RefCell::new(None)),
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         };
         let (commands, requests) = mpsc::channel();
         let (output, events) = mpsc::channel();
@@ -3600,6 +3673,7 @@ mod tests {
             last_layer: Rc::new(RefCell::new(None)),
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         };
         let (sender, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), sender);
@@ -5315,6 +5389,7 @@ mod tests {
             last_layer: Rc::new(RefCell::new(None)),
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         };
         artwork.refresh(false);
         assert_eq!(artwork.pictures.borrow().len(), 13);

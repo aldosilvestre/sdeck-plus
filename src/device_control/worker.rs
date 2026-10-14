@@ -49,6 +49,8 @@ impl Controls {
         if let Some(action) = &self.desired.action {
             let result = self.write(stop, sender, device);
             self.finish(stop, sender, action.clone(), result);
+        } else if let Err(error) = self.write(stop, sender, device) {
+            eprintln!("Could not restore Stream Deck brightness: {error}");
         }
     }
 

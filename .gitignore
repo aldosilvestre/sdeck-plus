@@ -4,6 +4,7 @@
 # Local agent runtime state
 .atl/
 /.omo/
+/.engram/
 
 # Editor temporary files and backups
 *.swp

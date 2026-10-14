@@ -8,6 +8,74 @@
 
 sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`) on Arch Linux. Configure actions for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, assign artwork, control device brightness and connect to OBS Studio.
 
+## Screenshots
+
+All captures are in [`docs/screenshots`](docs/screenshots) and show the
+application running against a connected Stream Deck +.
+
+**Main window.** Connection status, profile tabs, page navigation, the
+hardware preview with the assigned artwork, and the binding editor for the
+selected control.
+
+![Main window with Key 1 selected](docs/screenshots/main-window.png)
+
+**Action types.** The **Action** menu offers layer/page switching, shell
+commands, launching applications, keyboard shortcuts, legacy events, the
+categorized **More actions** and **Play sound**.
+
+![Action menu with every action type](docs/screenshots/action-types.png)
+
+**More actions categories.** **More actions** groups the extended actions
+into System, Multimedia, Organization, Device and OBS.
+
+![More actions category menu](docs/screenshots/more-actions-categories.png)
+
+**More actions binding.** A key bound to **OBS > Toggle recording**: each
+action shows only its own fields and a short description of what it does.
+
+![Key bound to an OBS More actions entry](docs/screenshots/more-actions-obs.png)
+
+**Encoder events.** Each dial has independent **Press**, **Clockwise** and
+**Counterclockwise** bindings.
+
+![Event menu for Dial 1](docs/screenshots/encoder-events.png)
+
+**Touch strip gestures.** Selecting the strip configures its gestures (tap,
+hold, flick and directional swipes) and targets the strip background artwork.
+
+![Touch strip selected in the editor](docs/screenshots/touch-strip.png)
+
+**Button text.** **Add text** opens the text editor: font, size, orientation
+and alignment, with a live preview of the key composition.
+
+![Button text editor with a live preview](docs/screenshots/button-text-editor.png)
+
+**Artwork and touch zones.** Choose any of the thirteen artwork targets for
+the active layer and assign or clear its image.
+
+![Artwork target selector](docs/screenshots/artwork-touch-zones.png)
+
+**Profiles, pages and folders.** **Organize** creates profiles, renames the
+current page and associates a profile with an application.
+
+![Organize panel](docs/screenshots/organize-profiles-pages.png)
+
+**Application profiles.** Each profile is a tab with its own pages, bindings
+and artwork. Here the **OBS** profile, associated with the `obs` application,
+shows its own keys.
+
+![OBS application profile tab](docs/screenshots/application-profile-tab.png)
+
+**OBS Studio.** Local WebSocket endpoint and masked password, with a
+connection test that only queries OBS state.
+
+![OBS settings panel](docs/screenshots/obs-settings.png)
+
+**Setup help.** A three-step guide: select a control, configure an action,
+then save or test it.
+
+![Setup help popover](docs/screenshots/setup-help.png)
+
 ## Requirements
 
 - Rust stable toolchain and Cargo.
@@ -108,11 +176,30 @@ Existing files are not migrated automatically.
 
 ## Graceful shutdown
 
-**Quit** stops device communication, discards pending artwork uploads, removes UI polling, and joins the HID worker to release the device. Application shutdown repeats this cleanup safely as a fallback. A synchronous HID call already admitted before cancellation may finish; shutdown waits for it, so a blocked driver call can delay exiting. No new reports are admitted after cancellation.
+**Quit** discards pending artwork uploads, removes UI polling, turns off display brightness, clears all eight keys and the full touch strip to black, and joins the HID worker to release the device. Application shutdown repeats this cleanup safely as a fallback. A synchronous HID call already admitted before cancellation may finish; shutdown waits for it, so a blocked driver call can delay exiting. Only the final display cleanup reports are sent after cancellation; failures are logged without preventing device release.
 
-Shutdown does not clear the displays or send shutdown artwork. The device may retain its last pixels; retained images do not mean the application is still transmitting. Unplug/reconnect retries and artwork replay remain active while the application is running, even with configuration hidden. Quitting cancels the timer and explicitly stops the action worker, which releases app-owned soundboard playback. Independently opened applications remain open.
+Saved artwork and profiles are preserved. On the next launch, brightness is restored to 100% and saved artwork is replayed. Unplug/reconnect retries and artwork replay remain active while the application is running, even with configuration hidden; hiding configuration does not turn off or clear the device. Quitting cancels the timer and explicitly stops the action worker, which releases app-owned soundboard playback. Independently opened applications remain open.
 
 ## Local artwork
+
+### Button text
+
+Select a key and click **Add text** in its configuration panel. Once text is
+saved, **Edit text** reopens the same popup with the saved settings.
+Choose an installed font, a size from 6 to 120 pixels, horizontal or vertical
+orientation, and separate horizontal and vertical alignment. Vertical rotates
+the whole text 90 degrees clockwise; new lines are supported. Text is white
+with a black outline and is drawn over the background image, or over black
+when no image is assigned. Oversized text is clipped to the key.
+
+The enlarged preview and the key preview show the same composition sent to
+the device. **Save text** applies and persists the settings for that key in the
+active profile/page and closes the popup. Closing without saving discards
+draft changes. **Remove text** keeps the
+background image; clearing the background keeps the text. Text settings are
+restored when reopening the application or switching profiles/pages.
+
+### Background images
 
 Select **Artwork target (active layer)** in the right settings panel, then use the shared **Image…** or **×** (Clear artwork) controls. All thirteen targets are available: eight keys, the Touch Strip background, and four touch zones. Clicking a key or touch zone also selects its artwork target. Clicking an encoder selects only its action binding; use the artwork selector explicitly to choose an image region. PNG and GIF files are explicitly available in the picker; a separate filter includes all image formats supported by the installed GdkPixbuf loaders. GIF artwork is uploaded as a static still image; animation is not supported by the hardware JPEG upload format. Artwork previews preserve aspect ratio and are center-cropped to fill their surfaces. Images are center-cropped to cover the device target and sent as correctly sized JPEGs over USB HID. The eight keys use 120 × 120 images; the Touch Strip background uses 800 × 100 and each encoder overlay uses a 200 × 100 region. The background and zone images can be layered. A failed import leaves the current assignment unchanged. **×** (Clear artwork) removes the local assignment; clearing a key sends a black key image, while clearing a Touch Strip image rebuilds the strip from its saved background (or black) and remaining zone images. It does not issue a separate device clear command.
 

@@ -1,5 +1,6 @@
 //! Versioned, app-owned local artwork assignments.
 
+use crate::button_text::ButtonText;
 use gtk::gdk_pixbuf::Pixbuf;
 use std::collections::HashMap;
 use std::fs;
@@ -9,7 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CONFIG_VERSION: &str = "streamdeck-artwork-v1";
 const LAYER_VERSION: &str = "streamdeck-artwork-v2";
+const TEXT_VERSION: &str = "streamdeck-artwork-v3";
 type Assignments = HashMap<(String, ArtworkTarget), String>;
+type ButtonTexts = HashMap<(String, ArtworkTarget), ButtonText>;
+type LoadedArtwork = (Assignments, ButtonTexts, bool, Vec<String>);
 
 /// The complete set of stable artwork destinations supported by the app.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -54,6 +58,7 @@ impl ArtworkTarget {
 pub struct ArtworkStore {
     root: PathBuf,
     assignments: Assignments,
+    button_texts: ButtonTexts,
     diagnostics: Vec<String>,
     legacy: bool,
     compatibility_layer: String,
@@ -71,11 +76,12 @@ impl ArtworkStore {
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(root.join("assets"))?;
-        let (assignments, legacy, diagnostics) = load_assignments(&root, false)?;
+        let (assignments, button_texts, legacy, diagnostics) = load_assignments(&root, false)?;
         let compatibility_layer = if legacy { "" } else { "Base" }.into();
         Ok(Self {
             root,
             assignments,
+            button_texts,
             diagnostics,
             legacy,
             compatibility_layer,
@@ -94,18 +100,19 @@ impl ArtworkStore {
     ) -> io::Result<Self> {
         let root = root.into();
         let active_layer = active_layer.unwrap_or("Base");
-        let (mut assignments, legacy, diagnostics) = load_assignments(&root, true)?;
+        let (mut assignments, button_texts, legacy, diagnostics) = load_assignments(&root, true)?;
         fs::create_dir_all(root.join("assets"))?;
         if legacy {
             assignments = assignments
                 .into_iter()
                 .map(|((_, target), name)| ((active_layer.to_owned(), target), name))
                 .collect();
-            persist(&root, &assignments, false)?;
+            persist(&root, &assignments, &button_texts, false)?;
         }
         Ok(Self {
             root,
             assignments,
+            button_texts,
             diagnostics,
             legacy: false,
             compatibility_layer: active_layer.to_owned(),
@@ -125,6 +132,41 @@ impl ArtworkStore {
         self.assignments
             .get(&(layer.to_owned(), target))
             .map(|name| self.root.join("assets").join(name))
+    }
+
+    pub fn button_text_in_layer(&self, layer: &str, target: ArtworkTarget) -> Option<&ButtonText> {
+        self.button_texts.get(&(layer.to_owned(), target))
+    }
+
+    /// Atomically replace keypad text; empty text removes only the overlay.
+    pub fn set_button_text_in_layer(
+        &mut self,
+        layer: &str,
+        target: ArtworkTarget,
+        text: ButtonText,
+    ) -> io::Result<()> {
+        self.check_mutation(layer)?;
+        if self.legacy {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "text requires layer-aware migration",
+            ));
+        }
+        if !matches!(target, ArtworkTarget::Keypad(1..=8)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "text requires keypad 1..=8",
+            ));
+        }
+        text.validate()?;
+        let mut next = self.button_texts.clone();
+        let key = (layer.to_owned(), target);
+        if text.text.is_empty() {
+            next.remove(&key);
+        } else {
+            next.insert(key, text);
+        }
+        self.commit_with_text(self.assignments.clone(), next)
     }
 
     /// Decode and copy an image before atomically switching its assignment.
@@ -207,7 +249,9 @@ impl ArtworkStore {
         self.check_mutation(layer)?;
         let mut next = self.assignments.clone();
         next.retain(|(name, _), _| name != layer);
-        self.commit(next)
+        let mut texts = self.button_texts.clone();
+        texts.retain(|(name, _), _| name != layer);
+        self.commit_with_text(next, texts)
     }
 
     fn check_mutation(&self, layer: &str) -> io::Result<()> {
@@ -221,7 +265,12 @@ impl ArtworkStore {
     }
 
     fn commit(&mut self, next: Assignments) -> io::Result<()> {
-        persist(&self.root, &next, self.legacy)?;
+        self.commit_with_text(next, self.button_texts.clone())
+    }
+
+    fn commit_with_text(&mut self, next: Assignments, texts: ButtonTexts) -> io::Result<()> {
+        persist(&self.root, &next, &texts, self.legacy)?;
+        self.button_texts = texts;
         let old = std::mem::replace(&mut self.assignments, next);
         for name in old.values() {
             if !self.assignments.values().any(|remaining| remaining == name) {
@@ -247,24 +296,48 @@ fn default_root() -> io::Result<PathBuf> {
     Ok(base.join("sdeck-plus"))
 }
 
-fn load_assignments(root: &Path, strict: bool) -> io::Result<(Assignments, bool, Vec<String>)> {
+fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
     let text = match fs::read_to_string(root.join("artwork.conf")) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok((HashMap::new(), true, Vec::new()))
+            return Ok((HashMap::new(), HashMap::new(), true, Vec::new()))
         }
         Err(error) => return Err(error),
     };
     let mut lines = text.lines();
-    let legacy = match lines.next() {
+    let version = lines.next();
+    let legacy = match version {
         Some(CONFIG_VERSION) => true,
         Some(LAYER_VERSION) => false,
+        Some(TEXT_VERSION) => false,
         _ => return invalid_config(strict, "unsupported artwork version"),
     };
     let mut result = HashMap::new();
+    let mut button_texts = HashMap::new();
     let mut diagnostics = Vec::new();
     for line in lines {
         let fields: Vec<_> = line.split('\t').collect();
+        if let [layer, id, "text", json] = fields.as_slice() {
+            if version != Some(TEXT_VERSION) {
+                return invalid_config(strict, "text row requires artwork v3");
+            }
+            let Some(layer) = decode_layer(layer) else {
+                return invalid_config(strict, "invalid encoded layer name");
+            };
+            let Some(target @ ArtworkTarget::Keypad(1..=8)) = ArtworkTarget::from_id(id) else {
+                return invalid_config(strict, "text requires keypad 1..=8");
+            };
+            let Ok(text) = serde_json::from_str::<ButtonText>(json) else {
+                return invalid_config(strict, "invalid button text configuration");
+            };
+            if text.validate().is_err() || text.text.is_empty() {
+                return invalid_config(strict, "invalid button text configuration");
+            }
+            if button_texts.insert((layer, target), text).is_some() {
+                return invalid_config(strict, "duplicate button text assignment");
+            }
+            continue;
+        }
         let (layer, id, name) = match fields.as_slice() {
             [id, name] if legacy => (String::new(), *id, *name),
             [layer, id, name] if !legacy => {
@@ -305,14 +378,14 @@ fn load_assignments(root: &Path, strict: bool) -> io::Result<(Assignments, bool,
         }
         result.insert(key, name.to_owned());
     }
-    Ok((result, legacy, diagnostics))
+    Ok((result, button_texts, legacy, diagnostics))
 }
 
-fn invalid_config(strict: bool, message: &str) -> io::Result<(Assignments, bool, Vec<String>)> {
+fn invalid_config(strict: bool, message: &str) -> io::Result<LoadedArtwork> {
     if strict {
         Err(io::Error::new(io::ErrorKind::InvalidData, message))
     } else {
-        Ok((HashMap::new(), true, vec![message.into()]))
+        Ok((HashMap::new(), HashMap::new(), true, vec![message.into()]))
     }
 }
 
@@ -336,14 +409,15 @@ fn decode_layer(encoded: &str) -> Option<String> {
     String::from_utf8(bytes?).ok()
 }
 
-fn persist(root: &Path, assignments: &Assignments, legacy: bool) -> io::Result<()> {
+fn persist(
+    root: &Path,
+    assignments: &Assignments,
+    button_texts: &ButtonTexts,
+    legacy: bool,
+) -> io::Result<()> {
     let mut rows: Vec<_> = assignments.iter().collect();
     rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id()));
-    let version = if legacy {
-        CONFIG_VERSION
-    } else {
-        LAYER_VERSION
-    };
+    let version = if legacy { CONFIG_VERSION } else { TEXT_VERSION };
     let mut text = format!("{version}\n");
     for ((layer, target), name) in rows {
         if !legacy {
@@ -351,6 +425,16 @@ fn persist(root: &Path, assignments: &Assignments, legacy: bool) -> io::Result<(
             text.push('\t');
         }
         text.push_str(&format!("{}\t{}\n", target.id(), name));
+    }
+    let mut texts: Vec<_> = button_texts.iter().collect();
+    texts.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id()));
+    for ((layer, target), overlay) in texts {
+        let json = serde_json::to_string(overlay).map_err(io::Error::other)?;
+        text.push_str(&format!(
+            "{}\t{}\ttext\t{json}\n",
+            encode_layer(layer),
+            target.id()
+        ));
     }
     let temp = root.join("artwork.conf.tmp");
     let mut file = fs::OpenOptions::new()
@@ -387,6 +471,177 @@ mod tests {
         let pixbuf = Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, true, 8, 2, 2).unwrap();
         pixbuf.fill(u32::from_str_radix(color, 16).unwrap());
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn text_restart_isolation_clear_and_layer_cleanup() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "008800ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, Some("Base")).unwrap();
+        let layer = "Live\t日本\n";
+        let first = ButtonText {
+            text: "Hello\n世界\t\"".into(),
+            font_family: "Serif".into(),
+            font_size: 36,
+            orientation: crate::button_text::TextOrientation::Vertical,
+            horizontal_alignment: crate::button_text::HorizontalAlignment::Right,
+            vertical_alignment: crate::button_text::VerticalAlignment::Bottom,
+        };
+        let second = ButtonText {
+            text: "Other".into(),
+            ..ButtonText::default()
+        };
+        store
+            .assign_in_layer(layer, ArtworkTarget::Keypad(1), &source)
+            .unwrap();
+        store
+            .set_button_text_in_layer(layer, ArtworkTarget::Keypad(1), first.clone())
+            .unwrap();
+        store
+            .set_button_text_in_layer(layer, ArtworkTarget::Keypad(2), second.clone())
+            .unwrap();
+        store
+            .set_button_text_in_layer("Base", ArtworkTarget::Keypad(1), second.clone())
+            .unwrap();
+        store
+            .clear_in_layer(layer, ArtworkTarget::Keypad(1))
+            .unwrap();
+        drop(store);
+        let mut store = ArtworkStore::open_at_for_layer(&root, Some(layer)).unwrap();
+        assert!(store
+            .assigned_path_in_layer(layer, ArtworkTarget::Keypad(1))
+            .is_none());
+        assert_eq!(
+            store.button_text_in_layer(layer, ArtworkTarget::Keypad(1)),
+            Some(&first)
+        );
+        assert_eq!(
+            store.button_text_in_layer(layer, ArtworkTarget::Keypad(2)),
+            Some(&second)
+        );
+        assert_eq!(
+            store.button_text_in_layer("Base", ArtworkTarget::Keypad(1)),
+            Some(&second)
+        );
+        assert!(store
+            .button_text_in_layer("Base", ArtworkTarget::Keypad(2))
+            .is_none());
+        store
+            .set_button_text_in_layer(layer, ArtworkTarget::Keypad(2), ButtonText::default())
+            .unwrap();
+        store.remove_layer(layer).unwrap();
+        let reopened = ArtworkStore::open_at(&root).unwrap();
+        assert!(reopened
+            .button_text_in_layer(layer, ArtworkTarget::Keypad(1))
+            .is_none());
+        assert!(reopened
+            .button_text_in_layer(layer, ArtworkTarget::Keypad(2))
+            .is_none());
+        assert_eq!(
+            reopened.button_text_in_layer("Base", ArtworkTarget::Keypad(1)),
+            Some(&second)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_text_and_failed_transactions_preserve_images_and_text() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        let target = ArtworkTarget::Keypad(1);
+        let asset = store.assign_in_layer("Base", target, &source).unwrap();
+        let text = ButtonText {
+            text: "Saved".into(),
+            ..ButtonText::default()
+        };
+        store
+            .set_button_text_in_layer("Base", target, text.clone())
+            .unwrap();
+        let before = fs::read(root.join("artwork.conf")).unwrap();
+        for invalid in [
+            ButtonText {
+                font_size: 5,
+                ..text.clone()
+            },
+            ButtonText {
+                font_size: 121,
+                ..text.clone()
+            },
+            ButtonText {
+                font_family: " ".into(),
+                ..text.clone()
+            },
+            ButtonText {
+                text: "é".repeat(1025),
+                ..text.clone()
+            },
+        ] {
+            assert!(store
+                .set_button_text_in_layer("Base", target, invalid)
+                .is_err());
+        }
+        for target in [
+            ArtworkTarget::Keypad(0),
+            ArtworkTarget::Keypad(9),
+            ArtworkTarget::TouchStripBackground,
+            ArtworkTarget::EncoderZone(1),
+        ] {
+            assert!(store
+                .set_button_text_in_layer("Base", target, text.clone())
+                .is_err());
+        }
+        fs::create_dir(root.join("artwork.conf.tmp")).unwrap();
+        assert!(store
+            .set_button_text_in_layer("Base", target, ButtonText::default())
+            .is_err());
+        assert!(store.clear_in_layer("Base", target).is_err());
+        assert!(store.remove_layer("Base").is_err());
+        assert_eq!(store.button_text_in_layer("Base", target), Some(&text));
+        assert_eq!(
+            store.assigned_path_in_layer("Base", target),
+            Some(asset.clone())
+        );
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), before);
+        assert!(asset.is_file());
+        fs::remove_dir(root.join("artwork.conf.tmp")).unwrap();
+        let valid = String::from_utf8(before).unwrap();
+        for row in [
+            "42617365\tkeypad-1\ttext\t{}\n".to_owned(),
+            format!(
+                "42617365\tencoder-zone-1\ttext\t{}\n",
+                serde_json::to_string(&text).unwrap()
+            ),
+            format!(
+                "42617365\tkeypad-1\ttext\t{}\n",
+                serde_json::to_string(&text).unwrap()
+            ),
+            format!(
+                "42617365\tkeypad-2\ttext\t{}\n",
+                serde_json::to_string(&ButtonText {
+                    font_size: 0,
+                    ..text.clone()
+                })
+                .unwrap()
+            ),
+        ] {
+            let corrupt = format!("{valid}{row}");
+            fs::write(root.join("artwork.conf"), &corrupt).unwrap();
+            assert!(ArtworkStore::open_at_for_layer(&root, None).is_err());
+            let mut compatibility = ArtworkStore::open_at(&root).unwrap();
+            assert!(!compatibility.diagnostics().is_empty());
+            assert!(compatibility
+                .set_button_text_in_layer("Base", target, text.clone())
+                .is_err());
+            assert_eq!(
+                fs::read_to_string(root.join("artwork.conf")).unwrap(),
+                corrupt
+            );
+            assert!(asset.is_file());
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

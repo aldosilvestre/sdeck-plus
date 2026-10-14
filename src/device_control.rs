@@ -37,7 +37,7 @@ impl DeviceAction {
     }
 }
 
-/// Remember intent even after a failed write. No intent means no startup report.
+/// Remember intent even after a failed write; a fresh connection starts at full brightness.
 pub(crate) struct DesiredState {
     brightness: u8,
     sleeping: bool,
@@ -47,8 +47,8 @@ pub(crate) struct DesiredState {
 impl Default for DesiredState {
     fn default() -> Self {
         Self {
-            // There is no brightness readback in this protocol. This baseline is
-            // only used once a user requests relative adjustment or wake.
+            // There is no brightness readback in this protocol. Restore this
+            // baseline on startup so a device blanked on exit becomes visible.
             brightness: 100,
             sleeping: false,
             action: None,

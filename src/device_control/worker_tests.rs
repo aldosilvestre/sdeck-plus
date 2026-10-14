@@ -46,7 +46,7 @@ fn results(events: Receiver<MonitorEvent>) -> Vec<(DeviceAction, Result<(), Stri
 }
 
 #[test]
-fn startup_does_not_write_when_no_control_was_issued() {
+fn startup_restores_brightness_when_no_control_was_issued() {
     // Given
     let (_sender, receiver) = channel();
     let controls = Controls::new(receiver);
@@ -55,7 +55,8 @@ fn startup_does_not_write_when_no_control_was_issued() {
     // When
     controls.replay(&StopSignal::default(), &events, &device);
     // Then
-    assert!(device.reports.borrow().is_empty());
+    assert_eq!(device.reports.borrow().len(), 1);
+    assert_eq!(device.reports.borrow()[0][..3], [0x03, 0x08, 100]);
 }
 
 #[test]
