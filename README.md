@@ -30,6 +30,14 @@ selected control.
 
 ![Main window with Key 1 selected](docs/screenshots/main-window.png)
 
+**Swap keys.** Drag a key onto another key in the preview to exchange their
+saved action, background image and text styling on the current page. An empty
+key exchanges its empty configuration too, so this also moves a configured key
+to a free position. Dropping on the same key or cancelling changes nothing.
+The exchange is saved automatically; it never runs either action. Other
+profiles, pages, dials and touch zones are unchanged. Unsaved editor drafts
+are not part of the exchange.
+
 **Selected control and live input.** The control being edited has a thick violet
 ring. When you press a key or dial on the device it gets a green outline and
 brightens while held; a dial turn flashes amber, and a touch tap, hold or flick

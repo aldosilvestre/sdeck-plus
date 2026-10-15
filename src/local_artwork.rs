@@ -124,6 +124,11 @@ impl ArtworkStore {
         &self.diagnostics
     }
 
+    /// Storage root for reopening the same artwork store.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn assigned_path(&self, target: ArtworkTarget) -> Option<PathBuf> {
         self.assigned_path_in_layer(&self.compatibility_layer, target)
     }
@@ -241,6 +246,51 @@ impl ArtworkStore {
         let mut next = self.assignments.clone();
         next.remove(&(layer.to_owned(), target));
         self.commit(next)
+    }
+
+    /// Atomically swap keypad images and text within one layer.
+    ///
+    /// # Errors
+    /// Invalid keys, invalid configuration, unmigrated storage, or persistence
+    /// failures leave all assignments, text, and referenced assets intact.
+    pub fn swap_keys_in_layer(&mut self, layer: &str, first: u8, second: u8) -> io::Result<()> {
+        self.check_mutation(layer)?;
+        if !(1..=8).contains(&first) || !(1..=8).contains(&second) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "key index out of range",
+            ));
+        }
+        if self.legacy {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "key swaps require layer-aware migration",
+            ));
+        }
+        if first == second {
+            return Ok(());
+        }
+        let first = (layer.to_owned(), ArtworkTarget::Keypad(first));
+        let second = (layer.to_owned(), ArtworkTarget::Keypad(second));
+        let mut next = self.assignments.clone();
+        let first_image = next.remove(&first);
+        let second_image = next.remove(&second);
+        if let Some(image) = first_image {
+            next.insert(second.clone(), image);
+        }
+        if let Some(image) = second_image {
+            next.insert(first.clone(), image);
+        }
+        let mut texts = self.button_texts.clone();
+        let first_text = texts.remove(&first);
+        let second_text = texts.remove(&second);
+        if let Some(text) = first_text {
+            texts.insert(second, text);
+        }
+        if let Some(text) = second_text {
+            texts.insert(first, text);
+        }
+        self.commit_with_text(next, texts)
     }
 
     /// Remove all assignments before layer deletion. Reusing its name starts empty.
@@ -481,6 +531,166 @@ mod tests {
         let pixbuf = Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, true, 8, 2, 2).unwrap();
         pixbuf.fill(u32::from_str_radix(color, 16).unwrap());
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn swap_keys_exchanges_images_and_text_durably_without_touching_other_pages() {
+        let root = temp();
+        let source = root.join("source.png");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        assert_eq!(store.root(), root);
+        let mut assets = Vec::new();
+        for (layer, target, color, label) in [
+            ("Base", ArtworkTarget::Keypad(1), "ff0000ff", "First"),
+            ("Base", ArtworkTarget::Keypad(8), "00ff00ff", "Second"),
+            ("Base", ArtworkTarget::Keypad(3), "0000ffff", "Keep"),
+            ("Other", ArtworkTarget::Keypad(1), "ffff00ff", "Other"),
+        ] {
+            png(&source, color);
+            let path = store.assign_in_layer(layer, target, &source).unwrap();
+            assets.push((path.clone(), fs::read(path).unwrap()));
+            store
+                .set_button_text_in_layer(
+                    layer,
+                    target,
+                    ButtonText {
+                        text: label.into(),
+                        font_size: if label == "First" { 24 } else { 36 },
+                        ..ButtonText::default()
+                    },
+                )
+                .unwrap();
+        }
+        let mut expected_images = store.assignments.clone();
+        let mut expected_texts = store.button_texts.clone();
+        let first = ("Base".to_owned(), ArtworkTarget::Keypad(1));
+        let second = ("Base".to_owned(), ArtworkTarget::Keypad(8));
+        expected_images.insert(first.clone(), store.assignments[&second].clone());
+        expected_images.insert(second.clone(), store.assignments[&first].clone());
+        expected_texts.insert(first.clone(), store.button_texts[&second].clone());
+        expected_texts.insert(second.clone(), store.button_texts[&first].clone());
+
+        store.swap_keys_in_layer("Base", 1, 8).unwrap();
+
+        assert_eq!(store.assignments, expected_images);
+        assert_eq!(store.button_texts, expected_texts);
+        let reopened = ArtworkStore::open_at_for_layer(store.root(), None).unwrap();
+        assert_eq!(reopened.assignments, expected_images);
+        assert_eq!(reopened.button_texts, expected_texts);
+        for (path, bytes) in assets {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn swap_keys_moves_independent_empty_images_and_text() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        let first = ArtworkTarget::Keypad(1);
+        let second = ArtworkTarget::Keypad(2);
+        let asset = store.assign_in_layer("Base", first, &source).unwrap();
+        let text = ButtonText {
+            text: "Text only".into(),
+            ..ButtonText::default()
+        };
+        store
+            .set_button_text_in_layer("Base", second, text.clone())
+            .unwrap();
+        store.swap_keys_in_layer("Base", 1, 2).unwrap();
+        assert_eq!(store.assigned_path_in_layer("Base", first), None);
+        assert_eq!(
+            store.assigned_path_in_layer("Base", second),
+            Some(asset.clone())
+        );
+        assert_eq!(store.button_text_in_layer("Base", first), Some(&text));
+        assert_eq!(store.button_text_in_layer("Base", second), None);
+        store.swap_keys_in_layer("Base", 2, 8).unwrap();
+        assert_eq!(store.assigned_path_in_layer("Base", second), None);
+        assert_eq!(
+            store.assigned_path_in_layer("Base", ArtworkTarget::Keypad(8)),
+            Some(asset.clone())
+        );
+        store.swap_keys_in_layer("Base", 1, 8).unwrap();
+        let reopened = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        assert_eq!(reopened.assignments, store.assignments);
+        assert_eq!(reopened.button_texts, store.button_texts);
+        assert!(asset.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn swap_keys_noops_invalid_inputs_and_failed_manifest_preserve_old_data() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        for key in [1, 8] {
+            store
+                .assign_in_layer("Base", ArtworkTarget::Keypad(key), &source)
+                .unwrap();
+            store
+                .set_button_text_in_layer(
+                    "Base",
+                    ArtworkTarget::Keypad(key),
+                    ButtonText {
+                        text: format!("Saved {key}"),
+                        ..ButtonText::default()
+                    },
+                )
+                .unwrap();
+        }
+        let images = store.assignments.clone();
+        let texts = store.button_texts.clone();
+        let manifest = fs::read(root.join("artwork.conf")).unwrap();
+        fs::create_dir(root.join("artwork.conf.tmp")).unwrap();
+        for key in [1, 4, 8] {
+            store.swap_keys_in_layer("Base", key, key).unwrap();
+        }
+        for (first, second) in [(0, 1), (1, 0), (9, 1), (1, 9), (0, 0), (9, 9)] {
+            assert_eq!(
+                store
+                    .swap_keys_in_layer("Base", first, second)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        assert!(store.swap_keys_in_layer("Base", 1, 8).is_err());
+        assert_eq!(store.assignments, images);
+        assert_eq!(store.button_texts, texts);
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), manifest);
+        for name in images.values() {
+            assert!(root.join("assets").join(name).is_file());
+        }
+        let reopened = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        assert_eq!(reopened.assignments, images);
+        assert_eq!(reopened.button_texts, texts);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn swap_keys_rejects_legacy_and_invalid_configuration_without_overwriting() {
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut legacy = ArtworkStore::open_at(&root).unwrap();
+        let asset = legacy.assign(ArtworkTarget::Keypad(1), &source).unwrap();
+        let manifest = fs::read(root.join("artwork.conf")).unwrap();
+        assert!(legacy.swap_keys_in_layer("Base", 1, 2).is_err());
+        assert!(legacy.swap_keys_in_layer("", 1, 2).is_err());
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), manifest);
+        fs::write(root.join("artwork.conf"), "broken\n").unwrap();
+        let mut invalid = ArtworkStore::open_at(&root).unwrap();
+        assert!(invalid.swap_keys_in_layer("Base", 1, 2).is_err());
+        assert_eq!(
+            fs::read_to_string(root.join("artwork.conf")).unwrap(),
+            "broken\n"
+        );
+        assert!(asset.is_file());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

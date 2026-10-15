@@ -17,6 +17,7 @@ use std::{
 };
 
 mod folders;
+mod key_swap;
 mod page_controls;
 mod pages;
 
@@ -50,6 +51,22 @@ pub(crate) fn run_worker(
         }
         let event = match command {
             LayerCommand::Shutdown => break,
+            LayerCommand::SwapKeys {
+                store,
+                artwork_root,
+                layer,
+                first,
+                second,
+            } => {
+                let result = key_swap::persist(&store, &artwork_root, &layer, first, second)
+                    .map_err(|error| error.to_string());
+                Some(MonitorEvent::KeySwapResult {
+                    layer,
+                    first,
+                    second,
+                    result,
+                })
+            }
             LayerCommand::Persist(store, organization) => {
                 let result = persist_snapshot(&store, organization.as_ref());
                 match result {
@@ -114,6 +131,23 @@ pub(crate) fn run_worker(
                 final_store = Some((store, organization))
             }
             LayerCommand::ObsSave(config) => final_obs = Some(config),
+            LayerCommand::SwapKeys {
+                store,
+                artwork_root,
+                layer,
+                first,
+                second,
+            } => {
+                if let Some((previous, organization)) = final_store.take() {
+                    if let Err(error) = persist_snapshot(&previous, organization.as_ref()) {
+                        eprintln!("Could not save before closing key swap: {error}");
+                    }
+                }
+                if let Err(error) = key_swap::persist(&store, &artwork_root, &layer, first, second)
+                {
+                    eprintln!("Could not swap keys while closing: {error}");
+                }
+            }
             LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_) | LayerCommand::Shutdown => {}
         }
     }
@@ -148,6 +182,9 @@ pub(crate) struct FeatureRuntime {
     artwork: ArtworkUi,
     output: mpsc::Sender<LayerCommand>,
     updating: Rc<Cell<bool>>,
+    key_swap_pending: Rc<Cell<bool>>,
+    key_swap_deferred_persist: Rc<Cell<bool>>,
+    key_swap_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
     pub(crate) indicator: Label,
     pub(crate) status: Label,
     pub(crate) timer_status: Label,
@@ -277,6 +314,9 @@ impl FeatureRuntime {
             artwork,
             output,
             updating,
+            key_swap_pending: Rc::new(Cell::new(false)),
+            key_swap_deferred_persist: Rc::new(Cell::new(false)),
+            key_swap_root: Rc::new(RefCell::new(glib::WeakRef::new())),
             indicator,
             status,
             timer_status,
@@ -622,6 +662,9 @@ impl FeatureRuntime {
     }
 
     fn reconcile_focus(&self) {
+        if self.key_swap_pending.get() {
+            return;
+        }
         let target = {
             let organization = self.organization.borrow();
             let Some(organization) = organization.as_ref() else {
@@ -715,6 +758,10 @@ impl FeatureRuntime {
     }
 
     pub(crate) fn persist(&self, store: LayerStore) {
+        if self.key_swap_pending.get() {
+            self.key_swap_deferred_persist.set(true);
+            return;
+        }
         self.persist_with_feedback(store, LayerCommand::Persist);
     }
 

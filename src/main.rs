@@ -23,6 +23,7 @@ use std::{
 
 mod app_icon;
 mod autostart;
+mod button_swap;
 mod button_text_editor;
 mod feature_editor;
 mod feature_runtime;
@@ -40,7 +41,17 @@ enum LayerCommand {
     Persist(LayerStore, Option<sdeck_plus::organization::Organization>),
     SaveBinding(LayerStore, Option<sdeck_plus::organization::Organization>),
     SaveProfile(LayerStore, Option<sdeck_plus::organization::Organization>),
-    Execute { binding_id: String, action: Action },
+    SwapKeys {
+        store: LayerStore,
+        artwork_root: std::path::PathBuf,
+        layer: String,
+        first: u8,
+        second: u8,
+    },
+    Execute {
+        binding_id: String,
+        action: Action,
+    },
     ObsSave(sdeck_plus::obs::ObsConfig),
     ObsProbe(sdeck_plus::obs::ObsConfig),
     Shutdown,
@@ -1071,7 +1082,10 @@ fn build_widgets(
         let widget = widget.clone();
         let tooltip = move |text: &str| {
             if index < 8 {
-                format!("Button {} · {text}", index + 1)
+                format!(
+                    "Button {} · {text}\nDrag onto another key to swap saved settings and artwork.",
+                    index + 1
+                )
             } else if index >= 9 {
                 format!("Encoder {} · {text}", index - 8)
             } else {
@@ -1091,6 +1105,7 @@ fn build_widgets(
         .map(|zone| zone.clone().upcast())
         .collect();
     let selected_widgets = Rc::new(selectable_widgets);
+    button_swap::connect(&selected_widgets[..8], &artwork, &feature_runtime, &root);
     set_selected_control(&selected_widgets, 0);
     for index in 0..8 {
         connect_control_selection(
@@ -1238,6 +1253,14 @@ fn start_event_updates(
             match message {
                 MonitorEvent::ApplicationFocus(_) => {}
                 MonitorEvent::Heartbeat => {}
+                MonitorEvent::KeySwapResult {
+                    layer,
+                    first,
+                    second,
+                    result,
+                } => {
+                    feature_runtime.complete_key_swap(&layer, first, second, result);
+                }
                 MonitorEvent::Connection(state) => match state {
                     ConnectionState::Searching => {
                         status.set_text("SEARCHING");
@@ -2655,6 +2678,7 @@ mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    mod button_swap_tests;
     mod control_feedback_tests;
     mod documentation_screenshots;
     mod page_ui_tests;

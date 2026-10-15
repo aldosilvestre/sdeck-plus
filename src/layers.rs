@@ -263,6 +263,34 @@ impl LayerStore {
             .remove(trigger)
             .is_some())
     }
+    /// Swap two keypad bindings in memory without persisting the layer store.
+    ///
+    /// # Errors
+    /// Returns an error for an unknown layer or keys outside 1..=8.
+    pub fn swap_keys(&mut self, layer: &str, first: u8, second: u8) -> io::Result<()> {
+        validate_trigger(&Trigger::KeyPress(first))?;
+        validate_trigger(&Trigger::KeyPress(second))?;
+        let bindings = &mut self
+            .layers
+            .get_mut(layer)
+            .ok_or_else(|| invalid("unknown layer"))?
+            .bindings;
+        if first == second {
+            return Ok(());
+        }
+        let first = Trigger::KeyPress(first);
+        let second = Trigger::KeyPress(second);
+        let first_action = bindings.remove(&first);
+        let second_action = bindings.remove(&second);
+        if let Some(action) = first_action {
+            bindings.insert(second, action);
+        }
+        if let Some(action) = second_action {
+            bindings.insert(first, action);
+        }
+        Ok(())
+    }
+
     pub fn matching_action(&self, event: &Event) -> Option<Action> {
         self.matching_binding(event).map(|(_, action)| action)
     }
@@ -852,6 +880,107 @@ mod tests {
         fs::create_dir_all(&p).unwrap();
         p
     }
+    #[test]
+    fn swap_keys_exchanges_actions_only_in_memory_and_selected_layer() {
+        let root = temp();
+        let mut store = LayerStore::open_at(&root).unwrap();
+        store.create("Other").unwrap();
+        for (layer, trigger, action) in [
+            ("Base", Trigger::KeyPress(1), Action::Emit("first".into())),
+            (
+                "Base",
+                Trigger::KeyPress(8),
+                Action::Command("echo second".into()),
+            ),
+            ("Base", Trigger::KeyPress(3), Action::Emit("keep".into())),
+            (
+                "Base",
+                Trigger::EncoderPress(1),
+                Action::Emit("encoder".into()),
+            ),
+            ("Other", Trigger::KeyPress(1), Action::Emit("other".into())),
+        ] {
+            store.bind(layer, trigger, action).unwrap();
+        }
+        store.persist().unwrap();
+        let original = store.layers()["Base"].bindings.clone();
+        let other = store.layers()["Other"].bindings.clone();
+        let persisted = fs::read(root.join("layers.conf")).unwrap();
+        store.select("Other");
+
+        store.swap_keys("Base", 1, 8).unwrap();
+
+        let mut expected = original.clone();
+        expected.insert(
+            Trigger::KeyPress(1),
+            original[&Trigger::KeyPress(8)].clone(),
+        );
+        expected.insert(
+            Trigger::KeyPress(8),
+            original[&Trigger::KeyPress(1)].clone(),
+        );
+        assert_eq!(store.layers()["Base"].bindings, expected);
+        assert_eq!(store.layers()["Other"].bindings, other);
+        assert_eq!(store.active(), "Other");
+        assert_eq!(fs::read(root.join("layers.conf")).unwrap(), persisted);
+        assert_eq!(
+            LayerStore::open_at(&root).unwrap().layers()["Base"].bindings,
+            original
+        );
+        store.persist().unwrap();
+        assert_eq!(
+            LayerStore::open_at(&root).unwrap().layers()["Base"].bindings,
+            expected
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn swap_keys_moves_empty_bindings_and_validates_before_self_swap() {
+        let root = temp();
+        let mut store = LayerStore::open_at(&root).unwrap();
+        let action = Action::Emit("move".into());
+        store
+            .bind("Base", Trigger::KeyPress(1), action.clone())
+            .unwrap();
+        store.swap_keys("Base", 1, 2).unwrap();
+        assert!(!store.layers()["Base"]
+            .bindings
+            .contains_key(&Trigger::KeyPress(1)));
+        assert_eq!(
+            store.layers()["Base"].bindings.get(&Trigger::KeyPress(2)),
+            Some(&action)
+        );
+        store.swap_keys("Base", 1, 2).unwrap();
+        assert_eq!(
+            store.layers()["Base"].bindings.get(&Trigger::KeyPress(1)),
+            Some(&action)
+        );
+        let before = store.layers()["Base"].bindings.clone();
+        for (first, second) in [(1, 1), (8, 8), (3, 4)] {
+            store.swap_keys("Base", first, second).unwrap();
+            assert_eq!(store.layers()["Base"].bindings, before);
+        }
+        for (layer, first, second) in [
+            ("Base", 0, 1),
+            ("Base", 1, 9),
+            ("Base", 9, 1),
+            ("Base", 1, 0),
+            ("Base", 0, 0),
+            ("Base", 9, 9),
+            ("missing", 1, 2),
+            ("missing", 1, 1),
+        ] {
+            assert_eq!(
+                store.swap_keys(layer, first, second).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            assert_eq!(store.layers()["Base"].bindings, before);
+        }
+        assert!(!root.join("layers.conf").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn persistence_selector_switch_and_safe_removal() {
         let p = temp();

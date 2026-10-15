@@ -264,6 +264,11 @@ scrollbar slider:active { background-color: @desk_cyan; }
 }
 .control-tile { color: #c2ccdc; font-size: 11px; font-weight: 700; padding: 0; }
 .control-active { background: #174936; color: #9af2c4; }
+.swap-source { opacity: 0.55; }
+.key-surface.swap-target {
+    outline: 3px dashed @desk_cyan;
+    outline-offset: -4px;
+}
 .key-surface .control-active { background: #174936; }
 .touch-display { color: #8fe7ca; font-size: 10px; padding: 0; }
 .control-selectable:focus-visible {

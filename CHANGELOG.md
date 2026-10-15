@@ -8,6 +8,11 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Swap keys by drag-and-drop.** Drag one keypad button onto another in the
+  native preview to exchange their saved action, background and text on the
+  current page. Empty keys can be used as destinations. The exchange is saved
+  automatically without executing either action.
+
 - **Light theme.** When the host GTK theme is not dark, `src/ui-light.css`
   overrides the `@desk_*` palette tokens, and the switch follows theme changes
   live. The silver hardware preview is identical in both modes.

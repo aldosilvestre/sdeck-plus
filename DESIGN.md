@@ -226,6 +226,13 @@ Shared native helpers live in `src/ui.rs`: `button(icon, caption)`,
 
 ## 6. Motion and interaction
 
+Keypad drag-and-drop uses GTK's native MOVE cursor and an artwork drag preview.
+The source dims to 55% opacity; a valid destination has an inset dashed cyan
+outline above its artwork. Dropping swaps both saved actions and appearance
+(image and text) within the current page; dropping on itself or cancelling
+does nothing. The configuration surface is temporarily disabled while the
+serial worker saves the exchange. Success or failure is reported inline.
+
 Retain native GTK interaction and the system animation setting.
 Button hover/press washes transition in 140ms with ease-out; geometry, live
 hardware input and keyboard focus update immediately. A `motion-enabled` class

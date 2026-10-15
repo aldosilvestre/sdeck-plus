@@ -55,6 +55,12 @@ pub enum MonitorEvent {
     BindingSaveResult(Result<(), String>),
     /// Result of an explicit profile save, after persistence finishes.
     ProfileSaveResult(Result<(), String>),
+    KeySwapResult {
+        layer: String,
+        first: u8,
+        second: u8,
+        result: Result<(), String>,
+    },
     ApplicationFocus(Result<Option<crate::app_focus::FocusedApplication>, String>),
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
