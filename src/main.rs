@@ -2656,6 +2656,7 @@ mod tests {
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     mod control_feedback_tests;
+    mod documentation_screenshots;
     mod page_ui_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;

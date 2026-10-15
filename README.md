@@ -10,8 +10,19 @@ sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PI
 
 ## Screenshots
 
-All captures are in [`docs/screenshots`](docs/screenshots) and show the
-application running against a connected Stream Deck +.
+All captures are in [`docs/screenshots`](docs/screenshots) and show the current
+native GTK application with isolated demonstration profiles and artwork.
+Input feedback is simulated; capturing these images does not operate a device
+or connect to OBS.
+
+Regenerate the complete set from a graphical session with:
+
+```sh
+GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
+  cargo test --offline --bin sdeck-plus \
+  tests::documentation_screenshots::regenerate_documentation_screenshots_when_explicitly_requested \
+  -- --exact --nocapture --test-threads=1
+```
 
 **Main window.** Connection status, profile tabs, page navigation, the
 hardware preview with the assigned artwork, and the binding editor for the

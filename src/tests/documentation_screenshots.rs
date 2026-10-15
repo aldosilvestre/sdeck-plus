@@ -1,0 +1,372 @@
+//! Explicitly opted-in native documentation captures; never starts device/action workers.
+use super::*;
+use sdeck_plus::{button_text::ButtonText, features::FeatureAction, obs::ObsAction};
+
+fn descendants<T: IsA<gtk::Widget> + glib::object::IsClass>(widget: &gtk::Widget) -> Vec<T> {
+    let mut found = Vec::new();
+    if let Ok(value) = widget.clone().downcast::<T>() {
+        found.push(value);
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        found.extend(descendants::<T>(&widget));
+        child = widget.next_sibling();
+    }
+    found
+}
+
+fn click(widgets: &MonitorWidgets, caption: &str) {
+    let mut buttons = Vec::new();
+    collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+    buttons
+        .iter()
+        .find(|button| button_caption(button).as_deref() == Some(caption))
+        .unwrap_or_else(|| panic!("missing production button: {caption}"))
+        .emit_clicked();
+}
+
+fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
+    if !widget.is_mapped() {
+        let main_loop = glib::MainLoop::new(None, false);
+        let done = main_loop.clone();
+        let signal = widget.connect_map(move |_| done.quit());
+        let expired = Rc::new(Cell::new(false));
+        let flag = expired.clone();
+        let done = main_loop.clone();
+        let timeout = glib::timeout_add_local_once(Duration::from_secs(5), move || {
+            flag.set(true);
+            done.quit();
+        });
+        main_loop.run();
+        widget.disconnect(signal);
+        if !expired.get() {
+            timeout.remove();
+        }
+        assert!(widget.is_mapped(), "{name} did not map");
+    }
+    let window = widget.root().unwrap().downcast::<gtk::Window>().unwrap();
+    wait_for_frame(widget);
+    let snapshot = gtk::Snapshot::new();
+    gtk::WidgetPaintable::new(Some(widget)).snapshot(
+        &snapshot,
+        f64::from(widget.width()),
+        f64::from(widget.height()),
+    );
+    let node = snapshot.to_node().expect("native GTK render node");
+    let texture = window.renderer().unwrap().render_texture(&node, None);
+    assert!(texture.width() > 0 && texture.height() > 0);
+    texture
+        .save_to_png(directory.join(format!("{name}.png")))
+        .unwrap();
+    eprintln!(
+        "documentation screenshot: {name} ({}x{})",
+        texture.width(),
+        texture.height()
+    );
+}
+
+fn menu(directory: &std::path::Path, button: &gtk::MenuButton, name: &str) {
+    let panel = button.popover().unwrap();
+    if name == "page-folders" {
+        for scroller in descendants::<gtk::ScrolledWindow>(panel.upcast_ref()) {
+            scroller.set_max_content_height(600);
+        }
+    }
+    panel.set_autohide(false);
+    button.popup();
+    save(directory, panel.upcast_ref(), name);
+    button.popdown();
+}
+
+fn dropdown(directory: &std::path::Path, picker: &gtk::DropDown, name: &str) {
+    let panel = descendants::<gtk::Popover>(picker.upcast_ref())
+        .into_iter()
+        .next()
+        .expect("production dropdown popup");
+    if name == "artwork-touch-zones" {
+        for scroller in descendants::<gtk::ScrolledWindow>(panel.upcast_ref()) {
+            scroller.set_max_content_height(600);
+            scroller.set_min_content_height(520);
+        }
+    }
+    assert!(picker.activate(), "native dropdown activation");
+    save(directory, panel.upcast_ref(), name);
+    panel.popdown();
+}
+
+#[test]
+fn regenerate_documentation_screenshots_when_explicitly_requested() {
+    let Some(directory) = std::env::var_os("STREAMDECK_DOC_SCREENSHOTS_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let _guard = gtk_test_lock();
+    gtk::init().expect("documentation capture requires a native GTK display");
+    let settings = gtk::Settings::default().unwrap();
+    let original_theme = settings.gtk_theme_name();
+    let original_dark = settings.is_gtk_application_prefer_dark_theme();
+    let original_animations = settings.is_gtk_enable_animations();
+    settings.set_gtk_enable_animations(false);
+    settings.set_gtk_theme_name(Some("Adwaita-dark"));
+    settings.set_gtk_application_prefer_dark_theme(true);
+
+    // Given: isolated, realistic profiles, bindings and app-owned artwork.
+    let (root, mut store, mut images, source) = artwork_fixture("documentation");
+    store.create("OBS").unwrap();
+    store.select("Base");
+    let mut organization = sdeck_plus::organization::Organization::in_memory(&store);
+    organization.set_profile_application("OBS", "obs").unwrap();
+    organization.rename_page(&store, "Everyday").unwrap();
+    organization
+        .create_folder(&mut store, "Studio tools")
+        .unwrap();
+    store.select("Base");
+    organization
+        .create_named_page(&mut store, "Production")
+        .unwrap();
+    store.select("Base");
+    let labels = [
+        "Play", "Mute", "Scene", "Files", "Record", "Browser", "Next", "Studio",
+    ];
+    let colors = [
+        0x254b75ff, 0x5c3566ff, 0x245c58ff, 0x66462cff, 0x702f49ff, 0x3a457aff, 0x3a5b38ff,
+        0x55447aff,
+    ];
+    for profile in ["Base", "Studio", "OBS"] {
+        for (index, (label, color)) in labels.iter().zip(colors).enumerate() {
+            let key = u8::try_from(index + 1).unwrap();
+            let pixbuf =
+                gtk::gdk_pixbuf::Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, false, 8, 120, 120)
+                    .unwrap();
+            pixbuf.fill(color);
+            pixbuf.savev(&source, "png", &[]).unwrap();
+            images
+                .assign_in_layer(profile, ArtworkTarget::Keypad(key), &source)
+                .unwrap();
+            images
+                .set_button_text_in_layer(
+                    profile,
+                    ArtworkTarget::Keypad(key),
+                    ButtonText {
+                        text: (*label).into(),
+                        font_size: 22,
+                        ..ButtonText::default()
+                    },
+                )
+                .unwrap();
+        }
+        for zone in 1..=4 {
+            images
+                .assign_in_layer(profile, ArtworkTarget::EncoderZone(zone), &source)
+                .unwrap();
+        }
+        store
+            .bind(
+                profile,
+                Trigger::KeyPress(1),
+                Action::Shortcut {
+                    modifiers: vec!["CTRL".into(), "ALT".into()],
+                    key: "p".into(),
+                },
+            )
+            .unwrap();
+        store
+            .bind(
+                profile,
+                Trigger::EncoderClockwise(1),
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(
+                        sdeck_plus::desktop_actions::MediaCommand::VolumeUp,
+                    ),
+                )),
+            )
+            .unwrap();
+        store
+            .bind(
+                profile,
+                Trigger::TouchSwipe(SwipeDirection::Left),
+                Action::Feature(FeatureAction::Navigation(
+                    sdeck_plus::organization::NavigationAction::NextPage,
+                )),
+            )
+            .unwrap();
+    }
+    let layers = Rc::new(RefCell::new(store));
+    let (output, hardware_commands) = mpsc::channel();
+    let artwork = ArtworkUi {
+        store: Rc::new(RefCell::new(Some(images))),
+        layers: layers.clone(),
+        pictures: Rc::new(RefCell::new(Vec::new())),
+        output,
+        last_layer: Rc::new(RefCell::new(None)),
+        chooser_owners: Rc::new(RefCell::new(Default::default())),
+        selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+        text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+    };
+    let window = ApplicationWindow::builder()
+        .title(APP_NAME)
+        .default_width(1000)
+        .default_height(800)
+        .build();
+    install_style(&window);
+    let (sender, commands) = mpsc::channel();
+    let widgets = build_widgets(window.clone(), layers, artwork.clone(), sender);
+    let (device, _device_commands) = mpsc::channel();
+    let (events, _events) = mpsc::channel();
+    widgets.feature_runtime.configure(
+        Ok(organization),
+        Ok(sdeck_plus::obs::ObsConfig::default()),
+        device,
+        events,
+    );
+    let stage = gtk::Fixed::new();
+    widgets.root.set_size_request(1000, 800);
+    stage.put(&widgets.root, 0.0, 0.0);
+    window.set_child(Some(&stage));
+    window.present();
+    wait_for_frame(&window);
+    artwork.refresh(false);
+
+    // When: drive the same native controls as configuration, never Test action.
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    let capture = |name: &str| save(&directory, widgets.root.upcast_ref(), name);
+    capture("main-window");
+    assert_reachable(&widgets.binding_ui.action_picker, &widgets.root);
+    dropdown(
+        &directory,
+        &widgets.binding_ui.action_picker,
+        "action-types",
+    );
+    widgets.binding_ui.action_picker.set_selected(5);
+    wait_for_frame(&widgets.root);
+    let category =
+        descendants::<gtk::DropDown>(widgets.binding_ui.feature_editor.root.upcast_ref()).remove(0);
+    assert_reachable(&category, &widgets.root);
+    dropdown(&directory, &category, "more-actions-categories");
+    widgets
+        .binding_ui
+        .populate_action(&Action::Feature(FeatureAction::Obs(ObsAction::Scene(
+            "Studio camera".into(),
+        ))));
+    widgets.root.vadjustment().set_value(0.0);
+    capture("more-actions-obs");
+    widgets.encoder_labels[0]
+        .ancestor(Button::static_type())
+        .unwrap()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
+    assert_reachable(&widgets.binding_ui.event_picker, &widgets.root);
+    dropdown(
+        &directory,
+        &widgets.binding_ui.event_picker,
+        "encoder-events",
+    );
+    widgets
+        .touch_status
+        .next_sibling()
+        .unwrap()
+        .downcast::<gtk::Overlay>()
+        .unwrap()
+        .child()
+        .unwrap()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
+    widgets.binding_ui.event_picker.set_selected(3);
+    widgets.root.vadjustment().set_value(0.0);
+    capture("touch-strip");
+
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    let editor = &widgets._text_editor;
+    wait_for_frame(&widgets.root);
+    assert_reachable(&editor.open, &widgets.root);
+    wait_for_frame(&widgets.root);
+    menu(&directory, &editor.open, "button-text-editor");
+    widgets.artwork_section.set_expanded(true);
+    wait_for_frame(&widgets.root);
+    assert_reachable(&widgets.target_picker, &widgets.root);
+    dropdown(&directory, &widgets.target_picker, "artwork-touch-zones");
+    widgets.artwork_section.set_expanded(false);
+    widgets.root.vadjustment().set_value(0.0);
+    wait_for_frame(&widgets.root);
+
+    widgets.feature_runtime.edit_profile("Studio");
+    menu(
+        &directory,
+        &widgets.management_menu,
+        "organize-profiles-pages",
+    );
+    let panel = widgets.management_menu.popover().unwrap();
+    let tasks = descendants::<gtk::Stack>(panel.upcast_ref()).remove(0);
+    tasks.set_visible_child_name("new");
+    menu(&directory, &widgets.management_menu, "organize-new-profile");
+    tasks.set_visible_child_name("edit");
+    settings.set_gtk_theme_name(Some("Adwaita"));
+    settings.set_gtk_application_prefer_dark_theme(false);
+    wait_for_frame(&widgets.root);
+    menu(&directory, &widgets.management_menu, "organize-light-theme");
+    settings.set_gtk_theme_name(Some("Adwaita-dark"));
+    settings.set_gtk_application_prefer_dark_theme(true);
+    widgets
+        .feature_runtime
+        .profile_tabs()
+        .set_current_page(Some(1));
+    capture("application-profile-tab");
+    menu(&directory, &widgets.obs_menu, "obs-settings");
+    menu(&directory, &widgets.help_menu, "setup-help");
+    widgets
+        .feature_runtime
+        .profile_tabs()
+        .set_current_page(Some(0));
+
+    click(&widgets, "New page");
+    let dialog = current_dialog();
+    page_dialog_entry(&dialog).set_text("Editing tools");
+    save(&directory, dialog.upcast_ref(), "new-page-name");
+    dialog.response(ResponseType::Cancel);
+    click(&widgets, "Rename page");
+    let dialog = current_dialog();
+    page_dialog_entry(&dialog).set_text("Everyday controls");
+    save(&directory, dialog.upcast_ref(), "rename-page");
+    dialog.response(ResponseType::Cancel);
+    menu(
+        &directory,
+        widgets.feature_runtime.folder_menu(),
+        "page-folders",
+    );
+
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    widgets.root.vadjustment().set_value(0.0);
+    set_pressed(&widgets.key_widgets[0], true);
+    set_pressed(&widgets.encoder_widgets[1], true);
+    // Refresh momentary feedback on the frame update signal, not a timer race.
+    let zones = widgets.zone_widgets.clone();
+    let dial = widgets.encoder_widgets[2].clone();
+    let clock = widgets.root.frame_clock().unwrap();
+    let feedback = clock.connect_update(move |_| {
+        flash_zones(&zones, 0, 199);
+        flash(&dial, "control-rotated");
+    });
+    clock.request_phase(gtk::gdk::FrameClockPhase::UPDATE);
+    capture("live-input-feedback");
+    clock.disconnect(feedback);
+
+    // Then: every documented artifact was rendered, with no dispatched action.
+    assert_eq!(widgets.status.text(), "SEARCHING");
+    assert!(commands.try_iter().all(|command| !matches!(
+        command,
+        LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_)
+    )));
+    drop(hardware_commands);
+    window.destroy();
+    settings.set_gtk_theme_name(original_theme.as_deref());
+    settings.set_gtk_application_prefer_dark_theme(original_dark);
+    settings.set_gtk_enable_animations(original_animations);
+    std::fs::remove_dir_all(root).unwrap();
+    eprintln!(
+        "Generated all 18 native documentation screenshots in {}",
+        directory.display()
+    );
+}
