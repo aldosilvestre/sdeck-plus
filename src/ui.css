@@ -1,47 +1,160 @@
+@define-color desk_bg #10121d;
+@define-color desk_surface #1b2033;
+@define-color desk_field #141827;
+@define-color desk_hover #2b3350;
+@define-color desk_edge #39435c;
+@define-color desk_control_edge #68789d;
+@define-color desk_ink #f1f3fb;
+@define-color desk_muted #afb9d0;
+@define-color desk_violet #a78bfa;
+@define-color desk_cyan #67e8f9;
+@define-color desk_error #fb7185;
+@define-color desk_success #7de2b3;
+@define-color desk_warning #f9cc7a;
+
 window, scrolledwindow, viewport, .app-shell {
-    background-color: @theme_bg_color;
+    background-color: @desk_bg;
     background-image: none;
-    color: @theme_fg_color;
+    color: @desk_ink;
 }
 
 .app-shell { font-size: 14px; }
 .title { font-size: 20px; font-weight: 700; }
 .section-label { font-size: 14px; font-weight: 600; }
-.control-heading { font-size: 18px; font-weight: 700; }
+.control-heading {
+    font-size: 18px;
+    font-weight: 700;
+}
 .muted, .helper {
-    color: alpha(@theme_fg_color, 0.72);
+    color: @desk_muted;
     font-size: 13px;
 }
 .field-label { font-size: 14px; }
+.shortcut-guidance link, .shortcut-guidance link:visited { color: @desk_cyan; }
+.shortcut-guidance link:focus { outline: 2px solid @desk_cyan; outline-offset: 2px; }
 .configuration-grid > flowboxchild { padding: 0; }
 
 .card {
-    background-color: mix(@theme_bg_color, @theme_fg_color, 0.035);
-    border: 1px solid alpha(@theme_fg_color, 0.14);
+    background-color: @desk_surface;
+    border: 1px solid @desk_edge;
     border-radius: 14px;
     padding: 12px;
+    box-shadow: inset 0 1px alpha(@desk_ink, 0.035);
 }
 .device-canvas { padding: 6px; }
+.editor-card { padding: 16px; }
+.action-fields > flowboxchild { padding: 0; }
+button, dropdown > button, spinbutton, entry, textview, textview text {
+    color: @desk_ink;
+    background-color: @desk_field;
+    background-image: none;
+    border-color: @desk_control_edge;
+    caret-color: @desk_cyan;
+}
+button {
+    border-radius: 8px;
+    box-shadow: none;
+    text-shadow: none;
+    transition: background-color 0ms, color 0ms;
+}
+.motion-enabled button:not(.control-selectable) {
+    transition: background-color 140ms ease-out, color 140ms ease-out;
+}
+button:hover { background-color: @desk_hover; }
+button:active { background-color: mix(@desk_hover, @desk_violet, 0.18); }
+button:checked { background-color: alpha(@desk_violet, 0.20); color: @desk_ink; }
+stackswitcher button { background-color: transparent; color: @desk_muted; }
+stackswitcher button:checked { background-color: alpha(@desk_violet, 0.60); color: @desk_ink; font-weight: 600; }
+button.flat { background-color: transparent; }
+button.flat:hover { background-color: @desk_hover; }
+button:disabled, button:disabled label, button:disabled image,
+entry:disabled, dropdown:disabled {
+    color: @desk_muted;
+    background-color: @desk_field;
+}
+textview text {
+    box-shadow: inset 0 0 0 1px @desk_control_edge;
+}
+entry:focus-within, spinbutton:focus-within {
+    box-shadow: inset 0 0 0 1px @desk_cyan;
+}
+button:focus-visible, dropdown:focus-visible, textview:focus-visible {
+    outline: 2px solid @desk_cyan;
+    outline-offset: -2px;
+}
+entry selection, textview text selection {
+    background-color: @desk_violet;
+    color: @desk_bg;
+}
+popover > contents, tooltip {
+    background-color: @desk_surface;
+    color: @desk_ink;
+    border: 1px solid @desk_edge;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px alpha(@desk_bg, 0.55);
+}
+popover scrolledwindow, popover viewport, popover listview {
+    background-color: @desk_surface;
+    color: @desk_ink;
+}
+popover modelbutton, popover row { color: @desk_ink; }
+popover modelbutton:hover, popover row:hover,
+popover row:selected { background-color: @desk_hover; }
+popover arrow { background-color: @desk_surface; border-color: @desk_edge; }
+separator { background-color: @desk_edge; min-height: 1px; }
+checkbutton { color: @desk_ink; }
+checkbutton check {
+    background-color: @desk_field;
+    background-image: none;
+    border-color: @desk_control_edge;
+    color: @desk_bg;
+    box-shadow: none;
+}
+checkbutton check:checked { background-color: @desk_violet; }
+scrollbar, scrollbar trough {
+    background-color: transparent;
+    background-image: none;
+}
+scrollbar slider {
+    background-color: @desk_control_edge;
+    background-image: none;
+    border-color: transparent;
+    box-shadow: none;
+}
+scrollbar slider:hover { background-color: @desk_muted; }
+scrollbar slider:active { background-color: @desk_cyan; }
 .icon-action { min-height: 20px; padding: 6px 10px; }
+.page-folder-menu { padding: 0; }
+.field-help > button { min-height: 20px; padding: 0 4px; }
+.page-name-dialog button { margin: 0 6px 16px; }
+.page-name-dialog button:first-child { margin-left: 16px; }
+.page-name-dialog button:last-child { margin-right: 16px; }
 .icon-action:disabled, .icon-action:disabled label, .icon-action:disabled image {
-    color: alpha(@theme_fg_color, 0.72);
+    color: @desk_muted;
     opacity: 1;
 }
 .icon-action.destructive-action:disabled {
     background-image: none;
-    background-color: mix(@theme_bg_color, @theme_fg_color, 0.035);
-    color: alpha(@theme_fg_color, 0.72);
+    background-color: @desk_field;
+    color: @desk_muted;
 }
 .suggested-action {
     background-image: none;
-    background-color: mix(@theme_selected_bg_color, #000000, 0.20);
-    color: #ffffff;
+    background-color: @desk_violet;
+    color: @desk_bg;
+    border-color: transparent;
+    font-weight: 600;
 }
 .suggested-action:hover {
-    background-color: mix(@theme_selected_bg_color, #000000, 0.16);
+    background-color: #bba5ff;
 }
 .suggested-action:active {
-    background-color: mix(@theme_selected_bg_color, #000000, 0.28);
+    background-color: #9575ed;
+}
+.suggested-action:disabled {
+    background-color: @desk_field;
+    color: @desk_muted;
+    border-color: @desk_edge;
 }
 .status {
     padding: 8px 12px;
@@ -50,28 +163,56 @@ window, scrolledwindow, viewport, .app-shell {
     font-weight: 600;
 }
 .status-idle {
-    color: mix(@theme_fg_color, #c79438, 0.45);
-    background-color: alpha(#c79438, 0.12);
+    color: @desk_warning;
+    background-color: alpha(@desk_warning, 0.12);
 }
 .status-online {
-    color: mix(@theme_fg_color, #38a979, 0.45);
-    background-color: alpha(#38a979, 0.12);
+    color: @desk_success;
+    background-color: alpha(@desk_success, 0.12);
 }
-.feedback-error { color: mix(@theme_fg_color, #e25a70, 0.45); }
+.feedback-error { color: @desk_error; }
+.destructive-action:not(:disabled) { color: @desk_error; }
 .icon-action.destructive-action.flat {
     background-image: none;
     background-color: transparent;
-    color: mix(@theme_fg_color, #e25a70, 0.45);
+    color: @desk_error;
 }
-.feedback-success { color: mix(@theme_fg_color, #38a979, 0.45); }
+.icon-action.destructive-action.flat:hover { background-color: alpha(@desk_error, 0.12); }
+.feedback-success { color: @desk_success; }
 .toast {
-    background-color: mix(@theme_bg_color, @theme_fg_color, 0.12);
-    border: 1px solid alpha(@theme_fg_color, 0.24);
+    background-color: @desk_hover;
+    border: 1px solid @desk_edge;
     border-radius: 12px;
     padding: 12px 16px;
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
-.profile-tabs > stack { background-color: transparent; }
+.profile-tabs, .profile-tabs > stack { background-color: transparent; }
+.profile-tabs > stack { margin-top: 12px; }
+.profile-tabs > header {
+    background-color: @desk_surface;
+    border: 1px solid @desk_edge;
+    border-radius: 14px;
+    padding: 4px;
+}
+.profile-tabs > header tabs { border: none; }
+.profile-tabs > header tab {
+    background-color: transparent;
+    color: @desk_muted;
+    border: none;
+    border-radius: 8px;
+    box-shadow: none;
+    padding: 6px 12px;
+}
+.profile-tabs > header tab:hover { background-color: @desk_hover; color: @desk_ink; }
+.profile-tabs > header tab:checked {
+    background-color: alpha(@desk_violet, 0.20);
+    color: @desk_ink;
+    box-shadow: none;
+}
+.profile-tabs > header tab:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.appearance-heading { color: @desk_cyan; font-size: 13px; font-weight: 600; }
+.appearance-section { margin-top: 0; }
+.navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
 
 .hardware-chassis {
@@ -104,15 +245,28 @@ window, scrolledwindow, viewport, .app-shell {
     min-height: 46px;
 }
 .encoder .control-tile { background: transparent; border: none; }
-.control-selected { box-shadow: 0 0 0 3px alpha(#202026, 0.7); }
-.key-surface.control-selected {
-    box-shadow: inset 0 0 0 2px #f0f0f2, 0 0 0 3px alpha(#202026, 0.7);
+.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
+.key-surface.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
+.control-pressed {
+    outline: 4px solid #22c55e;
+    outline-offset: -4px;
+    filter: brightness(1.25);
+}
+.control-rotated {
+    outline: 4px solid #f59e0b;
+    outline-offset: -4px;
+    filter: brightness(1.25);
+}
+.control-touched {
+    background-color: alpha(#67e8f9, 0.35);
+    outline: 3px solid #67e8f9;
+    outline-offset: -3px;
 }
 .control-tile { color: #c2ccdc; font-size: 11px; font-weight: 700; padding: 0; }
 .control-active { background: #174936; color: #9af2c4; }
 .key-surface .control-active { background: #174936; }
 .touch-display { color: #8fe7ca; font-size: 10px; padding: 0; }
 .control-selectable:focus-visible {
-    outline: 2px solid @theme_selected_bg_color;
+    outline: 2px solid @desk_cyan;
     outline-offset: -2px;
 }

@@ -49,7 +49,7 @@ where
     deserializer.deserialize_map(UniqueMap(std::marker::PhantomData))
 }
 
-pub(super) fn load(root: &Path) -> io::Result<Metadata> {
+pub(super) fn load(root: &Path, layers: &crate::layers::LayerStore) -> io::Result<Metadata> {
     let path = root.join("organization.json");
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
@@ -69,14 +69,55 @@ pub(super) fn load(root: &Path) -> io::Result<Metadata> {
         }
         Err(error) => return Err(error),
     };
-    let metadata: Metadata = serde_json::from_slice(&bytes)
+    let mut metadata: Metadata = serde_json::from_slice(&bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if metadata.version != 1 {
-        return Err(bad_metadata("unsupported organization version"));
+    match metadata.version {
+        1 => migrate(&mut metadata.views, layers)?,
+        2 => {}
+        _ => return Err(bad_metadata("unsupported organization version")),
     }
     validate(&metadata.views)?;
     validate_applications(&metadata.views, &metadata.profile_applications)?;
     Ok(metadata)
+}
+
+fn migrate(
+    views: &mut BTreeMap<String, View>,
+    layers: &crate::layers::LayerStore,
+) -> io::Result<()> {
+    let mut coordinates = BTreeSet::new();
+    for view in views.values() {
+        if view.parent_page.is_some()
+            || !coordinates.insert((&view.profile, &view.folder, view.page))
+        {
+            return Err(bad_metadata("invalid legacy organization view"));
+        }
+    }
+    let owners: BTreeMap<_, _> = views
+        .iter()
+        .filter(|(key, _)| layers.layers().contains_key(*key))
+        .fold(BTreeMap::new(), |mut owners, (key, view)| {
+            let coordinate = (view.profile.clone(), view.folder.clone());
+            let entry = owners.entry(coordinate).or_insert((view.page, key.clone()));
+            if view.page < entry.0 {
+                *entry = (view.page, key.clone());
+            }
+            owners
+        });
+    for view in views.values_mut() {
+        if !view.folder.is_empty() {
+            let mut parent = view.folder.clone();
+            parent.pop();
+            view.parent_page = Some(
+                owners
+                    .get(&(view.profile.clone(), parent))
+                    .ok_or_else(|| bad_metadata("legacy folder has no surviving parent page"))?
+                    .1
+                    .clone(),
+            );
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn validate(views: &BTreeMap<String, View>) -> io::Result<()> {
@@ -103,7 +144,22 @@ pub(super) fn validate(views: &BTreeMap<String, View>) -> io::Result<()> {
             validate_folder(name)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         }
-        if !coordinates.insert((&view.profile, &view.folder, view.page)) {
+        match &view.parent_page {
+            None if view.folder.is_empty() => {}
+            Some(owner) if !view.folder.is_empty() => {
+                let parent = views
+                    .get(owner)
+                    .ok_or_else(|| bad_metadata("missing folder owner"))?;
+                if parent.profile != view.profile
+                    || parent.folder.len().checked_add(1) != Some(view.folder.len())
+                    || !view.folder.starts_with(&parent.folder)
+                {
+                    return Err(bad_metadata("folder owner is outside parent scope"));
+                }
+            }
+            Some(_) | None => return Err(bad_metadata("invalid root or folder owner")),
+        }
+        if !coordinates.insert((&view.profile, &view.folder, &view.parent_page, view.page)) {
             return Err(bad_metadata("duplicate organization view"));
         }
     }
@@ -145,7 +201,7 @@ pub(super) fn persist(
     validate(views)?;
     validate_applications(views, profile_applications)?;
     let bytes = serde_json::to_vec_pretty(&Metadata {
-        version: 1,
+        version: 2,
         views: views.clone(),
         profile_applications: profile_applications.clone(),
     })

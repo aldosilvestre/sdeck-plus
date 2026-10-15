@@ -190,9 +190,10 @@ fn named_pages_keep_numeric_navigation_and_new_views_use_default_names() {
     f.folder("Tools");
     assert_eq!(f.organization.current(&f.layers).page_name, "Page 1");
     assert!(f.navigate(NavigationAction::ParentFolder));
-    assert_eq!(f.organization.current(&f.layers).page_name, "Home");
-    assert!(f.navigate(NavigationAction::GoToPage(2)));
+    assert_eq!(f.layers.active(), second);
     assert_eq!(f.organization.current(&f.layers).page_name, "Audio Mix");
+    assert!(f.navigate(NavigationAction::GoToPage(1)));
+    assert_eq!(f.organization.current(&f.layers).page_name, "Home");
 }
 
 #[test]
@@ -273,11 +274,11 @@ fn page_boundaries_do_not_wrap_when_navigated() {
 }
 
 #[test]
-fn parent_selects_page_one_when_leaving_nested_folder() {
+fn parent_selects_owning_page_when_leaving_nested_folder() {
     // Given
     let mut f = Fixture::new();
-    let parent = f.folder("Tools");
-    f.page();
+    f.folder("Tools");
+    let parent = f.page();
     f.folder("Audio");
     f.page();
     // When
@@ -370,4 +371,209 @@ fn friendly_keys_are_unique_and_bounded_when_legacy_names_collide() {
     assert!(first.len() <= 64 && second.len() <= 64);
     assert!(!first.chars().any(char::is_control));
     assert_eq!(f.organization.current(&f.layers).profile, profile);
+}
+
+#[test]
+fn same_named_folders_link_locally_and_delete_without_crossing_pages() {
+    // Given: two root pages own independent folders with the same name.
+    let mut f = Fixture::new();
+    let first = f.folder("Tools");
+    let first_second = f.page();
+    let nested = f.folder("Audio");
+    f.layers.select("Base");
+    let second_root = f.page();
+    let second = f.folder("Tools");
+    let second_page = f.page();
+    f.layers.select(&second_root);
+    f.organization
+        .rename_page(&f.layers, "Renamed owner")
+        .unwrap();
+    // When: folder links resolve relative to the active page, even after renaming.
+    assert_eq!(f.organization.folders(&f.layers), ["Tools"]);
+    assert!(f.navigate(NavigationAction::OpenFolder("Tools".into())));
+    assert_eq!(f.layers.active(), second);
+    assert!(f.navigate(NavigationAction::NextPage));
+    assert_eq!(f.layers.active(), second_page);
+    assert!(f.navigate(NavigationAction::ParentFolder));
+    assert_eq!(f.layers.active(), second_root);
+    f.layers.select("Base");
+    assert!(f.navigate(NavigationAction::OpenFolder("Tools".into())));
+    assert_eq!(f.layers.active(), first);
+    assert!(f.navigate(NavigationAction::NextPage));
+    assert_eq!(f.layers.active(), first_second);
+    assert!(f.navigate(NavigationAction::OpenFolder("Audio".into())));
+    assert_eq!(f.layers.active(), nested);
+    assert!(f.navigate(NavigationAction::ParentFolder));
+    assert_eq!(f.layers.active(), first_second);
+    f.layers.select("Base");
+    f.organization
+        .remove_folder(&mut f.layers, "Tools")
+        .unwrap();
+    // Then: all local folder pages and descendants go, while the owner survives.
+    assert_eq!(f.layers.active(), "Base");
+    assert!(f.organization.folders(&f.layers).is_empty());
+    for key in [first, first_second, nested] {
+        assert!(!f.layers.layers().contains_key(&key));
+    }
+    for key in [second, second_page, second_root] {
+        assert!(f.layers.layers().contains_key(&key));
+    }
+}
+
+#[test]
+fn page_deletion_cascades_only_through_ownership_and_cleans_layer_links() {
+    // Given: siblings have identically named folders and links to their pages.
+    let mut f = Fixture::new();
+    let kept_folder = f.folder("Tools");
+    f.layers.select("Base");
+    let removed = f.page();
+    let removed_folder = f.folder("Tools");
+    let nested = f.folder("Nested");
+    f.layers.select(&removed);
+    let nearest = f.page();
+    let farther = f.page();
+    f.layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            Action::SwitchLayer(nested.clone()),
+        )
+        .unwrap();
+    f.layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(2),
+            Action::SwitchLayer(kept_folder.clone()),
+        )
+        .unwrap();
+    f.layers.select(&removed);
+    // When
+    f.organization.remove_page(&mut f.layers).unwrap();
+    // Then: equal-distance selection prefers the preceding page.
+    assert_eq!(f.layers.active(), "Base");
+    for key in [removed, removed_folder, nested] {
+        assert!(!f.layers.layers().contains_key(&key));
+    }
+    for key in [kept_folder.clone(), nearest, farther] {
+        assert!(f.layers.layers().contains_key(&key));
+    }
+    assert!(!f.layers.layers()["Base"]
+        .bindings
+        .contains_key(&Trigger::KeyPress(1)));
+    assert_eq!(
+        f.layers.layers()["Base"].bindings[&Trigger::KeyPress(2)],
+        Action::SwitchLayer(kept_folder)
+    );
+}
+
+#[test]
+fn last_folder_page_deletion_returns_owner_and_last_profile_returns_base() {
+    // Given
+    let mut f = Fixture::new();
+    let owner = f.page();
+    f.folder("Tools");
+    // When / Then
+    f.organization.remove_page(&mut f.layers).unwrap();
+    assert_eq!(f.layers.active(), owner);
+    f.layers.create("Studio").unwrap();
+    f.layers.select("Studio");
+    f.organization.sync(&f.layers);
+    f.organization
+        .set_profile_application("Studio", "obs")
+        .unwrap();
+    f.folder("Tools");
+    f.layers.select("Studio");
+    f.organization.remove_page(&mut f.layers).unwrap();
+    assert_eq!(f.layers.active(), "Base");
+    assert!(!f.organization.profiles().contains(&"Studio".to_owned()));
+    assert!(f.organization.profile_application("Studio").is_none());
+}
+
+#[test]
+fn named_page_is_blank_selected_and_keeps_its_folder_owner() {
+    // Given
+    let mut f = Fixture::new();
+    let owner = f.page();
+    f.folder("Tools");
+    f.layers
+        .bind(
+            f.layers.active().to_owned().as_str(),
+            Trigger::KeyPress(1),
+            Action::Emit("kept".into()),
+        )
+        .unwrap();
+    // When
+    let page = f
+        .organization
+        .create_named_page(&mut f.layers, " Audio Mix ")
+        .unwrap();
+    // Then
+    assert_eq!(f.layers.active(), page);
+    assert!(f.layers.layers()[&page].bindings.is_empty());
+    assert_eq!(f.organization.current(&f.layers).page_name, "Audio Mix");
+    assert_eq!(
+        f.organization.views[&page].parent_page.as_deref(),
+        Some(owner.as_str())
+    );
+    assert!(f.navigate(NavigationAction::ParentFolder));
+    assert_eq!(f.layers.active(), owner);
+}
+
+#[test]
+fn profile_removal_deletes_all_pages_folders_and_application_identity() {
+    for select_removed in [false, true] {
+        // Given
+        let mut f = Fixture::new();
+        let other = f.page();
+        let other_folder = f.folder("Tools");
+        f.layers.create("Studio").unwrap();
+        f.layers.select("Studio");
+        f.organization.sync(&f.layers);
+        let page = f.page();
+        let folder = f.folder("Tools");
+        let child = f.folder("Nested");
+        f.organization
+            .set_profile_application("Studio", "obs")
+            .unwrap();
+        f.layers
+            .bind(
+                &other,
+                Trigger::KeyPress(1),
+                Action::SwitchLayer(child.clone()),
+            )
+            .unwrap();
+        f.layers
+            .bind(
+                &other,
+                Trigger::KeyPress(2),
+                Action::SwitchLayer(other_folder.clone()),
+            )
+            .unwrap();
+        if !select_removed {
+            f.layers.select(&other);
+        }
+        // When
+        f.organization
+            .remove_profile(&mut f.layers, "Studio")
+            .unwrap();
+        // Then
+        assert_eq!(
+            f.layers.active(),
+            if select_removed { "Base" } else { &other }
+        );
+        for key in ["Studio".to_owned(), page, folder, child] {
+            assert!(!f.layers.layers().contains_key(&key));
+            assert!(!f.organization.views.contains_key(&key));
+        }
+        assert_eq!(f.organization.profiles(), ["Base"]);
+        assert!(f.organization.profile_application("Studio").is_none());
+        assert!(f.layers.layers().contains_key(&other_folder));
+        assert!(!f.layers.layers()[&other]
+            .bindings
+            .contains_key(&Trigger::KeyPress(1)));
+        assert_eq!(
+            f.layers.layers()[&other].bindings[&Trigger::KeyPress(2)],
+            Action::SwitchLayer(other_folder)
+        );
+    }
 }

@@ -34,7 +34,7 @@ pub(super) struct ButtonTextEditor {
 impl ButtonTextEditor {
     pub(super) fn new(artwork: &ArtworkUi) -> Rc<Self> {
         let content = GtkBox::new(Orientation::Vertical, 8);
-        let body = GtkBox::new(Orientation::Horizontal, 12);
+        let body = GtkBox::new(Orientation::Horizontal, 16);
         let form = GtkBox::new(Orientation::Vertical, 8);
         form.set_hexpand(true);
         let input = gtk::TextView::new();
@@ -90,9 +90,12 @@ impl ButtonTextEditor {
         preview_column.append(&status);
         body.append(&preview_column);
         content.append(&body);
-        let buttons = GtkBox::new(Orientation::Horizontal, 8);
+        let buttons = GtkBox::new(Orientation::Horizontal, 12);
         let save = ui::button("document-save-symbolic", "Save text");
+        save.add_css_class("suggested-action");
         let remove = ui::button("edit-clear-symbolic", "Remove text");
+        remove.add_css_class("destructive-action");
+        remove.set_has_frame(false);
         buttons.append(&save);
         buttons.append(&remove);
         content.append(&buttons);

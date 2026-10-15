@@ -1,6 +1,9 @@
 //! Physical evdev chords, not text entry or compositor commands.
 use std::io;
 
+mod aliases;
+pub use aliases::supported_key_aliases;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Modifier {
     Control,
@@ -155,10 +158,13 @@ const KEYS: &[(&str, u16)] = &[
     ("COMPOSE", 127),
     ("STOP", 128),
     ("MENU", 139),
+    ("EJECTCD", 161),
     ("NEXTSONG", 163),
     ("PLAYPAUSE", 164),
     ("PREVIOUSSONG", 165),
     ("STOPCD", 166),
+    ("RECORD", 167),
+    ("REWIND", 168),
     ("F13", 183),
     ("F14", 184),
     ("F15", 185),
@@ -171,6 +177,16 @@ const KEYS: &[(&str, u16)] = &[
     ("F22", 192),
     ("F23", 193),
     ("F24", 194),
+    ("PLAYCD", 200),
+    ("PAUSECD", 201),
+    ("PLAY", 207),
+    ("FASTFORWARD", 208),
+    ("BRIGHTNESSDOWN", 224),
+    ("BRIGHTNESSUP", 225),
+    ("KBDILLUMTOGGLE", 228),
+    ("KBDILLUMDOWN", 229),
+    ("KBDILLUMUP", 230),
+    ("MICMUTE", 248),
 ];
 
 /// Canonical physical key names accepted by the parser (aliases excluded).
@@ -198,20 +214,10 @@ pub fn parse_chord(modifiers: &[String], text: &str) -> Result<Chord, String> {
             normalized.push(modifier);
             continue;
         }
-        let name = match name.as_str() {
-            "RETURN" => "ENTER",
-            "ESC" => "ESCAPE",
-            "SPACEBAR" => "SPACE",
-            "BACKSPACE" | "BACK_SPACE" => "BACKSPACE",
-            "PAGE_UP" | "PRIOR" => "PAGEUP",
-            "PAGE_DOWN" | "NEXT" => "PAGEDOWN",
-            "PRINTSCREEN" | "PRINT" => "SYSRQ",
-            "PERIOD" => "DOT",
-            "BRACKETLEFT" => "LEFTBRACE",
-            "BRACKETRIGHT" => "RIGHTBRACE",
-            "KP_ENTER" => "KPENTER",
-            other => other,
-        };
+        let name = aliases::ALIASES
+            .iter()
+            .find(|(alias, _)| alias.eq_ignore_ascii_case(&name))
+            .map_or(name.as_str(), |(_, canonical)| *canonical);
         let code = KEYS.iter().find(|(candidate, _)| *candidate == name).map(|(_, code)| *code)
             .ok_or_else(|| format!("Unsupported physical key {segment:?}; use ASCII A-Z/0-9, F1-F24, Enter/Return, Tab, Escape, Space, navigation, named punctuation (e.g. Minus/Slash), KP0-KP9/KPEnter or media key names; not Unicode text"))?;
         if key.replace(PhysicalKey(code)).is_some() {
@@ -797,6 +803,17 @@ mod tests {
         }
     }
     #[test]
+    fn every_exported_alias_parses_to_its_canonical_key() {
+        for (alias, canonical) in supported_key_aliases() {
+            let expected = KEYS.iter().find(|(name, _)| *name == canonical).unwrap().1;
+            assert_eq!(
+                parse_chord(&[], alias).unwrap().key().code(),
+                expected,
+                "{alias} should map to {canonical}"
+            );
+        }
+    }
+    #[test]
     fn invalid_chords_are_not_commands_or_text() {
         for text in [
             "",
@@ -821,6 +838,103 @@ mod tests {
         ] {
             assert!(parse_chord(&[], text).is_ok(), "{text}");
         }
+    }
+    #[test]
+    fn multimedia_names_emit_the_requested_physical_key() {
+        // Given: independent Linux input codes and user-facing media aliases.
+        for (names, code) in [
+            (&["XF86AudioLowerVolume", "volume_down"][..], 114),
+            (&["XF86AudioRaiseVolume", "volume_up"][..], 115),
+            (&["XF86AudioMute", "mute_audio"][..], 113),
+            (&["XF86AudioMicMute", "mute_mic", "mic_mute"][..], 248),
+            (&["XF86AudioPlay", "play", "media_play"][..], 207),
+            (&["XF86AudioPause", "media_pause", "pausecd"][..], 201),
+            (
+                &[
+                    "XF86AudioPlayPause",
+                    "play_pause",
+                    "playpause",
+                    "media_play_pause",
+                ][..],
+                164,
+            ),
+            (
+                &["XF86AudioNext", "next_track", "nextsong", "media_next"][..],
+                163,
+            ),
+            (
+                &[
+                    "XF86AudioPrev",
+                    "previous",
+                    "prev",
+                    "previous_track",
+                    "media_previous",
+                ][..],
+                165,
+            ),
+            (&["XF86AudioStop", "media_stop"][..], 166),
+            (&["XF86AudioRecord", "media_record"][..], 167),
+            (&["XF86AudioRewind", "media_rewind"][..], 168),
+            (
+                &["XF86AudioForward", "fast_forward", "media_forward"][..],
+                208,
+            ),
+            (&["XF86Eject", "eject"][..], 161),
+            (&["XF86MonBrightnessDown", "brightness_down"][..], 224),
+            (&["XF86MonBrightnessUp", "brightness_up"][..], 225),
+            (&["XF86KbdBrightnessDown", "kbd_brightness_down"][..], 229),
+            (&["XF86KbdBrightnessUp", "kbd_brightness_up"][..], 230),
+            (&["XF86KbdLightOnOff", "kbd_light_toggle"][..], 228),
+        ] {
+            for name in names {
+                let chord = parse_chord(&[], name).unwrap();
+                let mut sink = Mock::default();
+                // When: the production emitter sends the parsed shortcut.
+                emit_chord(&mut sink, &chord).unwrap();
+                // Then: only the expected main key is pressed and released.
+                assert_eq!(
+                    sink.events,
+                    vec![
+                        Event::Sync,
+                        down(code),
+                        Event::Sync,
+                        up(code),
+                        Event::Sync,
+                        Event::Sync
+                    ],
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn multimedia_modifiers_do_not_reinterpret_legacy_navigation_keys() {
+        // Given: checkbox modifiers merged with a mixed-case media chord.
+        let chord =
+            parse_chord(&strings(&["Control", "SHIFT"]), "ctrl + xf86AudioMicMute").unwrap();
+        let mut sink = Mock::default();
+        // When: the real emitter sends that chord.
+        emit_chord(&mut sink, &chord).unwrap();
+        // Then: deduplicated modifiers surround microphone mute, not audio mute.
+        assert_eq!(
+            sink.events,
+            vec![
+                down(29),
+                down(42),
+                Event::Sync,
+                down(248),
+                Event::Sync,
+                up(248),
+                Event::Sync,
+                up(42),
+                up(29),
+                Event::Sync
+            ]
+        );
+        assert_eq!(parse_chord(&[], "PAUSE").unwrap().key().code(), 119);
+        assert_eq!(parse_chord(&[], "NEXT").unwrap().key().code(), 109);
+        assert_eq!(parse_chord(&[], "STOP").unwrap().key().code(), 128);
     }
     #[test]
     fn synchronized_sequence() {

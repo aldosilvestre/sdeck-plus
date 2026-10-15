@@ -149,3 +149,48 @@ fn parent_does_not_cross_scope_when_parent_page_one_is_deleted() {
     assert!(!changed);
     assert_eq!(f.layers.active(), child);
 }
+
+#[test]
+fn invalid_named_page_and_removals_leave_both_stores_unchanged() {
+    // Given
+    let mut f = Fixture::new();
+    f.folder("Tools");
+    f.layers.select("Base");
+    f.layers
+        .bind(
+            "Base",
+            crate::layers::Trigger::KeyPress(1),
+            crate::layers::Action::Emit("kept".into()),
+        )
+        .unwrap();
+    let before = f.organization.views.clone();
+    let keys = f.layers.names();
+    let bindings = f.layers.layers()["Base"].bindings.clone();
+    // When / Then
+    for name in [
+        "".to_owned(),
+        " ".into(),
+        "bad\n".into(),
+        "a".repeat(65),
+        "é".repeat(33),
+    ] {
+        assert!(f
+            .organization
+            .create_named_page(&mut f.layers, &name)
+            .is_err());
+    }
+    assert!(f.organization.remove_page(&mut f.layers).is_err());
+    for profile in ["Base", "Missing"] {
+        assert!(f
+            .organization
+            .remove_profile(&mut f.layers, profile)
+            .is_err());
+    }
+    for name in ["Missing", "..", "a/b"] {
+        assert!(f.organization.remove_folder(&mut f.layers, name).is_err());
+    }
+    assert_eq!(f.organization.views, before);
+    assert_eq!(f.layers.names(), keys);
+    assert_eq!(f.layers.active(), "Base");
+    assert_eq!(f.layers.layers()["Base"].bindings, bindings);
+}

@@ -159,6 +159,16 @@ pub(crate) fn button(icon: &str, caption: &str) -> Button {
     button
 }
 
+pub(crate) fn icon_button(icon: &str, caption: &str) -> Button {
+    let button = Button::builder()
+        .icon_name(icon)
+        .tooltip_text(caption)
+        .build();
+    button.add_css_class("icon-action");
+    button.update_property(&[gtk::accessible::Property::Label(caption)]);
+    button
+}
+
 pub(crate) fn menu_button(icon: &str, caption: &str, panel: &Popover) -> gtk::MenuButton {
     let button = gtk::MenuButton::builder()
         .child(&icon_caption(icon, caption))
@@ -192,6 +202,46 @@ pub(crate) fn helper(text: &str) -> Label {
     label
 }
 
+pub(crate) fn field_help(row: &GtkBox, title: &str, explanation: &str) {
+    let Some(label) = row
+        .first_child()
+        .and_then(|child| child.downcast::<Label>().ok())
+    else {
+        return;
+    };
+    row.remove(&label);
+    label.set_hexpand(true);
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.append(&label);
+    let panel = popover(title, &helper(explanation));
+    let help = gtk::MenuButton::builder()
+        .icon_name("help-about-symbolic")
+        .tooltip_text(explanation)
+        .popover(&panel)
+        .build();
+    help.add_css_class("field-help");
+    help.update_property(&[gtk::accessible::Property::Label(title)]);
+    header.append(&help);
+    row.prepend(&header);
+}
+
+pub(crate) fn track_motion(widget: &impl IsA<gtk::Widget>) {
+    let settings = widget.settings();
+    if settings.is_gtk_enable_animations() {
+        widget.add_css_class("motion-enabled");
+    }
+    let weak = widget.as_ref().downgrade();
+    settings.connect_gtk_enable_animations_notify(move |settings| {
+        if let Some(widget) = weak.upgrade() {
+            if settings.is_gtk_enable_animations() {
+                widget.add_css_class("motion-enabled");
+            } else {
+                widget.remove_css_class("motion-enabled");
+            }
+        }
+    });
+}
+
 pub(crate) fn clear_feedback(label: &Label) {
     label.remove_css_class("feedback-error");
     label.remove_css_class("feedback-success");
@@ -206,13 +256,28 @@ pub(crate) fn feedback(label: &Label, failed: bool) {
     });
 }
 
+pub(crate) fn panel_body(body: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
+        .min_content_width(300)
+        .max_content_width(560)
+        .max_content_height(288)
+        .child(body)
+        .build()
+}
+
 pub(crate) fn popover(title: &str, body: &impl IsA<gtk::Widget>) -> Popover {
     let panel = Popover::new();
-    let content = GtkBox::new(Orientation::Vertical, 12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
+    panel.set_halign(gtk::Align::End);
+    track_motion(&panel);
+    let content = GtkBox::new(Orientation::Vertical, 16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
     let header = GtkBox::new(Orientation::Horizontal, 8);
     let title = Label::new(Some(title));
     title.add_css_class("section-label");

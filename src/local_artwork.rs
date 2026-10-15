@@ -246,11 +246,21 @@ impl ArtworkStore {
     /// Remove all assignments before layer deletion. Reusing its name starts empty.
     /// Assets still referenced by any other layer or target are retained.
     pub fn remove_layer(&mut self, layer: &str) -> io::Result<()> {
-        self.check_mutation(layer)?;
+        self.remove_layers(&[layer.to_owned()])
+    }
+
+    /// Remove a page/folder subtree's artwork in one atomic configuration commit.
+    ///
+    /// # Errors
+    /// Invalid configuration or persistence errors leave every assignment intact.
+    pub fn remove_layers(&mut self, layers: &[String]) -> io::Result<()> {
+        for layer in layers {
+            self.check_mutation(layer)?;
+        }
         let mut next = self.assignments.clone();
-        next.retain(|(name, _), _| name != layer);
+        next.retain(|(name, _), _| !layers.contains(name));
         let mut texts = self.button_texts.clone();
-        texts.retain(|(name, _), _| name != layer);
+        texts.retain(|(name, _), _| !layers.contains(name));
         self.commit_with_text(next, texts)
     }
 
@@ -779,6 +789,73 @@ mod tests {
         let mut store = ArtworkStore::open_at_for_layer(&second, None).unwrap();
         store.remove_layer("B").unwrap();
         assert!(!second.join("assets/shared.png").exists());
+    }
+
+    #[test]
+    fn failed_bulk_removal_preserves_every_assignment_and_asset() {
+        // Given: a subtree and an unrelated page, with a blocked atomic commit.
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        let pages = ["Owner", "Child", "Keep"];
+        let paths: Vec<_> = pages
+            .iter()
+            .map(|name| {
+                store
+                    .assign_in_layer(name, ArtworkTarget::Keypad(1), &source)
+                    .unwrap()
+            })
+            .collect();
+        let before = fs::read(root.join("artwork.conf")).unwrap();
+        fs::create_dir(root.join("artwork.conf.tmp")).unwrap();
+        // When
+        assert!(store
+            .remove_layers(&["Owner".into(), "Child".into()])
+            .is_err());
+        // Then
+        assert_eq!(fs::read(root.join("artwork.conf")).unwrap(), before);
+        for (page, path) in pages.iter().zip(paths) {
+            assert_eq!(
+                store.assigned_path_in_layer(page, ArtworkTarget::Keypad(1)),
+                Some(path.clone())
+            );
+            assert!(path.is_file());
+        }
+    }
+
+    #[test]
+    fn bulk_removal_clears_only_the_deleted_subtree_artwork() {
+        // Given
+        let root = temp();
+        let source = root.join("source.png");
+        png(&source, "ff0000ff");
+        let mut store = ArtworkStore::open_at_for_layer(&root, None).unwrap();
+        let pages = ["Owner", "Child", "Keep"];
+        let paths: Vec<_> = pages
+            .iter()
+            .map(|name| {
+                store
+                    .assign_in_layer(name, ArtworkTarget::Keypad(1), &source)
+                    .unwrap()
+            })
+            .collect();
+        // When
+        store
+            .remove_layers(&["Owner".into(), "Child".into()])
+            .unwrap();
+        // Then
+        for (page, path) in pages[..2].iter().zip(&paths[..2]) {
+            assert!(store
+                .assigned_path_in_layer(page, ArtworkTarget::Keypad(1))
+                .is_none());
+            assert!(!path.exists());
+        }
+        assert_eq!(
+            store.assigned_path_in_layer("Keep", ArtworkTarget::Keypad(1)),
+            Some(paths[2].clone())
+        );
+        assert!(paths[2].is_file());
     }
 
     #[test]

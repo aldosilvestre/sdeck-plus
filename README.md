@@ -19,6 +19,15 @@ selected control.
 
 ![Main window with Key 1 selected](docs/screenshots/main-window.png)
 
+**Selected control and live input.** The control being edited has a thick violet
+ring. When you press a key or dial on the device it gets a green outline and
+brightens while held; a dial turn flashes amber, and a touch tap, hold or flick
+lights the touched strip zone in cyan. The highlight is drawn on the control
+itself, over any assigned artwork, so it stays visible on keys and zones with
+images.
+
+![Key press, dial turn and touch zone highlighted over assigned artwork](docs/screenshots/live-input-feedback.png)
+
 **Action types.** The **Action** menu offers layer/page switching, shell
 commands, launching applications, keyboard shortcuts, legacy events, the
 categorized **More actions** and **Play sound**.
@@ -55,10 +64,20 @@ the active layer and assign or clear its image.
 
 ![Artwork target selector](docs/screenshots/artwork-touch-zones.png)
 
-**Profiles, pages and folders.** **Organize** creates profiles, renames the
-current page and associates a profile with an application.
+**Profiles.** **Organize** creates profiles, associates a profile with an
+application and deletes the selected profile. Pages and folders are managed
+from the page bar instead.
 
-![Organize panel](docs/screenshots/organize-profiles-pages.png)
+![Organize panel, Edit profile task](docs/screenshots/organize-profiles-pages.png)
+![Organize panel, New profile task](docs/screenshots/organize-new-profile.png)
+
+**Create profile** stays disabled until the name is non-empty and unused, and a
+duplicate name is explained while you type. **Save changes** is enabled only
+when the application rule differs from the saved one; Base cannot be changed or
+deleted. The same panel in the light palette, used when the system GTK theme is
+not dark:
+
+![Organize panel in the light theme](docs/screenshots/organize-light-theme.png)
 
 **Application profiles.** Each profile is a tab with its own pages, bindings
 and artwork. Here the **OBS** profile, associated with the `obs` application,
@@ -207,7 +226,31 @@ Images are copied into the application's XDG data directory, so the original fil
 
 ## Application layers and actions
 
-Layers and action bindings are stored independently in `layers.conf` in the same app data directory; per-layer artwork assets and assignments remain in their separate artwork store. Create, select, or remove a named layer in **APPLICATION LAYERS**. The built-in `Base` layer cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
+Layers and action bindings are stored independently in `layers.conf` in the same app data directory; per-page artwork remains in its separate artwork store. Select a profile tab and use **Organize** to create, associate or delete a profile. The built-in `Base` profile and its first page cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
+
+### Pages and their folders
+
+**New page** asks for a name before creating anything. Cancel leaves the
+configuration unchanged. The adjacent pencil renames the current page;
+the red trash button deletes it after confirmation, including its owned
+folders, bindings and artwork. Renaming preserves its identity and contents.
+The compact previous, next and parent icons have accessible labels and tooltips.
+
+The folder icon in the page bar opens **Page folders**. Create a folder,
+select one of this page's folders, then **Open folder**, **Link to control**
+or **Delete folder**. Linking saves navigation for the selected physical
+control and event without opening the folder. Deleting removes only this
+page's folder and its local links; other pages can keep independent folders
+with the same name. **Parent** returns to the exact owning page.
+
+Organization metadata writes version 2 with stable page-owner keys. Existing
+version-1 folders attach to their former parent view's first surviving page
+(page 1 when present). Names, backing keys, bindings and artwork are retained.
+Invalid metadata remains untouched and disables organization writes.
+
+![New page name prompt](docs/screenshots/new-page-name.png)
+![Rename current page](docs/screenshots/rename-page.png)
+![Folders owned by the current page](docs/screenshots/page-folders.png)
 
 To configure an action, choose the layer at the top, then select a physical control:
 
@@ -258,13 +301,14 @@ remembered level; before an explicit absolute level, relative/wake actions use
 a 100% baseline because the device protocol has no brightness readback.
 
 Profiles appear as native tabs, with **Base** always available. Create another
-profile in **Organize** using **New profile name** and **Save new profile**. Pages and
-folders belong to their profile and do not create additional profile tabs.
+profile in **Organize → New profile** using **Profile name** and **Create profile** (disabled until the name is new). Pages
+belong to their profile; folders belong to individual pages and do not create additional profile tabs.
 Switching tabs restores that profile's last selected page for the current session.
 
-To make a profile application-specific, open **Organize**, choose it under
-**Profile to save**, enter a window class or executable name under
-**Application (optional)**, and click **Save profile**. Both save buttons confirm
+To make a profile application-specific, open **Organize → Edit profile**, choose it under
+**Profile to edit**, enter a window class or executable name under
+**Auto-switch application (optional)**, and click **Save changes** (enabled once the field differs from the saved rule). Question-mark
+icons provide extended help on hover or click. Both save buttons confirm
 success only after writing the configuration, and report disk errors. For example,
 `kitty`, `firefox`, or `obs` can match executable names; a precise window class
 can distinguish windows belonging to the same executable. Leave the field
@@ -280,11 +324,11 @@ external window clears its retained context. A manual tab choice is retained
 until the next changed external application context. Selecting a profile
 never launches its application. Associations survive restarting the app.
 
-Use **New page** beside the page indicator or **New folder** in **Organize**. Every view has
+Use **New page** beside the page indicator or **New folder** in **Page folders**. Every view has
 its own existing layer-backed bindings and artwork. Navigation stays within
 the current profile and folder; the indicator shows the current page.
-To rename the current page, open **Organize**, edit **Page name**, and click
-**Rename page** (or press Enter in the name field). Names must be nonblank,
+To rename the current page, click the pencil next to **New page**, edit
+**Page name**, and click **Save name** (or press Enter). Names must be nonblank,
 contain no control characters, and fit within 64 UTF-8 bytes. Surrounding
 spaces are trimmed. The saved name appears in the page indicator and survives
 restarts; page numbers, navigation, bindings and artwork remain unchanged.
@@ -311,7 +355,29 @@ The application does not enable OBS's server or alter its configuration.
 
 All controls fit without scrolling at the default 1000 × 700 logical-pixel client size: the device canvas stays on the left, action settings on the right, and layer controls above. The last-event panel has been removed; live physical states and connection/error indicators remain. Summaries and long layer names are ellipsized; tooltips show full summaries and the editor retains full saved action fields.
 
-Every outer edge has 38 logical pixels of padding: a 10mm reference at 96dpi, not a physical measurement guarantee. Actual millimeters depend on monitor DPI and scaling. Inactive window, viewport, shell, and cards share one dark background. The physical preview intentionally contrasts: a nearly square silver chassis, two rows of four separated black square keys, a continuous black display bezel, and four round purple knobs on a recessed silver rail aligned to the key columns. The artwork strip retains its 8:1 ratio inside the wider bezel; transparent zones preserve strip-background layering. No sample artwork or audio values are rendered. Selection, live state, keyboard focus, and connection status remain distinct.
+The window uses 24 logical pixels of outer padding and an ink-toned palette,
+with elevated navy surfaces, violet save actions and cyan keyboard focus.
+This appearance stays consistent under light and dark desktop themes.
+Profile tabs use a tonal selection highlight, and the **Appearance** group
+separates button text and artwork from action editing. **Save binding** only
+persists the binding; **Test action** runs it immediately.
+
+Profile tabs and page navigation have a 12-pixel gap; the main preview and
+editor regions have 24-pixel separation. The editor uses 16-pixel padding
+and gaps between sections. Executable/arguments and shortcut/modifiers share
+adaptive columns, stacking when their available width is too small. Modifier
+checkboxes use a two-by-two grid, and hidden fields do not leave empty cells.
+
+Organization, OBS and help panels keep their title and **Close** button visible
+above scrollable content. The text popup retains its full-size preview and
+native font chooser. Brief hover and press transitions follow GTK's animation
+setting and stop when animations are disabled.
+
+The physical preview retains its silver chassis, eight black keys, continuous
+touch-strip bezel and four purple knobs. The artwork strip keeps its 8:1 ratio;
+transparent zones preserve strip-background layering. No sample artwork or audio
+values are rendered. Selection, live state, keyboard focus and connection status
+remain distinct.
 
 The serialized production GTK test checks the shared editor's thirteen assign/clear paths, explicit target selection, chooser ownership, reference geometry, and all five actions at 1000 × 700 with empty, loaded, and cleared artwork and long editor values, without moving scroll adjustments. It also checks 1840 × 980, 1280 × 720, and 960 × 640 horizontal fit separately. Reduced heights (including 960 × 640) may scroll vertically; 640 × 480 retains two-axis scroll reachability. Larger system fonts can also require scrolling. Window managers may override the requested startup size; no desktop resolution change is needed.
 
@@ -319,12 +385,18 @@ Launch arguments are passed as distinct process arguments; no shell evaluates la
 
 ### Physical keyboard actions (Linux)
 
+In the **Shortcut** editor, select **Key names and aliases** to open the native
+reference. It lists the parser's accepted aliases and canonical physical keys,
+with selectable text for copying. Closing the reference preserves the current
+shortcut draft and never saves or executes it.
+
 **Shortcut** uses a Linux uinput virtual keyboard, not compositor shortcut dispatch, shell commands, desktop bindings, or text typing. With no modifiers, it sends one complete key down/up. With modifiers, it holds them while the main key goes down/up, then releases them in reverse order. For example, `CTRL + D` holds Control during D; `SUPER + RETURN` holds Windows/Meta during Enter. Modifiers are released after each action, not kept held between bindings. Failed sends attempt release cleanup and broken devices are discarded.
 
 - Full chord text and checkbox modifiers are merged and deduplicated in CTRL, SHIFT, ALT, SUPER order. Checkboxes may all be empty. Names are case-insensitive; `Control` = `CTRL`, `Win`/`Windows`/`Meta` = `SUPER`, and `Return` = `Enter`. Uppercase letters do not implicitly add Shift.
 - Saved legacy **Press key** actions keep working and appear in the editor as **Shortcut** with no modifiers. Inspection never rewrites saved records or key names; explicitly saving converts that binding to a canonical Shortcut. Unsupported legacy names remain visible unchanged, but validation rejects unsupported explicit saves.
 - New bindings save canonical modifier/key fields and reject unknown names, empty segments, multiple main keys, or modifier-only chords. Supported keys include ASCII letters/digits, F1–F24, Enter, Tab, Escape, Space, navigation, named punctuation, keypad and media keys. Structurally valid legacy names remain loadable and unchanged; unsupported names report an actionable execution error, not a destructive migration.
 - Names identify physical evdev positions. The active desktop keyboard layout determines resulting symbols; this is not Unicode text entry and does not promise indistinguishable hardware behavior.
+- Multimedia shortcuts accept `XF86AudioLowerVolume`, `XF86AudioRaiseVolume`, `XF86AudioMute`, `XF86AudioMicMute` (`mute_mic`), `XF86AudioPlay` (`play`), `XF86AudioPause` (`media_pause`), `play_pause`, `XF86AudioNext` (`next_track`), `XF86AudioPrev` (`previous`), `XF86AudioStop`, `XF86AudioRecord`, `XF86AudioRewind`, `XF86AudioForward` and `XF86Eject`. Display brightness accepts `XF86MonBrightnessUp`/`XF86MonBrightnessDown`; keyboard lighting accepts `XF86KbdBrightnessUp`/`XF86KbdBrightnessDown`/`XF86KbdLightOnOff`. These names are case-insensitive and work with optional modifiers. Existing `PAUSE`, `NEXT` and `STOP` retain their keyboard/navigation meanings; use the media names for transport controls. These are physical key events: desktop bindings determine their effects, so separate Play and Play/Pause key codes may still resolve to the same desktop action.
 - The serial layer worker owns one lazy, persistent keyboard. Startup and non-keyboard actions do not open uinput. First use requires effective access to `/dev/uinput` and kernel uinput support. Access/create/write failures are reported; there is no fallback or automatic privilege escalation, module loading, permission change, or desktop configuration change. Ask an administrator to assess narrowly scoped access if needed; a device node or udev tag alone does not prove effective permission.
 - Creation has a bounded 200 ms discovery grace period, not proof that the compositor has recognized the keyboard. Real access, first-action delivery, compositor acceptance and layout behavior remain unverified on hardware. Automated tests use mocks only and never open or send to a real keyboard.
 

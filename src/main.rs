@@ -26,6 +26,7 @@ mod autostart;
 mod button_text_editor;
 mod feature_editor;
 mod feature_runtime;
+mod shortcut_reference;
 mod tray;
 mod tray_preference;
 mod ui;
@@ -353,6 +354,9 @@ struct MonitorWidgets {
     key_labels: Vec<Label>,
     encoder_labels: Vec<Label>,
     touch_status: Label,
+    key_widgets: Vec<gtk::Widget>,
+    encoder_widgets: Vec<gtk::Widget>,
+    zone_widgets: Vec<gtk::Widget>,
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
@@ -373,6 +377,7 @@ fn build_widgets(
     root.set_margin_start(24);
     root.set_margin_end(24);
     root.add_css_class("app-shell");
+    ui::track_motion(&root);
 
     let header = GtkBox::new(Orientation::Horizontal, 12);
     let heading = GtkBox::new(Orientation::Vertical, 4);
@@ -387,16 +392,18 @@ fn build_widgets(
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
-    let help_body = GtkBox::new(Orientation::Vertical, 12);
+    let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
         ("preferences-system-symbolic", "2. Configure an action", "Choose an event and action. More actions contains System, Multimedia, Organization, Device and OBS."),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
     ] {
-        help_body.append(&ui::section_heading(icon, title));
-        help_body.append(&ui::helper(explanation));
+        let step = GtkBox::new(Orientation::Vertical, 8);
+        step.append(&ui::section_heading(icon, title));
+        step.append(&ui::helper(explanation));
+        help_body.append(&step);
     }
-    let help_popover = ui::popover("Setup help", &help_body);
+    let help_popover = ui::popover("Setup help", &ui::panel_body(&help_body));
     let help_menu = ui::menu_button("help-browser-symbolic", "Help", &help_popover);
     header.append(&help_menu);
     root.append(&header);
@@ -409,6 +416,7 @@ fn build_widgets(
     heading.append(&connection_detail);
 
     let layer_card = card();
+    layer_card.add_css_class("navigation-card");
     layer_card.set_spacing(8);
     let layer_row = GtkBox::new(Orientation::Horizontal, 8);
     let layer_model = gtk::StringList::new(&[]);
@@ -431,16 +439,36 @@ fn build_widgets(
         .width_chars(16)
         .hexpand(true)
         .build();
-    let create_layer = ui::button("document-save-symbolic", "Save new profile");
-    let remove_layer = ui::button("edit-delete-symbolic", "Remove selected");
-    remove_layer.add_css_class("destructive-action");
-    remove_layer.set_has_frame(false);
-    let management = GtkBox::new(Orientation::Vertical, 12);
-    management.append(&ui::helper(
-        "Profiles keep separate bindings and artwork. Add folders and pages to organize a profile.",
-    ));
-    management.append(&labeled("New profile name", &layer_name));
-    management.append(&create_layer);
+    let create_layer = ui::button("list-add-symbolic", "Create profile");
+    create_layer.add_css_class("suggested-action");
+    let management = GtkBox::new(Orientation::Vertical, 16);
+    let creation = GtkBox::new(Orientation::Vertical, 12);
+    let name_row = labeled("Profile name", &layer_name);
+    ui::field_help(&name_row, "New profile help",
+        "Create a separate set of bindings and artwork. The new profile starts empty. Add pages and folders from the page bar after creating it.");
+    creation.append(&name_row);
+    creation.append(&create_layer);
+    let creation_error = ui::helper("");
+    creation_error.set_visible(false);
+    creation.append(&creation_error);
+    let error = creation_error.downgrade();
+    let known = layers.clone();
+    let create = create_layer.downgrade();
+    layer_name.connect_changed(move |name| {
+        let (Some(error), Some(create)) = (error.upgrade(), create.upgrade()) else {
+            return;
+        };
+        let value = name.text();
+        let value = value.trim();
+        let duplicate = known.borrow().names().iter().any(|n| n == value);
+        create.set_sensitive(!value.is_empty() && !duplicate);
+        error.set_visible(duplicate);
+        if duplicate {
+            error.set_text(&format!("A profile named {value} already exists."));
+            ui::feedback(&error, true);
+        }
+    });
+    create_layer.set_sensitive(false);
     let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad"]);
     let control_picker = gtk::DropDown::new(Some(control_model.clone()), gtk::Expression::NONE);
     let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
@@ -503,11 +531,14 @@ fn build_widgets(
     args_view.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
         args_label.upcast_ref()
     ])]);
-    let modifier_buttons = GtkBox::new(Orientation::Horizontal, 8);
-    modifier_buttons.append(&super_mod);
-    modifier_buttons.append(&shift_mod);
-    modifier_buttons.append(&ctrl_mod);
-    modifier_buttons.append(&alt_mod);
+    let modifier_buttons = gtk::Grid::builder()
+        .column_spacing(12)
+        .row_spacing(8)
+        .build();
+    modifier_buttons.attach(&super_mod, 0, 0, 1, 1);
+    modifier_buttons.attach(&shift_mod, 1, 0, 1, 1);
+    modifier_buttons.attach(&ctrl_mod, 0, 1, 1, 1);
+    modifier_buttons.attach(&alt_mod, 1, 1, 1, 1);
     let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
@@ -547,21 +578,22 @@ fn build_widgets(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    management.append(feature_runtime.management());
-    management.append(&remove_layer);
-    let management_scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .propagate_natural_height(true)
-        .max_content_height(360)
-        .min_content_width(320)
-        .child(&management)
+    let profile_tasks = gtk::Stack::builder()
+        .vhomogeneous(false)
+        .hhomogeneous(true)
         .build();
-    let management_popover = ui::popover("Profiles, pages and folders", &management_scroll);
+    profile_tasks.add_titled(feature_runtime.management(), Some("edit"), "Edit profile");
+    profile_tasks.add_titled(&creation, Some("new"), "New profile");
+    let task_picker = gtk::StackSwitcher::builder().stack(&profile_tasks).build();
+    task_picker.set_halign(gtk::Align::Fill);
+    management.append(&task_picker);
+    management.append(&profile_tasks);
+    let management_scroll = ui::panel_body(&management);
+    let management_popover = ui::popover("Profiles", &management_scroll);
     let management_menu = ui::menu_button("folder-new-symbolic", "Organize", &management_popover);
     layer_row.append(&management_menu);
     // Integration settings are global, not part of every action's form.
-    let obs_popover = ui::popover("OBS Studio", &feature_runtime.obs_panel);
+    let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     layer_row.append(&obs_menu);
@@ -587,32 +619,91 @@ fn build_widgets(
     settings_card.append(&settings_heading);
     // Match the 414px chassis plus the preview card's padding and border.
     settings_card.set_size_request(300, 428);
-    settings_card.set_spacing(12);
+    settings_card.set_spacing(16);
     settings_card.set_hexpand(true);
     settings_card.set_valign(gtk::Align::Start);
-    let selector_row = GtkBox::new(Orientation::Horizontal, 8);
+    let selector_row = GtkBox::new(Orientation::Horizontal, 12);
     selector_row.append(&labeled("Event", &binding_ui.event_picker));
     selector_row.append(&labeled("Action", &binding_ui.action_picker));
     settings_card.append(&selector_row);
     settings_card.append(&binding_ui.action_guidance);
     settings_card.append(&binding_ui.layer_target_row);
-    settings_card.append(&binding_ui.text_row);
-    settings_card.append(&binding_ui.application_row);
-    settings_card.append(&binding_ui.args_row);
-    settings_card.append(&binding_ui.modifier_row);
+    let action_fields = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .focusable(false)
+        .min_children_per_line(1)
+        .max_children_per_line(if matches!(binding_ui.action_picker.selected(), 2 | 3) {
+            2
+        } else {
+            1
+        })
+        .homogeneous(true)
+        .column_spacing(16)
+        .row_spacing(12)
+        .hexpand(true)
+        .build();
+    action_fields.add_css_class("action-fields");
+    for row in [
+        &binding_ui.text_row,
+        &binding_ui.modifier_row,
+        &binding_ui.application_row,
+        &binding_ui.args_row,
+    ] {
+        row.set_size_request(180, -1);
+        let cell = gtk::FlowBoxChild::new();
+        cell.set_focusable(false);
+        cell.set_child(Some(row));
+        action_fields.insert(&cell, -1);
+        row.bind_property("visible", &cell, "visible")
+            .sync_create()
+            .build();
+    }
+    action_fields.set_visible(matches!(binding_ui.action_picker.selected(), 1..=4));
+    let fields = action_fields.downgrade();
+    binding_ui
+        .action_picker
+        .connect_selected_notify(move |picker| {
+            if let Some(fields) = fields.upgrade() {
+                fields.set_max_children_per_line(if matches!(picker.selected(), 2 | 3) {
+                    2
+                } else {
+                    1
+                });
+                fields.set_visible(matches!(picker.selected(), 1..=4));
+            }
+        });
+    settings_card.append(&action_fields);
     settings_card.append(&binding_ui.feature_editor.root);
-    let binding_buttons = GtkBox::new(Orientation::Horizontal, 8);
+    let binding_buttons = GtkBox::new(Orientation::Horizontal, 12);
     let test_action = ui::button("media-playback-start-symbolic", "Test action");
+    test_action.set_tooltip_text(Some(
+        "Run this action now. Saving a binding does not execute it.",
+    ));
+    save_binding.set_tooltip_text(Some(
+        "Save this control's binding without executing the action.",
+    ));
     binding_buttons.append(&save_binding);
     binding_buttons.append(&test_action);
     binding_buttons.append(&remove_binding);
-    settings_card.append(&binding_buttons);
-    settings_card.append(&binding_ui.status);
-    let artwork_content = GtkBox::new(Orientation::Vertical, 8);
+    let binding_feedback = GtkBox::new(Orientation::Vertical, 12);
+    binding_feedback.append(&binding_buttons);
+    binding_feedback.append(&binding_ui.status);
+    settings_card.append(&binding_feedback);
+    let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
     *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
-    settings_card.append(&text_editor.root);
+    let appearance = GtkBox::new(Orientation::Vertical, 12);
+    appearance.add_css_class("appearance-section");
+    appearance.append(&gtk::Separator::new(Orientation::Horizontal));
+    let appearance_heading = Label::new(Some("Appearance"));
+    appearance_heading.set_xalign(0.0);
+    appearance_heading.set_hexpand(true);
+    appearance_heading.add_css_class("appearance-heading");
+    let appearance_tools = GtkBox::new(Orientation::Horizontal, 12);
+    appearance_tools.append(&appearance_heading);
+    appearance_tools.append(&text_editor.root);
+    appearance.append(&appearance_tools);
     let editor = Rc::downgrade(&text_editor);
     binding_ui
         .control_picker
@@ -623,7 +714,8 @@ fn build_widgets(
         });
     let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
     artwork_section.set_child(Some(&artwork_content));
-    settings_card.append(&artwork_section);
+    appearance.append(&artwork_section);
+    settings_card.append(&appearance);
     let layer_hint = Label::new(Some(
         "Touch gestures bind the whole strip. Artwork targets are independent of encoder actions.",
     ));
@@ -671,13 +763,26 @@ fn build_widgets(
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
         let updating_layers = updating_layers.clone();
+        let tasks = profile_tasks.downgrade();
         create_layer.connect_clicked(move |_| {
             let value = name.text().to_string();
             let trimmed = value.trim().to_owned();
             let result = layers.borrow_mut().create(&value);
             if let Err(error) = result {
-                runtime.report(&format!("Could not create layer: {error}"), true);
+                let message = if layers.borrow().names().contains(&trimmed) {
+                    format!("A profile named {trimmed} already exists.")
+                } else if error.to_string().contains("limit") {
+                    "Profile limit reached. Delete a profile to create another.".to_owned()
+                } else {
+                    format!("Could not create profile: {error}")
+                };
+                creation_error.set_text(&message);
+                creation_error.set_visible(true);
+                ui::feedback(&creation_error, true);
+                runtime.report(&message, true);
             } else {
+                name.set_text("");
+                creation_error.set_visible(false);
                 let names = layers.borrow().names();
                 // Keep picker indices aligned with LayerStore's sorted names.
                 updating_layers.set(true);
@@ -694,85 +799,10 @@ fn build_widgets(
                 ui.refresh_summaries(&layers);
                 artwork.refresh(false);
                 name.set_text("");
-            }
-        });
-    }
-    {
-        let layers = layers.clone();
-        let model = layer_model.clone();
-        let picker = layer_picker.clone();
-        let runtime = feature_runtime.clone();
-        let ui = binding_ui.clone();
-        let artwork = artwork.clone();
-        let updating_layers = updating_layers.clone();
-        let window = window.clone();
-        remove_layer.set_sensitive(artwork.store.borrow().is_some());
-        remove_layer.connect_clicked(move |_| {
-            let index = picker.selected() as usize;
-            if index == 0 {
-                return;
-            }
-            let Some(name) = dropdown_value(&model, picker.selected()) else {
-                return;
-            };
-            let confirmation = gtk::MessageDialog::builder()
-                .transient_for(&window)
-                .modal(true)
-                .message_type(gtk::MessageType::Question)
-                .text(format!("Remove \"{name}\"?"))
-                .secondary_text("This removes its bindings and artwork. This cannot be undone.")
-                .build();
-            confirmation.add_button("Keep", ResponseType::Cancel);
-            confirmation.add_button("Remove", ResponseType::Accept);
-            confirmation
-                .widget_for_response(ResponseType::Accept)
-                .unwrap()
-                .add_css_class("destructive-action");
-            confirmation.set_default_response(ResponseType::Cancel);
-            let layers = layers.clone();
-            let model = model.clone();
-            let picker = picker.clone();
-            let runtime = runtime.clone();
-            let ui = ui.clone();
-            let artwork = artwork.clone();
-            let updating_layers = updating_layers.clone();
-            let window = window.clone();
-            confirmation.connect_response(move |dialog, response| {
-                if response == ResponseType::Accept {
-                    // Resolve the named target again, not a potentially changed index.
-                    let index = layers
-                        .borrow()
-                        .names()
-                        .iter()
-                        .position(|candidate| candidate == &name);
-                    if let Some(index) = index {
-                        let removed = artwork.remove_layer(index);
-                        match removed {
-                            Ok(Some(snapshot)) => {
-                                runtime.persist(snapshot);
-                                updating_layers.set(true);
-                                model.remove(index as u32);
-                                picker.set_selected(0);
-                                updating_layers.set(false);
-                                let names = layers.borrow().names();
-                                ui.refresh_layer_targets(&names);
-                                ui.load_selected_binding(&layers);
-                                ui.refresh_summaries(&layers);
-                                artwork.refresh(false);
-                            }
-                            Ok(None) => {}
-                            Err(error) => show_artwork_error(
-                                &window,
-                                &format!(
-                        "Layer not removed: {error}. Check artwork storage permissions and retry."
-                    ),
-                            ),
-                        }
-                    }
+                if let Some(tasks) = tasks.upgrade() {
+                    tasks.set_visible_child_name("edit");
                 }
-                dialog.close();
-            });
-            confirmation.present();
+            }
         });
     }
     {
@@ -888,8 +918,8 @@ fn build_widgets(
         .selection_mode(gtk::SelectionMode::None)
         .min_children_per_line(1)
         .max_children_per_line(2)
-        .column_spacing(16)
-        .row_spacing(16)
+        .column_spacing(24)
+        .row_spacing(24)
         .build();
     body.set_valign(gtk::Align::Start);
     body.add_css_class("configuration-grid");
@@ -1054,6 +1084,12 @@ fn build_widgets(
         });
     }
 
+    let key_widgets = selectable_widgets[..8].to_vec();
+    let encoder_widgets = selectable_widgets[9..].to_vec();
+    let zone_widgets: Vec<gtk::Widget> = zone_select_buttons
+        .iter()
+        .map(|zone| zone.clone().upcast())
+        .collect();
     let selected_widgets = Rc::new(selectable_widgets);
     set_selected_control(&selected_widgets, 0);
     for index in 0..8 {
@@ -1120,7 +1156,7 @@ fn build_widgets(
     body.insert(&device_area, -1);
     sidebar.append(&settings_card);
     body.insert(&sidebar, -1);
-    let profile_content = GtkBox::new(Orientation::Vertical, 16);
+    let profile_content = GtkBox::new(Orientation::Vertical, 24);
     profile_content.append(&layer_card);
     profile_content.append(&body);
     feature_runtime.attach_profile_content(&profile_content);
@@ -1159,8 +1195,11 @@ fn build_widgets(
         key_labels,
         encoder_labels,
         touch_status,
+        key_widgets,
+        encoder_widgets,
+        zone_widgets,
         feature_runtime,
-        organization_writes: vec![create_layer, remove_layer],
+        organization_writes: vec![create_layer],
         _text_editor: text_editor,
     }
 }
@@ -1184,6 +1223,9 @@ fn start_event_updates(
             key_labels,
             encoder_labels,
             touch_status,
+            key_widgets,
+            encoder_widgets,
+            zone_widgets,
             ..
         } = &widgets;
         let pending: Vec<_> = receiver.try_iter().collect();
@@ -1238,6 +1280,9 @@ fn start_event_updates(
                                 ));
                                 set_active(label, pressed);
                             }
+                            if let Some(widget) = key_widgets.get(index) {
+                                set_pressed(widget, pressed);
+                            }
                         }
                         protocol::Event::EncoderButton { index, pressed } => {
                             if let Some(label) = encoder_labels.get(index) {
@@ -1248,6 +1293,9 @@ fn start_event_updates(
                                     ticks.borrow()[index]
                                 ));
                                 set_active(label, pressed);
+                            }
+                            if let Some(widget) = encoder_widgets.get(index) {
+                                set_pressed(widget, pressed);
                             }
                         }
                         protocol::Event::Rotation {
@@ -1263,20 +1311,30 @@ fn start_event_updates(
                                     totals[index]
                                 ));
                             }
+                            if let Some(widget) = encoder_widgets.get(index) {
+                                flash(widget, "control-rotated");
+                            }
                         }
                         protocol::Event::TouchTap { x, y } => {
-                            touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"))
+                            touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
+                            flash_zones(zone_widgets, x, x);
                         }
-                        protocol::Event::TouchPress { x, y } => touch_status
-                            .set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}")),
+                        protocol::Event::TouchPress { x, y } => {
+                            touch_status
+                                .set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
+                            flash_zones(zone_widgets, x, x);
+                        }
                         protocol::Event::TouchFlick {
                             start_x,
                             start_y,
                             end_x,
                             end_y,
-                        } => touch_status.set_text(&format!(
-                            "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
-                        )),
+                        } => {
+                            touch_status.set_text(&format!(
+                                "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
+                            ));
+                            flash_zones(zone_widgets, start_x.min(end_x), start_x.max(end_x));
+                        }
                     }
                 }
                 MonitorEvent::ArtworkResult { target, result } => match result {
@@ -1384,6 +1442,8 @@ impl BindingUi {
         modifier_row: GtkBox,
     ) -> Self {
         status.connect_label_notify(ui::clear_feedback);
+        let action_guidance = ui::helper("");
+        shortcut_reference::connect(&action_guidance);
         Self {
             layer_picker,
             layer_model,
@@ -1410,7 +1470,7 @@ impl BindingUi {
             args_row,
             modifier_row,
             feature_editor: feature_editor::FeatureEditor::new(),
-            action_guidance: ui::helper(""),
+            action_guidance,
             summaries: (0..13)
                 .map(|_| {
                     let label = Label::new(None);
@@ -1538,6 +1598,11 @@ impl BindingUi {
             ActionKind::EmitLegacy => "Emit a named internal event for an existing legacy binding.",
             ActionKind::Extended => "",
         });
+        if matches!(kind, ActionKind::Shortcut) {
+            self.action_guidance.set_markup(
+                "Type a key or chord. <a href=\"shortcut-reference\">Key names and aliases</a>",
+            );
+        }
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended));
         if let Some(label) = self
@@ -2006,6 +2071,7 @@ fn bind_selected_layer(
     }
 }
 
+#[cfg(test)]
 fn remove_selected_layer(layers: &RefCell<LayerStore>, index: usize) -> Option<LayerStore> {
     let name = {
         let store = layers.borrow();
@@ -2053,6 +2119,7 @@ impl ArtworkUi {
         }
     }
 
+    #[cfg(test)]
     fn remove_layer(&self, index: usize) -> Result<Option<LayerStore>, String> {
         let name = self.layers.borrow().names().get(index).cloned();
         let removed = remove_layer_with_artwork(&self.layers, &mut self.store.borrow_mut(), index)?;
@@ -2063,6 +2130,19 @@ impl ArtworkUi {
             }
         }
         Ok(removed)
+    }
+
+    fn remove_layers(&self, names: &[String]) -> Result<(), String> {
+        self.store
+            .borrow_mut()
+            .as_mut()
+            .ok_or("Artwork storage is unavailable; repair it and restart.")?
+            .remove_layers(names)
+            .map_err(|error| error.to_string())?;
+        self.chooser_owners
+            .borrow_mut()
+            .retain(|name, _| !names.contains(name));
+        Ok(())
     }
 
     fn refresh(&self, force: bool) {
@@ -2193,6 +2273,7 @@ fn assign_chooser_artwork(
     Ok(())
 }
 
+#[cfg(test)]
 fn remove_layer_with_artwork(
     layers: &RefCell<LayerStore>,
     artwork: &mut Option<ArtworkStore>,
@@ -2386,6 +2467,34 @@ fn show_artwork_error(window: &ApplicationWindow, message: &str) {
     dialog.show();
 }
 
+fn set_pressed(widget: &gtk::Widget, pressed: bool) {
+    if pressed {
+        widget.add_css_class("control-pressed");
+    } else {
+        widget.remove_css_class("control-pressed");
+    }
+}
+
+/// Briefly highlights a control for momentary input such as rotation or taps.
+fn flash(widget: &gtk::Widget, class: &'static str) {
+    widget.add_css_class(class);
+    let widget = widget.downgrade();
+    glib::timeout_add_local_once(Duration::from_millis(300), move || {
+        if let Some(widget) = widget.upgrade() {
+            widget.remove_css_class(class);
+        }
+    });
+}
+
+/// The touch strip is 800 px wide and split into four 200 px regions.
+fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+    for zone in usize::from(from_x / 200).min(3)..=usize::from(to_x / 200).min(3) {
+        if let Some(widget) = zones.get(zone) {
+            flash(widget, "control-touched");
+        }
+    }
+}
+
 fn set_active(label: &Label, active: bool) {
     // Hidden key/dial labels retain state; their surface renders the live highlight.
     if !label.is_visible() {
@@ -2496,11 +2605,49 @@ fn install_style(window: &ApplicationWindow) {
         eprintln!("GTK CSS parse error at {section:?}: {error}");
     });
     provider.load_from_data(include_str!("ui.css"));
+    let display = gtk::prelude::WidgetExt::display(window);
     gtk::style_context_add_provider_for_display(
-        &gtk::prelude::WidgetExt::display(window),
+        &display,
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+    install_light_overrides(&display);
+}
+
+/// Overrides the dark palette whenever the host GTK theme is not dark.
+fn install_light_overrides(display: &gtk::gdk::Display) {
+    thread_local! {
+        static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    }
+    if INSTALLED.replace(true) {
+        return;
+    }
+    let provider = gtk::CssProvider::new();
+    provider.connect_parsing_error(|_, section, error| {
+        eprintln!("GTK CSS parse error at {section:?}: {error}");
+    });
+    provider.load_from_data(include_str!("ui-light.css"));
+    let settings = gtk::Settings::for_display(display);
+    let display = display.clone();
+    let sync = Rc::new(move |settings: &gtk::Settings| {
+        let dark = settings.is_gtk_application_prefer_dark_theme()
+            || settings
+                .gtk_theme_name()
+                .is_some_and(|name| name.to_lowercase().contains("dark"));
+        gtk::style_context_remove_provider_for_display(&display, &provider);
+        if !dark {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+            );
+        }
+    });
+    sync(&settings);
+    for property in ["gtk-theme-name", "gtk-application-prefer-dark-theme"] {
+        let sync = sync.clone();
+        settings.connect_notify_local(Some(property), move |settings, _| sync(settings));
+    }
 }
 
 #[cfg(test)]
@@ -2508,6 +2655,12 @@ mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    mod control_feedback_tests;
+    mod page_ui_tests;
+    #[path = "profile_manager_tests.rs"]
+    mod profile_manager_tests;
+    #[path = "shortcut_reference_tests.rs"]
+    mod shortcut_reference_tests;
 
     static GTK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     include!("button_text_editor_tests.rs");
@@ -2840,6 +2993,11 @@ mod tests {
         assert!(!ui.modifier_row.is_visible());
 
         assert_physical_shortcut_widgets(&ui);
+        shortcut_reference_tests::assert_reference_dialog();
+        profile_manager_tests::assert_compact_profile_manager();
+        control_feedback_tests::assert_control_feedback();
+        assert_profile_tabs_and_focus();
+        assert_binding_save_toasts();
         assert_select_control_validates_ranges_and_preserves_valid_events();
         assert_direct_button_click_selects_button_8_and_loads_existing_assignment();
         assert_direct_selection_css_is_distinct_from_live_active_state();
@@ -2857,8 +3015,6 @@ mod tests {
         eprintln!("GTK assertions executed: selection, styles, summaries and refresh paths");
         assert!(ui.summaries[0].text().contains("Unassigned"));
         assert_production_layout_fits();
-        assert_binding_save_toasts();
-        assert_profile_tabs_and_focus();
     }
 
     fn assert_profile_tabs_and_focus() {
@@ -2902,6 +3058,14 @@ mod tests {
                 .unwrap()
         };
         button("New page").emit_clicked();
+        let dialog = current_dialog();
+        assert_eq!(
+            layers.borrow().active(),
+            "Studio",
+            "opening must not create a page"
+        );
+        page_dialog_entry(&dialog).set_text("Studio tools");
+        dialog.response(ResponseType::Accept);
         let studio_page = layers.borrow().active().to_owned();
         assert_ne!(studio_page, "Studio");
         assert_eq!(tabs.n_pages(), 2, "pages must not become profile tabs");
@@ -2917,7 +3081,7 @@ mod tests {
                 if row
                     .first_child()
                     .and_then(|child| child.downcast::<Label>().ok())
-                    .is_some_and(|label| label.text() == "Profile to save")
+                    .is_some_and(|label| label.text() == "Profile to edit")
                 {
                     picker = row
                         .last_child()
@@ -2940,7 +3104,7 @@ mod tests {
         );
         picker.set_selected(1);
         application.set_text("ui_showcase");
-        button("Save profile").emit_clicked();
+        button("Save changes").emit_clicked();
         assert_eq!(tabs.n_pages(), 2, "configured profiles must stay visible");
         assert_eq!(layers.borrow().active(), studio_page);
         assert!(
@@ -2966,6 +3130,37 @@ mod tests {
         runtime.focus_changed(Ok(Some(focus.clone())));
         assert_eq!(tabs.n_pages(), 2);
         assert_eq!(layers.borrow().active(), studio_page);
+        for (caption, invalid) in [
+            ("New page", false),
+            ("New page", true),
+            ("Rename page", false),
+            ("Rename page", true),
+        ] {
+            runtime.focus_changed(Ok(Some(focus.clone())));
+            while commands.try_recv().is_ok() {}
+            button(caption).emit_clicked();
+            let dialog = current_dialog();
+            if invalid {
+                page_dialog_entry(&dialog).set_text("");
+                dialog.response(ResponseType::Accept);
+                assert!(dialog.is_visible());
+            }
+            dialog.response(ResponseType::Cancel);
+            assert!(
+                commands.try_recv().is_err(),
+                "cancel/invalid input must not persist"
+            );
+            runtime.focus_changed(Ok(Some(sdeck_plus::app_focus::FocusedApplication {
+                window_class: "kitty".into(),
+                executable: Some("kitty".into()),
+            })));
+            assert_eq!(
+                layers.borrow().active(),
+                "Base",
+                "canceled name edits must preserve automatic focus selection"
+            );
+        }
+        runtime.focus_changed(Ok(Some(focus.clone())));
         tabs.set_current_page(Some(0));
         runtime.focus_changed(Ok(Some(focus.clone())));
         assert_eq!(
@@ -3030,7 +3225,7 @@ mod tests {
             "focus refresh must preserve the application draft"
         );
         application.set_text("");
-        button("Save profile").emit_clicked();
+        button("Save changes").emit_clicked();
         assert_eq!(tabs.n_pages(), 2);
         let mut entries = Vec::new();
         collect_entries(widgets.root.upcast_ref(), &mut entries);
@@ -3039,7 +3234,7 @@ mod tests {
             .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
             .unwrap();
         name.set_text("Manual");
-        button("Save new profile").emit_clicked();
+        button("Create profile").emit_clicked();
         assert_eq!(tabs.n_pages(), 3);
         assert_eq!(layers.borrow().active(), "Manual");
         assert_eq!(
@@ -3116,11 +3311,11 @@ mod tests {
             .unwrap();
         let create_profile = buttons
             .iter()
-            .find(|button| button_caption(button).as_deref() == Some("Save new profile"))
+            .find(|button| button_caption(button).as_deref() == Some("Create profile"))
             .unwrap();
         let save_profile = buttons
             .iter()
-            .find(|button| button_caption(button).as_deref() == Some("Save profile"))
+            .find(|button| button_caption(button).as_deref() == Some("Save changes"))
             .unwrap();
         let mut entries = Vec::new();
         collect_entries(viewport.upcast_ref(), &mut entries);
@@ -3677,6 +3872,31 @@ mod tests {
         };
         let (sender, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), sender);
+        let shell = widgets
+            .root
+            .child()
+            .unwrap()
+            .downcast::<gtk::Viewport>()
+            .unwrap()
+            .child()
+            .unwrap();
+        let motion = shell.settings();
+        let animations = motion.is_gtk_enable_animations();
+        motion.set_gtk_enable_animations(false);
+        assert!(!shell.has_css_class("motion-enabled"));
+        assert!(!widgets
+            .help_menu
+            .popover()
+            .unwrap()
+            .has_css_class("motion-enabled"));
+        motion.set_gtk_enable_animations(true);
+        assert!(shell.has_css_class("motion-enabled"));
+        assert!(widgets
+            .help_menu
+            .popover()
+            .unwrap()
+            .has_css_class("motion-enabled"));
+        motion.set_gtk_enable_animations(animations);
         window.set_child(Some(&widgets.root));
         widgets.artwork_section.set_expanded(true);
         let mut artwork_buttons = Vec::new();
@@ -3831,7 +4051,7 @@ mod tests {
             );
         }
         assert_normal_no_scroll(&widgets, &content, &artwork, "loaded long values");
-        for (width, height) in [(1840, 980), (1280, 720), (960, 640), (640, 480)] {
+        for (width, height) in [(1840, 980), (1280, 720), (960, 640), (900, 700), (640, 480)] {
             widgets.root.allocate(width, height, -1, None);
             assert_eq!(widgets.root.width(), width);
             assert_eq!(widgets.root.height(), height);
@@ -3863,6 +4083,41 @@ mod tests {
                 ui.update_action_visibility();
                 widgets.root.allocate(width, height, -1, None);
                 assert_sidebar_geometry(&widgets, &content);
+                let fields = ui.text_row.parent().unwrap().parent().unwrap();
+                assert_eq!(fields.is_visible(), action != 0);
+                for row in [
+                    &ui.text_row,
+                    &ui.modifier_row,
+                    &ui.application_row,
+                    &ui.args_row,
+                ] {
+                    assert_eq!(row.parent().unwrap().is_visible(), row.is_visible());
+                }
+                if matches!(action, 1 | 4) {
+                    let field = ui.text_row.compute_bounds(&content).unwrap();
+                    let group = fields.compute_bounds(&content).unwrap();
+                    assert!(
+                        (field.width() - group.width()).abs() <= 1.0,
+                        "standalone action field must fill its group: {field:?}, {group:?}"
+                    );
+                }
+                if matches!(action, 2 | 3) {
+                    let (first, second) = if action == 2 {
+                        (&ui.application_row, &ui.args_row)
+                    } else {
+                        (&ui.text_row, &ui.modifier_row)
+                    };
+                    let first = first.compute_bounds(&content).unwrap();
+                    let second = second.compute_bounds(&content).unwrap();
+                    assert!(
+                        second.x() >= first.x() + first.width() + 15.0
+                            || second.y() >= first.y() + first.height() + 11.0,
+                        "related action fields overlap or lose their gap: {first:?}, {second:?}"
+                    );
+                    if width >= 1000 {
+                        assert!((first.y() - second.y()).abs() <= 1.0);
+                    }
+                }
                 let (action_minimum, _, _, _) = content.measure(Orientation::Horizontal, -1);
                 assert!(
                     action_minimum <= 936,
@@ -4013,6 +4268,9 @@ mod tests {
         };
         let directory = std::path::PathBuf::from(directory);
         std::fs::create_dir_all(&directory).unwrap();
+        let settings = widgets.root.settings();
+        let animations = settings.is_gtk_enable_animations();
+        settings.set_gtk_enable_animations(false);
         // GtkFixed keeps the capture child at its requested size, independently
         // of the tiling compositor's allocation of the hosting window.
         let stage = gtk::Fixed::new();
@@ -4110,37 +4368,73 @@ mod tests {
                 capture(&format!("feature-{index}"));
             }
         }
-        widgets.root.set_size_request(1000, 700);
         widgets.binding_ui.action_picker.set_selected(0);
         widgets.binding_ui.update_action_visibility();
-        widgets.root.vadjustment().set_value(0.0);
-        for (name, menu) in [
-            ("help", &widgets.help_menu),
-            ("organization", &widgets.management_menu),
-            ("obs", &widgets.obs_menu),
-        ] {
-            menu.popup();
-            let panel = menu.popover().unwrap();
-            rendered_texture(window, &panel)
-                .save_to_png(directory.join(format!("popover-{name}.png")))
-                .unwrap();
-            let close = panel
-                .child()
-                .unwrap()
-                .first_child()
-                .unwrap()
-                .last_child()
-                .unwrap()
-                .downcast::<Button>()
-                .unwrap();
-            close.emit_clicked();
-            assert!(!panel.is_visible(), "popover Close must dismiss its panel");
+        for (width, height) in [(640, 480), (1000, 700), (1280, 800), (1840, 980)] {
+            widgets.root.set_size_request(width, height);
+            widgets.root.vadjustment().set_value(0.0);
+            wait_for_frame(&widgets.root);
+            for (name, menu) in [
+                ("help", &widgets.help_menu),
+                ("organization", &widgets.management_menu),
+                ("folders", widgets.feature_runtime.folder_menu()),
+                ("obs", &widgets.obs_menu),
+            ] {
+                let panel = menu.popover().unwrap();
+                // Capture on a shared desktop without outside focus changes
+                // dismissing the panel between its top and scrolled-end frames.
+                let autohide = panel.is_autohide();
+                panel.set_autohide(false);
+                menu.popup();
+                let texture = rendered_texture(window, &panel);
+                eprintln!(
+                    "GTK panel {name} at {width}x{height}: {}x{}",
+                    panel.width(),
+                    panel.height()
+                );
+                texture
+                    .save_to_png(directory.join(format!("{width}x{height}-popover-{name}.png")))
+                    .unwrap();
+                if width == 1000 && name == "organization" {
+                    if let Some(docs) = std::env::var_os("STREAMDECK_QA_DOCS_DIR") {
+                        let docs = std::path::PathBuf::from(docs);
+                        std::fs::create_dir_all(&docs).unwrap();
+                        texture
+                            .save_to_png(docs.join("organize-profiles-pages.png"))
+                            .unwrap();
+                    }
+                }
+                assert!(panel.width() <= width, "{name} exceeds the client width");
+                assert!(panel.height() <= height, "{name} exceeds the client height");
+                let content = panel.child().unwrap();
+                let header = content.first_child().unwrap();
+                let close = header.last_child().unwrap().downcast::<Button>().unwrap();
+                let scroller = content
+                    .last_child()
+                    .unwrap()
+                    .downcast::<gtk::ScrolledWindow>()
+                    .unwrap();
+                scroller
+                    .vadjustment()
+                    .set_value(scroller.vadjustment().upper() - scroller.vadjustment().page_size());
+                rendered_texture(window, &panel)
+                    .save_to_png(directory.join(format!("{width}x{height}-popover-{name}-end.png")))
+                    .unwrap();
+                let close_bounds = close.compute_bounds(&content).unwrap();
+                assert!(close_bounds.y() >= 0.0);
+                assert!(close_bounds.y() + close_bounds.height() <= header.height() as f32);
+                close.emit_clicked();
+                assert!(!panel.is_visible(), "popover Close must dismiss its panel");
+                panel.set_autohide(autohide);
+            }
+            page_ui_tests::capture_page_workflow(window, widgets, (width, height));
         }
-        eprintln!("GTK exact-size captures executed: 640x480, 1000x700, 1280x800, 1840x980, all actions and three popovers");
+        eprintln!("GTK exact-size captures executed: 640x480, 1000x700, 1280x800, 1840x980, all actions, four popovers and page workflows");
         window.set_child(gtk::Widget::NONE);
         stage.remove(&widgets.root);
         widgets.root.set_size_request(-1, -1);
         window.set_child(Some(&widgets.root));
+        settings.set_gtk_enable_animations(animations);
     }
 
     fn assert_feature_integration(
@@ -4151,6 +4445,7 @@ mod tests {
     ) {
         use sdeck_plus::desktop_actions::{DesktopAction, MediaCommand};
         use sdeck_plus::features::FeatureAction;
+        use sdeck_plus::organization::NavigationAction;
         let ui = &widgets.binding_ui;
         ui.action_picker.set_selected(5);
         ui.feature_editor.assert_roundtrips();
@@ -4226,83 +4521,142 @@ mod tests {
             assert!(commands.try_recv().is_err());
         }
 
-        find("New page").emit_clicked();
-        assert!(widgets.feature_runtime.indicator.text().contains("Page 2"));
-        assert_eq!(
-            ui.layer_picker.selected(),
-            layer_index(layers, layers.borrow().active())
-        );
-        let mut entries = Vec::new();
-        collect_entries(
-            widgets.feature_runtime.management().upcast_ref(),
-            &mut entries,
-        );
-        let page_name = entries
-            .iter()
-            .find(|entry| entry.placeholder_text().as_deref() == Some("Page name"))
-            .unwrap();
-        assert_eq!(page_name.text(), "Page 2");
-        while commands.try_recv().is_ok() {}
-        let active = layers.borrow().active().to_owned();
-        page_name.set_text("Audio Mix");
-        find("Rename page").emit_clicked();
-        assert_eq!(layers.borrow().active(), active);
-        assert!(widgets
+        let original = layers.borrow().active().to_owned();
+        let keys = layers.borrow().names();
+        let folder_count = widgets
             .feature_runtime
-            .indicator
-            .text()
-            .contains("Audio Mix"));
+            .folder_menu()
+            .child()
+            .unwrap()
+            .last_child()
+            .unwrap()
+            .downcast::<Label>()
+            .unwrap();
+        let previous_count = folder_count.text().parse::<usize>().unwrap();
+        find("New page").emit_clicked();
+        let dialog = current_dialog();
+        assert_eq!(
+            layers.borrow().names(),
+            keys,
+            "prompting must not create a page"
+        );
+        dialog.response(ResponseType::Cancel);
+        assert_eq!(layers.borrow().active(), original);
+        assert!(commands.try_recv().is_err());
+        find("New page").emit_clicked();
+        let dialog = current_dialog();
+        let page_name = page_dialog_entry(&dialog);
+        dialog.response(ResponseType::Accept);
+        assert!(dialog.is_visible(), "invalid names keep the prompt open");
+        assert_eq!(layers.borrow().names(), keys);
+        assert!(commands.try_recv().is_err());
+        page_name.set_text("Audio Mix");
+        dialog.response(ResponseType::Accept);
+        let active = layers.borrow().active().to_owned();
+        assert_ne!(active, original);
         let LayerCommand::Persist(snapshot, Some(metadata)) = commands.try_recv().unwrap() else {
-            panic!("renaming must submit the updated metadata for persistence");
+            panic!("named page creation persists metadata without executing");
         };
         assert_eq!(metadata.current(&snapshot).page_name, "Audio Mix");
-        assert_eq!(snapshot.active(), active);
-        assert!(
-            commands.try_recv().is_err(),
-            "renaming must not execute actions"
-        );
-        page_name.set_text("");
+        assert_eq!(metadata.current(&snapshot).page, 2);
+        assert_eq!(ui.layer_picker.selected(), layer_index(layers, &active));
+        assert!(commands.try_recv().is_err());
+
         find("Rename page").emit_clicked();
-        assert!(
-            commands.try_recv().is_err(),
-            "invalid names must not be persisted"
-        );
-        assert!(widgets
-            .feature_runtime
-            .status
-            .has_css_class("feedback-error"));
-        assert!(widgets
-            .feature_runtime
-            .indicator
-            .text()
-            .contains("Audio Mix"));
+        let dialog = current_dialog();
+        let page_name = page_dialog_entry(&dialog);
+        assert_eq!(page_name.text(), "Audio Mix");
+        page_name.set_text("");
+        dialog.response(ResponseType::Accept);
+        assert!(dialog.is_visible());
+        assert_eq!(layers.borrow().active(), active);
+        assert!(commands.try_recv().is_err());
         page_name.set_text("Keyboard Mix");
         page_name.emit_activate();
         let LayerCommand::Persist(snapshot, Some(metadata)) = commands.try_recv().unwrap() else {
-            panic!("Enter must persist the page name from the editor");
+            panic!("Enter must save the valid page name from its dialog");
         };
         assert_eq!(metadata.current(&snapshot).page_name, "Keyboard Mix");
-        assert!(widgets
-            .feature_runtime
-            .indicator
-            .text()
-            .contains("Keyboard Mix"));
+        assert_eq!(snapshot.active(), active);
+        assert!(commands.try_recv().is_err());
+
+        let mut entries = Vec::new();
+        let folder_panel = widgets.feature_runtime.folder_menu().popover().unwrap();
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
+        collect_entries(folder_panel.upcast_ref(), &mut entries);
         entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New folder name"))
             .unwrap()
             .set_text("Studio");
         find("New folder").emit_clicked();
-        assert!(widgets.feature_runtime.indicator.text().contains("Studio"));
-        assert_eq!(page_name.text(), "Page 1");
+        let folder_key = layers.borrow().active().to_owned();
+        assert_ne!(folder_key, active);
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
         find("Parent").emit_clicked();
-        find("Next").emit_clicked();
-        assert!(widgets.feature_runtime.indicator.text().contains("Page 2"));
-        assert_eq!(page_name.text(), "Keyboard Mix");
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
+        assert_eq!(
+            layers.borrow().active(),
+            active,
+            "Parent returns to the owning page"
+        );
         find("Previous").emit_clicked();
-        assert!(widgets.feature_runtime.indicator.text().contains("Page 1"));
-        assert_eq!(page_name.text(), "Page 1");
-        eprintln!("GTK page renaming executed: metadata snapshot, invalid-name rejection and numeric navigation");
+        assert_eq!(layers.borrow().active(), original);
+        assert_eq!(
+            folder_count.text().parse::<usize>().unwrap(),
+            previous_count
+        );
+        find("Next").emit_clicked();
+        assert_eq!(layers.borrow().active(), active);
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
+        while commands.try_recv().is_ok() {}
+        find("Link to control").emit_clicked();
+        let LayerCommand::SaveBinding(snapshot, Some(_)) = commands.try_recv().unwrap() else {
+            panic!("linking must save without entering the folder");
+        };
+        assert_eq!(snapshot.active(), active);
+        assert_eq!(layers.borrow().active(), active);
+        assert_eq!(
+            ui.binding_from_widgets(layers).unwrap().2,
+            Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(
+                "Studio".into()
+            )))
+        );
+        assert!(commands.try_recv().is_err());
+        find("Open folder").emit_clicked();
+        assert_eq!(layers.borrow().active(), folder_key);
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
+        find("Parent").emit_clicked();
+        while commands.try_recv().is_ok() {}
+        find("Delete folder").emit_clicked();
+        current_dialog().response(ResponseType::Cancel);
+        assert!(layers.borrow().layers().contains_key(&folder_key));
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
+        assert!(commands.try_recv().is_err());
+        find("Delete folder").emit_clicked();
+        current_dialog().response(ResponseType::Accept);
+        assert!(!layers.borrow().layers().contains_key(&folder_key));
+        assert_eq!(layers.borrow().active(), active);
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            LayerCommand::Persist(_, Some(_))
+        ));
+        assert!(commands.try_recv().is_err());
+        find("Delete page").emit_clicked();
+        current_dialog().response(ResponseType::Cancel);
+        assert!(layers.borrow().layers().contains_key(&active));
+        assert!(commands.try_recv().is_err());
+        find("Delete page").emit_clicked();
+        current_dialog().response(ResponseType::Accept);
+        assert!(!layers.borrow().layers().contains_key(&active));
+        assert_eq!(layers.borrow().active(), original);
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            LayerCommand::Persist(_, Some(_))
+        ));
+        assert!(commands.try_recv().is_err());
+        eprintln!("GTK named-page prompts, rename, local folder links, parent navigation and confirmed deletions executed");
 
         widgets.feature_runtime.execute(
             "timer-test".into(),
@@ -4760,7 +5114,7 @@ mod tests {
                 settings_bounds.y(),
                 device_bounds.y()
             );
-            assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 12);
+            assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 16);
             assert_eq!(settings_bounds.y(), device_bounds.y());
             assert!(
                 settings_bounds.height() >= device_bounds.height(),
@@ -4886,23 +5240,76 @@ mod tests {
         widget: &impl IsA<gtk::Widget>,
     ) -> gtk::gdk::Texture {
         let widget = widget.as_ref();
-        wait_for_frame(widget);
-        let snapshot = gtk::Snapshot::new();
-        gtk::WidgetPaintable::new(Some(widget)).snapshot(
-            &snapshot,
-            widget.width() as f64,
-            widget.height() as f64,
+        let paintable = gtk::WidgetPaintable::new(Some(widget));
+        let renderer = window.renderer().unwrap();
+        let main_loop = glib::MainLoop::new(None, false);
+        let captured = Rc::new(RefCell::new(None));
+        let result = captured.clone();
+        let done = main_loop.clone();
+        let target = widget.clone();
+        let capture = Rc::new(move || {
+            let snapshot = gtk::Snapshot::new();
+            gtk::WidgetPaintable::new(Some(&target)).snapshot(
+                &snapshot,
+                f64::from(target.width()),
+                f64::from(target.height()),
+            );
+            if let Some(node) = snapshot.to_node() {
+                *result.borrow_mut() = Some(renderer.render_texture(
+                    &node,
+                    Some(&gtk::graphene::Rect::new(
+                        0.0,
+                        0.0,
+                        target.width() as f32,
+                        target.height() as f32,
+                    )),
+                ));
+                done.quit();
+            }
+        });
+        let clock = widget.frame_clock().unwrap();
+        let phases = gtk::gdk::FrameClockPhase::UPDATE
+            | gtk::gdk::FrameClockPhase::LAYOUT
+            | gtk::gdk::FrameClockPhase::PAINT
+            | gtk::gdk::FrameClockPhase::AFTER_PAINT;
+        let redraw = clock.clone();
+        let invalidated =
+            paintable.connect_invalidate_contents(move |_| redraw.request_phase(phases));
+        let baseline = clock.frame_counter();
+        let callback = capture.clone();
+        let painted = clock.connect_after_paint(move |clock| {
+            if clock.frame_counter() > baseline {
+                callback();
+            }
+        });
+        let expired = Rc::new(Cell::new(false));
+        let flag = expired.clone();
+        let done = main_loop.clone();
+        let deadline = glib::timeout_add_local_once(Duration::from_secs(10), move || {
+            flag.set(true);
+            done.quit();
+        });
+        widget.queue_draw();
+        clock.request_phase(phases);
+        if captured.borrow().is_none() {
+            main_loop.run();
+        }
+        paintable.disconnect(invalidated);
+        clock.disconnect(painted);
+        if !expired.get() {
+            deadline.remove();
+        }
+        assert!(
+            !expired.get(),
+            "GTK content was not published: {} visible={} mapped={} size={}x{}",
+            widget.type_().name(),
+            widget.is_visible(),
+            widget.is_mapped(),
+            widget.width(),
+            widget.height()
         );
-        let node = snapshot.to_node().expect("rendered GTK widget");
-        window.renderer().unwrap().render_texture(
-            &node,
-            Some(&gtk::graphene::Rect::new(
-                0.0,
-                0.0,
-                widget.width() as f32,
-                widget.height() as f32,
-            )),
-        )
+        let texture = captured.borrow_mut().take().expect("published GTK content");
+        texture
     }
 
     fn assert_inactive_backgrounds(
@@ -4981,14 +5388,35 @@ mod tests {
     }
 
     fn button_caption(button: &Button) -> Option<glib::GString> {
-        button.label().or_else(|| {
-            button
-                .child()
-                .and_then(|child| child.downcast::<GtkBox>().ok())
-                .and_then(|content| content.last_child())
-                .and_then(|child| child.downcast::<Label>().ok())
-                .map(|label| label.text())
-        })
+        button
+            .label()
+            .or_else(|| {
+                button
+                    .child()
+                    .and_then(|child| child.downcast::<GtkBox>().ok())
+                    .and_then(|content| content.last_child())
+                    .and_then(|child| child.downcast::<Label>().ok())
+                    .map(|label| label.text())
+            })
+            .or_else(|| button.tooltip_text())
+    }
+
+    fn current_dialog() -> gtk::Dialog {
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|window| window.downcast::<gtk::Dialog>().ok())
+            .find(|dialog| dialog.is_visible())
+            .expect("the action opens a native dialog")
+    }
+
+    fn page_dialog_entry(dialog: &gtk::Dialog) -> Entry {
+        let mut entries = Vec::new();
+        collect_entries(dialog.content_area().upcast_ref(), &mut entries);
+        entries
+            .into_iter()
+            .find(|entry| entry.placeholder_text().as_deref() == Some("Page name"))
+            .expect("the dialog contains its named-page input")
     }
 
     fn device_canvas(widgets: &MonitorWidgets) -> gtk::Widget {
@@ -5036,8 +5464,8 @@ mod tests {
             .unwrap();
         assert_eq!(body.min_children_per_line(), 1);
         assert_eq!(body.max_children_per_line(), 2);
-        assert_eq!(body.column_spacing(), 16);
-        assert_eq!(body.row_spacing(), 16);
+        assert_eq!(body.column_spacing(), 24);
+        assert_eq!(body.row_spacing(), 24);
         assert_eq!(
             body.last_child()
                 .unwrap()
@@ -5065,7 +5493,7 @@ mod tests {
                 if panel.has_css_class("device-canvas") {
                     4
                 } else {
-                    12
+                    16
                 }
             );
             assert_eq!(
@@ -5086,6 +5514,33 @@ mod tests {
     fn assert_sidebar_geometry(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         let device = device_canvas(widgets);
+        let profile_content = settings
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let navigation = profile_content.first_child().unwrap();
+        let navigation_bounds = navigation.compute_bounds(content).unwrap();
+        let header = widgets
+            .feature_runtime
+            .profile_tabs()
+            .first_child()
+            .unwrap();
+        let header_bounds = header.compute_bounds(content).unwrap();
+        assert!(
+            navigation_bounds.y() - header_bounds.y() - header_bounds.height() >= 11.0,
+            "profile tabs and page navigation need a visible gap"
+        );
+        let region = device.parent().unwrap().parent().unwrap();
+        let region_bounds = region.compute_bounds(content).unwrap();
+        assert!(
+            region_bounds.y() - navigation_bounds.y() - navigation_bounds.height() >= 23.0,
+            "page navigation and the main regions must remain separate"
+        );
         for panel in [&device, &settings] {
             let bounds = panel.compute_bounds(content).unwrap();
             let first = panel
@@ -5108,21 +5563,21 @@ mod tests {
                 continue;
             }
             assert!(
-                (first.x() - bounds.x() - 13.0).abs() <= 1.0,
+                (first.x() - bounds.x() - 17.0).abs() <= 1.0,
                 "shared CSS inner padding: {first:?}, {bounds:?}"
             );
             assert!(
-                (first.y() - bounds.y() - 13.0).abs() <= 1.0,
+                (first.y() - bounds.y() - 17.0).abs() <= 1.0,
                 "shared CSS top padding: {first:?}, {bounds:?}"
             );
         }
         let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
         if settings.y() == device.y() {
-            assert!((settings.x() - device.x() - device.width() - 16.0).abs() <= 1.0);
+            assert!((settings.x() - device.x() - device.width() - 24.0).abs() <= 1.0);
         } else {
             assert!((settings.x() - device.x()).abs() <= 1.0);
-            assert!((settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0);
+            assert!((settings.y() - device.y() - device.height() - 24.0).abs() <= 1.0);
         }
         eprintln!("GTK sidebar geometry assertions executed");
     }
@@ -5254,16 +5709,20 @@ mod tests {
                         | "Clear"
                         | "Save binding"
                         | "Remove"
-                        | "Save new profile"
-                        | "Remove selected"
+                        | "Create profile"
+                        | "Delete profile"
                         | "Test action"
                         | "Previous"
                         | "Next"
                         | "Parent"
                         | "New page"
                         | "Rename page"
-                        | "Save profile"
+                        | "Delete page"
+                        | "Save changes"
                         | "New folder"
+                        | "Open folder"
+                        | "Link to control"
+                        | "Delete folder"
                         | "Save settings"
                         | "Test connection"
                 )

@@ -1,0 +1,18 @@
+@define-color desk_bg #f4f5fb;
+@define-color desk_surface #ffffff;
+@define-color desk_field #eef0f8;
+@define-color desk_hover #e2e6f3;
+@define-color desk_edge #cfd5e6;
+@define-color desk_control_edge #8a96b5;
+@define-color desk_ink #1b2033;
+@define-color desk_muted #55607a;
+@define-color desk_violet #6d4fd6;
+@define-color desk_cyan #0e7490;
+@define-color desk_error #c0243f;
+@define-color desk_success #1b7f55;
+@define-color desk_warning #9a6a00;
+
+.suggested-action:hover { background-color: #5f43c8; }
+.suggested-action:active { background-color: #4f35b0; }
+popover > contents, tooltip { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
+.toast { box-shadow: 0 4px 16px alpha(@desk_ink, 0.18); }

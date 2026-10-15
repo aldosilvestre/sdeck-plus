@@ -16,6 +16,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod folders;
+mod page_controls;
+mod pages;
+
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
     output: mpsc::Sender<MonitorEvent>,
@@ -150,9 +154,9 @@ pub(crate) struct FeatureRuntime {
     timer: Rc<RefCell<Option<glib::SourceId>>>,
     device: Rc<RefCell<Option<mpsc::Sender<DeviceAction>>>>,
     events: Rc<RefCell<Option<mpsc::Sender<MonitorEvent>>>>,
-    organization_controls: GtkBox,
+    page_controls: page_controls::PageControls,
     organization_management: GtkBox,
-    page_name: Entry,
+    profile_delete: Button,
     profile_tabs: gtk::Notebook,
     profile_pages: Rc<RefCell<Vec<(String, GtkBox)>>>,
     profile_content: Rc<RefCell<Option<GtkBox>>>,
@@ -206,8 +210,8 @@ impl FeatureRuntime {
         timer_status.set_xalign(0.0);
         timer_status.add_css_class("muted");
         timer_status.set_visible(false);
-        let organization_controls = GtkBox::new(Orientation::Horizontal, 8);
-        let organization_management = GtkBox::new(Orientation::Vertical, 8);
+        let page_controls = page_controls::PageControls::new();
+        let organization_management = GtkBox::new(Orientation::Vertical, 12);
         let legacy_picker = crate::labeled("Layer (organization unavailable)", &ui.layer_picker);
         legacy_picker.set_visible(false);
         organization_management.append(&legacy_picker);
@@ -225,16 +229,14 @@ impl FeatureRuntime {
             .width_chars(16)
             .hexpand(true)
             .build();
-        let profile_application_apply = crate::ui::button("document-save-symbolic", "Save profile");
+        let profile_application_apply = crate::ui::button("document-save-symbolic", "Save changes");
+        profile_application_apply.add_css_class("suggested-action");
         let profile_application_status = Label::new(None);
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
-        let page_name = Entry::builder()
-            .placeholder_text("Page name")
-            .width_chars(12)
-            .hexpand(true)
-            .build();
+        let profile_delete = crate::ui::button("edit-delete-symbolic", "Delete profile");
+        profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
         let fields = GtkBox::new(Orientation::Vertical, 8);
         fields.append(&crate::ui::helper(
@@ -281,9 +283,9 @@ impl FeatureRuntime {
             timer: Rc::new(RefCell::new(None)),
             device: Rc::new(RefCell::new(None)),
             events: Rc::new(RefCell::new(None)),
-            organization_controls,
+            page_controls,
             organization_management,
-            page_name,
+            profile_delete,
             profile_tabs,
             profile_pages: Rc::new(RefCell::new(Vec::new())),
             profile_content: Rc::new(RefCell::new(None)),
@@ -305,26 +307,7 @@ impl FeatureRuntime {
             obs_status,
             obs_valid: Rc::new(Cell::new(true)),
         };
-        for (label, icon, action) in [
-            (
-                "Previous",
-                "go-previous-symbolic",
-                NavigationAction::PreviousPage,
-            ),
-            ("Next", "go-next-symbolic", NavigationAction::NextPage),
-            ("Parent", "go-up-symbolic", NavigationAction::ParentFolder),
-        ] {
-            let button = crate::ui::button(icon, label);
-            let callback = runtime.clone();
-            button.connect_clicked(move |_| callback.navigate(&action));
-            runtime.organization_controls.append(&button);
-        }
-        let page = crate::ui::button("document-new-symbolic", "New page");
-        let callback = runtime.clone();
-        page.connect_clicked(move |_| {
-            callback.create_view(None);
-        });
-        runtime.organization_controls.append(&page);
+        runtime.page_controls.bind(&runtime);
         let callback = runtime.clone();
         runtime
             .profile_tabs
@@ -342,38 +325,31 @@ impl FeatureRuntime {
                     callback.select_profile(&profile);
                 }
             });
-        let page_editor = GtkBox::new(Orientation::Horizontal, 8);
-        page_editor.append(&crate::labeled("Page name", &runtime.page_name));
-        let rename = crate::ui::button("document-edit-symbolic", "Rename page");
-        rename.set_valign(gtk::Align::End);
-        let callback = runtime.clone();
-        rename.connect_clicked(move |_| callback.rename_page());
-        let callback = runtime.clone();
-        runtime
-            .page_name
-            .connect_activate(move |_| callback.rename_page());
-        page_editor.append(&rename);
-        runtime.organization_management.append(&page_editor);
-        runtime
-            .organization_management
-            .append(&gtk::Separator::new(Orientation::Horizontal));
         runtime.organization_management.append(&crate::labeled(
-            "Profile to save",
+            "Profile to edit",
             &runtime.profile_settings_picker,
         ));
-        runtime.organization_management.append(&crate::labeled(
-            "Application (optional)",
+        let application_row = crate::labeled(
+            "Auto-switch application (optional)",
             &runtime.profile_application,
-        ));
-        runtime.organization_management.append(&crate::ui::helper(
-            "Optionally select this profile when a window class or executable, such as kitty or firefox, has focus. All profiles stay visible. Base is always available.",
-        ));
-        runtime
-            .organization_management
-            .append(&runtime.profile_application_apply);
+        );
+        crate::ui::field_help(&application_row, "Automatic switching help",
+            "Enter a window class or executable, such as kitty or firefox. This profile is selected when that application has focus; it does not launch the application. Leave empty for manual selection. All profile tabs stay visible. Base is always available and cannot have an application rule.");
+        runtime.organization_management.append(&application_row);
         runtime
             .organization_management
             .append(&runtime.profile_application_status);
+        let actions = GtkBox::new(Orientation::Horizontal, 12);
+        actions.append(&runtime.profile_application_apply);
+        actions.append(&runtime.profile_delete);
+        runtime.profile_delete.set_tooltip_text(Some(
+            "Delete the selected profile and all its pages, folders, bindings and artwork. Base cannot be deleted.",
+        ));
+        runtime.organization_management.append(&actions);
+        let callback = runtime.clone();
+        runtime
+            .profile_delete
+            .connect_clicked(move |_| callback.confirm_profile_removal());
         let callback = runtime.clone();
         runtime
             .profile_settings_picker
@@ -390,23 +366,10 @@ impl FeatureRuntime {
         runtime
             .profile_application
             .connect_activate(move |_| callback.save_profile_application());
-        let folder = Entry::builder()
-            .placeholder_text("New folder name")
-            .width_chars(12)
-            .hexpand(true)
-            .build();
-        let create = crate::ui::button("folder-new-symbolic", "New folder");
         let callback = runtime.clone();
-        let name = folder.clone();
-        create.connect_clicked(move |_| {
-            if callback.create_view(Some(&name.text())) {
-                name.set_text("");
-            }
-        });
         runtime
-            .organization_management
-            .append(&crate::labeled("Folder name", &folder));
-        runtime.organization_management.append(&create);
+            .profile_application
+            .connect_changed(move |_| callback.refresh_save_state());
         let callback = runtime.clone();
         runtime
             .obs_save
@@ -420,7 +383,12 @@ impl FeatureRuntime {
     }
 
     pub(crate) fn controls(&self) -> &GtkBox {
-        &self.organization_controls
+        &self.page_controls.root
+    }
+
+    #[cfg(test)]
+    pub(crate) fn folder_menu(&self) -> &gtk::MenuButton {
+        &self.page_controls.folder_menu
     }
 
     pub(crate) fn management(&self) -> &GtkBox {
@@ -568,18 +536,41 @@ impl FeatureRuntime {
             && profile.is_some()
             && organization.is_some();
         self.profile_application.set_sensitive(editable);
-        self.profile_application_apply
-            .set_sensitive(profile.is_some() && organization.is_some());
+        self.profile_delete
+            .set_sensitive(editable && self.artwork.store.borrow().is_some());
         self.profile_settings_picker
             .set_sensitive(organization.is_some());
         let application = profile
             .as_deref()
             .and_then(|profile| organization.as_ref()?.profile_application(profile));
         self.profile_application.set_text(application.unwrap_or(""));
-        self.profile_application_status.set_text(match application {
-            Some(_) => "Automatically selected when its application has focus.",
-            None => "Always available.",
-        });
+        self.refresh_save_state();
+        crate::ui::clear_feedback(&self.profile_application_status);
+        self.profile_application_status
+            .set_text(match (profile.as_deref(), application) {
+                (Some(sdeck_plus::layers::DEFAULT_LAYER), _) => {
+                    "Base: always available, cannot be deleted."
+                }
+                (_, Some(_)) => "Automatic switching enabled.",
+                (_, None) => "Manual selection — no application rule.",
+            });
+    }
+
+    fn refresh_save_state(&self) {
+        let profile = self
+            .profile_settings_picker
+            .selected_item()
+            .and_then(|item| item.downcast::<gtk::StringObject>().ok())
+            .map(|item| item.string().to_string());
+        let organization = self.organization.borrow();
+        let dirty = match (profile.as_deref(), organization.as_ref()) {
+            (Some(profile), Some(organization)) if profile != sdeck_plus::layers::DEFAULT_LAYER => {
+                self.profile_application.text().trim()
+                    != organization.profile_application(profile).unwrap_or("")
+            }
+            _ => false,
+        };
+        self.profile_application_apply.set_sensitive(dirty);
     }
 
     fn save_profile_application(&self) {
@@ -601,6 +592,7 @@ impl FeatureRuntime {
         match result {
             Ok(()) => {
                 self.save_profile(self.layers.borrow().clone());
+                self.refresh_save_state();
             }
             Err(error) => {
                 self.profile_application_status.set_text(&error.to_string());
@@ -681,7 +673,8 @@ impl FeatureRuntime {
             Ok(value) => *self.organization.borrow_mut() = Some(value),
             Err(error) => {
                 *self.organization.borrow_mut() = None;
-                self.organization_controls.set_sensitive(false);
+                self.page_controls.root.set_sensitive(false);
+                self.page_controls.folders.set_sensitive(false);
                 self.organization_management.set_sensitive(false);
                 self.status.set_text(&format!("Organization writes disabled: {error}. Repair organization.json; original retained."));
                 crate::ui::feedback(&self.status, true);
@@ -774,7 +767,11 @@ impl FeatureRuntime {
         match self.organization.borrow().as_ref() {
             Some(organization) => {
                 let info = organization.current(&self.layers.borrow());
-                self.page_name.set_text(&info.page_name);
+                self.page_controls.refresh(
+                    organization,
+                    &self.layers.borrow(),
+                    self.artwork.store.borrow().is_some(),
+                );
                 self.indicator.set_text(&format!(
                     "{}  ·  Page {} of {}",
                     info.label, info.page, info.page_count
@@ -782,7 +779,6 @@ impl FeatureRuntime {
                 self.indicator.set_tooltip_text(Some(&info.label));
             }
             None => {
-                self.page_name.set_text("");
                 self.indicator
                     .set_text("Organization unavailable · layer bindings remain editable");
             }
@@ -802,52 +798,6 @@ impl FeatureRuntime {
         self.ui.refresh_summaries(&self.layers);
         self.artwork.refresh(false);
         self.refresh_indicator();
-    }
-
-    fn create_view(&self, folder: Option<&str>) -> bool {
-        let result = {
-            let mut organization = self.organization.borrow_mut();
-            let Some(organization) = organization.as_mut() else {
-                self.report("Organization writes are disabled.", true);
-                return false;
-            };
-            let mut layers = self.layers.borrow_mut();
-            match folder {
-                Some(name) => organization.create_folder(&mut layers, name),
-                None => organization.create_page(&mut layers),
-            }
-        };
-        match result {
-            Ok(_) => {
-                self.refresh_selection();
-                self.persist(self.layers.borrow().clone());
-                self.status.set_text("View created.");
-                crate::ui::feedback(&self.status, false);
-                true
-            }
-            Err(error) => {
-                self.report(&format!("Could not create view: {error}"), true);
-                false
-            }
-        }
-    }
-
-    fn rename_page(&self) {
-        let result = {
-            let mut organization = self.organization.borrow_mut();
-            let Some(organization) = organization.as_mut() else {
-                self.report("Organization writes are disabled.", true);
-                return;
-            };
-            organization.rename_page(&self.layers.borrow(), &self.page_name.text())
-        };
-        match result {
-            Ok(()) => {
-                self.persist(self.layers.borrow().clone());
-                self.report("Page renamed.", false);
-            }
-            Err(error) => self.report(&format!("Could not rename page: {error}"), true),
-        }
     }
 
     fn navigate(&self, action: &NavigationAction) {

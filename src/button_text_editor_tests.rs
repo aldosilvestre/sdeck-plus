@@ -32,10 +32,13 @@ fn assert_button_text_editor() {
     window.set_child(Some(&stage));
     window.present();
     let editor = &widgets._text_editor;
+    // Keep shared-desktop focus changes from dismissing this test's popup.
+    let autohide = editor.panel.is_autohide();
+    editor.panel.set_autohide(false);
     commands.try_iter().for_each(drop);
     assert!(!editor.panel.is_visible());
     wait_for_frame(&widgets.root);
-    rendered_text_popup(&editor.panel, || assert!(editor.open.activate()));
+    rendered_text_popup(&editor.panel, || editor.open.popup());
     assert!(editor.panel.is_mapped(), "new text popup must be mapped");
     assert!(editor.panel.is_visible());
 
@@ -302,6 +305,8 @@ fn assert_button_text_editor() {
             .button_text_in_layer("Base", ArtworkTarget::Keypad(2)),
         Some(&draft)
     );
+    panel.set_autohide(autohide);
+    panel.set_autohide(autohide);
     polling.remove();
     assert!(
         editor_owner.upgrade().is_none(),
@@ -664,7 +669,9 @@ fn rendered_text_popup(panel: &gtk::Popover, update: impl FnOnce()) -> gtk::gdk:
     });
     update();
     content.queue_draw();
-    main_loop.run();
+    if captured.borrow().is_none() {
+        main_loop.run();
+    }
     paintable.disconnect(signal);
     if !timed_out.get() {
         deadline.remove();

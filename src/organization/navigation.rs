@@ -5,7 +5,7 @@ impl Organization {
     /// Select an existing view; return whether the active layer changed.
     ///
     /// Next/previous skip deleted slots and never wrap. Missing pages/folders
-    /// and root's parent return false. Parent and child entry target page 1;
+    /// and root's parent return false. Child entry targets page 1;
     /// if page 1 was deleted, entry returns false rather than crossing scope.
     ///
     /// # Errors
@@ -47,14 +47,15 @@ impl Organization {
             }
             NavigationAction::GoToPage(page) => target.page = *page,
             NavigationAction::OpenFolder(name) => {
+                target.parent_page = Some(layers.active().to_owned());
                 target.folder.push(name.clone());
                 target.page = 1;
             }
             NavigationAction::ParentFolder => {
-                if target.folder.pop().is_none() {
-                    return Ok(false);
-                }
-                target.page = 1;
+                return Ok(target
+                    .parent_page
+                    .as_deref()
+                    .is_some_and(|key| layers.select(key)));
             }
         }
         let key = candidates
