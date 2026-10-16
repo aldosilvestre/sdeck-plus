@@ -65,8 +65,10 @@ impl ButtonTextEditor {
         let (orientation_row, orientation) = toggle_group(["Horizontal", "Vertical"]);
         orientation[1].set_tooltip_text(Some("Rotate text 90 degrees clockwise"));
         form.append(&labeled("Orientation", &orientation_row));
-        let (horizontal_row, horizontal) = toggle_group(["Left", "Center", "Right"]);
-        let (vertical_row, vertical) = toggle_group(["Top", "Center", "Bottom"]);
+        let (horizontal_row, horizontal) =
+            alignment_group(["Align left", "Center horizontally", "Align right"], false);
+        let (vertical_row, vertical) =
+            alignment_group(["Align top", "Center vertically", "Align bottom"], true);
         let alignment_row = GtkBox::new(Orientation::Horizontal, 8);
         alignment_row.set_homogeneous(true);
         alignment_row.append(&labeled("Horizontal alignment", &horizontal_row));
@@ -353,6 +355,10 @@ impl ButtonTextEditor {
         let image = sdeck_plus::image_output::compose_button_image(path.as_deref(), value)?;
         let texture = gtk::gdk::Texture::for_pixbuf(&image);
         self.preview.set_paintable(Some(&texture));
+        // A key that shows live information keeps its picture in the window.
+        if self.artwork.shows_info(&layer, target) {
+            return Ok(());
+        }
         for (picture_target, picture) in self.artwork.pictures.borrow().iter() {
             if *picture_target == target {
                 picture.set_paintable(Some(&texture));
@@ -388,6 +394,50 @@ impl ButtonTextEditor {
             Err(error) => self.feedback(&format!("Could not save text: {error}"), true),
         }
     }
+}
+
+fn alignment_group(captions: [&str; 3], vertical: bool) -> (GtkBox, [gtk::ToggleButton; 3]) {
+    let (row, buttons) = toggle_group(captions);
+    for (index, (button, caption)) in buttons.iter().zip(captions).enumerate() {
+        let icon = gtk::DrawingArea::builder()
+            .content_width(16)
+            .content_height(16)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .build();
+        icon.set_draw_func(move |icon, context, _, _| {
+            let color = icon.style_context().color();
+            context.set_source_rgba(
+                f64::from(color.red()),
+                f64::from(color.green()),
+                f64::from(color.blue()),
+                f64::from(color.alpha()),
+            );
+            if vertical {
+                context.rectangle(2.0, 1.0, 12.0, 1.0);
+                context.rectangle(2.0, 14.0, 12.0, 1.0);
+                let top = [3.0, 5.0, 7.0][index];
+                for (width, offset) in [10.0, 6.0, 10.0].into_iter().zip([0.0, 2.0, 4.0]) {
+                    context.rectangle(3.0, top + offset, width, 1.0);
+                }
+            } else {
+                for (width, top) in [12.0, 8.0, 12.0, 6.0]
+                    .into_iter()
+                    .zip([3.0, 6.0, 9.0, 12.0])
+                {
+                    let left = [2.0, (16.0 - width) / 2.0, 14.0 - width][index];
+                    context.rectangle(left, top, width, 1.0);
+                }
+            }
+            if let Err(error) = context.fill() {
+                eprintln!("Could not draw text alignment icon: {error}");
+            }
+        });
+        button.set_child(Some(&icon));
+        button.set_tooltip_text(Some(caption));
+        button.update_property(&[gtk::accessible::Property::Label(caption)]);
+    }
+    (row, buttons)
 }
 
 fn toggle_group<const N: usize>(captions: [&str; N]) -> (GtkBox, [gtk::ToggleButton; N]) {

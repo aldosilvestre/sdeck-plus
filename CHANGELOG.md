@@ -8,6 +8,22 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Live information.** Keys, dial zones and per-section touch bindings can
+  show volume, audio output, brightness, time/date, weather, CPU, memory,
+  temperature and OBS state. Transparent icons, bars and text share the
+  production compositor and preserve the assigned artwork.
+- **Configuration import/export.** The top-right Menu includes Help, Import
+  configuration and Export configuration. Version-2 exports embed saved
+  settings and local sounds, but image entries contain filenames only, without
+  base64 image data. Import reuses local assets, validates before replacing,
+  retains a backup and still accepts version-1 bundles.
+- **Multimedia controls.** Play and stop owned soundboard audio, select a
+  fixed PipeWire output by stable name, or rotate through the connected
+  outputs on each press. Choosing or saving an output does not switch audio.
+- **Delayed page returns.** A non-None binding can return to an exact page
+  after 1–86400 seconds. Reusing it restarts the wait; navigation, cancellation
+  and destination removal clear pending returns.
+
 - **Swap keys by drag-and-drop.** Drag one keypad button onto another in the
   native preview to exchange their saved action, background and text on the
   current page. Empty keys can be used as destinations. The exchange is saved
@@ -39,6 +55,18 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **None by default.** Untouched controls on new profiles and pages start
+  with None instead of suggesting a page switch. None can display information
+  without executing an action or starting a return timer.
+- **Text alignment icons.** Six Word-like line icons replace alignment
+  captions while preserving grouped selection, tooltips, accessible names,
+  keyboard focus and the shared live preview.
+- **Current documentation and captures.** README and the documentation site
+  describe the new controls, version-2 image references and configuration
+  recovery. The reproducible native generator now captures 26 current
+  application views, including both themes, information, audio routing,
+  page returns and configuration transfer.
+
 - **Organize popup.** Edit profile and New profile are separate tasks in a
   native stack, so only one occupies space and the popup no longer scrolls at
   640x480 or 1000x700. Long explanations moved from permanent paragraphs into
@@ -66,13 +94,24 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 - Opening a page name dialog no longer enabled manual profile selection before
   the name was accepted.
 
-### Known issues
+### Fixed
 
-- The native test `binding_editor_hides_labeled_rows_for_inactive_controls_and_actions`
-  fails at `src/button_text_editor_tests.rs:679` ("popup did not publish
-  rendered content"), so the full suite is not green (27 of 28 binary tests and
-  225 of 225 library tests pass). Earlier QA notes record the same symptom. It
-  persisted with the CSS and `main.rs` changes of this work removed, and its
-  cause is not yet identified. No assertion was weakened or skipped.
+- **Record-level configuration recovery.** Invalid and conflicting records
+  in readable layer files are isolated and logged to `button-errors.log`
+  while valid assignments remain usable. Unreadable files and unsupported
+  headers still preserve the original file with startup writes disabled.
+- **Visible runtime feedback.** Progress and error messages no longer hide
+  themselves behind the feedback container's inherited visibility.
+- **Compact binding forms.** Return and live-information options fit the
+  existing 1000x700 layout with the base action fields. Form and Appearance
+  spacing is reduced without shrinking text or controls.
+- **GTK test initialization.** Headless checks avoid initializing GTK without
+  a display; an advertised display must initialize successfully. Native checks
+  use the current None and touch-section behavior.
+
+### Verification
+
+- Graphical binary tests run one case per process so GTK retains a single
+  owning thread. Popup checks wait for allocated, rendered content.
 - Physical HID input and live OBS were not exercised; verification used
   temporary data and command channels.

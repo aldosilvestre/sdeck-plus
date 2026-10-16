@@ -5,7 +5,8 @@ use sdeck_plus::{
     device_control::DeviceAction,
     event_api::MonitorEvent,
     features::FeatureAction,
-    layers::{Action, LayerStore},
+    info::{Glyph, InfoSource, InfoValue},
+    layers::{Action, LayerStore, PageReturn},
     obs::ObsConfig,
     organization::{NavigationAction, Organization},
 };
@@ -16,9 +17,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod configuration;
 mod folders;
 mod key_swap;
 mod page_controls;
+#[cfg(test)]
+mod page_return_tests;
 mod pages;
 
 pub(crate) fn run_worker(
@@ -88,6 +92,24 @@ pub(crate) fn run_worker(
                         .map_err(|error| error.to_string()),
                 ))
             }
+            LayerCommand::ExportConfiguration {
+                store,
+                organization,
+                destination,
+            } => {
+                let result = persist_snapshot(&store, organization.as_ref())
+                    .and_then(|()| sdeck_plus::config_bundle::export(store.root(), &destination))
+                    .map_err(|error| error.to_string());
+                Some(MonitorEvent::ConfigurationExportResult {
+                    path: destination,
+                    result,
+                })
+            }
+            LayerCommand::ImportConfiguration { root, source } => {
+                let result = sdeck_plus::config_bundle::import(&source, &root)
+                    .map_err(|error| error.to_string());
+                Some(MonitorEvent::ConfigurationImportResult { root, result })
+            }
             LayerCommand::Execute { binding_id, action } => {
                 crate::execute_layer_action_for(&mut executor, &binding_id, &action, &output);
                 None
@@ -148,7 +170,11 @@ pub(crate) fn run_worker(
                     eprintln!("Could not swap keys while closing: {error}");
                 }
             }
-            LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_) | LayerCommand::Shutdown => {}
+            LayerCommand::Execute { .. }
+            | LayerCommand::ObsProbe(_)
+            | LayerCommand::ExportConfiguration { .. }
+            | LayerCommand::ImportConfiguration { .. }
+            | LayerCommand::Shutdown => {}
         }
     }
     if let Some((store, organization)) = final_store {
@@ -185,10 +211,16 @@ pub(crate) struct FeatureRuntime {
     key_swap_pending: Rc<Cell<bool>>,
     key_swap_deferred_persist: Rc<Cell<bool>>,
     key_swap_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
+    configuration_operation: Rc<Cell<Option<configuration::Operation>>>,
+    configuration_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
     pub(crate) indicator: Label,
     pub(crate) status: Label,
     pub(crate) timer_status: Label,
     timer: Rc<RefCell<Option<glib::SourceId>>>,
+    page_return: Rc<RefCell<Option<glib::SourceId>>>,
+    info_watch: Rc<RefCell<Option<mpsc::Sender<std::collections::BTreeSet<InfoSource>>>>>,
+    brightness: Rc<Cell<u8>>,
+    sleeping: Rc<Cell<bool>>,
     device: Rc<RefCell<Option<mpsc::Sender<DeviceAction>>>>,
     events: Rc<RefCell<Option<mpsc::Sender<MonitorEvent>>>>,
     page_controls: page_controls::PageControls,
@@ -317,10 +349,16 @@ impl FeatureRuntime {
             key_swap_pending: Rc::new(Cell::new(false)),
             key_swap_deferred_persist: Rc::new(Cell::new(false)),
             key_swap_root: Rc::new(RefCell::new(glib::WeakRef::new())),
+            configuration_operation: Rc::new(Cell::new(None)),
+            configuration_root: Rc::new(RefCell::new(glib::WeakRef::new())),
             indicator,
             status,
             timer_status,
             timer: Rc::new(RefCell::new(None)),
+            page_return: Rc::new(RefCell::new(None)),
+            info_watch: Rc::new(RefCell::new(None)),
+            brightness: Rc::new(Cell::new(100)),
+            sleeping: Rc::new(Cell::new(false)),
             device: Rc::new(RefCell::new(None)),
             events: Rc::new(RefCell::new(None)),
             page_controls,
@@ -662,7 +700,7 @@ impl FeatureRuntime {
     }
 
     fn reconcile_focus(&self) {
-        if self.key_swap_pending.get() {
+        if self.key_swap_pending.get() || self.configuration_operation.get().is_some() {
             return;
         }
         let target = {
@@ -711,7 +749,18 @@ impl FeatureRuntime {
         events: mpsc::Sender<MonitorEvent>,
     ) {
         *self.device.borrow_mut() = Some(device);
+        let info_events = events.clone();
         *self.events.borrow_mut() = Some(events);
+        let root = self.layers.borrow().root().to_owned();
+        match sdeck_plus::info::spawn_worker(root, info_events) {
+            Ok(sender) => *self.info_watch.borrow_mut() = Some(sender),
+            Err(error) => eprintln!("Could not start the information reader: {error}"),
+        }
+        self.artwork.update_info(
+            InfoSource::Brightness,
+            InfoValue::gauge(Glyph::Sun, 100, "100%".into()),
+        );
+        self.sync_info_from(&self.layers.borrow());
         match organization {
             Ok(value) => *self.organization.borrow_mut() = Some(value),
             Err(error) => {
@@ -757,7 +806,46 @@ impl FeatureRuntime {
         }
     }
 
+    /// Tell the reader which sources any binding currently shows.
+    pub(crate) fn sync_info_from(&self, store: &LayerStore) {
+        let sources = store
+            .info_sources()
+            .into_iter()
+            .filter(|source| source.is_polled())
+            .collect();
+        if let Some(sender) = self.info_watch.borrow().as_ref() {
+            if sender.send(sources).is_err() {
+                eprintln!("The information reader stopped.");
+            }
+        }
+    }
+
+    fn track_brightness(&self, action: &DeviceAction) {
+        match action {
+            DeviceAction::Brightness(value) => self.brightness.set(*value),
+            DeviceAction::AdjustBrightness(step) => self
+                .brightness
+                .set(self.brightness.get().saturating_add_signed(*step).min(100)),
+            DeviceAction::Sleep => self.sleeping.set(true),
+            DeviceAction::Wake => self.sleeping.set(false),
+        }
+        let level = self.brightness.get();
+        let value = if self.sleeping.get() {
+            InfoValue {
+                inactive: true,
+                ..InfoValue::gauge(Glyph::Sun, 0, "OFF".into())
+            }
+        } else {
+            InfoValue::gauge(Glyph::Sun, level, format!("{level}%"))
+        };
+        self.artwork.update_info(InfoSource::Brightness, value);
+    }
+
     pub(crate) fn persist(&self, store: LayerStore) {
+        if self.configuration_operation.get() == Some(configuration::Operation::Import) {
+            return;
+        }
+        self.sync_info_from(&store);
         if self.key_swap_pending.get() {
             self.key_swap_deferred_persist.set(true);
             return;
@@ -766,11 +854,13 @@ impl FeatureRuntime {
     }
 
     pub(crate) fn save_binding(&self, store: LayerStore) -> bool {
+        self.sync_info_from(&store);
         self.manual_profile.set(true);
         self.persist_with_feedback(store, LayerCommand::SaveBinding)
     }
 
     pub(crate) fn save_profile(&self, store: LayerStore) {
+        self.sync_info_from(&store);
         self.manual_profile.set(true);
         if self.persist_with_feedback(store, LayerCommand::SaveProfile) {
             self.report_profile_save("Saving profile…", false);
@@ -871,7 +961,11 @@ impl FeatureRuntime {
     }
 
     pub(crate) fn execute(&self, binding_id: String, action: Action) {
+        if self.configuration_operation.get() == Some(configuration::Operation::Import) {
+            return;
+        }
         match action {
+            Action::None => {}
             Action::SwitchLayer(target) => {
                 if self.layers.borrow_mut().apply_switch(&target) {
                     self.refresh_selection();
@@ -892,8 +986,11 @@ impl FeatureRuntime {
             Action::Feature(feature) => match feature {
                 FeatureAction::Navigation(action) => self.navigate(&action),
                 FeatureAction::Device(action) => match self.device.borrow().as_ref() {
-                    Some(output) => match output.send(action) {
-                        Ok(()) => self.status.set_text("Device action queued."),
+                    Some(output) => match output.send(action.clone()) {
+                        Ok(()) => {
+                            self.track_brightness(&action);
+                            self.status.set_text("Device action queued.");
+                        }
                         Err(error) => {
                             self.report(&format!("Device action unavailable: {error}"), true)
                         }
@@ -937,8 +1034,52 @@ impl FeatureRuntime {
         }
     }
 
+    /// Run `action`, then move once to the configured page after its delay.
+    /// The destination is the exact page chosen in the editor.
+    pub(crate) fn execute_with_return(
+        &self,
+        binding_id: String,
+        action: Action,
+        page_return: Option<PageReturn>,
+    ) {
+        if action == Action::None
+            || self.configuration_operation.get() == Some(configuration::Operation::Import)
+        {
+            return;
+        }
+        self.execute(binding_id, action);
+        if let Some(value) = page_return {
+            if self.layers.borrow().layers().contains_key(&value.layer) {
+                self.arm_page_return(value);
+            } else {
+                self.report("The return page no longer exists.", true);
+            }
+        }
+    }
+
+    fn arm_page_return(&self, value: PageReturn) {
+        if let Some(source) = self.page_return.borrow_mut().take() {
+            source.remove();
+        }
+        let runtime = self.clone();
+        *self.page_return.borrow_mut() = Some(glib::timeout_add_local_once(
+            Duration::from_secs(u64::from(value.seconds)),
+            move || {
+                runtime.page_return.borrow_mut().take();
+                if runtime.layers.borrow_mut().select(&value.layer) {
+                    runtime.manual_profile.set(true);
+                    runtime.refresh_selection();
+                    runtime.persist(runtime.layers.borrow().clone());
+                    runtime.report(&format!("Returned to {}.", value.layer), false);
+                } else {
+                    runtime.report("Return page is no longer available.", true);
+                }
+            },
+        ));
+    }
+
     fn start_timer(&self, seconds: u32) {
-        self.cancel_timer();
+        self.cancel_countdown();
         let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
         self.timer_status
             .set_text(&format!("Timer: {seconds}s remaining"));
@@ -968,10 +1109,23 @@ impl FeatureRuntime {
         ));
     }
 
-    pub(crate) fn cancel_timer(&self) {
+    fn cancel_countdown(&self) {
         if let Some(source) = self.timer.borrow_mut().take() {
             source.remove();
         }
+    }
+
+    /// Cancels the countdown and any pending page return.
+    pub(crate) fn cancel_timer(&self) {
+        self.cancel_countdown();
+        if let Some(source) = self.page_return.borrow_mut().take() {
+            source.remove();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn page_return_active(&self) -> bool {
+        self.page_return.borrow().is_some()
     }
 
     #[cfg(test)]

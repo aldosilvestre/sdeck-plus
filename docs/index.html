@@ -159,7 +159,7 @@
         <p class="lead">
           sdeck-plus is a GTK4 control desk for the Elgato Stream Deck +. Configure
           its eight keys, four dials and touch strip, organize profiles, pages and
-          folders, assign artwork and text, control device brightness and drive OBS Studio.
+          folders, show live information, route audio, style button text and drive OBS Studio.
         </p>
         <div class="cta">
           <a class="btn primary" href="#install">Install</a>
@@ -167,7 +167,7 @@
         </div>
         <p class="note">This project is still under construction. Developed and tested on Arch Linux with Hyprland.</p>
       </div>
-      <img class="shot" src="screenshots/main-window.png" width="1000" height="800"
+      <img class="shot" src="screenshots/main-window.png" width="1000" height="950"
            alt="sdeck-plus main window with the hardware preview and the binding editor">
     </div>
   </section>
@@ -186,12 +186,12 @@
   <section id="features">
     <div class="wrap">
       <h2>Features</h2>
-      <p class="section-lead">Current native GTK widgets with demonstration profiles and artwork. Input feedback is simulated; no device or OBS actions are performed for these captures.</p>
+      <p class="section-lead">Current native GTK widgets with demonstration profiles and artwork. Input feedback and readings are deterministic examples; no device, audio-output or OBS actions are performed for these captures.</p>
 
       <div class="feature">
         <div class="feature-text">
           <h3>Configure any control</h3>
-          <p>Click a key, dial or the touch strip on the hardware preview, choose an event and an action, then save.
+          <p>Untouched controls start with <strong>None</strong>. Click a key, dial or the touch strip on the hardware preview, choose an event and an action, then save.
              Saving never runs the action; <strong>Test action</strong> runs it on demand.</p>
           <ul>
             <li>Move to a profile or page, run a command, open an application</li>
@@ -199,8 +199,18 @@
             <li>Play sounds and the categorized <strong>More actions</strong></li>
           </ul>
         </div>
-        <img class="shot" src="screenshots/action-types.png" width="241" height="324" loading="lazy"
+        <img class="shot" src="screenshots/action-types.png" width="241" height="358" loading="lazy"
              alt="Action menu listing every action type">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>None stays inert</h3>
+          <p>New buttons, profiles and pages start without an action. <strong>None</strong> can still display artwork,
+             button text or live information, but it never runs an action or starts a page-return timer.</p>
+        </div>
+        <img class="shot" src="screenshots/default-none.png" width="1000" height="950" loading="lazy"
+             alt="An untouched key with the None action selected">
       </div>
 
       <div class="feature">
@@ -212,7 +222,7 @@
         <div class="pair">
           <img class="shot" src="screenshots/encoder-events.png" width="243" height="188" loading="lazy"
                alt="Event menu for a dial with press, clockwise and counterclockwise">
-          <img class="shot" src="screenshots/touch-strip.png" width="1000" height="800" loading="lazy"
+          <img class="shot" src="screenshots/touch-strip.png" width="1000" height="950" loading="lazy"
                alt="Touch strip selected in the binding editor">
         </div>
       </div>
@@ -226,8 +236,35 @@
         <div class="pair">
           <img class="shot" src="screenshots/more-actions-categories.png" width="483" height="256" loading="lazy"
                alt="More actions category menu">
-          <img class="shot" src="screenshots/more-actions-obs.png" width="1000" height="800" loading="lazy"
+          <img class="shot" src="screenshots/more-actions-obs.png" width="1000" height="950" loading="lazy"
                alt="Key configured to switch OBS to the Studio camera scene">
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Choose or rotate audio outputs</h3>
+          <p><strong>More actions &gt; Multimedia &gt; Change audio output</strong> can select a fixed PipeWire output
+             or <strong>Rotate</strong> through connected outputs on each press. Saved fixed targets use stable names,
+             not temporary numeric IDs. Choosing or saving never changes audio.</p>
+        </div>
+        <img class="shot" src="screenshots/more-actions-audio-output.png" width="1000" height="950" loading="lazy"
+             alt="Change audio output with Rotate selected and a Refresh button">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Live information</h3>
+          <p>Show volume, output device, brightness, time and date, weather, CPU, memory, temperature or OBS state.
+             Readings update on keys and eligible dial or touch-section bindings, over their own artwork.
+             <strong>None</strong> can show information without running an action.</p>
+          <p>Weather accepts a city or coordinates and needs an internet connection. The readings below are demonstration values.</p>
+        </div>
+        <div class="pair">
+          <img class="shot" src="screenshots/live-information.png" width="1000" height="950" loading="lazy"
+               alt="Clock, CPU, memory, temperature, volume and touch-section information over assigned artwork">
+          <img class="shot" src="screenshots/live-information-settings.png" width="1000" height="950" loading="lazy"
+               alt="Weather information selected with a city field in the binding editor">
         </div>
       </div>
 
@@ -235,10 +272,11 @@
         <div class="feature-text">
           <h3>Button text</h3>
           <p>Draw text on any key with an installed font, a size from 6 to 120 px, horizontal or vertical orientation
-             and independent alignment. The preview matches exactly what is sent to the device.</p>
+             and independent alignment. Word-like icon buttons select left, center, right, top, middle and bottom,
+             with tooltips and keyboard focus. The preview matches what is sent to the device.</p>
         </div>
-        <img class="shot" src="screenshots/button-text-editor.png" width="670" height="472" loading="lazy"
-             alt="Button text editor with a live preview">
+        <img class="shot" src="screenshots/button-text-editor.png" width="538" height="472" loading="lazy"
+             alt="Button text editor with six alignment icons and a live preview">
       </div>
 
       <div class="feature">
@@ -260,9 +298,47 @@
         <div class="pair">
           <img class="shot" src="screenshots/organize-profiles-pages.png" width="416" height="433" loading="lazy"
                alt="Organize panel for editing profiles and application association">
-          <img class="shot" src="screenshots/application-profile-tab.png" width="1000" height="800" loading="lazy"
+          <img class="shot" src="screenshots/application-profile-tab.png" width="1000" height="950" loading="lazy"
                alt="OBS application profile tab with its own keys">
         </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Return to a page</h3>
+          <p>Enable a delayed return on a non-None binding, choose the exact page and set a delay from 1 to 86400 seconds.
+             Activating that binding again restarts the wait. Saving a binding never starts the timer.</p>
+        </div>
+        <img class="shot" src="screenshots/page-return.png" width="1000" height="950" loading="lazy"
+             alt="A binding configured to return to its selected page after ten seconds">
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Save and restore configuration</h3>
+          <p>The top-right <strong>Menu</strong> imports and exports <code>.sdeck-plus.json</code> files containing
+             saved profiles, pages, bindings, button text, local sounds, information and OBS settings.</p>
+          <p>Version 2 exports image filenames only, without base64 image data. The named files must already exist
+             in the destination's <code>assets</code> directory. Import validates first, asks for confirmation
+             and keeps the previous configuration as a backup. Older version-1 exports remain supported.</p>
+          <p class="note">Exports include saved OBS credentials. Keep them private. Cancel or an invalid file leaves the current configuration intact.</p>
+        </div>
+        <div class="pair">
+          <img class="shot" src="screenshots/configuration-menu.png" width="319" height="298" loading="lazy"
+               alt="Menu with Help, Import configuration and Export configuration">
+          <img class="shot" src="screenshots/import-configuration.png" width="440" height="146" loading="lazy"
+               alt="Import confirmation explaining replacement and backup, with Cancel as the default">
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Light and dark GTK themes</h3>
+          <p>The native controls follow the desktop theme while keeping consistent spacing, a violet primary action
+             and a distinct cyan keyboard-focus outline.</p>
+        </div>
+        <img class="shot" src="screenshots/main-window-light.png" width="1000" height="950" loading="lazy"
+             alt="The same native configuration window in the light GTK theme">
       </div>
 
       <div class="feature">
@@ -278,10 +354,10 @@
       <div class="feature">
         <div class="feature-text">
           <h3>Built-in help</h3>
-          <p>A three-step guide is always one click away: select a control, configure an action, then save or test it.</p>
+          <p>Choose <strong>Menu &gt; Help</strong> for the three-step guide: select a control, configure an action, then save or test it.</p>
         </div>
-        <img class="shot" src="screenshots/setup-help.png" width="420" height="424" loading="lazy"
-             alt="Setup help popover">
+        <img class="shot" src="screenshots/setup-help.png" width="480" height="278" loading="lazy"
+             alt="Setup help dialog">
       </div>
     </div>
   </section>
@@ -292,7 +368,7 @@
       <p class="section-lead">Beyond layers, commands, applications, shortcuts and sounds, <strong>More actions</strong> provides:</p>
       <table class="actions-table">
         <tr><th>System</th><td>Alternate two shortcuts, paste Unicode text with optional Enter, open files, folders or websites, close a process, scroll the mouse wheel</td></tr>
-        <tr><th>Multimedia</th><td>Play/pause, stop, next/previous track, PipeWire volume up/down and mute, play a local audio file, stop soundboard playback</td></tr>
+        <tr><th>Multimedia</th><td>Play/pause, stop, next/previous track, PipeWire volume up/down and mute, fixed or rotating audio output, play a local audio file, stop soundboard playback</td></tr>
         <tr><th>Organization</th><td>Next, previous or specific page, enter a child folder, return to the parent</td></tr>
         <tr><th>Device</th><td>Absolute or relative brightness, sleep and wake, timers with countdown</td></tr>
         <tr><th>OBS</th><td>Select a scene, toggle recording or streaming, toggle input mute, show/hide a source</td></tr>

@@ -34,6 +34,7 @@ pub enum EventKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
+    None,
     MoveToLayer,
     RunCommand,
     OpenApplication,
@@ -87,8 +88,19 @@ pub fn trigger_from_selection(
         {
             Ok(Trigger::EncoderCounterClockwise(control_number))
         }
-        (ControlKind::Touch, EventKind::TouchTap) => Ok(Trigger::TouchTap),
-        (ControlKind::Touch, EventKind::TouchPress) => Ok(Trigger::TouchPress),
+        // Number 0 is the whole strip; 1 through 4 are its sections.
+        (ControlKind::Touch, EventKind::TouchTap) if control_number <= 4 => {
+            Ok(match control_number {
+                0 => Trigger::TouchTap,
+                zone => Trigger::ZoneTap(zone),
+            })
+        }
+        (ControlKind::Touch, EventKind::TouchPress) if control_number <= 4 => {
+            Ok(match control_number {
+                0 => Trigger::TouchPress,
+                zone => Trigger::ZonePress(zone),
+            })
+        }
         (ControlKind::Touch, EventKind::TouchFlick) => Ok(Trigger::TouchFlick),
         (ControlKind::Touch, EventKind::TouchSwipeLeft) => {
             Ok(Trigger::TouchSwipe(SwipeDirection::Left))
@@ -175,6 +187,7 @@ pub fn action_from_fields(
 ) -> Result<Action, EditorError> {
     let text_value = text_value.trim();
     let action = match kind {
+        ActionKind::None => Action::None,
         ActionKind::MoveToLayer => {
             let target = layer_destination.trim();
             if !store.layers().contains_key(target) {
@@ -217,6 +230,23 @@ pub fn control_summary(
             format!("{}: {}", summary_event_label(event), action_summary(action))
         })
         .collect();
+    if control == ControlKind::Touch {
+        if let Some(bindings) = bindings {
+            for zone in 1..=4 {
+                for (trigger, label) in [
+                    (Trigger::ZoneTap(zone), "Tap"),
+                    (Trigger::ZonePress(zone), "Hold"),
+                ] {
+                    if let Some(action) = bindings.get(&trigger) {
+                        lines.push(format!(
+                            "Section {zone} {label}: {}",
+                            action_summary(Some(action))
+                        ));
+                    }
+                }
+            }
+        }
+    }
     if control == ControlKind::Encoder {
         if let Some(bindings) = bindings {
             for (trigger, action) in bindings {
@@ -252,6 +282,7 @@ fn summary_event_label(event: EventKind) -> &'static str {
 fn action_summary(action: Option<&Action>) -> String {
     let text = match action {
         None => return "Unassigned".into(),
+        Some(Action::None) => "None".into(),
         Some(Action::SwitchLayer(target)) => format!("Layer {target}"),
         Some(Action::Command(command)) => format!("Run {command}"),
         Some(Action::KeyPress { key }) => format!("Shortcut {key}"),
@@ -362,8 +393,13 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(control_summary(&store, "Base", ControlKind::Touch, 1),
+        assert_eq!(control_summary(&store, "Base", ControlKind::Touch, 0),
             "Tap: Open /usr/bin/firefox\nHold: Unassigned\nFlick: Unassigned\nSwipe left: Shortcut CTRL+TAB\nSwipe right: Unassigned\nSwipe up: Unassigned\nSwipe down: Unassigned");
+        store
+            .bind("Base", Trigger::ZoneTap(2), Action::Command("run".into()))
+            .unwrap();
+        assert!(control_summary(&store, "Base", ControlKind::Touch, 0)
+            .ends_with("Swipe down: Unassigned\nSection 2 Tap: Run run"));
         assert_eq!(
             control_summary(&store, "Missing", ControlKind::Button, 1),
             "Press: Unassigned"

@@ -6,6 +6,8 @@
 
 #[path = "desktop_actions/audio.rs"]
 mod audio;
+#[path = "desktop_actions/audio_output.rs"]
+pub mod audio_output;
 #[cfg(target_os = "linux")]
 #[path = "desktop_actions/mouse.rs"]
 mod mouse;
@@ -46,6 +48,10 @@ pub enum DesktopAction {
         path: PathBuf,
     },
     StopAudio,
+    SetAudioOutput {
+        name: String,
+    },
+    CycleAudioOutput,
     MouseScroll {
         direction: ScrollDirection,
         ticks: u16,
@@ -146,6 +152,7 @@ impl DesktopAction {
                     Ok(())
                 }
             }
+            Self::SetAudioOutput { name } => printable_target(name),
             Self::MouseScroll { ticks, .. } => {
                 if *ticks == 0 {
                     Err(invalid("scroll requires at least one tick"))
@@ -153,7 +160,7 @@ impl DesktopAction {
                     Ok(())
                 }
             }
-            Self::Media(_) | Self::StopAudio => Ok(()),
+            Self::Media(_) | Self::StopAudio | Self::CycleAudioOutput => Ok(()),
         }
     }
 
@@ -170,6 +177,8 @@ impl DesktopAction {
             Self::Media(command) => format!("Media {command:?}"),
             Self::PlayAudio { path } => format!("Play audio {}", path.display()),
             Self::StopAudio => "Stop owned audio".into(),
+            Self::SetAudioOutput { name } => format!("Set audio output {name}"),
+            Self::CycleAudioOutput => "Rotate audio output".into(),
             Self::MouseScroll { direction, ticks } => format!("Scroll {direction:?} {ticks}"),
         }
     }
@@ -202,6 +211,8 @@ trait Backend: Send {
     fn clipboard(&mut self, value: &str) -> io::Result<()>;
     fn play_audio(&mut self, path: &std::path::Path) -> io::Result<()>;
     fn stop_audio(&mut self) -> io::Result<()>;
+    fn set_audio_output(&mut self, name: &str) -> io::Result<()>;
+    fn cycle_audio_output(&mut self) -> io::Result<()>;
     fn scroll(&mut self, direction: ScrollDirection, ticks: u16) -> io::Result<()>;
     fn poll_errors(&mut self) -> Vec<String> {
         Vec::new()
@@ -316,6 +327,8 @@ impl DesktopRuntime {
             },
             DesktopAction::PlayAudio { path } => self.backend.play_audio(path),
             DesktopAction::StopAudio => self.backend.stop_audio(),
+            DesktopAction::SetAudioOutput { name } => self.backend.set_audio_output(name),
+            DesktopAction::CycleAudioOutput => self.backend.cycle_audio_output(),
             DesktopAction::MouseScroll { direction, ticks } => {
                 self.backend.scroll(*direction, *ticks)
             }
@@ -343,6 +356,8 @@ mod tests {
         Clipboard(String),
         Play(PathBuf),
         Stop,
+        SetAudioOutput(String),
+        CycleAudioOutput,
         Scroll(ScrollDirection, u16),
         Key(Chord),
     }
@@ -387,6 +402,12 @@ mod tests {
         }
         fn stop_audio(&mut self) -> io::Result<()> {
             self.call(Call::Stop)
+        }
+        fn set_audio_output(&mut self, name: &str) -> io::Result<()> {
+            self.call(Call::SetAudioOutput(name.into()))
+        }
+        fn cycle_audio_output(&mut self) -> io::Result<()> {
+            self.call(Call::CycleAudioOutput)
         }
         fn scroll(&mut self, direction: ScrollDirection, ticks: u16) -> io::Result<()> {
             self.call(Call::Scroll(direction, ticks))
@@ -661,6 +682,78 @@ mod tests {
     }
 
     #[test]
+    fn audio_output_routes_stable_name_without_keyboard_input() {
+        let (mut runtime, mut keyboard, state) = fixture();
+        runtime
+            .execute(
+                &DesktopAction::SetAudioOutput {
+                    name: "alsa_output.usb".into(),
+                },
+                &mut keyboard,
+            )
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [Call::SetAudioOutput("alsa_output.usb".into())]
+        );
+        assert_eq!(keyboard.sends, 0);
+    }
+
+    #[test]
+    fn invalid_audio_output_names_never_reach_backend() {
+        for name in ["", "   ", "sink\nname", "sink\0name", "sink\u{7f}"] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            let error = runtime
+                .execute(
+                    &DesktopAction::SetAudioOutput { name: name.into() },
+                    &mut keyboard,
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(state.lock().unwrap().calls.is_empty());
+        }
+    }
+
+    #[test]
+    fn audio_output_rotation_routes_each_binding_without_keyboard_input() {
+        // Given two controls sharing the same rotation action.
+        let (mut runtime, mut keyboard, state) = fixture();
+        // When either control is pressed repeatedly.
+        for binding in ["Base:Key1", "Base:Key2", "Base:Key1"] {
+            runtime
+                .execute_for(binding, &DesktopAction::CycleAudioOutput, &mut keyboard)
+                .unwrap();
+        }
+        // Then every press reaches the backend without binding-local state.
+        assert_eq!(state.lock().unwrap().calls, vec![Call::CycleAudioOutput; 3]);
+        assert!(runtime.second_next.is_empty());
+        assert_eq!(keyboard.sends, 0);
+    }
+
+    #[test]
+    fn audio_output_serialized_shapes_remain_distinct() {
+        // Given the existing named selection and the new unit action.
+        for (action, expected) in [
+            (
+                DesktopAction::SetAudioOutput {
+                    name: "sink".into(),
+                },
+                r#"{"SetAudioOutput":{"name":"sink"}}"#,
+            ),
+            (DesktopAction::CycleAudioOutput, r#""CycleAudioOutput""#),
+        ] {
+            // When serialized.
+            let encoded = serde_json::to_string(&action).unwrap();
+            // Then the persisted representation is unchanged for named outputs.
+            assert_eq!(encoded, expected);
+            assert_eq!(
+                serde_json::from_str::<DesktopAction>(&encoded).unwrap(),
+                action
+            );
+        }
+    }
+
+    #[test]
     fn invalid_inputs_never_reach_adapters() {
         // Given invalid input classes including patterns and options.
         let actions = [
@@ -798,6 +891,10 @@ mod tests {
                 path: "clip.wav".into(),
             },
             DesktopAction::StopAudio,
+            DesktopAction::CycleAudioOutput,
+            DesktopAction::SetAudioOutput {
+                name: "alsa_output.usb".into(),
+            },
             DesktopAction::MouseScroll {
                 direction: ScrollDirection::Right,
                 ticks: 3,
@@ -838,6 +935,10 @@ mod tests {
                 path: "/tmp/clip.wav".into(),
             },
             DesktopAction::StopAudio,
+            DesktopAction::CycleAudioOutput,
+            DesktopAction::SetAudioOutput {
+                name: "alsa_output.usb".into(),
+            },
         ];
         actions.extend(
             [

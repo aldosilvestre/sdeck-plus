@@ -83,6 +83,7 @@ mod tests {
                 target: "/home/user/a file.txt".into(),
             }),
             FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeUp)),
+            FeatureAction::Desktop(DesktopAction::CycleAudioOutput),
             FeatureAction::Desktop(DesktopAction::MouseScroll {
                 direction: ScrollDirection::Down,
                 ticks: 2,

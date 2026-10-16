@@ -192,6 +192,8 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
             )
             .unwrap();
     }
+    store.persist().unwrap();
+    let configuration_root = store.root().to_path_buf();
     let layers = Rc::new(RefCell::new(store));
     let (output, hardware_commands) = mpsc::channel();
     let artwork = ArtworkUi {
@@ -203,11 +205,12 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let window = ApplicationWindow::builder()
         .title(APP_NAME)
         .default_width(1000)
-        .default_height(800)
+        .default_height(950)
         .build();
     install_style(&window);
     let (sender, commands) = mpsc::channel();
@@ -220,8 +223,11 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
         device,
         events,
     );
+    widgets
+        .binding_ui
+        .refresh_layer_targets(&artwork.layers.borrow().names());
     let stage = gtk::Fixed::new();
-    widgets.root.set_size_request(1000, 800);
+    widgets.root.set_size_request(1000, 950);
     stage.put(&widgets.root, 0.0, 0.0);
     window.set_child(Some(&stage));
     window.present();
@@ -232,6 +238,21 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
     key_button(&widgets.key_labels[0]).emit_clicked();
     let capture = |name: &str| save(&directory, widgets.root.upcast_ref(), name);
     capture("main-window");
+    settings.set_gtk_theme_name(Some("Adwaita"));
+    settings.set_gtk_application_prefer_dark_theme(false);
+    wait_for_frame(&widgets.root);
+    capture("main-window-light");
+    settings.set_gtk_theme_name(Some("Adwaita-dark"));
+    settings.set_gtk_application_prefer_dark_theme(true);
+    key_button(&widgets.key_labels[7]).emit_clicked();
+    capture("default-none");
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    widgets.binding_ui.return_toggle.set_active(true);
+    widgets.binding_ui.return_seconds.set_text("10");
+    assert!(widgets.binding_ui.return_model.n_items() > 0);
+    widgets.binding_ui.return_target.set_selected(0);
+    capture("page-return");
+    widgets.binding_ui.return_toggle.set_active(false);
     assert_reachable(&widgets.binding_ui.action_picker, &widgets.root);
     dropdown(
         &directory,
@@ -251,6 +272,13 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
         ))));
     widgets.root.vadjustment().set_value(0.0);
     capture("more-actions-obs");
+    widgets
+        .binding_ui
+        .populate_action(&Action::Feature(FeatureAction::Desktop(
+            sdeck_plus::desktop_actions::DesktopAction::CycleAudioOutput,
+        )));
+    widgets.binding_ui.feature_editor.wait_for_audio_outputs();
+    capture("more-actions-audio-output");
     widgets.encoder_labels[0]
         .ancestor(Button::static_type())
         .unwrap()
@@ -315,7 +343,23 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
         .set_current_page(Some(1));
     capture("application-profile-tab");
     menu(&directory, &widgets.obs_menu, "obs-settings");
-    menu(&directory, &widgets.help_menu, "setup-help");
+    menu(&directory, &widgets.help_menu, "configuration-menu");
+    let help = widgets._configuration_menu.help_for_test();
+    help.present();
+    save(&directory, help.upcast_ref(), "setup-help");
+    help.response(ResponseType::Close);
+    let bundle = root.join("stream-deck-configuration.sdeck-plus.json");
+    sdeck_plus::config_bundle::export(&configuration_root, &bundle).unwrap();
+    widgets
+        ._configuration_menu
+        .select_path_for_test(true, bundle);
+    let confirmation = widgets._configuration_menu.confirmation_for_test().unwrap();
+    save(
+        &directory,
+        confirmation.upcast_ref(),
+        "import-configuration",
+    );
+    confirmation.response(ResponseType::Cancel);
     widgets
         .feature_runtime
         .profile_tabs()
@@ -352,6 +396,103 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
     clock.request_phase(gtk::gdk::FrameClockPhase::UPDATE);
     capture("live-input-feedback");
     clock.disconnect(feedback);
+    set_pressed(&widgets.key_widgets[0], false);
+    set_pressed(&widgets.encoder_widgets[1], false);
+    widgets.encoder_widgets[2].remove_css_class("control-rotated");
+    for zone in widgets.zone_widgets.iter() {
+        zone.remove_css_class("control-touched");
+    }
+    {
+        let mut layers = artwork.layers.borrow_mut();
+        for (key, source) in [
+            (1, sdeck_plus::info::InfoSource::Clock),
+            (2, sdeck_plus::info::InfoSource::Cpu),
+            (3, sdeck_plus::info::InfoSource::Memory),
+            (4, sdeck_plus::info::InfoSource::Temperature),
+            (5, sdeck_plus::info::InfoSource::Volume),
+        ] {
+            layers
+                .bind("Base", Trigger::KeyPress(key), Action::None)
+                .unwrap();
+            layers
+                .set_info("Base", &Trigger::KeyPress(key), Some(source))
+                .unwrap();
+        }
+        layers
+            .bind("Base", Trigger::EncoderPress(1), Action::None)
+            .unwrap();
+        layers
+            .set_info(
+                "Base",
+                &Trigger::EncoderPress(1),
+                Some(sdeck_plus::info::InfoSource::AudioDevice),
+            )
+            .unwrap();
+        layers
+            .bind("Base", Trigger::ZoneTap(2), Action::None)
+            .unwrap();
+        layers
+            .set_info(
+                "Base",
+                &Trigger::ZoneTap(2),
+                Some(sdeck_plus::info::InfoSource::Weather),
+            )
+            .unwrap();
+    }
+    // Deterministic readings use the production renderer, not the host's data.
+    for (source, headline, detail, level) in [
+        (
+            sdeck_plus::info::InfoSource::Clock,
+            "10:24",
+            "Fri 16 Oct",
+            None,
+        ),
+        (sdeck_plus::info::InfoSource::Cpu, "38%", "CPU", Some(38)),
+        (
+            sdeck_plus::info::InfoSource::Memory,
+            "6.4 GiB",
+            "Memory",
+            Some(41),
+        ),
+        (
+            sdeck_plus::info::InfoSource::Temperature,
+            "47°C",
+            "Temperature",
+            Some(47),
+        ),
+        (
+            sdeck_plus::info::InfoSource::Volume,
+            "42%",
+            "Volume",
+            Some(42),
+        ),
+        (
+            sdeck_plus::info::InfoSource::AudioDevice,
+            "Speakers",
+            "Default output",
+            None,
+        ),
+        (sdeck_plus::info::InfoSource::Weather, "22°C", "Clear", None),
+    ] {
+        artwork.update_info(
+            source,
+            sdeck_plus::info::InfoValue {
+                glyph: if source == sdeck_plus::info::InfoSource::Weather {
+                    sdeck_plus::info::Glyph::Sun
+                } else {
+                    source.glyph()
+                },
+                detail: detail.into(),
+                level,
+                ..sdeck_plus::info::InfoValue::text(source.glyph(), headline)
+            },
+        );
+    }
+    widgets.binding_ui.load_selected_binding(&artwork.layers);
+    capture("live-information");
+    widgets.binding_ui.info_source.set_selected(4);
+    widgets.binding_ui.info_location.set_text("Mexico City");
+    capture("live-information-settings");
 
     // Then: every documented artifact was rendered, with no dispatched action.
     assert_eq!(widgets.status.text(), "SEARCHING");
@@ -366,7 +507,7 @@ fn regenerate_documentation_screenshots_when_explicitly_requested() {
     settings.set_gtk_enable_animations(original_animations);
     std::fs::remove_dir_all(root).unwrap();
     eprintln!(
-        "Generated all 18 native documentation screenshots in {}",
+        "Generated all 26 native documentation screenshots in {}",
         directory.display()
     );
 }

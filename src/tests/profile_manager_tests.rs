@@ -21,6 +21,7 @@ pub(super) fn assert_compact_profile_manager() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let (sender, commands) = mpsc::channel();
     let widgets = build_widgets(window.clone(), layers.clone(), artwork, sender);

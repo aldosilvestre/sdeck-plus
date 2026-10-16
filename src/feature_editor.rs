@@ -13,6 +13,7 @@ use std::{
     rc::Rc,
 };
 
+mod audio_output;
 mod choice;
 use choice::Choice;
 #[cfg(test)]
@@ -50,6 +51,7 @@ pub(crate) struct EditorWidgets {
     browse_folder: gtk::Button,
     generation: Cell<u64>,
     picker: RefCell<Option<gtk::FileChooserNative>>,
+    audio_output: audio_output::OutputPicker,
 }
 
 impl Deref for FeatureEditor {
@@ -133,6 +135,7 @@ impl FeatureEditor {
         let (number_row, number_label) = field("", &number);
         let (direction_row, _) = field("Direction", &direction);
         let (flag_row, _) = field("Options", &flag);
+        let audio_output = audio_output::OutputPicker::new();
         for row in [
             &first_row,
             &second_row,
@@ -143,6 +146,7 @@ impl FeatureEditor {
         ] {
             root.append(row);
         }
+        root.append(audio_output.root());
         let editor = Self(Rc::new(EditorWidgets {
             root,
             selectors: pickers,
@@ -170,6 +174,7 @@ impl FeatureEditor {
             browse_folder,
             generation: Cell::new(0),
             picker: RefCell::new(None),
+            audio_output,
         }));
         editor.refresh_choices();
         let weak = Rc::downgrade(&editor.0);
@@ -308,6 +313,9 @@ impl FeatureEditor {
             row.set_visible(false);
         }
         let Ok(choice) = self.choice() else { return };
+        self.audio_output
+            .root()
+            .set_visible(choice == Choice::SetAudioOutput);
         self.description.set_text(choice.description());
         self.action_icon.set_icon_name(Some(choice.icon()));
         self.first.set_placeholder_text(Some(match choice {
@@ -388,6 +396,7 @@ impl FeatureEditor {
 
     pub(crate) fn reset(&self) {
         self.invalidate_picker();
+        self.audio_output.select(None);
         self.first.set_text("");
         self.second.set_text("");
         self.text.buffer().set_text("");
@@ -464,6 +473,7 @@ impl FeatureEditor {
                 FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeDown))
             }
             Choice::Mute => FeatureAction::Desktop(DesktopAction::Media(MediaCommand::Mute)),
+            Choice::SetAudioOutput => FeatureAction::Desktop(self.audio_output.action()),
             Choice::NextPage => FeatureAction::Navigation(NavigationAction::NextPage),
             Choice::PreviousPage => FeatureAction::Navigation(NavigationAction::PreviousPage),
             Choice::GoToPage => FeatureAction::Navigation(NavigationAction::GoToPage(
@@ -534,6 +544,14 @@ impl FeatureEditor {
                     Choice::PlayAudio
                 }
                 DesktopAction::StopAudio => Choice::StopAudio,
+                DesktopAction::SetAudioOutput { name } => {
+                    self.audio_output.select(Some(name));
+                    Choice::SetAudioOutput
+                }
+                DesktopAction::CycleAudioOutput => {
+                    self.audio_output.select(None);
+                    Choice::SetAudioOutput
+                }
                 DesktopAction::Media(command) => match command {
                     MediaCommand::PlayPause => Choice::PlayPause,
                     MediaCommand::Stop => Choice::Stop,

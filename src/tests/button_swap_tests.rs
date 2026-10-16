@@ -97,7 +97,7 @@ fn controller<T: IsA<gtk::EventController> + IsA<glib::Object> + glib::object::I
 #[test]
 fn dragging_keys_swaps_saved_actions_images_and_text() {
     let _guard = gtk_test_lock();
-    if gtk::init().is_err() {
+    if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),
             "GTK initialization failed despite an advertised display"
@@ -154,6 +154,7 @@ fn dragging_keys_swaps_saved_actions_images_and_text() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let (commands, requests) = mpsc::channel();
     let (events, receiver) = mpsc::channel();

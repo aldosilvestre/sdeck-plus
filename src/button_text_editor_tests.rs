@@ -1,3 +1,19 @@
+#[test]
+fn button_text_alignment_icons_update_preview_and_save() {
+    let _guard = gtk_test_lock();
+    if !init_gtk_for_test() {
+        assert!(
+            std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),
+            "GTK initialization failed despite an advertised display"
+        );
+        return;
+    }
+    gtk::Settings::default()
+        .unwrap()
+        .set_gtk_enable_animations(false);
+    assert_button_text_editor();
+}
+
 fn assert_button_text_editor() {
     use sdeck_plus::button_text::{
         ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment,
@@ -18,6 +34,7 @@ fn assert_button_text_editor() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let window = ApplicationWindow::builder()
         .default_width(1000)
@@ -41,11 +58,61 @@ fn assert_button_text_editor() {
     rendered_text_popup(&editor.panel, || editor.open.popup());
     assert!(editor.panel.is_mapped(), "new text popup must be mapped");
     assert!(editor.panel.is_visible());
+    for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+        assert!(
+            button.label().is_none(),
+            "alignment controls must be icon-only"
+        );
+        assert!(button.child().is_some());
+        assert!(button
+            .tooltip_text()
+            .is_some_and(|tooltip| !tooltip.is_empty()));
+    }
 
     // Given: a background image and a draft with every text control configured.
     editor.input.buffer().set_text("Play\nNow");
     let typed = editor.value().unwrap();
     assert_live_text_preview(editor, &artwork, Some(&path), &typed);
+    for (horizontal, expected_horizontal) in [
+        HorizontalAlignment::Left,
+        HorizontalAlignment::Center,
+        HorizontalAlignment::Right,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        editor.horizontal[horizontal].emit_clicked();
+        for (vertical, expected_vertical) in [
+            VerticalAlignment::Top,
+            VerticalAlignment::Center,
+            VerticalAlignment::Bottom,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            editor.vertical[vertical].emit_clicked();
+            let value = editor.value().unwrap();
+            assert_eq!(value.horizontal_alignment, expected_horizontal);
+            assert_eq!(value.vertical_alignment, expected_vertical);
+            assert_eq!(
+                editor
+                    .horizontal
+                    .iter()
+                    .filter(|button| button.is_active())
+                    .count(),
+                1
+            );
+            assert_eq!(
+                editor
+                    .vertical
+                    .iter()
+                    .filter(|button| button.is_active())
+                    .count(),
+                1
+            );
+            assert_live_text_preview(editor, &artwork, Some(&path), &value);
+        }
+    }
     editor.size.set_value(30.0);
     editor.orientation[1].set_active(true);
     editor.horizontal[2].set_active(true);
@@ -215,6 +282,38 @@ fn assert_button_text_editor() {
                                 directory.join(format!("text-{name}-{theme}-{width}x{height}.png")),
                             )
                             .unwrap();
+                    }
+                    editor.panel.popdown();
+                }
+                if width == 1000 {
+                    for (index, name) in ["start", "center", "end"].into_iter().enumerate() {
+                        let texture = rendered_text_popup(&editor.panel, || {
+                            editor.open.popup();
+                            editor.horizontal[index].set_active(true);
+                            editor.vertical[index].set_active(true);
+                            assert!(editor.horizontal[index].grab_focus());
+                            window.set_focus_visible(true);
+                        });
+                        assert_text_popup_fits(editor);
+                        texture
+                            .save_to_png(
+                                directory.join(format!("text-alignment-{name}-{theme}.png")),
+                            )
+                            .unwrap();
+                        editor.panel.popdown();
+                    }
+                    window.set_focus_visible(false);
+                    let texture = rendered_text_popup(&editor.panel, || {
+                        editor.open.popup();
+                        for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+                            button.set_sensitive(false);
+                        }
+                    });
+                    texture
+                        .save_to_png(directory.join(format!("text-alignment-disabled-{theme}.png")))
+                        .unwrap();
+                    for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+                        button.set_sensitive(true);
                     }
                     editor.panel.popdown();
                 }
@@ -441,6 +540,7 @@ fn assert_saved_text_on_streamdeck() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let window = ApplicationWindow::builder()
         .default_width(1000)
@@ -640,7 +740,12 @@ fn rendered_text_popup(panel: &gtk::Popover, update: impl FnOnce()) -> gtk::gdk:
     let done = main_loop.clone();
     let popup = panel.clone();
     let widget = content.clone();
+    let updated = Rc::new(Cell::new(false));
+    let ready = updated.clone();
     let signal = paintable.connect_invalidate_contents(move |paintable| {
+        if !ready.get() || !popup.is_mapped() {
+            return;
+        }
         let snapshot = gtk::Snapshot::new();
         paintable.snapshot(
             &snapshot,
@@ -668,6 +773,7 @@ fn rendered_text_popup(panel: &gtk::Popover, update: impl FnOnce()) -> gtk::gdk:
         done.quit();
     });
     update();
+    updated.set(true);
     content.queue_draw();
     if captured.borrow().is_none() {
         main_loop.run();

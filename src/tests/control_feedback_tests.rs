@@ -41,6 +41,7 @@ pub(super) fn assert_control_feedback() {
         chooser_owners: Rc::new(RefCell::new(Default::default())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let (layer_sender, _layer_commands) = mpsc::channel();
     let widgets = build_widgets(

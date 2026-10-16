@@ -6,14 +6,14 @@
 > [!NOTE]
 > This project is still under construction.
 
-sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`) on Arch Linux. Configure actions for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, assign artwork, control device brightness and connect to OBS Studio.
+sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`) on Arch Linux. Configure actions and live information for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, style button text, route audio and connect to OBS Studio.
 
 ## Screenshots
 
-All captures are in [`docs/screenshots`](docs/screenshots) and show the current
+The 26 captures in [`docs/screenshots`](docs/screenshots) show the current
 native GTK application with isolated demonstration profiles and artwork.
-Input feedback is simulated; capturing these images does not operate a device
-or connect to OBS.
+Input feedback and live readings are deterministic demonstrations; capturing these
+images does not operate a device, change audio output or connect to OBS.
 
 Regenerate the complete set from a graphical session with:
 
@@ -29,6 +29,10 @@ hardware preview with the assigned artwork, and the binding editor for the
 selected control.
 
 ![Main window with Key 1 selected](docs/screenshots/main-window.png)
+
+The same native window in the light palette:
+
+![Main window in the light theme](docs/screenshots/main-window-light.png)
 
 **Swap keys.** Drag a key onto another key in the preview to exchange their
 saved action, background image and text styling on the current page. An empty
@@ -49,14 +53,86 @@ images.
 
 **Action types.** The **Action** menu offers layer/page switching, shell
 commands, launching applications, keyboard shortcuts, legacy events, the
-categorized **More actions** and **Play sound**.
+categorized **More actions**, **Play sound** and **None**.
+**None** keeps a saved binding but does nothing when pressed. It can still
+display live information and does not schedule a page return.
+Untouched buttons start with **None**, including buttons on new profiles and pages.
 
+![An untouched key with None selected](docs/screenshots/default-none.png)
 ![Action menu with every action type](docs/screenshots/action-types.png)
+
+**Configuration menu.** The top-right **Menu** contains **Help**,
+**Import configuration...** and **Export configuration...**.
+Help opens the setup guide. Export writes a single `.sdeck-plus.json` file
+containing all saved profiles, folders, pages, bindings, artwork filenames, button text,
+live-information settings, page returns, local sound files and OBS settings.
+Images are referenced only by filename; their binary data is not embedded in base64.
+The current format is version 2: an image entry contains only
+`{"path":"assets/filename.png"}`, without a `data` field. Configuration and local
+sound-file payloads remain embedded.
+Before importing, the named images must already exist in the destination's `assets`
+directory (normally `~/.local/share/sdeck-plus/assets`). Missing or invalid images
+cancel the import without replacing the configuration. Older exports with embedded
+images are still accepted.
+The export includes saved OBS credentials and is written with owner-only permissions.
+Application executables, shell commands and external document paths remain references;
+launcher autostart and tray preferences remain local to the computer.
+
+Import validates the file before replacing the current configuration and asks
+for confirmation. The previous configuration is retained in a sibling backup
+directory whose path is shown after import. Profiles, previews and the device
+are refreshed immediately. Cancelling or selecting an invalid file keeps the
+existing configuration. Importing never runs any saved action.
+
+![Menu with Help, Import configuration and Export configuration](docs/screenshots/configuration-menu.png)
+![Import confirmation with Cancel as the default response](docs/screenshots/import-configuration.png)
 
 **More actions categories.** **More actions** groups the extended actions
 into System, Multimedia, Organization, Device and OBS.
 
+**Change audio output.** Under **More actions > Multimedia**, choose
+**Change audio output**, select an output device, then save the binding.
+**Refresh** discovers newly connected outputs using `pw-dump`. Pressing the
+control switches the default output with `wpctl`; choosing or saving never
+changes audio. Bindings store the stable device name, so numeric ID changes
+after reconnecting do not select a different device. A disconnected saved
+device stays selected and reports an error if used while unavailable.
+Choose **Rotate** in the same device selector to advance to the next connected
+output on each press, returning to the first after the last. Rotation starts
+from the system's current output and checks the available devices each time.
+
+![Change audio output with Rotate selected](docs/screenshots/more-actions-audio-output.png)
+
 ![More actions category menu](docs/screenshots/more-actions-categories.png)
+
+**Return to a page afterwards.** A non-None binding can return to a selected
+page after a delay: tick **Return to a page afterwards** under the action, then pick the
+destination page (listed with its profile and folder, such as `Base` or
+`Studio / Page 2`) and the delay in seconds (1–86400). Pressing the key again
+restarts the wait; **Device > Cancel timer** cancels it. The destination is
+exactly the page you picked. Saving a binding does not start the wait.
+
+![Binding with a ten-second return to the selected page](docs/screenshots/page-return.png)
+
+**Live information on keys and dials.** Under the action of a key or a dial,
+tick **Show live information** and pick what to show. The icon, bar and text are drawn directly over the
+key's own image, with transparent empty space and no background of
+their own, and update by themselves: a
+speaker with a volume bar (crossed out and greyed while muted), the audio output
+device, Stream Deck brightness with a bar, time and date, weather with its icon,
+CPU, memory and temperature with a bar that turns amber and red under load, or
+the OBS state (recording, streaming and scene). Only the key or zone that shows
+a value is redrawn, and the binding's action still runs as usual. Each touch section can show
+it too, for its Tap or Hold binding. A dial's section shows the information of
+its press binding first, then its turns, then a tap or hold on that section.
+Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through `curl`: enter a city or
+`latitude,longitude`; the lookup needs internet access and shows `--` when it
+fails. Volume and audio device use `wpctl`. The previews in the window show the
+same picture as the device. On the touch strip, transparent areas reveal the
+existing strip background instead of adding a black rectangle to the section.
+
+![Demonstration clock, CPU, memory, temperature, volume and touch-section readings](docs/screenshots/live-information.png)
+![Live-information selector and weather location field](docs/screenshots/live-information-settings.png)
 
 **More actions binding.** A key bound to **OBS > Toggle recording**: each
 action shows only its own fields and a short description of what it does.
@@ -70,11 +146,18 @@ action shows only its own fields and a short description of what it does.
 
 **Touch strip gestures.** Selecting the strip configures its gestures (tap,
 hold, flick and directional swipes) and targets the strip background artwork.
+The strip has four sections, one above each dial. Choose **Touch**, then the
+control number **1** to **4**, and give each section its own **Tap** and
+**Hold** binding, all at the same time. **Any** keeps the older whole-strip
+bindings, which still work for taps that no section binding claims. Flick and
+swipes always apply to the whole strip.
 
 ![Touch strip selected in the editor](docs/screenshots/touch-strip.png)
 
 **Button text.** **Add text** opens the text editor: font, size, orientation
-and alignment, with a live preview of the key composition.
+and alignment, with a live preview of the key composition. Word-like icons select
+left, center or right and top, center or bottom. Hover for a tooltip; the controls
+also retain distinct accessible names and keyboard focus.
 
 ![Button text editor with a live preview](docs/screenshots/button-text-editor.png)
 
@@ -109,10 +192,10 @@ connection test that only queries OBS state.
 
 ![OBS settings panel](docs/screenshots/obs-settings.png)
 
-**Setup help.** A three-step guide: select a control, configure an action,
-then save or test it.
+**Setup help.** Choose **Menu > Help** for the three-step guide: select a control,
+configure an action, then save or test it.
 
-![Setup help popover](docs/screenshots/setup-help.png)
+![Setup help dialog](docs/screenshots/setup-help.png)
 
 ## Requirements
 
@@ -121,7 +204,7 @@ then save or test it.
 - A desktop tray supporting StatusNotifierItem (for example, the Omarchy tray).
 - Stream Deck + connected over USB for live device events.
 - Permission to open the device's HID node. If access is denied, use the distribution's supported device-access mechanism (for example, an administrator-installed narrowly scoped udev rule for this VID/PID with `TAG+="uaccess"`), then reconnect the device. The application does not change host permissions.
-- Action-specific tools: `xdg-utils` for opening files/websites, `wireplumber` (`wpctl`) for PipeWire volume, `wl-clipboard` for Wayland text pasting, `procps-ng` for closing a named process, and `mpv` for soundboard playback. Keyboard and mouse-wheel actions require effective `/dev/uinput` access; media transport requires an MPRIS-capable player. Missing tools or access are reported; the app never installs packages or changes permissions.
+- Action-specific tools: `xdg-utils` for opening files/websites, `wireplumber` (`wpctl`) for PipeWire volume and output selection, `pipewire` (`pw-dump`) for output discovery, `curl` for weather, `wl-clipboard` for Wayland text pasting, `procps-ng` for closing a named process, and `mpv` for soundboard playback. Keyboard and mouse-wheel actions require effective `/dev/uinput` access; media transport requires an MPRIS-capable player. Missing tools or access are reported; the app never installs packages or changes permissions.
 
 ## Build and run
 
@@ -297,7 +380,7 @@ use **Test action** to play it. Playback replaces the app's previous sound.
 | Category | Actions |
 | --- | --- |
 | System | Alternate two shortcuts, paste Unicode text with optional Enter, open files/folders or HTTP(S) websites, close an exact process basename, scroll the mouse wheel |
-| Multimedia | Play/pause, stop, next/previous track, PipeWire volume up/down and mute, play a local audio file, stop app-owned soundboard playback |
+| Multimedia | Play/pause, stop, next/previous track, PipeWire volume up/down and mute, change audio output, play a local audio file, stop app-owned soundboard playback |
 | Organization | Next/previous/specific page, enter a named child folder, return to the parent; existing layers remain root profiles |
 | Device | Absolute or relative brightness, sleep and wake; timer actions show countdown and completion |
 | OBS | Select a scene, toggle recording/streaming, toggle input mute, show/hide a named source in a scene |
@@ -372,7 +455,7 @@ The application does not enable OBS's server or alter its configuration.
 
 ### Window layout
 
-All controls fit without scrolling at the default 1000 × 700 logical-pixel client size: the device canvas stays on the left, action settings on the right, and layer controls above. The last-event panel has been removed; live physical states and connection/error indicators remain. Summaries and long layer names are ellipsized; tooltips show full summaries and the editor retains full saved action fields.
+At the default 1000 × 700 logical-pixel client size, the device canvas stays on the left, action settings on the right, and layer controls above. Longer action forms and smaller windows can scroll vertically. The documentation captures use 1000 × 950 to show complete forms. Live physical states and connection/error indicators remain. Summaries and long layer names are ellipsized; tooltips show full summaries and the editor retains full saved action fields.
 
 The window uses 24 logical pixels of outer padding and an ink-toned palette,
 with elevated navy surfaces, violet save actions and cyan keyboard focus.
@@ -383,7 +466,8 @@ persists the binding; **Test action** runs it immediately.
 
 Profile tabs and page navigation have a 12-pixel gap; the main preview and
 editor regions have 24-pixel separation. The editor uses 16-pixel padding
-and gaps between sections. Executable/arguments and shortcut/modifiers share
+and 6-pixel gaps between related form groups; Appearance uses 4-pixel internal
+gaps. Executable/arguments and shortcut/modifiers share
 adaptive columns, stacking when their available width is too small. Modifier
 checkboxes use a two-by-two grid, and hidden fields do not leave empty cells.
 
@@ -395,7 +479,8 @@ setting and stop when animations are disabled.
 The physical preview retains its silver chassis, eight black keys, continuous
 touch-strip bezel and four purple knobs. The artwork strip keeps its 8:1 ratio;
 transparent zones preserve strip-background layering. No sample artwork or audio
-values are rendered. Selection, live state, keyboard focus and connection status
+values are injected by the running application; documentation fixtures supply
+their own demonstration data. Selection, live state, keyboard focus and connection status
 remain distinct.
 
 The serialized production GTK test checks the shared editor's thirteen assign/clear paths, explicit target selection, chooser ownership, reference geometry, and all five actions at 1000 × 700 with empty, loaded, and cleared artwork and long editor values, without moving scroll adjustments. It also checks 1840 × 980, 1280 × 720, and 960 × 640 horizontal fit separately. Reduced heights (including 960 × 640) may scroll vertically; 640 × 480 retains two-axis scroll reachability. Larger system fonts can also require scrolling. Window managers may override the requested startup size; no desktop resolution change is needed.
@@ -419,7 +504,16 @@ shortcut draft and never saves or executes it.
 - The serial layer worker owns one lazy, persistent keyboard. Startup and non-keyboard actions do not open uinput. First use requires effective access to `/dev/uinput` and kernel uinput support. Access/create/write failures are reported; there is no fallback or automatic privilege escalation, module loading, permission change, or desktop configuration change. Ask an administrator to assess narrowly scoped access if needed; a device node or udev tag alone does not prove effective permission.
 - Creation has a bounded 200 ms discovery grace period, not proof that the compositor has recognized the keyboard. Real access, first-action delivery, compositor acceptance and layout behavior remain unverified on hardware. Automated tests use mocks only and never open or send to a real keyboard.
 
-The versioned layer file is validated on load; malformed or unreadable layer data leaves startup configuration unavailable with writes disabled. The application shows a repair message and does not save an empty `Base` fallback over the original file; repair `layers.conf` in the app data directory and restart. Missing layer-switch targets are rejected, and removing a layer removes bindings targeting it. Legacy exact rotation bindings remain supported and are checked before directional rotation fallbacks, but the primary editor only creates the generic clockwise/counterclockwise rotation bindings.
+The versioned layer file is validated on load. An unreadable file or unsupported
+header leaves startup configuration unavailable with writes disabled; the app
+does not save an empty `Base` fallback over it. Repair the file and restart.
+Within a readable version-1 file, invalid, conflicting and duplicate records are
+removed while valid assignments are retained. Their original lines and reasons
+are appended to `button-errors.log` in the app data directory, and the cleaned
+file is saved. Missing layer-switch and page-return targets are rejected; removing
+a layer also removes references to it. Legacy exact rotation bindings remain
+supported and take priority over directional rotation, while the GUI edits
+clockwise/counterclockwise bindings.
 
 ## In-process event API
 
@@ -428,12 +522,25 @@ The versioned layer file is validated on load; malformed or unreadable layer dat
 ## Development checks
 
 ```sh
-cargo fmt --check
-cargo test --offline
+cargo fmt --all -- --check
+env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=x11 cargo test --offline
 cargo clippy --offline --all-targets --all-features -- -D warnings
 ```
 
-The single GTK widget test uses the production widget constructor without starting HID/action workers. Run `cargo test --offline -- --nocapture` in a display session to see the executed sizing/reachability markers; without a display it explicitly reports a skip. Measurements are layout checks, not a substitute for manual visual, chooser, and device verification.
+The headless run covers the Rust suites but skips display-dependent GTK bodies.
+Run native GTK cases separately in a graphical session so each process owns its
+GTK main thread. For example, this case checks every text-alignment combination,
+the shared preview, save/reload and draft cancellation:
+
+```sh
+GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::button_text_alignment_icons_update_preview_and_save \
+  -- --exact --nocapture --test-threads=1
+```
+
+The capture command above drives the production widgets without HID/action
+workers. These checks do not replace real chooser, accessibility or device
+verification.
 
 The protocol decoder validates report ID and declared little-endian payload length before decoding supported input commands. Hardware event behavior requires a connected, accessible Stream Deck +.
 
@@ -472,7 +579,11 @@ dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | Application startup, configuration window, worker lifecycle and the single GTK-owner test fixture |
+| `src/main.rs` | Application startup, configuration window, worker lifecycle and GTK-owner fixtures |
+| `src/feature_runtime.rs` | Serialized action/configuration work, profiles, page returns and runtime feedback |
+| `src/config_bundle.rs` | Versioned configuration export, local image references, validation and backup/restore |
+| `src/info.rs`, `src/info_render.rs` | Live readings and the shared key/touch-section compositor |
+| `src/desktop_actions/audio_output.rs` | Fixed and rotating PipeWire output selection |
 | `src/tray.rs` | StatusNotifier menu, GTK command dispatch and native About dialog |
 | `src/autostart.rs` | Per-user XDG session startup entry |
 | `src/ui.rs` | Shared native controls, feedback and secondary panels |

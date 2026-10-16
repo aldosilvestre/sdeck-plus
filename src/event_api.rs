@@ -55,6 +55,14 @@ pub enum MonitorEvent {
     BindingSaveResult(Result<(), String>),
     /// Result of an explicit profile save, after persistence finishes.
     ProfileSaveResult(Result<(), String>),
+    ConfigurationExportResult {
+        path: PathBuf,
+        result: Result<(), String>,
+    },
+    ConfigurationImportResult {
+        root: PathBuf,
+        result: Result<Option<PathBuf>, String>,
+    },
     KeySwapResult {
         layer: String,
         first: u8,
@@ -62,6 +70,11 @@ pub enum MonitorEvent {
         result: Result<(), String>,
     },
     ApplicationFocus(Result<Option<crate::app_focus::FocusedApplication>, String>),
+    /// Latest reading of a live information source.
+    Info {
+        source: crate::info::InfoSource,
+        value: crate::info::InfoValue,
+    },
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
 }
@@ -81,6 +94,15 @@ pub enum ArtworkCommand {
         key: u8,
         path: Option<PathBuf>,
         text: crate::button_text::ButtonText,
+    },
+    /// A live information picture replaces a key or touch-zone image.
+    ComposeInfo {
+        target: ArtworkTarget,
+        /// The target's own artwork, drawn under the picture.
+        path: Option<PathBuf>,
+        /// The strip underneath a section with no artwork of its own.
+        strip_path: Option<PathBuf>,
+        value: crate::info::InfoValue,
     },
 }
 
@@ -235,6 +257,20 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
             ArtworkTarget::Keypad(key),
             image_output::prepare_button_jpeg(path.as_deref(), &text)?,
         ),
+        ArtworkCommand::ComposeInfo {
+            target,
+            path,
+            strip_path,
+            value,
+        } => (
+            target,
+            image_output::prepare_info_jpeg(
+                target,
+                &value,
+                path.as_deref(),
+                strip_path.as_deref(),
+            )?,
+        ),
         ArtworkCommand::Replace(_) => unreachable!("snapshots contain target commands"),
     };
     image_output::encode_reports(target, &jpeg)
@@ -255,7 +291,9 @@ fn process_artwork(
             return;
         }
         let target = match &command {
-            ArtworkCommand::Assign { target, .. } | ArtworkCommand::Clear { target } => *target,
+            ArtworkCommand::Assign { target, .. }
+            | ArtworkCommand::Clear { target }
+            | ArtworkCommand::ComposeInfo { target, .. } => *target,
             ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
             ArtworkCommand::Replace(_) => continue,
         };

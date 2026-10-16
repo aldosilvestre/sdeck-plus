@@ -88,7 +88,7 @@ Long summaries ellipsize with full tooltips; editable fields preserve the value.
 ## 4. Spacing and layout
 
 Default window: 1000x700. Shell margins: 24px. Tokens: 4px label stacks, 8px
-compact controls, 12px action/tool gaps, 16px editor padding/form groups and
+compact controls, 12px action/tool gaps, 16px editor padding and
 24px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
 6px so hardware/artwork geometry is unchanged. Icons are 16px, or 20px for
@@ -98,10 +98,13 @@ characters.
 Profile tabs have a 12px gap before page navigation; navigation and the
 device/editor region have 24px separation. The device and editor also have
 24px horizontal separation, retained as a vertical gap when they stack.
-The editor uses 16px inner padding and 16px between form groups.
+The editor uses 16px inner padding and 6px between related form groups, keeping
+the added return and information options within the default 1000x700 layout.
 Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
 Binding feedback stays with its action buttons at a 12px vertical gap,
-while unrelated editor sections retain their 16px separation.
+while the Appearance separator keeps action and artwork sections distinct.
+The related controls inside Appearance use 4px gaps so expanded artwork and
+the taller shortcut/argument fields still fit the default client height.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
 
 Executable and arguments are one related adaptive group: two columns with a
@@ -151,6 +154,20 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   file field and native chooser directly, without secondary category/action
   selectors. Category/action selection never executes.
   `Test action` explicitly executes; save persists configuration only.
+- **Page return option:** below every action, a "Return to a page afterwards"
+  check button reveals a labeled destination selector (profiles, folders and
+  pages by name) and a seconds field. It is off by
+  default, saved with the binding, and applies once after the action runs.
+- **Live information option:** below the page return, a "Show live information
+  on the key" check button reveals a labeled source selector, plus a location
+  field only for Weather. Keys, dials and a tap or hold on one touch section; the
+  picture is drawn by `info_render` directly over the key's own artwork (120x120)
+  or the touch section's (200x100, icon left, value/bar/detail right), never on
+  a solid background of its own. Icons and text carry a dark outline for
+  legibility and the bar a translucent track. Icon colors
+  follow the palette: cyan audio, amber light, violet load that turns amber at
+  70 and red at 85, grey when inactive, red for the muted cross and recording.
+  Readings come from a worker thread, never the GTK thread.
 - **Action guidance:** explain the selected action and expected values beside
   its fields. Native file/folder/audio pickers populate absolute paths. A
   stale picker result must not write into another editor context.
@@ -195,7 +212,12 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   640x480 or larger. Only a long multiline text input may scroll internally.
   Use a native font chooser button, a 6–120px size spinner and linked, grouped
   toggle buttons for horizontal/vertical orientation and separate
-  left/center/right and top/center/bottom alignment. Vertical text
+  left/center/right and top/center/bottom alignment. Alignment choices use
+  16px monochrome line icons, like word-processor alignment tools, instead of
+  button captions. Horizontal icons line up text edges; vertical icons position
+  text between top and bottom guides. They inherit the control's theme color
+  and retain tooltips, distinct accessible names and native grouped selection.
+  Vertical text
   rotates the layout 90 degrees clockwise. White glyphs with a thin black
   outline sit above the existing background image. An enlarged 120px preview
   and the physical key preview share the device compositor. Save text is

@@ -44,7 +44,31 @@ pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<V
     encode_jpeg(&prepare_background(size, source.as_ref())?)
 }
 
-fn prepare_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
+pub(crate) fn prepare_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
+    let scaled = resize_background(size, source)?;
+    let target_w = scaled.width();
+    let target_h = scaled.height();
+    // JPEG has no alpha channel; flatten only for device output.
+    let rgb = Pixbuf::new(Colorspace::Rgb, false, 8, target_w, target_h)
+        .ok_or_else(|| "could not allocate JPEG image".to_string())?;
+    rgb.fill(0x000000ff);
+    scaled.composite(
+        &rgb,
+        0,
+        0,
+        target_w,
+        target_h,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        InterpType::Nearest,
+        255,
+    );
+    Ok(rgb)
+}
+
+pub(crate) fn resize_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
     let image = Pixbuf::from_file(source).map_err(|error| error.to_string())?;
     let width = image.width();
     let height = image.height();
@@ -64,39 +88,36 @@ fn prepare_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, St
             (0, (height - crop_h) / 2, width, crop_h)
         };
     let cropped = image.new_subpixbuf(crop_x, crop_y, crop_w, crop_h);
-    let scaled = cropped
+    cropped
         .scale_simple(target_w, target_h, InterpType::Bilinear)
-        .ok_or_else(|| "could not resize source image".to_string())?;
-    // GIF and some PNG sources carry alpha; JPEG has no alpha channel. Copy onto
-    // an RGB canvas so transparent source pixels encode consistently as black.
-    let rgb = Pixbuf::new(Colorspace::Rgb, false, 8, target_w, target_h)
-        .ok_or_else(|| "could not allocate JPEG image".to_string())?;
-    let pixel_bytes = scaled.read_pixel_bytes();
-    let pixels = pixel_bytes.as_ref();
-    let channels = scaled.n_channels() as usize;
-    let stride = scaled.rowstride() as usize;
-    for y in 0..target_h {
-        for x in 0..target_w {
-            let offset = y as usize * stride + x as usize * channels;
-            let alpha = if scaled.has_alpha() {
-                u16::from(pixels[offset + 3])
-            } else {
-                255
-            };
-            rgb.put_pixel(
-                x as u32,
-                y as u32,
-                (u16::from(pixels[offset]) * alpha / 255) as u8,
-                (u16::from(pixels[offset + 1]) * alpha / 255) as u8,
-                (u16::from(pixels[offset + 2]) * alpha / 255) as u8,
-                255,
-            );
-        }
-    }
-    Ok(rgb)
+        .ok_or_else(|| "could not resize source image".to_string())
 }
 
 fn encode_jpeg(image: &Pixbuf) -> Result<Vec<u8>, String> {
+    // Transparency belongs to the preview/overlay. The device takes JPEG, so
+    // flatten only after compositing the overlay onto its existing artwork.
+    let flattened;
+    let image = if image.has_alpha() {
+        flattened = Pixbuf::new(Colorspace::Rgb, false, 8, image.width(), image.height())
+            .ok_or_else(|| "could not allocate JPEG image".to_string())?;
+        flattened.fill(0x000000ff);
+        image.composite(
+            &flattened,
+            0,
+            0,
+            image.width(),
+            image.height(),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            InterpType::Nearest,
+            255,
+        );
+        &flattened
+    } else {
+        image
+    };
     let bytes = image
         .save_to_bufferv("jpeg", &[("quality", "92")])
         .map_err(|error| error.to_string())?;
@@ -218,6 +239,48 @@ pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<V
     encode_jpeg(&compose_button_image(source, text)?)
 }
 
+/// Encode a live information picture as a device-ready JPEG for a key or touch
+/// section, drawn over `background` (the target's own artwork) when there is one.
+pub fn prepare_info_jpeg(
+    target: ArtworkTarget,
+    value: &crate::info::InfoValue,
+    background: Option<&Path>,
+    strip_background: Option<&Path>,
+) -> Result<Vec<u8>, String> {
+    let _ = dimensions(target)?;
+    match target {
+        ArtworkTarget::Keypad(_) => {
+            encode_jpeg(&crate::info_render::compose_info_image(value, background)?)
+        }
+        ArtworkTarget::EncoderZone(zone) => {
+            let overlay = crate::info_render::compose_zone_image(value, background)?;
+            if let Some(strip) = strip_background {
+                let strip =
+                    prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
+                let section = strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100);
+                overlay.composite(
+                    &section,
+                    0,
+                    0,
+                    200,
+                    100,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    InterpType::Nearest,
+                    255,
+                );
+                return encode_jpeg(&section);
+            }
+            encode_jpeg(&overlay)
+        }
+        ArtworkTarget::TouchStripBackground => {
+            Err("live information cannot replace the touch strip background".into())
+        }
+    }
+}
+
 /// Prepare a black JPEG for the target, suitable for the same image command as artwork.
 pub fn prepare_clear_jpeg(target: ArtworkTarget) -> Result<Vec<u8>, String> {
     let size = dimensions(target)?;
@@ -326,6 +389,38 @@ mod tests {
         let data = image.read_pixel_bytes();
         let offset = y * stride + x * channels;
         [data[offset], data[offset + 1], data[offset + 2]]
+    }
+
+    #[test]
+    fn live_sections_keep_the_underlying_strip_in_device_jpegs() {
+        let strip = fixture(800, 100);
+        let own = fixture(200, 100);
+        let value = crate::info::parse_volume("Volume: 0.45").unwrap();
+        for zone in 1..=4 {
+            let jpeg =
+                prepare_info_jpeg(ArtworkTarget::EncoderZone(zone), &value, None, Some(&strip))
+                    .unwrap();
+            let image = Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
+            assert_eq!((image.width(), image.height()), (200, 100));
+            let corner = pixel(&image, 4, 4);
+            if zone <= 2 {
+                assert!(corner[0] > 240 && corner[2] < 15, "{zone}: {corner:?}");
+            } else {
+                assert!(corner[2] > 240 && corner[0] < 15, "{zone}: {corner:?}");
+            }
+        }
+        // An assigned section image still takes precedence over the strip.
+        let jpeg = prepare_info_jpeg(
+            ArtworkTarget::EncoderZone(4),
+            &value,
+            Some(&own),
+            Some(&strip),
+        )
+        .unwrap();
+        let image = Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
+        assert!(pixel(&image, 4, 4)[0] > 240);
+        fs::remove_file(strip).unwrap();
+        fs::remove_file(own).unwrap();
     }
 
     fn white_bounds(image: &Pixbuf) -> (usize, usize, usize, usize, usize) {

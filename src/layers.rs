@@ -36,6 +36,10 @@ pub enum Trigger {
     TouchPress,
     TouchFlick,
     TouchSwipe(SwipeDirection),
+    /// Tap on one of the four 200px sections of the touch strip.
+    ZoneTap(u8),
+    /// Press and hold on one of the four sections of the touch strip.
+    ZonePress(u8),
 }
 
 impl Trigger {
@@ -68,8 +72,17 @@ impl Trigger {
                 }
                 triggers
             }
-            Event::TouchTap { .. } => vec![Self::TouchTap],
-            Event::TouchPress { .. } => vec![Self::TouchPress],
+            // A section binding wins over the whole-strip binding.
+            Event::TouchTap { x, .. } => touch_zone(x)
+                .map(Self::ZoneTap)
+                .into_iter()
+                .chain([Self::TouchTap])
+                .collect(),
+            Event::TouchPress { x, .. } => touch_zone(x)
+                .map(Self::ZonePress)
+                .into_iter()
+                .chain([Self::TouchPress])
+                .collect(),
             Event::TouchFlick {
                 start_x,
                 start_y,
@@ -86,6 +99,14 @@ impl Trigger {
             _ => Vec::new(),
         }
     }
+}
+
+/// Section (1 through 4) of the 800px touch strip that contains `x`.
+fn touch_zone(x: u16) -> Option<u8> {
+    u8::try_from(x / 200)
+        .ok()
+        .filter(|zone| *zone < 4)
+        .map(|zone| zone + 1)
 }
 
 fn one_based(index: usize) -> Option<u8> {
@@ -113,6 +134,7 @@ fn swipe_direction(start_x: u16, start_y: u16, end_x: u16, end_y: u16) -> Option
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    None,
     SwitchLayer(String),
     Launch {
         executable: PathBuf,
@@ -130,14 +152,39 @@ pub enum Action {
     Feature(crate::features::FeatureAction),
 }
 
+/// Optional follow-up of any binding: move once to the page stored in layer
+/// `layer` (its key names the profile, folder and page) after `seconds`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageReturn {
+    pub layer: String,
+    pub seconds: u32,
+}
+
+impl PageReturn {
+    /// # Errors
+    /// Rejects invalid layer names and delays outside 1 second to 24 hours.
+    pub fn validate(&self) -> io::Result<()> {
+        validate_name(&self.layer)?;
+        if !(1..=86_400).contains(&self.seconds) {
+            return Err(invalid(
+                "return delay must be between 1 second and 24 hours",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Layer {
     pub name: String,
     pub bindings: BTreeMap<Trigger, Action>,
+    pub returns: BTreeMap<Trigger, PageReturn>,
+    pub displays: BTreeMap<Trigger, crate::info::InfoSource>,
 }
 
 #[derive(Clone, Debug)]
 pub struct LayerStore {
+    conflicts: Vec<ConfigConflict>,
     root: PathBuf,
     layers: BTreeMap<String, Layer>,
     active: String,
@@ -162,12 +209,15 @@ impl LayerStore {
             layers: BTreeMap::new(),
             active: DEFAULT_LAYER.into(),
             diagnostics: Vec::new(),
+            conflicts: Vec::new(),
         };
         store.layers.insert(
             DEFAULT_LAYER.into(),
             Layer {
                 name: DEFAULT_LAYER.into(),
                 bindings: BTreeMap::new(),
+                returns: BTreeMap::new(),
+                displays: BTreeMap::new(),
             },
         );
         store.load()?;
@@ -189,6 +239,10 @@ impl LayerStore {
     }
     pub fn diagnostics(&self) -> &[String] {
         &self.diagnostics
+    }
+    /// Button settings removed while loading; also written to the conflict log.
+    pub fn conflicts(&self) -> &[ConfigConflict] {
+        &self.conflicts
     }
     pub fn layers(&self) -> &BTreeMap<String, Layer> {
         &self.layers
@@ -212,6 +266,8 @@ impl LayerStore {
             Layer {
                 name: name.into(),
                 bindings: BTreeMap::new(),
+                returns: BTreeMap::new(),
+                displays: BTreeMap::new(),
             },
         );
         Ok(())
@@ -225,6 +281,7 @@ impl LayerStore {
             layer.bindings.retain(
                 |_, action| !matches!(action, Action::SwitchLayer(target) if target == name),
             );
+            layer.returns.retain(|_, value| value.layer != name);
         }
         if self.active == name {
             self.active = DEFAULT_LAYER.into();
@@ -255,13 +312,103 @@ impl LayerStore {
             return Err(invalid("unknown layer"));
         }
         validate_trigger(trigger)?;
-        Ok(self
+        let data = self.layers.get_mut(layer).expect("checked");
+        data.returns.remove(trigger);
+        data.displays.remove(trigger);
+        Ok(data.bindings.remove(trigger).is_some())
+    }
+    /// Set or clear the page return that follows an existing binding.
+    ///
+    /// # Errors
+    /// Unknown layers, invalid values and triggers without a binding.
+    pub fn set_return(
+        &mut self,
+        layer: &str,
+        trigger: &Trigger,
+        value: Option<PageReturn>,
+    ) -> io::Result<()> {
+        validate_trigger(trigger)?;
+        if let Some(value) = &value {
+            value.validate()?;
+            if !self.layers.contains_key(&value.layer) {
+                return Err(invalid("unknown return page"));
+            }
+        }
+        let data = self
             .layers
             .get_mut(layer)
-            .expect("checked")
-            .bindings
-            .remove(trigger)
-            .is_some())
+            .ok_or_else(|| invalid("unknown layer"))?;
+        match value {
+            Some(value) => {
+                if !data.bindings.contains_key(trigger) {
+                    return Err(invalid("no binding for this control"));
+                }
+                data.returns.insert(trigger.clone(), value);
+            }
+            None => {
+                data.returns.remove(trigger);
+            }
+        }
+        Ok(())
+    }
+    /// Set or clear the live information drawn on a key bound to `trigger`.
+    ///
+    /// # Errors
+    /// Unknown layers, non-key triggers and triggers without a binding.
+    pub fn set_info(
+        &mut self,
+        layer: &str,
+        trigger: &Trigger,
+        value: Option<crate::info::InfoSource>,
+    ) -> io::Result<()> {
+        validate_trigger(trigger)?;
+        let data = self
+            .layers
+            .get_mut(layer)
+            .ok_or_else(|| invalid("unknown layer"))?;
+        match value {
+            Some(source) => {
+                if !shows_information(trigger) {
+                    return Err(invalid(
+                        "live information is available on keys, dials and the touch strip only",
+                    ));
+                }
+                if !data.bindings.contains_key(trigger) {
+                    return Err(invalid("no binding for this control"));
+                }
+                data.displays.insert(trigger.clone(), source);
+            }
+            None => {
+                data.displays.remove(trigger);
+            }
+        }
+        Ok(())
+    }
+    pub fn info_source(&self, layer: &str, trigger: &Trigger) -> Option<crate::info::InfoSource> {
+        self.layers.get(layer)?.displays.get(trigger).copied()
+    }
+    /// Information drawn on one section of the touch strip: a dial's own
+    /// section (press, then turns) or a tap or hold on that section.
+    pub fn zone_info_source(&self, layer: &str, zone: u8) -> Option<crate::info::InfoSource> {
+        [
+            Trigger::EncoderPress(zone),
+            Trigger::EncoderClockwise(zone),
+            Trigger::EncoderCounterClockwise(zone),
+            Trigger::ZoneTap(zone),
+            Trigger::ZonePress(zone),
+        ]
+        .iter()
+        .find_map(|trigger| self.info_source(layer, trigger))
+    }
+    /// Every source used by any layer, so the reader knows what to poll.
+    pub fn info_sources(&self) -> std::collections::BTreeSet<crate::info::InfoSource> {
+        self.layers
+            .values()
+            .flat_map(|layer| layer.displays.values().copied())
+            .collect()
+    }
+    pub fn page_return(&self, layer: &str, trigger: &Trigger) -> Option<PageReturn> {
+        self.layers.get(layer)?.returns.get(trigger).cloned()
     }
     /// Swap two keypad bindings in memory without persisting the layer store.
     ///
@@ -270,16 +417,32 @@ impl LayerStore {
     pub fn swap_keys(&mut self, layer: &str, first: u8, second: u8) -> io::Result<()> {
         validate_trigger(&Trigger::KeyPress(first))?;
         validate_trigger(&Trigger::KeyPress(second))?;
-        let bindings = &mut self
+        let data = self
             .layers
             .get_mut(layer)
-            .ok_or_else(|| invalid("unknown layer"))?
-            .bindings;
+            .ok_or_else(|| invalid("unknown layer"))?;
         if first == second {
             return Ok(());
         }
         let first = Trigger::KeyPress(first);
         let second = Trigger::KeyPress(second);
+        let first_return = data.returns.remove(&first);
+        let second_return = data.returns.remove(&second);
+        if let Some(value) = first_return {
+            data.returns.insert(second.clone(), value);
+        }
+        if let Some(value) = second_return {
+            data.returns.insert(first.clone(), value);
+        }
+        let first_display = data.displays.remove(&first);
+        let second_display = data.displays.remove(&second);
+        if let Some(value) = first_display {
+            data.displays.insert(second.clone(), value);
+        }
+        if let Some(value) = second_display {
+            data.displays.insert(first.clone(), value);
+        }
+        let bindings = &mut data.bindings;
         let first_action = bindings.remove(&first);
         let second_action = bindings.remove(&second);
         if let Some(action) = first_action {
@@ -311,6 +474,23 @@ impl LayerStore {
     pub fn apply_switch(&mut self, target: &str) -> bool {
         self.select(target)
     }
+    /// Log the removed settings and rewrite the file without them, so the
+    /// application keeps starting. Failures here must never block startup.
+    fn record_conflicts(&mut self, conflicts: Vec<ConfigConflict>) {
+        if let Err(error) = log_conflicts(&self.root, &conflicts) {
+            eprintln!("Could not write {CONFLICT_LOG}: {error}");
+        }
+        for conflict in &conflicts {
+            eprintln!(
+                "Removed button setting {} in {:?}: {}",
+                conflict.control, conflict.layer, conflict.reason
+            );
+        }
+        self.conflicts = conflicts;
+        if let Err(error) = self.persist() {
+            eprintln!("Could not save the cleaned layer configuration: {error}");
+        }
+    }
     fn load(&mut self) -> io::Result<()> {
         let path = self.root.join("layers.conf");
         let text = match fs::read_to_string(path) {
@@ -320,13 +500,16 @@ impl LayerStore {
         };
         let parsed = parse(&text);
         match parsed {
-            Ok((layers, active)) => {
+            Ok((layers, active, conflicts)) => {
                 self.layers = layers;
                 self.active = if self.layers.contains_key(&active) {
                     active
                 } else {
                     DEFAULT_LAYER.into()
                 };
+                if !conflicts.is_empty() {
+                    self.record_conflicts(conflicts);
+                }
             }
             Err(message) => self
                 .diagnostics
@@ -346,6 +529,23 @@ impl LayerStore {
                     encode_action(action)?
                 ));
             }
+            for (trigger, value) in &layer.returns {
+                text.push_str(&format!(
+                    "pagereturn\t{}\t{}\t{}\t{}\n",
+                    hex(layer.name.as_bytes()),
+                    encode_trigger(trigger),
+                    hex(value.layer.as_bytes()),
+                    value.seconds
+                ));
+            }
+            for (trigger, source) in &layer.displays {
+                text.push_str(&format!(
+                    "info\t{}\t{}\t{}\n",
+                    hex(layer.name.as_bytes()),
+                    encode_trigger(trigger),
+                    source.id()
+                ));
+            }
         }
         let temp = self.root.join("layers.conf.tmp");
         let mut file = fs::File::create(&temp)?;
@@ -363,6 +563,19 @@ fn validate_name(name: &str) -> io::Result<()> {
         Ok(())
     }
 }
+/// Keys draw information on their image; dials and touch sections draw it on
+/// their section of the touch strip.
+fn shows_information(trigger: &Trigger) -> bool {
+    matches!(
+        trigger,
+        Trigger::KeyPress(_)
+            | Trigger::EncoderPress(_)
+            | Trigger::EncoderClockwise(_)
+            | Trigger::EncoderCounterClockwise(_)
+            | Trigger::ZoneTap(_)
+            | Trigger::ZonePress(_)
+    )
+}
 fn validate_trigger(t: &Trigger) -> io::Result<()> {
     match t {
         Trigger::KeyPress(n) if !(1..=8).contains(n) => Err(invalid("key index out of range")),
@@ -373,6 +586,9 @@ fn validate_trigger(t: &Trigger) -> io::Result<()> {
             if !(1..=4).contains(n) =>
         {
             Err(invalid("encoder index out of range"))
+        }
+        Trigger::ZoneTap(n) | Trigger::ZonePress(n) if !(1..=4).contains(n) => {
+            Err(invalid("touch section out of range"))
         }
         Trigger::Rotation(_, 0) => Err(invalid("rotation ticks cannot be zero")),
         _ => Ok(()),
@@ -493,6 +709,8 @@ fn encode_trigger(t: &Trigger) -> String {
         Trigger::TouchPress => "press".into(),
         Trigger::TouchFlick => "flick".into(),
         Trigger::TouchSwipe(direction) => format!("swipe:{}", encode_swipe_direction(*direction)),
+        Trigger::ZoneTap(zone) => format!("ztap:{zone}"),
+        Trigger::ZonePress(zone) => format!("zpress:{zone}"),
     }
 }
 fn encode_swipe_direction(direction: SwipeDirection) -> &'static str {
@@ -529,6 +747,8 @@ fn decode_trigger(s: &str) -> Result<Trigger, String> {
         ["press"] => Trigger::TouchPress,
         ["flick"] => Trigger::TouchFlick,
         ["swipe", direction] => Trigger::TouchSwipe(decode_swipe_direction(direction)?),
+        ["ztap", zone] => Trigger::ZoneTap(zone.parse().map_err(|_| "invalid touch section")?),
+        ["zpress", zone] => Trigger::ZonePress(zone.parse().map_err(|_| "invalid touch section")?),
         _ => return Err("invalid trigger".into()),
     };
     validate_trigger(&t).map_err(|e| e.to_string())?;
@@ -537,6 +757,7 @@ fn decode_trigger(s: &str) -> Result<Trigger, String> {
 fn encode_action(a: &Action) -> io::Result<String> {
     validate_action(a)?;
     Ok(match a {
+        Action::None => "none".into(),
         Action::SwitchLayer(n) => format!("switch:{}", hex(n.as_bytes())),
         Action::Emit(n) => format!("emit:{}", hex(n.as_bytes())),
         Action::Launch { executable, args } => format!(
@@ -563,7 +784,9 @@ fn encode_action(a: &Action) -> io::Result<String> {
     })
 }
 fn decode_action(s: &str) -> Result<Action, String> {
-    let action = if let Some(value) = s.strip_prefix("feature-v1:") {
+    let action = if s == "none" {
+        Action::None
+    } else if let Some(value) = s.strip_prefix("feature-v1:") {
         Action::Feature(
             crate::features::FeatureAction::decode(&unhex(value)?)
                 .map_err(|error| error.to_string())?,
@@ -651,7 +874,23 @@ fn decode_action(s: &str) -> Result<Action, String> {
     validate_action(&action).map_err(|e| e.to_string())?;
     Ok(action)
 }
-fn parse(text: &str) -> Result<(BTreeMap<String, Layer>, String), String> {
+/// A button setting that could not be loaded and was removed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigConflict {
+    pub layer: String,
+    pub control: String,
+    pub reason: String,
+    pub row: String,
+}
+
+/// Written in the configuration folder, one line per removed button setting.
+pub const CONFLICT_LOG: &str = "button-errors.log";
+
+type Parsed = (BTreeMap<String, Layer>, String, Vec<ConfigConflict>);
+
+/// Only an unsupported header rejects the file; any other broken row removes
+/// just the setting it describes and is reported as a conflict.
+fn parse(text: &str) -> Result<Parsed, String> {
     let mut lines = text.lines();
     if lines.next() != Some(VERSION) {
         return Err("unsupported layer configuration version".into());
@@ -662,56 +901,195 @@ fn parse(text: &str) -> Result<(BTreeMap<String, Layer>, String), String> {
         Layer {
             name: DEFAULT_LAYER.into(),
             bindings: BTreeMap::new(),
+            returns: BTreeMap::new(),
+            displays: BTreeMap::new(),
         },
     );
     let mut active = DEFAULT_LAYER.to_string();
+    let mut conflicts = Vec::new();
     for row in lines {
-        let cells: Vec<_> = row.split('\t').collect();
-        match cells.as_slice() {
-            ["active", value] => active = canonical_layer_name(&unhex(value)?),
-            ["layer", value] => {
-                let name = canonical_layer_name(&unhex(value)?);
-                validate_name(&name).map_err(|e| e.to_string())?;
-                let exists = layers.contains_key(&name);
-                if layers.len() >= MAX_LAYERS || (exists && name != DEFAULT_LAYER) {
-                    return Err("duplicate layer or layer limit".into());
-                }
-                layers.insert(
-                    name.clone(),
-                    Layer {
-                        name,
-                        bindings: BTreeMap::new(),
-                    },
-                );
-            }
-            ["binding", layer, trigger, action] => {
-                let layer = canonical_layer_name(&unhex(layer)?);
-                let trigger = decode_trigger(trigger)?;
-                let mut action = decode_action(action)?;
-                if let Action::SwitchLayer(target) = &mut action {
-                    *target = canonical_layer_name(target);
-                }
-                let data = layers
-                    .get_mut(&layer)
-                    .ok_or("binding references missing layer")?;
-                if data.bindings.insert(trigger, action).is_some() {
-                    return Err("duplicate binding".into());
-                }
-            }
-            _ => return Err("malformed layer configuration".into()),
+        if let Err(reason) = apply_row(&mut layers, &mut active, row) {
+            conflicts.push(conflict_for(row, reason));
         }
     }
-    if layers
-        .values()
-        .flat_map(|layer| layer.bindings.values())
-        .any(|action| matches!(action, Action::SwitchLayer(target) if !layers.contains_key(target)))
-    {
-        return Err("binding references missing target layer".into());
+    let names: Vec<String> = layers.keys().cloned().collect();
+    for layer in layers.values_mut() {
+        let dangling: Vec<Trigger> = layer
+            .bindings
+            .iter()
+            .filter(|(_, action)| {
+                matches!(action, Action::SwitchLayer(target) if !names.contains(target))
+            })
+            .map(|(trigger, _)| trigger.clone())
+            .collect();
+        for trigger in dangling {
+            layer.bindings.remove(&trigger);
+            layer.returns.remove(&trigger);
+            conflicts.push(ConfigConflict {
+                layer: layer.name.clone(),
+                control: encode_trigger(&trigger),
+                reason: "binding references a missing target layer".into(),
+                row: String::new(),
+            });
+        }
+        let stale: Vec<Trigger> = layer
+            .returns
+            .iter()
+            .filter(|(_, value)| !names.contains(&value.layer))
+            .map(|(trigger, _)| trigger.clone())
+            .collect();
+        for trigger in stale {
+            layer.returns.remove(&trigger);
+            conflicts.push(ConfigConflict {
+                layer: layer.name.clone(),
+                control: encode_trigger(&trigger),
+                reason: "page return references a missing page".into(),
+                row: String::new(),
+            });
+        }
     }
     if !layers.contains_key(&active) {
         active = DEFAULT_LAYER.into();
     }
-    Ok((layers, active))
+    Ok((layers, active, conflicts))
+}
+
+fn apply_row(
+    layers: &mut BTreeMap<String, Layer>,
+    active: &mut String,
+    row: &str,
+) -> Result<(), String> {
+    let cells: Vec<_> = row.split('\t').collect();
+    match cells.as_slice() {
+        ["active", value] => *active = canonical_layer_name(&unhex(value)?),
+        ["layer", value] => {
+            let name = canonical_layer_name(&unhex(value)?);
+            validate_name(&name).map_err(|e| e.to_string())?;
+            let exists = layers.contains_key(&name);
+            if layers.len() >= MAX_LAYERS || (exists && name != DEFAULT_LAYER) {
+                return Err("duplicate layer or layer limit".into());
+            }
+            layers.insert(
+                name.clone(),
+                Layer {
+                    name,
+                    bindings: BTreeMap::new(),
+                    returns: BTreeMap::new(),
+                    displays: BTreeMap::new(),
+                },
+            );
+        }
+        ["binding", layer, trigger, action] => {
+            let layer = canonical_layer_name(&unhex(layer)?);
+            let trigger = decode_trigger(trigger)?;
+            let mut action = decode_action(action)?;
+            if let Action::SwitchLayer(target) = &mut action {
+                *target = canonical_layer_name(target);
+            }
+            let data = layers
+                .get_mut(&layer)
+                .ok_or("binding references missing layer")?;
+            if data.bindings.contains_key(&trigger) {
+                return Err("duplicate binding".into());
+            }
+            data.bindings.insert(trigger, action);
+        }
+        // Pre-release rows with a numeric page cannot be mapped to a page key.
+        ["return", _, _, _, _] => {}
+        ["pagereturn", layer, trigger, target, seconds] => {
+            let layer = canonical_layer_name(&unhex(layer)?);
+            let trigger = decode_trigger(trigger)?;
+            let value = PageReturn {
+                layer: canonical_layer_name(&unhex(target)?),
+                seconds: seconds.parse().map_err(|_| "invalid return delay")?,
+            };
+            value.validate().map_err(|error| error.to_string())?;
+            let data = layers
+                .get_mut(&layer)
+                .ok_or("return references missing layer")?;
+            if !data.bindings.contains_key(&trigger) || data.returns.contains_key(&trigger) {
+                return Err("invalid or duplicate page return".into());
+            }
+            data.returns.insert(trigger, value);
+        }
+        ["info", layer, trigger, source] => {
+            let layer = canonical_layer_name(&unhex(layer)?);
+            let trigger = decode_trigger(trigger)?;
+            let source =
+                crate::info::InfoSource::from_id(source).ok_or("unknown information source")?;
+            let data = layers
+                .get_mut(&layer)
+                .ok_or("information references missing layer")?;
+            if !shows_information(&trigger)
+                || !data.bindings.contains_key(&trigger)
+                || data.displays.contains_key(&trigger)
+            {
+                return Err("invalid or duplicate live information".into());
+            }
+            data.displays.insert(trigger, source);
+        }
+        _ => return Err("malformed layer configuration".into()),
+    }
+    Ok(())
+}
+
+fn conflict_for(row: &str, reason: String) -> ConfigConflict {
+    let cells: Vec<_> = row.split('\t').collect();
+    let layer = cells
+        .get(1)
+        .and_then(|cell| unhex(cell).ok())
+        .filter(|name| !name.chars().any(char::is_control))
+        .map_or_else(|| "?".to_owned(), |name| canonical_layer_name(&name));
+    let control = match cells.first() {
+        Some(&("binding" | "pagereturn" | "info")) => cells.get(2).map_or("?", |cell| *cell),
+        _ => "-",
+    };
+    ConfigConflict {
+        layer,
+        control: control.chars().take(40).collect(),
+        reason,
+        row: row.chars().take(300).collect(),
+    }
+}
+
+fn utc_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    // Civil date from days since 1970 (Howard Hinnant's algorithm).
+    let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let rem = secs % 86_400;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3_600,
+        rem % 3_600 / 60,
+        rem % 60
+    )
+}
+
+fn log_conflicts(root: &Path, conflicts: &[ConfigConflict]) -> io::Result<()> {
+    use std::io::Write;
+    let stamp = utc_timestamp();
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join(CONFLICT_LOG))?;
+    for conflict in conflicts {
+        writeln!(
+            file,
+            "{stamp}\tERROR\tprofile={:?}\tcontrol={}\treason={}\tremoved={}",
+            conflict.layer, conflict.control, conflict.reason, conflict.row
+        )?;
+    }
+    Ok(())
 }
 
 fn canonical_layer_name(name: &str) -> String {
@@ -791,6 +1169,7 @@ impl<P: ProcessRunner, K: KeyboardSender> ActionExecutor<P, K> {
     pub fn execute_for(&mut self, binding_id: &str, action: &Action) -> io::Result<()> {
         validate_action(action)?;
         match action {
+            Action::None => Ok(()),
             Action::Launch { executable, .. } => {
                 if let Some(child) = self.process.launch(&action_argv(action)?)? {
                     self.applications.push((executable.clone(), child));
@@ -851,7 +1230,8 @@ fn action_argv(action: &Action) -> io::Result<Vec<String>> {
             argv
         }
         Action::Command(command) => vec!["/bin/sh".into(), "-c".into(), command.clone()],
-        Action::KeyPress { .. }
+        Action::None
+        | Action::KeyPress { .. }
         | Action::Shortcut { .. }
         | Action::SwitchLayer(_)
         | Action::Emit(_)
@@ -1395,8 +1775,13 @@ mod tests {
         }
 
         for (trigger, event, expected) in &cases {
-            if !matches!(trigger, Trigger::TouchFlick) {
-                assert_eq!(Trigger::from_event(event), Some(trigger.clone()));
+            match trigger {
+                // A tap or hold names its touch section first, then the strip.
+                Trigger::TouchTap | Trigger::TouchPress => {
+                    assert!(Trigger::event_triggers(event).contains(trigger));
+                }
+                Trigger::TouchFlick => {}
+                _ => assert_eq!(Trigger::from_event(event), Some(trigger.clone())),
             }
             assert_eq!(store.matching_action(event), expected.clone());
         }
@@ -1551,6 +1936,23 @@ mod tests {
             })
         );
         let _ = fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn none_does_not_send_keys_or_start_a_process() {
+        let mut executor = ActionExecutor::new(
+            MockRunner {
+                next_error: Some("must not run".into()),
+                ..Default::default()
+            },
+            MockKeyboard {
+                fail: true,
+                ..Default::default()
+            },
+        );
+        executor.execute(&Action::None).unwrap();
+        assert!(executor.process.argv.is_empty());
+        assert!(executor.keyboard.events.is_empty());
     }
 
     #[test]

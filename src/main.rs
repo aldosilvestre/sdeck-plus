@@ -25,6 +25,7 @@ mod app_icon;
 mod autostart;
 mod button_swap;
 mod button_text_editor;
+mod configuration_menu;
 mod feature_editor;
 mod feature_runtime;
 mod shortcut_reference;
@@ -54,6 +55,15 @@ enum LayerCommand {
     },
     ObsSave(sdeck_plus::obs::ObsConfig),
     ObsProbe(sdeck_plus::obs::ObsConfig),
+    ExportConfiguration {
+        store: LayerStore,
+        organization: Option<sdeck_plus::organization::Organization>,
+        destination: std::path::PathBuf,
+    },
+    ImportConfiguration {
+        root: std::path::PathBuf,
+        source: std::path::PathBuf,
+    },
     Shutdown,
 }
 
@@ -294,6 +304,7 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
     };
     let widgets = build_widgets(
         window.clone(),
@@ -372,6 +383,7 @@ struct MonitorWidgets {
     organization_writes: Vec<Button>,
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
+    _configuration_menu: configuration_menu::ConfigurationMenu,
 }
 
 fn build_widgets(
@@ -382,6 +394,16 @@ fn build_widgets(
 ) -> MonitorWidgets {
     let updating_layers = Rc::new(Cell::new(false));
     let toast = ui::Toast::new();
+    let conflicts = layers.borrow().conflicts().len();
+    if conflicts > 0 {
+        toast.show(
+            &format!(
+                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
+                sdeck_plus::layers::CONFLICT_LOG
+            ),
+            true,
+        );
+    }
     let root = GtkBox::new(Orientation::Vertical, 16);
     root.set_margin_top(24);
     root.set_margin_bottom(24);
@@ -414,8 +436,8 @@ fn build_widgets(
         step.append(&ui::helper(explanation));
         help_body.append(&step);
     }
-    let help_popover = ui::popover("Setup help", &ui::panel_body(&help_body));
-    let help_menu = ui::menu_button("help-browser-symbolic", "Help", &help_popover);
+    let configuration_menu = configuration_menu::ConfigurationMenu::new(&window, &help_body);
+    let help_menu = configuration_menu.button().clone();
     header.append(&help_menu);
     root.append(&header);
 
@@ -495,8 +517,10 @@ fn build_widgets(
         "Emit legacy event",
         "More actions",
         "Play sound",
+        "None",
     ]);
     let action_picker = gtk::DropDown::new(Some(action_model.clone()), gtk::Expression::NONE);
+    action_picker.set_selected(7);
     let layer_target_model = gtk::StringList::new(&[]);
     for name in layers.borrow().names() {
         layer_target_model.append(&name);
@@ -589,6 +613,7 @@ fn build_widgets(
         layer_sender.clone(),
         updating_layers.clone(),
     );
+    configuration_menu.bind(feature_runtime.clone());
     let profile_tasks = gtk::Stack::builder()
         .vhomogeneous(false)
         .hhomogeneous(true)
@@ -630,7 +655,7 @@ fn build_widgets(
     settings_card.append(&settings_heading);
     // Match the 414px chassis plus the preview card's padding and border.
     settings_card.set_size_request(300, 428);
-    settings_card.set_spacing(16);
+    settings_card.set_spacing(6);
     settings_card.set_hexpand(true);
     settings_card.set_valign(gtk::Align::Start);
     let selector_row = GtkBox::new(Orientation::Horizontal, 12);
@@ -685,6 +710,10 @@ fn build_widgets(
         });
     settings_card.append(&action_fields);
     settings_card.append(&binding_ui.feature_editor.root);
+    settings_card.append(&binding_ui.return_toggle);
+    settings_card.append(&binding_ui.return_row);
+    settings_card.append(&binding_ui.info_toggle);
+    settings_card.append(&binding_ui.info_row);
     let binding_buttons = GtkBox::new(Orientation::Horizontal, 12);
     let test_action = ui::button("media-playback-start-symbolic", "Test action");
     test_action.set_tooltip_text(Some(
@@ -704,7 +733,7 @@ fn build_widgets(
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
     *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
-    let appearance = GtkBox::new(Orientation::Vertical, 12);
+    let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
     let appearance_heading = Label::new(Some("Appearance"));
@@ -739,11 +768,18 @@ fn build_widgets(
         let ui = binding_ui.clone();
         let layers = layers.clone();
         let runtime = feature_runtime.clone();
-        test_action.connect_clicked(move |_| match ui.binding_from_widgets(&layers) {
-            Ok((layer, trigger, action)) => {
-                runtime.execute(binding_identity(&layer, &trigger), action)
+        test_action.connect_clicked(move |_| {
+            match ui
+                .binding_from_widgets(&layers)
+                .and_then(|binding| ui.page_return_from_widgets().map(|page| (binding, page)))
+            {
+                Ok(((layer, trigger, action), page_return)) => runtime.execute_with_return(
+                    binding_identity(&layer, &trigger),
+                    action,
+                    page_return,
+                ),
+                Err(error) => ui.status.set_text(&error),
             }
-            Err(error) => ui.status.set_text(&error),
         });
     }
     {
@@ -849,33 +885,57 @@ fn build_widgets(
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
         let toast = toast.clone();
-        save_binding.connect_clicked(move |_| match ui.binding_from_widgets(&layers) {
-            Ok((layer, trigger, action)) => {
-                let snapshot = {
-                    let mut store = layers.borrow_mut();
-                    store.bind(&layer, trigger, action).map(|_| store.clone())
-                };
-                match snapshot {
-                    Ok(snapshot) => {
-                        if runtime.save_binding(snapshot) {
-                            ui.status.set_text("Binding updated; saving to disk…");
-                        } else {
-                            let error = "Could not save binding: saving worker is unavailable.";
-                            ui.error(error);
-                            toast.show(error, true);
+        let artwork = artwork.clone();
+        save_binding.connect_clicked(move |_| {
+            match ui
+                .binding_from_widgets(&layers)
+                .and_then(|binding| ui.page_return_from_widgets().map(|page| (binding, page)))
+            {
+                Ok(((layer, trigger, action), page_return)) => {
+                    let info = ui.info_from_widgets();
+                    if info == Some(sdeck_plus::info::InfoSource::Weather) {
+                        let saved = sdeck_plus::info::save_location(
+                            layers.borrow().root(),
+                            &ui.info_location.text(),
+                        );
+                        if let Err(error) = saved {
+                            let message = format!("Could not save weather location: {error}");
+                            ui.error(&message);
+                            toast.show(&message, true);
+                            return;
                         }
-                        ui.refresh_summaries(&layers);
                     }
-                    Err(error) => {
-                        let message = format!("Could not save binding: {error}");
-                        ui.error(&message);
-                        toast.show(&message, true);
+                    let snapshot = {
+                        let mut store = layers.borrow_mut();
+                        store
+                            .bind(&layer, trigger.clone(), action)
+                            .and_then(|_| store.set_return(&layer, &trigger, page_return))
+                            .and_then(|_| store.set_info(&layer, &trigger, info))
+                            .map(|_| store.clone())
+                    };
+                    match snapshot {
+                        Ok(snapshot) => {
+                            if runtime.save_binding(snapshot) {
+                                ui.status.set_text("Binding updated; saving to disk…");
+                            } else {
+                                let error = "Could not save binding: saving worker is unavailable.";
+                                ui.error(error);
+                                toast.show(error, true);
+                            }
+                            ui.refresh_summaries(&layers);
+                            artwork.refresh(true);
+                        }
+                        Err(error) => {
+                            let message = format!("Could not save binding: {error}");
+                            ui.error(&message);
+                            toast.show(&message, true);
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                ui.error(&error);
-                toast.show(&error, true);
+                Err(error) => {
+                    ui.error(&error);
+                    toast.show(&error, true);
+                }
             }
         });
     }
@@ -883,6 +943,7 @@ fn build_widgets(
         let layers = layers.clone();
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
+        let artwork = artwork.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_trigger(&layers) {
             Ok((layer, trigger)) => {
                 let snapshot = {
@@ -898,6 +959,7 @@ fn build_widgets(
                         ui.status.set_text("Binding removed.");
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
+                        artwork.refresh(true);
                     }
                     Ok((false, _)) => ui
                         .status
@@ -920,7 +982,7 @@ fn build_widgets(
         let timer = feature_runtime.timer_status.clone();
         changing.connect_visible_notify(move |_| {
             if let Some(feedback) = feedback.upgrade() {
-                feedback.set_visible(status.is_visible() || timer.is_visible());
+                feedback.set_visible(status.get_visible() || timer.get_visible());
             }
         });
     }
@@ -1100,6 +1162,11 @@ fn build_widgets(
 
     let key_widgets = selectable_widgets[..8].to_vec();
     let encoder_widgets = selectable_widgets[9..].to_vec();
+    selectable_widgets.extend(
+        zone_select_buttons
+            .iter()
+            .map(|zone| zone.clone().upcast::<gtk::Widget>()),
+    );
     let zone_widgets: Vec<gtk::Widget> = zone_select_buttons
         .iter()
         .map(|zone| zone.clone().upcast())
@@ -1132,24 +1199,21 @@ fn build_widgets(
         selected_widgets.clone(),
         8,
         ControlKind::Touch,
-        1,
+        0,
     );
+    // Each of the four touch sections is its own control.
     for (index, zone_button) in zone_select_buttons.into_iter().enumerate() {
         connect_control_selection(
             &touch_status,
-            zone_button.clone(),
+            zone_button,
             &binding_ui,
             &layers,
             &settings_heading,
             selected_widgets.clone(),
-            8,
+            13 + index,
             ControlKind::Touch,
-            1,
+            (index + 1) as u8,
         );
-        let heading = settings_heading.clone();
-        zone_button.connect_clicked(move |_| {
-            heading.set_text(&format!("Configuring: Touchpad region {}", index + 1));
-        });
     }
     for index in 0..4 {
         connect_control_selection(
@@ -1187,6 +1251,7 @@ fn build_widgets(
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .child(&root)
         .build();
+    feature_runtime.attach_configuration_root(viewport.upcast_ref());
     MonitorWidgets {
         root: viewport,
         toast,
@@ -1216,6 +1281,7 @@ fn build_widgets(
         feature_runtime,
         organization_writes: vec![create_layer],
         _text_editor: text_editor,
+        _configuration_menu: configuration_menu,
     }
 }
 
@@ -1253,6 +1319,20 @@ fn start_event_updates(
             match message {
                 MonitorEvent::ApplicationFocus(_) => {}
                 MonitorEvent::Heartbeat => {}
+                MonitorEvent::ConfigurationExportResult { path, result } => {
+                    let failed = result.is_err();
+                    feature_runtime.complete_configuration_export(&path, result);
+                    toast.show(&feature_runtime.status.text(), failed);
+                }
+                MonitorEvent::ConfigurationImportResult { root, result } => {
+                    let imported = feature_runtime.complete_configuration_import(&root, result);
+                    if imported {
+                        for button in &widgets.organization_writes {
+                            button.set_sensitive(true);
+                        }
+                    }
+                    toast.show(&feature_runtime.status.text(), !imported);
+                }
                 MonitorEvent::KeySwapResult {
                     layer,
                     first,
@@ -1290,8 +1370,9 @@ fn start_event_updates(
                     }
                 },
                 MonitorEvent::Input(event) => {
-                    if let Some((identity, action)) = matching_binding(&layers, &event) {
-                        feature_runtime.execute(identity, action);
+                    if let Some((identity, action, page_return)) = matching_binding(&layers, &event)
+                    {
+                        feature_runtime.execute_with_return(identity, action, page_return);
                     }
                     match event {
                         protocol::Event::Key { index, pressed } => {
@@ -1377,6 +1458,7 @@ fn start_event_updates(
                     ),
                 },
                 MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
+                MonitorEvent::Info { source, value } => artwork.update_info(source, value),
                 MonitorEvent::BindingSaveResult(result) => {
                     let (message, failed) = match result {
                         Ok(()) => ("Binding saved successfully.".to_owned(), false),
@@ -1432,6 +1514,16 @@ struct BindingUi {
     modifier_row: GtkBox,
     feature_editor: feature_editor::FeatureEditor,
     action_guidance: Label,
+    return_toggle: CheckButton,
+    return_target: gtk::DropDown,
+    return_model: gtk::StringList,
+    return_seconds: Entry,
+    return_row: GtkBox,
+    info_toggle: CheckButton,
+    info_source: gtk::DropDown,
+    info_location: Entry,
+    info_row: GtkBox,
+    info_location_row: GtkBox,
     // Same order as the physical selection widgets: eight buttons, touch, four encoders.
     summaries: Vec<Label>,
 }
@@ -1467,6 +1559,69 @@ impl BindingUi {
         status.connect_label_notify(ui::clear_feedback);
         let action_guidance = ui::helper("");
         shortcut_reference::connect(&action_guidance);
+        let return_toggle = CheckButton::with_label("Return to a page afterwards");
+        return_toggle.set_tooltip_text(Some(
+            "After this action runs, move once to the page you choose.",
+        ));
+        let return_model = gtk::StringList::new(&[]);
+        let return_target = gtk::DropDown::new(Some(return_model.clone()), gtk::Expression::NONE);
+        bound_layer_picker(&return_target);
+        let return_seconds = Entry::builder()
+            .text("60")
+            .placeholder_text("90")
+            .width_chars(8)
+            .build();
+        let return_row = GtkBox::new(Orientation::Vertical, 12);
+        return_row.append(&labeled(
+            "Return to (profile, folder or page)",
+            &return_target,
+        ));
+        return_row.append(&labeled(
+            "After how many seconds (1–86400)",
+            &return_seconds,
+        ));
+        return_row.set_visible(false);
+        let row = return_row.clone();
+        return_toggle.connect_toggled(move |toggle| row.set_visible(toggle.is_active()));
+        let info_toggle = CheckButton::with_label("Show live information on the key");
+        info_toggle.set_tooltip_text(Some(
+            "Replaces the image with a live picture, such as the volume or the time. Dials, and a tap or hold on a touch section, draw it on that section.",
+        ));
+        let labels: Vec<&str> = sdeck_plus::info::InfoSource::ALL
+            .iter()
+            .map(|source| source.label())
+            .collect();
+        let info_source = gtk::DropDown::from_strings(&labels);
+        let info_location = Entry::builder()
+            .placeholder_text("Madrid or 40.4,-3.7")
+            .hexpand(true)
+            .build();
+        let info_location_row = labeled(
+            "Weather location (city or latitude,longitude)",
+            &info_location,
+        );
+        info_location_row.set_visible(false);
+        let info_row = GtkBox::new(Orientation::Vertical, 12);
+        info_row.append(&labeled("Information to show", &info_source));
+        info_row.append(&info_location_row);
+        info_row.set_visible(false);
+        let refresh_info = {
+            let toggle = info_toggle.clone();
+            let source = info_source.clone();
+            let row = info_row.clone();
+            let location = info_location_row.clone();
+            move || {
+                let on = toggle.is_active() && toggle.get_visible();
+                row.set_visible(on);
+                location.set_visible(
+                    on && sdeck_plus::info::InfoSource::ALL.get(source.selected() as usize)
+                        == Some(&sdeck_plus::info::InfoSource::Weather),
+                );
+            }
+        };
+        let refresh = refresh_info.clone();
+        info_toggle.connect_toggled(move |_| refresh());
+        info_source.connect_selected_notify(move |_| refresh_info());
         Self {
             layer_picker,
             layer_model,
@@ -1494,6 +1649,16 @@ impl BindingUi {
             modifier_row,
             feature_editor: feature_editor::FeatureEditor::new(),
             action_guidance,
+            return_toggle,
+            return_target,
+            return_model,
+            return_seconds,
+            return_row,
+            info_toggle,
+            info_source,
+            info_location,
+            info_row,
+            info_location_row,
             summaries: (0..13)
                 .map(|_| {
                     let label = Label::new(None);
@@ -1526,7 +1691,7 @@ impl BindingUi {
                 .map(|index| {
                     let (control, number) = match index {
                         0..=7 => (ControlKind::Button, index + 1),
-                        8 => (ControlKind::Touch, 1),
+                        8 => (ControlKind::Touch, 0),
                         _ => (ControlKind::Encoder, index - 8),
                     };
                     control_summary(&store, &layer, control, number as u8)
@@ -1539,17 +1704,63 @@ impl BindingUi {
         }
     }
 
+    /// Keys, dials and a tap or hold on one touch section can show information.
+    fn info_supported(&self) -> bool {
+        match self.control_kind() {
+            ControlKind::Button | ControlKind::Encoder => true,
+            ControlKind::Touch => {
+                matches!(
+                    self.event_kind(),
+                    EventKind::TouchTap | EventKind::TouchPress
+                ) && self.control_number().is_some_and(|number| number > 0)
+            }
+        }
+    }
+
+    fn update_info_visibility(&self) {
+        let supported = self.info_supported();
+        self.info_toggle.set_visible(supported);
+        let on = supported && self.info_toggle.is_active();
+        self.info_row.set_visible(on);
+        self.info_location_row.set_visible(
+            on && self.info_from_widgets() == Some(sdeck_plus::info::InfoSource::Weather),
+        );
+    }
+
+    fn info_from_widgets(&self) -> Option<sdeck_plus::info::InfoSource> {
+        if !self.info_supported() || !self.info_toggle.is_active() {
+            return None;
+        }
+        let index = usize::try_from(self.info_source.selected()).ok()?;
+        sdeck_plus::info::InfoSource::ALL.get(index).copied()
+    }
+
+    fn populate_info(&self, value: Option<sdeck_plus::info::InfoSource>, location: &str) {
+        let index = value
+            .and_then(|source| {
+                sdeck_plus::info::InfoSource::ALL
+                    .iter()
+                    .position(|s| *s == source)
+            })
+            .and_then(|index| u32::try_from(index).ok())
+            .unwrap_or(0);
+        self.info_source.set_selected(index);
+        self.info_location.set_text(location);
+        self.info_toggle.set_active(value.is_some());
+        self.update_info_visibility();
+    }
+
     fn update_for_control(&self, reset_event: bool) {
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
             ControlKind::Button => (1..=8).map(|n| n.to_string()).collect(),
             ControlKind::Encoder => (1..=4).map(|n| n.to_string()).collect(),
-            ControlKind::Touch => Vec::new(),
+            // "Any" is the whole strip; 1 through 4 are its sections.
+            ControlKind::Touch => ["Any", "1", "2", "3", "4"].map(str::to_owned).to_vec(),
         };
         replace_string_list(&self.control_number_model, &numbers);
-        self.control_number_row
-            .set_visible(!matches!(control, ControlKind::Touch));
+        self.control_number_row.set_visible(true);
         let events: Vec<String> = events_for_control(control)
             .into_iter()
             .map(event_label)
@@ -1591,27 +1802,30 @@ impl BindingUi {
                 number - 1
             }
             ControlKind::Touch => {
-                if let Some(number) = number {
-                    if number != 1 {
-                        return Err("touch strip does not have numbered controls".into());
-                    }
+                let number = number.unwrap_or(0);
+                if number > 4 {
+                    return Err("touch section must be 0 (whole strip) through 4".into());
                 }
                 self.control_picker.set_selected(2);
                 self.update_for_control(reset_event);
-                0
+                number
             }
         };
-        if !matches!(control, ControlKind::Touch) {
-            self.control_number_picker.set_selected(selected as u32);
-        }
+        self.control_number_picker.set_selected(u32::from(selected));
         Ok(())
     }
 
     fn update_action_visibility(&self) {
         let kind = self.action_kind();
+        self.return_toggle.set_visible(kind != ActionKind::None);
+        self.return_row
+            .set_visible(kind != ActionKind::None && self.return_toggle.is_active());
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
         self.action_guidance.set_text(match kind {
+            ActionKind::None => {
+                "Do nothing when this control is used. Live information can still be shown."
+            }
             ActionKind::MoveToLayer => {
                 "Switch to another profile or page when this control is used."
             }
@@ -1637,7 +1851,10 @@ impl BindingUi {
                 ActionKind::RunCommand => "Shell command",
                 ActionKind::Shortcut => "Shortcut",
                 ActionKind::EmitLegacy => "Event name",
-                ActionKind::MoveToLayer | ActionKind::OpenApplication | ActionKind::Extended => "",
+                ActionKind::None
+                | ActionKind::MoveToLayer
+                | ActionKind::OpenApplication
+                | ActionKind::Extended => "",
             });
         }
         self.feature_editor
@@ -1663,13 +1880,18 @@ impl BindingUi {
             ActionKind::RunCommand => "Shell command run with /bin/sh -c",
             ActionKind::Shortcut => "A, F5, Enter (no modifiers), or CTRL + D",
             ActionKind::EmitLegacy => "Internal event name",
-            ActionKind::MoveToLayer | ActionKind::OpenApplication | ActionKind::Extended => "",
+            ActionKind::None
+            | ActionKind::MoveToLayer
+            | ActionKind::OpenApplication
+            | ActionKind::Extended => "",
         }));
     }
 
     fn refresh_layer_targets(&self, names: &[String]) {
         replace_string_list(&self.layer_target_model, names);
         self.layer_target_picker.set_selected(0);
+        replace_string_list(&self.return_model, names);
+        self.return_target.set_selected(0);
     }
 
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
@@ -1685,13 +1907,34 @@ impl BindingUi {
         match action {
             Some(action) => {
                 self.populate_action(&action);
+                self.populate_return(layers.borrow().page_return(&layer, &trigger));
+                let store = layers.borrow();
+                self.populate_info(
+                    store.info_source(&layer, &trigger),
+                    &sdeck_plus::info::load_location(store.root()).unwrap_or_default(),
+                );
                 self.status.set_text("Binding loaded for editing.");
             }
-            None => self
-                .status
-                .set_text("No binding exists for that control event."),
+            None => {
+                self.populate_action(&Action::None);
+                self.status
+                    .set_text("No binding exists for that control event.");
+            }
         }
         self.update_action_visibility();
+    }
+
+    /// Selected control number; 0 means the whole touch strip.
+    fn control_number(&self) -> Option<u8> {
+        let value = dropdown_value(
+            &self.control_number_model,
+            self.control_number_picker.selected(),
+        )?;
+        if value == "Any" {
+            Some(0)
+        } else {
+            value.parse().ok()
+        }
     }
 
     fn selected_layer_and_trigger(
@@ -1703,16 +1946,9 @@ impl BindingUi {
         if !layers.borrow().layers().contains_key(&layer) {
             return Err("Selected layer no longer exists.".into());
         }
-        let number = if matches!(self.control_kind(), ControlKind::Touch) {
-            1
-        } else {
-            dropdown_value(
-                &self.control_number_model,
-                self.control_number_picker.selected(),
-            )
-            .and_then(|value| value.parse::<u8>().ok())
-            .ok_or_else(|| "Select a control number.".to_string())?
-        };
+        let number = self
+            .control_number()
+            .ok_or_else(|| "Select a control number.".to_string())?;
         let trigger = trigger_from_selection(self.control_kind(), number, self.event_kind())
             .map_err(|error| error.0)?;
         Ok((layer, trigger))
@@ -1756,7 +1992,35 @@ impl BindingUi {
         Ok((layer, trigger, action))
     }
 
+    fn page_return_from_widgets(&self) -> Result<Option<sdeck_plus::layers::PageReturn>, String> {
+        if self.action_kind() == ActionKind::None || !self.return_toggle.is_active() {
+            return Ok(None);
+        }
+        let layer = dropdown_value(&self.return_model, self.return_target.selected())
+            .ok_or("Select the page to return to.")?;
+        let seconds = self
+            .return_seconds
+            .text()
+            .parse()
+            .map_err(|error| format!("Return delay in seconds: {error}"))?;
+        let value = sdeck_plus::layers::PageReturn { layer, seconds };
+        value.validate().map_err(|error| error.to_string())?;
+        Ok(Some(value))
+    }
+
+    fn populate_return(&self, value: Option<sdeck_plus::layers::PageReturn>) {
+        match &value {
+            Some(value) => select_string(&self.return_model, &self.return_target, &value.layer),
+            None => self.return_target.set_selected(0),
+        }
+        self.return_seconds
+            .set_text(&value.as_ref().map_or(60, |value| value.seconds).to_string());
+        self.return_toggle.set_active(value.is_some());
+    }
+
     fn clear_action_fields(&self) {
+        self.populate_info(None, "");
+        self.populate_return(None);
         self.feature_editor.reset();
         self.text_entry.set_text("");
         self.application_entry.set_text("");
@@ -1770,6 +2034,7 @@ impl BindingUi {
 
     fn populate_action(&self, action: &Action) {
         match action {
+            Action::None => self.action_picker.set_selected(7),
             Action::Feature(feature) => {
                 self.action_picker.set_selected(
                     if matches!(
@@ -1855,6 +2120,7 @@ impl BindingUi {
             3 => ActionKind::Shortcut,
             4 => ActionKind::EmitLegacy,
             5 | 6 => ActionKind::Extended,
+            7 => ActionKind::None,
             _ => ActionKind::MoveToLayer,
         }
     }
@@ -1956,7 +2222,10 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
     match control {
         ControlKind::Button => format!("Configuring: Key {}", number.unwrap_or(1)),
         ControlKind::Encoder => format!("Configuring: Dial {}", number.unwrap_or(1)),
-        ControlKind::Touch => "Configuring: Touchpad".into(),
+        ControlKind::Touch => match number {
+            Some(zone @ 1..=4) => format!("Configuring: Touchpad section {zone}"),
+            _ => "Configuring: Touchpad".into(),
+        },
     }
 }
 
@@ -2047,11 +2316,16 @@ fn binding_identity(layer: &str, trigger: &Trigger) -> String {
 fn matching_binding(
     layers: &RefCell<LayerStore>,
     event: &protocol::Event,
-) -> Option<(String, Action)> {
+) -> Option<(String, Action, Option<sdeck_plus::layers::PageReturn>)> {
     let store = layers.borrow();
-    store
-        .matching_binding(event)
-        .map(|(trigger, action)| (binding_identity(store.active(), &trigger), action))
+    store.matching_binding(event).map(|(trigger, action)| {
+        let page_return = store.page_return(store.active(), &trigger);
+        (
+            binding_identity(store.active(), &trigger),
+            action,
+            page_return,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -2124,9 +2398,153 @@ struct ArtworkUi {
     chooser_owners: Rc<RefCell<std::collections::BTreeMap<String, Rc<()>>>>,
     selected_target: Rc<Cell<ArtworkTarget>>,
     text_editor: Rc<RefCell<std::rc::Weak<button_text_editor::ButtonTextEditor>>>,
+    /// Latest reading of every live information source.
+    info: Rc<
+        RefCell<
+            std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
+        >,
+    >,
 }
 
 impl ArtworkUi {
+    /// Keys and touch sections that show live information on `layer`.
+    fn info_targets(&self, layer: &str) -> Vec<(ArtworkTarget, sdeck_plus::info::InfoSource)> {
+        let store = self.layers.borrow();
+        let keys = (1..=8).filter_map(|key| {
+            let source = store.info_source(layer, &Trigger::KeyPress(key))?;
+            Some((ArtworkTarget::Keypad(key), source))
+        });
+        let zones = (1..=4).filter_map(|zone| {
+            let source = store.zone_info_source(layer, zone)?;
+            Some((ArtworkTarget::EncoderZone(zone), source))
+        });
+        keys.chain(zones).collect()
+    }
+
+    fn info_value(&self, source: sdeck_plus::info::InfoSource) -> sdeck_plus::info::InfoValue {
+        self.info
+            .borrow()
+            .get(&source)
+            .cloned()
+            .unwrap_or_else(|| source.placeholder())
+    }
+
+    /// The target's own artwork, drawn under its live picture.
+    fn info_background(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        self.store
+            .borrow()
+            .as_ref()?
+            .assigned_path_in_layer(layer, target)
+    }
+
+    fn info_command(
+        &self,
+        layer: &str,
+        target: ArtworkTarget,
+        source: sdeck_plus::info::InfoSource,
+    ) -> ArtworkCommand {
+        ArtworkCommand::ComposeInfo {
+            target,
+            path: self.info_background(layer, target),
+            strip_path: if matches!(target, ArtworkTarget::EncoderZone(_)) {
+                self.info_background(layer, ArtworkTarget::TouchStripBackground)
+            } else {
+                None
+            },
+            value: self.info_value(source),
+        }
+    }
+
+    /// Redraw keys and touch sections that show information over their own
+    /// artwork; the sections go last so they draw over the strip background.
+    fn with_info(&self, layer: &str, commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
+        let targets = self.info_targets(layer);
+        let shown = |target: &ArtworkTarget| targets.iter().any(|(shown, _)| shown == target);
+        let info = |wanted: fn(&ArtworkTarget) -> bool| -> Vec<ArtworkCommand> {
+            targets
+                .iter()
+                .filter(|(target, _)| wanted(target))
+                .map(|(target, source)| self.info_command(layer, *target, *source))
+                .collect()
+        };
+        let mut other = Vec::new();
+        let mut touch = Vec::new();
+        for command in commands {
+            let target = match &command {
+                ArtworkCommand::Assign { target, .. } | ArtworkCommand::Clear { target } => *target,
+                ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
+                _ => {
+                    other.push(command);
+                    continue;
+                }
+            };
+            if shown(&target) {
+                continue;
+            }
+            if matches!(target, ArtworkTarget::Keypad(_)) {
+                other.push(command);
+            } else {
+                touch.push(command);
+            }
+        }
+        other.extend(info(|target| matches!(target, ArtworkTarget::Keypad(_))));
+        other.extend(touch);
+        other.extend(info(|target| {
+            matches!(target, ArtworkTarget::EncoderZone(_))
+        }));
+        other
+    }
+
+    /// Draw the same picture in the window's preview of `target`.
+    fn paint_info_preview(&self, target: ArtworkTarget, value: &sdeck_plus::info::InfoValue) {
+        let layer = self.layers.borrow().active().to_owned();
+        let background = self.info_background(&layer, target);
+        let image = match target {
+            ArtworkTarget::Keypad(_) => {
+                sdeck_plus::info_render::compose_info_image(value, background.as_deref())
+            }
+            ArtworkTarget::EncoderZone(_) => {
+                sdeck_plus::info_render::compose_zone_image(value, background.as_deref())
+            }
+            ArtworkTarget::TouchStripBackground => return,
+        };
+        match image {
+            Ok(image) => {
+                let pictures = self.pictures.borrow();
+                if let Some((_, picture)) = pictures.iter().find(|(shown, _)| *shown == target) {
+                    picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                    picture.set_visible(true);
+                }
+            }
+            Err(error) => eprintln!("Could not draw live information preview: {error}"),
+        }
+    }
+
+    fn paint_info_previews(&self, layer: &str) {
+        for (target, source) in self.info_targets(layer) {
+            self.paint_info_preview(target, &self.info_value(source));
+        }
+    }
+
+    /// Store a new reading and redraw only what shows it, on the device and in the window.
+    fn update_info(
+        &self,
+        source: sdeck_plus::info::InfoSource,
+        value: sdeck_plus::info::InfoValue,
+    ) {
+        let previous = self.info.borrow_mut().insert(source, value.clone());
+        if previous.as_ref() == Some(&value) {
+            return;
+        }
+        let layer = self.layers.borrow().active().to_owned();
+        for (target, shown) in self.info_targets(&layer) {
+            if shown == source {
+                self.paint_info_preview(target, &value);
+                let _ = self.output.send(self.info_command(&layer, target, source));
+            }
+        }
+    }
+
     fn capture_owner(&self) -> ChooserOwner {
         let name = self.layers.borrow().active().to_owned();
         let incarnation = self
@@ -2192,9 +2610,11 @@ impl ArtworkUi {
                 .collect::<Vec<_>>();
             (paths, desired_artwork_commands(store, &layer))
         };
+        let commands = self.with_info(&layer, commands);
         for (picture, path, text) in paths {
             set_button_picture(&picture, path, text.as_ref());
         }
+        self.paint_info_previews(&layer);
         let _ = self.output.send(ArtworkCommand::Replace(commands));
         *self.last_layer.borrow_mut() = Some(layer);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
@@ -2203,8 +2623,23 @@ impl ArtworkUi {
         }
     }
 
+    /// Whether `target` shows live information on `layer`.
+    fn shows_info(&self, layer: &str, target: ArtworkTarget) -> bool {
+        self.info_targets(layer)
+            .iter()
+            .any(|(shown, _)| *shown == target)
+    }
+
     fn restore_button_preview(&self, target: &ArtworkTarget) {
         let layer = self.layers.borrow().active().to_owned();
+        if let Some((_, source)) = self
+            .info_targets(&layer)
+            .into_iter()
+            .find(|(shown, _)| shown == target)
+        {
+            self.paint_info_preview(*target, &self.info_value(source));
+            return;
+        }
         let (path, text) = {
             let store = self.store.borrow();
             let Some(store) = store.as_ref() else {
@@ -2679,8 +3114,12 @@ mod tests {
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     mod button_swap_tests;
+    mod configuration_transfer_tests;
     mod control_feedback_tests;
     mod documentation_screenshots;
+    mod live_info_tests;
+    mod multimedia_action_tests;
+    mod page_return_tests;
     mod page_ui_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
@@ -2697,8 +3136,16 @@ mod tests {
             .expect("GTK test lock should not be poisoned")
     }
 
+    fn init_gtk_for_test() -> bool {
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return false;
+        }
+        gtk::init().expect("GTK initialization failed despite an advertised display");
+        true
+    }
+
     fn test_binding_ui() -> Option<BindingUi> {
-        if gtk::init().is_err() {
+        if !init_gtk_for_test() {
             return None;
         }
         // Pixel assertions inspect final states, not theme transition timing.
@@ -2722,8 +3169,10 @@ mod tests {
             "Emit legacy event",
             "More actions",
             "Play sound",
+            "None",
         ]);
         let action_picker = gtk::DropDown::new(Some(action_model), gtk::Expression::NONE);
+        action_picker.set_selected(7);
         let layer_target_model = gtk::StringList::new(&["Base"]);
         let layer_target_picker =
             gtk::DropDown::new(Some(layer_target_model.clone()), gtk::Expression::NONE);
@@ -2987,9 +3436,9 @@ mod tests {
         drop(fallback_hold);
         eprintln!("GTK tray-unavailable close quit despite application hold");
         assert_shortcut_only_menu(&ui);
-        ui.feature_editor.assert_roundtrips();
         ui.action_picker.set_selected(5);
         ui.update_action_visibility();
+        ui.feature_editor.assert_roundtrips();
         assert!(ui.feature_editor.root.is_visible());
         assert!(!ui.layer_target_row.is_visible());
         assert!(!ui.text_row.is_visible());
@@ -2999,7 +3448,13 @@ mod tests {
         assert_legacy_keys_load_without_rewriting_and_save_as_shortcuts(&ui);
         ui.control_picker.set_selected(2);
         ui.update_for_control(true);
-        assert!(!ui.control_number_row.is_visible());
+        assert!(ui.control_number_row.is_visible());
+        assert_eq!(ui.control_number_model.n_items(), 5);
+        ui.control_number_picker.set_selected(0);
+        assert_eq!(ui.control_number(), Some(0));
+        ui.control_number_picker.set_selected(4);
+        assert_eq!(ui.control_number(), Some(4));
+        ui.control_number_picker.set_selected(0);
 
         ui.action_picker.set_selected(0);
         ui.update_action_visibility();
@@ -3064,6 +3519,7 @@ mod tests {
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
             text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
         };
         let (requests, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork, requests);
@@ -3297,6 +3753,7 @@ mod tests {
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
             text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
         };
         let (commands, requests) = mpsc::channel();
         let (output, events) = mpsc::channel();
@@ -3537,6 +3994,8 @@ mod tests {
             }
         }
         let saved = std::fs::read(&path).unwrap();
+        ui.action_picker.set_selected(1);
+        ui.update_action_visibility();
         ui.text_entry.set_text("");
         save.emit_clicked();
         assert!(toast.root.reveals_child());
@@ -3737,6 +4196,7 @@ mod tests {
                 "Emit legacy event",
                 "More actions",
                 "Play sound",
+                "None",
             ]
         );
         for (index, kind) in [
@@ -3747,6 +4207,7 @@ mod tests {
             ActionKind::EmitLegacy,
             ActionKind::Extended,
             ActionKind::Extended,
+            ActionKind::None,
         ]
         .into_iter()
         .enumerate()
@@ -3894,6 +4355,7 @@ mod tests {
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
             text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
         };
         let (sender, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), sender);
@@ -3949,6 +4411,11 @@ mod tests {
             timeout_flag.set(true);
             loop_on_timeout.quit();
         });
+        // GTK may update the default size after the window manager configures it.
+        assert_eq!(
+            (window.default_width(), window.default_height()),
+            (DEFAULT_WIDTH, DEFAULT_HEIGHT)
+        );
         window.set_visible(true);
         if !mapped.get() {
             main_loop.run();
@@ -3959,10 +4426,6 @@ mod tests {
         }
         assert!(mapped.get(), "window did not map before timeout");
         wait_for_frame(&window);
-        assert_eq!(
-            (window.default_width(), window.default_height()),
-            (DEFAULT_WIDTH, DEFAULT_HEIGHT)
-        );
         eprintln!(
             "GTK requested initial size 1000x700; window-manager allocation {}x{}",
             window.width(),
@@ -5012,6 +5475,7 @@ mod tests {
                         .emit_clicked();
                     assert_eq!(artwork.selected_target.get(), *target);
                     assert_eq!(widgets.binding_ui.control_picker.selected(), 2);
+                    assert_eq!(widgets.binding_ui.control_number(), Some(*zone));
                     assert_eq!(widgets.binding_ui.event_model.n_items(), 7);
                     let heading = sidebar_settings(widgets)
                         .first_child()
@@ -5020,10 +5484,13 @@ mod tests {
                         .unwrap();
                     assert_eq!(
                         heading.text().as_str(),
-                        format!("Configuring: Touchpad region {zone}")
+                        control_heading(ControlKind::Touch, Some(*zone))
                     );
                     key_button(&widgets.key_labels[0]).emit_clicked();
-                    assert_eq!(heading.text().as_str(), "Configuring: Key 1");
+                    assert_eq!(
+                        heading.text().as_str(),
+                        control_heading(ControlKind::Button, Some(1))
+                    );
                 }
                 ArtworkTarget::TouchStripBackground => {
                     picker.set_selected(
@@ -5139,7 +5606,7 @@ mod tests {
                 settings_bounds.y(),
                 device_bounds.y()
             );
-            assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 16);
+            assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 6);
             assert_eq!(settings_bounds.y(), device_bounds.y());
             assert!(
                 settings_bounds.height() >= device_bounds.height(),
@@ -5518,7 +5985,7 @@ mod tests {
                 if panel.has_css_class("device-canvas") {
                     4
                 } else {
-                    16
+                    6
                 }
             );
             assert_eq!(
@@ -5874,6 +6341,7 @@ mod tests {
             chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
             text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
         };
         artwork.refresh(false);
         assert_eq!(artwork.pictures.borrow().len(), 13);
@@ -6206,7 +6674,7 @@ mod tests {
         );
         ui.select_control(ControlKind::Touch, Some(1), false)
             .expect("the touch strip should be selectable");
-        assert!(!ui.control_number_row.is_visible());
+        assert!(ui.control_number_row.is_visible());
         assert_eq!(ui.event_model.n_items(), 7);
         assert!(ui
             .select_control(ControlKind::Button, Some(9), true)
@@ -6215,7 +6683,7 @@ mod tests {
             .select_control(ControlKind::Encoder, Some(5), true)
             .is_err());
         assert!(ui
-            .select_control(ControlKind::Touch, Some(2), true)
+            .select_control(ControlKind::Touch, Some(5), true)
             .is_err());
     }
 
@@ -6266,7 +6734,7 @@ mod tests {
     }
 
     fn assert_direct_selection_css_is_distinct_from_live_active_state() {
-        if gtk::init().is_err() {
+        if !init_gtk_for_test() {
             eprintln!("skipping GTK CSS state test because gtk::init failed");
             return;
         }

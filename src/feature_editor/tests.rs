@@ -2,6 +2,55 @@ use super::*;
 use gtk::glib::translate::IntoGlib;
 
 impl FeatureEditor {
+    pub(crate) fn wait_for_audio_outputs(&self) {
+        self.audio_output.wait_until_loaded();
+    }
+
+    pub(crate) fn select_audio_rotation(&self) {
+        self.audio_output.select_rotation();
+    }
+
+    pub(crate) fn assert_audio_output_choices(&self) {
+        use sdeck_plus::desktop_actions::audio_output::AudioOutput;
+        let selected = FeatureAction::Desktop(DesktopAction::SetAudioOutput {
+            name: "speakers".into(),
+        });
+        self.populate(&selected);
+        self.audio_output.set_outputs(vec![
+            AudioOutput {
+                name: "headphones".into(),
+                description: "USB headphones".into(),
+            },
+            AudioOutput {
+                name: "speakers".into(),
+                description: "Monitor speakers".into(),
+            },
+        ]);
+        assert_eq!(self.parse().unwrap(), selected);
+        // A disconnected saved device remains selected rather than silently changing targets.
+        self.audio_output.set_outputs(Vec::new());
+        assert_eq!(self.parse().unwrap(), selected);
+        self.select_audio_rotation();
+        let rotation = FeatureAction::Desktop(DesktopAction::CycleAudioOutput);
+        assert_eq!(self.parse().unwrap(), rotation);
+        self.audio_output.set_outputs(vec![AudioOutput {
+            name: "headphones".into(),
+            description: "USB headphones".into(),
+        }]);
+        assert_eq!(
+            self.parse().unwrap(),
+            rotation,
+            "refresh must retain rotation"
+        );
+        self.audio_output.select(Some("headphones"));
+        assert_eq!(
+            self.parse().unwrap(),
+            FeatureAction::Desktop(DesktopAction::SetAudioOutput {
+                name: "headphones".into(),
+            })
+        );
+    }
+
     pub(crate) fn select_category(&self, category: u32) {
         self.reset();
         self.category.set_selected(category);
@@ -9,6 +58,10 @@ impl FeatureEditor {
     }
 
     pub(crate) fn assert_roundtrips(&self) {
+        assert!(
+            self.root.is_visible(),
+            "extended action editor must be visible before checking its fields"
+        );
         for action in examples() {
             self.populate(&action);
             assert_eq!(self.parse().unwrap(), action);
@@ -53,7 +106,16 @@ impl FeatureEditor {
             .into_iter()
             .map(|row| row.is_visible())
             .collect();
-            assert_eq!(visible, expected);
+            assert_eq!(visible, expected, "visible fields for {action:?}");
+            assert_eq!(
+                self.audio_output.root().is_visible(),
+                matches!(
+                    action,
+                    FeatureAction::Desktop(
+                        DesktopAction::SetAudioOutput { .. } | DesktopAction::CycleAudioOutput
+                    )
+                ),
+            );
             assert_eq!(
                 self.browse_file.is_visible(),
                 matches!(self.choice().unwrap(), Choice::Open | Choice::PlayAudio)
@@ -206,6 +268,10 @@ pub(crate) fn examples() -> Vec<FeatureAction> {
             path: "/tmp/a track.ogg".into(),
         }),
         FeatureAction::Desktop(DesktopAction::StopAudio),
+        FeatureAction::Desktop(DesktopAction::CycleAudioOutput),
+        FeatureAction::Desktop(DesktopAction::SetAudioOutput {
+            name: "alsa_output.pci-0000_06_00.6.analog-stereo".into(),
+        }),
         FeatureAction::Navigation(NavigationAction::NextPage),
         FeatureAction::Navigation(NavigationAction::PreviousPage),
         FeatureAction::Navigation(NavigationAction::GoToPage(2)),

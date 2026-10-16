@@ -13,6 +13,7 @@ pub(super) enum Choice {
     VolumeUp,
     VolumeDown,
     Mute,
+    SetAudioOutput,
     PlayAudio,
     StopAudio,
     NextPage,
@@ -65,6 +66,7 @@ impl Choice {
             Self::VolumeUp => "Increase the system output volume.",
             Self::VolumeDown => "Decrease the system output volume.",
             Self::Mute => "Toggle the system output mute state.",
+            Self::SetAudioOutput => "Choose a fixed output or Rotate to advance through connected devices on each press. Choosing or saving does not change audio.",
             Self::PlayAudio => "Play WAV, MP3, FLAC, OGG, M4A or another audio format supported by mpv. Choose a local file or enter its absolute path. Choosing or saving does not play it.",
             Self::StopAudio => "Stop audio started by a Play audio file action.",
             Self::NextPage => "Show the next page in the current profile folder.",
@@ -92,7 +94,7 @@ impl Choice {
         }
     }
 
-    pub(super) const ALL: [Self; 37] = [
+    pub(super) const ALL: [Self; 38] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
@@ -106,6 +108,7 @@ impl Choice {
         Self::VolumeUp,
         Self::VolumeDown,
         Self::Mute,
+        Self::SetAudioOutput,
         Self::PlayAudio,
         Self::StopAudio,
         Self::NextPage,
@@ -147,6 +150,7 @@ impl Choice {
             | Self::VolumeUp
             | Self::VolumeDown
             | Self::Mute
+            | Self::SetAudioOutput
             | Self::PlayAudio
             | Self::StopAudio => 1,
             Self::NextPage
@@ -189,6 +193,7 @@ impl Choice {
             Self::VolumeUp => "Volume up",
             Self::VolumeDown => "Volume down",
             Self::Mute => "Mute",
+            Self::SetAudioOutput => "Change audio output",
             Self::PlayAudio => "Play audio file",
             Self::StopAudio => "Stop audio file",
             Self::NextPage => "Next page",
