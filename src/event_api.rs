@@ -75,6 +75,8 @@ pub enum MonitorEvent {
         source: crate::info::InfoSource,
         value: crate::info::InfoValue,
     },
+    /// An action finished running, so live readings it changes are stale.
+    ActionDispatched,
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
 }

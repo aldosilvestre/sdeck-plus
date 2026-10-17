@@ -9,6 +9,12 @@ use std::{
 #[serde(deny_unknown_fields)]
 struct Preference {
     keep_running: bool,
+    #[serde(default = "enabled")]
+    start_in_tray: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 pub(super) fn path() -> io::Result<PathBuf> {
@@ -31,20 +37,49 @@ fn config_home(xdg: Option<&Path>, home: Option<&Path>) -> io::Result<PathBuf> {
     }
 }
 
-pub(super) fn load(path: &Path) -> io::Result<bool> {
+fn read(path: &Path) -> io::Result<Preference> {
     match fs::read(path) {
         Ok(contents) => serde_json::from_slice::<Preference>(&contents)
-            .map(|preference| preference.keep_running)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Preference {
+            keep_running: true,
+            start_in_tray: true,
+        }),
         Err(error) => Err(error),
     }
+}
+
+pub(super) fn load(path: &Path) -> io::Result<bool> {
+    read(path).map(|preference| preference.keep_running)
+}
+
+pub(super) fn load_start_in_tray(path: &Path) -> io::Result<bool> {
+    read(path).map(|preference| preference.start_in_tray)
+}
+
+/// Whether a normal launch should begin hidden in the tray. An unreadable
+/// preference shows the window so the problem can be reported.
+pub(super) fn start_in_tray() -> bool {
+    path()
+        .and_then(|path| load_start_in_tray(&path))
+        .unwrap_or(false)
 }
 
 pub(super) fn save(path: &Path, keep_running: bool) -> io::Result<()> {
     // Refuse to replace unreadable or malformed originals, including changes
     // made outside the application after startup.
-    load(path)?;
+    let mut preference = read(path)?;
+    preference.keep_running = keep_running;
+    write(path, &preference)
+}
+
+pub(super) fn save_start_in_tray(path: &Path, start_in_tray: bool) -> io::Result<()> {
+    let mut preference = read(path)?;
+    preference.start_in_tray = start_in_tray;
+    write(path, &preference)
+}
+
+fn write(path: &Path, preference: &Preference) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing config directory"))?;
@@ -55,7 +90,7 @@ pub(super) fn save(path: &Path, keep_running: bool) -> io::Result<()> {
         .create_new(true)
         .open(&temporary)?;
     let result = (|| {
-        serde_json::to_writer(&mut file, &Preference { keep_running })?;
+        serde_json::to_writer(&mut file, preference)?;
         file.write_all(b"\n")?;
         file.sync_all()?;
         fs::rename(&temporary, path)
@@ -86,6 +121,31 @@ mod tests {
             PathBuf::from("/home/test/.config")
         );
         assert!(config_home(None, Some(Path::new("relative"))).is_err());
+    }
+
+    #[test]
+    fn start_in_tray_defaults_on_and_each_setting_survives_the_other() {
+        let root = std::env::temp_dir().join(format!(
+            "sdeck-tray-start-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = root.join("tray.json");
+        assert!(load_start_in_tray(&path).unwrap());
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&path, b"{\"keep_running\":false}").unwrap();
+        assert!(!load(&path).unwrap());
+        assert!(load_start_in_tray(&path).unwrap());
+        save_start_in_tray(&path, false).unwrap();
+        assert!(!load(&path).unwrap());
+        assert!(!load_start_in_tray(&path).unwrap());
+        save(&path, true).unwrap();
+        assert!(load(&path).unwrap());
+        assert!(!load_start_in_tray(&path).unwrap());
+        fs::write(&path, b"not json").unwrap();
+        assert!(save_start_in_tray(&path, true).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"not json");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -6,6 +6,7 @@ enum Command {
     About,
     Quit,
     ToggleKeepRunning,
+    ToggleStartInTray,
     Error(String),
 }
 
@@ -13,6 +14,7 @@ struct MonitorTray {
     commands: async_channel::Sender<Command>,
     autostart: bool,
     keep_running: bool,
+    start_in_tray: bool,
     executable: std::path::PathBuf,
     icon: ksni::Icon,
 }
@@ -71,6 +73,13 @@ impl Tray for MonitorTray {
                 ..Default::default()
             }
             .into(),
+            CheckmarkItem {
+                label: "Start in tray".into(),
+                checked: self.start_in_tray,
+                activate: Box::new(|tray: &mut Self| tray.send(Command::ToggleStartInTray)),
+                ..Default::default()
+            }
+            .into(),
             StandardItem {
                 label: "About".into(),
                 icon_name: "help-about".into(),
@@ -108,10 +117,16 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|error| error.to_string())
         .and_then(|path| crate::tray_preference::load(path).map_err(|error| error.to_string()));
     let keep_running = *preference.as_ref().unwrap_or(&true);
+    let start_in_tray = preference_path
+        .as_ref()
+        .ok()
+        .and_then(|path| crate::tray_preference::load_start_in_tray(path).ok())
+        .unwrap_or(true);
     let tray = MonitorTray {
         commands,
         autostart: *autostart.as_ref().unwrap_or(&false),
         keep_running,
+        start_in_tray,
         executable: std::env::current_exe()?,
         icon: crate::app_icon::tray_pixmap()?,
     };
@@ -132,6 +147,7 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
     let preference_action = install_close_preference(app, keep_running);
     let app = app.clone();
     glib::MainContext::default().spawn_local(async move {
+        let mut start_in_tray = start_in_tray;
         if let Err(error) = autostart {
             show_error(&app, &format!("Could not read start at login: {error}"));
         }
@@ -159,6 +175,22 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         Err(error) => show_error(&app, &format!("Could not save tray preference: {error}. Close behavior has not changed.")),
+                    }
+                }
+                Command::ToggleStartInTray => {
+                    let enabled = !start_in_tray;
+                    let result = match &preference_path {
+                        Ok(path) => crate::tray_preference::save_start_in_tray(path, enabled),
+                        Err(error) => Err(std::io::Error::new(error.kind(), error.to_string())),
+                    };
+                    match result {
+                        Ok(()) => {
+                            start_in_tray = enabled;
+                            if handle.update(|tray| tray.start_in_tray = enabled).is_none() {
+                                show_error(&app, "System tray stopped while applying start preference.");
+                            }
+                        }
+                        Err(error) => show_error(&app, &format!("Could not save tray preference: {error}. Start behavior has not changed.")),
                     }
                 }
                 Command::Error(message) => show_error(&app, &message),
@@ -255,6 +287,7 @@ mod tests {
             commands,
             autostart: true,
             keep_running: true,
+            start_in_tray: true,
             executable: "/test/sdeck-plus".into(),
             icon: ksni::Icon {
                 width: 1,
@@ -263,7 +296,7 @@ mod tests {
             },
         };
         let menu = tray.menu();
-        assert_eq!(menu.len(), 6);
+        assert_eq!(menu.len(), 7);
         if let MenuItem::Checkmark(item) = &menu[1] {
             assert!(item.checked);
         } else {
@@ -283,9 +316,20 @@ mod tests {
         } else {
             panic!("close preference must be a checkmark");
         }
+        if let MenuItem::Checkmark(item) = &menu[3] {
+            assert!(item.checked);
+            (item.activate)(&mut tray);
+            assert!(matches!(
+                receiver.try_recv().unwrap(),
+                Command::ToggleStartInTray
+            ));
+            assert!(tray.start_in_tray, "menu waits for disk acknowledgment");
+        } else {
+            panic!("start preference must be a checkmark");
+        }
         tray.keep_running = false;
         assert!(matches!(&tray.menu()[2], MenuItem::Checkmark(item) if !item.checked));
-        for (index, expected) in [(0, "configure"), (3, "about"), (5, "quit")] {
+        for (index, expected) in [(0, "configure"), (4, "about"), (6, "quit")] {
             if let MenuItem::Standard(item) = &menu[index] {
                 (item.activate)(&mut tray);
                 let command = receiver.try_recv().unwrap();

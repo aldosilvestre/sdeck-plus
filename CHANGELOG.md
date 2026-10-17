@@ -8,6 +8,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Start in tray.** A tray checkbox, on by default, makes a normal launch
+  begin hidden in the tray. Launching again while running opens the window,
+  and an unavailable tray still shows it. `tray.json` gains `start_in_tray`;
+  files without it are read as on.
 - **Live information.** Keys, dial zones and per-section touch bindings can
   show volume, audio output, brightness, time/date, weather, CPU, memory,
   temperature and OBS state. Transparent icons, bars and text share the

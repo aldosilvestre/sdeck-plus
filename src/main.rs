@@ -106,6 +106,7 @@ fn execute_layer_action_for(
         }
         _ => executor.execute_for(binding_id, action),
     };
+    let succeeded = result.is_ok();
     let event = match result {
         Ok(()) => MonitorEvent::AppEvent {
             name: "Action dispatched.".into(),
@@ -114,6 +115,11 @@ fn execute_layer_action_for(
     };
     if let Err(error) = output.send(event) {
         eprintln!("Action result delivery failed: {error}");
+    }
+    if succeeded {
+        if let Err(error) = output.send(MonitorEvent::ActionDispatched) {
+            eprintln!("Action completion delivery failed: {error}");
+        }
     }
 }
 
@@ -141,8 +147,13 @@ fn main() -> glib::ExitCode {
             *startup_error.borrow_mut() = Some(error.to_string());
         }
     });
+    let first_activation = Cell::new(true);
     app.connect_activate(move |app| {
-        let visible = !background.replace(false) || tray_error.borrow().is_some();
+        // Only the first activation honors the flag and the saved preference;
+        // launching again while running opens the window.
+        let hidden = background.replace(false) | tray_preference::start_in_tray();
+        let hidden = first_activation.replace(false) && hidden;
+        let visible = !hidden || tray_error.borrow().is_some();
         build_ui_with_visibility(app, visible);
         if let Some(error) = tray_error.borrow_mut().take() {
             if let Some(window) = configuration_window(app) {
@@ -1319,6 +1330,9 @@ fn start_event_updates(
             match message {
                 MonitorEvent::ApplicationFocus(_) => {}
                 MonitorEvent::Heartbeat => {}
+                MonitorEvent::ActionDispatched => {
+                    feature_runtime.sync_info_from(&layers.borrow());
+                }
                 MonitorEvent::ConfigurationExportResult { path, result } => {
                     let failed = result.is_err();
                     feature_runtime.complete_configuration_export(&path, result);

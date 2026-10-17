@@ -115,6 +115,11 @@ impl InfoSource {
     pub fn is_polled(self) -> bool {
         self != Self::Brightness
     }
+
+    /// Cheap local readings that a button press can change right away.
+    fn follows_actions(self) -> bool {
+        matches!(self, Self::Volume | Self::AudioDevice)
+    }
 }
 
 /// Picture drawn on a key for an information source.
@@ -522,7 +527,9 @@ impl InfoReader {
 }
 
 /// Starts the reader thread. It reports through `output` and stops when the
-/// returned sender (the set of sources to watch) is dropped.
+/// returned sender (the set of sources to watch) is dropped. Sending the set
+/// that is already watched re-reads the sources an action can change at once,
+/// instead of waiting for their polling interval.
 ///
 /// # Errors
 /// Returns the thread spawn error.
@@ -541,6 +548,9 @@ pub fn spawn_worker(
                 match receiver.recv_timeout(Duration::from_millis(500)) {
                     Ok(set) => {
                         last.retain(|source, _| set.contains(source));
+                        if set == watched {
+                            last.retain(|source, _| !source.follows_actions());
+                        }
                         watched = set;
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}

@@ -266,6 +266,7 @@ Left-click or right-click the tray icon to open the same menu:
 
 - **Open configuration** reopens the existing configuration window.
 - **Start at login** enables or disables per-user session autostart; its checkmark reflects the saved state.
+- **Start in tray** (on by default) makes a normal launch begin hidden in the tray instead of opening the configuration window; launching again while the app runs still opens it. The choice is saved in `tray.json` beside the close preference.
 - **About** opens the native sdeck-plus dialog with its version, description, author, copyright, and complete MIT license.
 - **Quit** stops the application and removes its tray icon.
 
