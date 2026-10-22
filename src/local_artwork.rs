@@ -293,6 +293,28 @@ impl ArtworkStore {
         self.commit_with_text(next, texts)
     }
 
+    /// Copy touch-only references in one commit without deleting legacy owners
+    /// or copying asset bytes. A failed migration can safely repeat this step.
+    pub fn copy_touchscreen_assignments(&mut self, owners: &[(String, String)]) -> io::Result<()> {
+        if owners.is_empty() {
+            return Ok(());
+        }
+        let mut next = self.assignments.clone();
+        for (from, to) in owners {
+            self.check_mutation(from)?;
+            self.check_mutation(to)?;
+            for target in ArtworkTarget::ALL
+                .into_iter()
+                .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
+            {
+                if let Some(name) = self.assignments.get(&(from.clone(), target)) {
+                    next.insert((to.clone(), target), name.clone());
+                }
+            }
+        }
+        self.commit(next)
+    }
+
     /// Remove all assignments before layer deletion. Reusing its name starts empty.
     /// Assets still referenced by any other layer or target are retained.
     pub fn remove_layer(&mut self, layer: &str) -> io::Result<()> {

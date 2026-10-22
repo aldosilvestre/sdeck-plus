@@ -11,6 +11,8 @@ use std::{
     process::{Child, Command},
 };
 
+mod touchscreen;
+
 const VERSION: &str = "streamdeck-layers-v1";
 pub const DEFAULT_LAYER: &str = "Base";
 const LEGACY_DEFAULT_LAYER: &str = "default";
@@ -189,6 +191,7 @@ pub struct LayerStore {
     layers: BTreeMap<String, Layer>,
     active: String,
     diagnostics: Vec<String>,
+    touchscreens: touchscreen::Touchscreens,
 }
 
 impl LayerStore {
@@ -210,6 +213,7 @@ impl LayerStore {
             active: DEFAULT_LAYER.into(),
             diagnostics: Vec::new(),
             conflicts: Vec::new(),
+            touchscreens: touchscreen::Touchscreens::default(),
         };
         store.layers.insert(
             DEFAULT_LAYER.into(),
@@ -221,6 +225,15 @@ impl LayerStore {
             },
         );
         store.load()?;
+        match touchscreen::Touchscreens::load(&store.root, &store.layers) {
+            Ok(touchscreens) => store.touchscreens = touchscreens,
+            Err(error) => {
+                store
+                    .diagnostics
+                    .push(format!("Invalid touchscreen configuration: {error}"));
+                store.touchscreens.invalid = true;
+            }
+        }
         Ok(store)
     }
     pub fn names(&self) -> Vec<String> {
@@ -277,6 +290,7 @@ impl LayerStore {
             return Ok(false);
         }
         self.layers.remove(name).expect("checked");
+        self.touchscreens.remove_references(name);
         for layer in self.layers.values_mut() {
             layer.bindings.retain(
                 |_, action| !matches!(action, Action::SwitchLayer(target) if target == name),
@@ -289,7 +303,7 @@ impl LayerStore {
         Ok(true)
     }
     pub fn bind(&mut self, layer: &str, trigger: Trigger, action: Action) -> io::Result<()> {
-        if !self.layers.contains_key(layer) {
+        if self.binding_layer(layer, &trigger).is_none() {
             return Err(invalid("unknown layer"));
         }
         validate_trigger(&trigger)?;
@@ -300,19 +314,18 @@ impl LayerStore {
                 return Err(invalid("unknown target layer"));
             }
         }
-        self.layers
-            .get_mut(layer)
+        self.binding_layer_mut(layer, &trigger)
             .expect("checked")
             .bindings
             .insert(trigger.clone(), action);
         Ok(())
     }
     pub fn unbind(&mut self, layer: &str, trigger: &Trigger) -> io::Result<bool> {
-        if !self.layers.contains_key(layer) {
+        if self.binding_layer(layer, trigger).is_none() {
             return Err(invalid("unknown layer"));
         }
         validate_trigger(trigger)?;
-        let data = self.layers.get_mut(layer).expect("checked");
+        let data = self.binding_layer_mut(layer, trigger).expect("checked");
         data.returns.remove(trigger);
         data.displays.remove(trigger);
         Ok(data.bindings.remove(trigger).is_some())
@@ -335,8 +348,7 @@ impl LayerStore {
             }
         }
         let data = self
-            .layers
-            .get_mut(layer)
+            .binding_layer_mut(layer, trigger)
             .ok_or_else(|| invalid("unknown layer"))?;
         match value {
             Some(value) => {
@@ -363,8 +375,7 @@ impl LayerStore {
     ) -> io::Result<()> {
         validate_trigger(trigger)?;
         let data = self
-            .layers
-            .get_mut(layer)
+            .binding_layer_mut(layer, trigger)
             .ok_or_else(|| invalid("unknown layer"))?;
         match value {
             Some(source) => {
@@ -385,7 +396,10 @@ impl LayerStore {
         Ok(())
     }
     pub fn info_source(&self, layer: &str, trigger: &Trigger) -> Option<crate::info::InfoSource> {
-        self.layers.get(layer)?.displays.get(trigger).copied()
+        self.binding_layer(layer, trigger)?
+            .displays
+            .get(trigger)
+            .copied()
     }
     /// Information drawn on one section of the touch strip: a dial's own
     /// section (press, then turns) or a tap or hold on that section.
@@ -402,13 +416,15 @@ impl LayerStore {
     }
     /// Every source used by any layer, so the reader knows what to poll.
     pub fn info_sources(&self) -> std::collections::BTreeSet<crate::info::InfoSource> {
-        self.layers
-            .values()
+        self.configurations()
             .flat_map(|layer| layer.displays.values().copied())
             .collect()
     }
     pub fn page_return(&self, layer: &str, trigger: &Trigger) -> Option<PageReturn> {
-        self.layers.get(layer)?.returns.get(trigger).cloned()
+        self.binding_layer(layer, trigger)?
+            .returns
+            .get(trigger)
+            .cloned()
     }
     /// Swap two keypad bindings in memory without persisting the layer store.
     ///
@@ -460,14 +476,10 @@ impl LayerStore {
 
     /// Return the winning trigger as well as its action for per-binding state.
     pub fn matching_binding(&self, event: &Event) -> Option<(Trigger, Action)> {
-        let layer = self.layers.get(&self.active)?;
         Trigger::event_triggers(event)
             .into_iter()
             .find_map(|trigger| {
-                layer
-                    .bindings
-                    .get(&trigger)
-                    .cloned()
+                self.binding(&self.active, &trigger)
                     .map(|action| (trigger, action))
             })
     }
@@ -518,6 +530,7 @@ impl LayerStore {
         Ok(())
     }
     pub fn persist(&self) -> io::Result<()> {
+        self.touchscreens.persist(&self.root)?;
         let mut text = format!("{VERSION}\nactive\t{}\n", hex(self.active.as_bytes()));
         for layer in self.layers.values() {
             text.push_str(&format!("layer\t{}\n", hex(layer.name.as_bytes())));

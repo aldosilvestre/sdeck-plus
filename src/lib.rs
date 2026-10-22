@@ -20,3 +20,5 @@ pub mod protocol;
 pub mod app_focus;
 #[cfg(test)]
 mod feature_persistence_tests;
+#[cfg(test)]
+mod touchscreen_tests;
