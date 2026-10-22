@@ -27,12 +27,15 @@ impl FeatureRuntime {
             .ok_or("Organization writes are disabled.")?;
         let mut layers = self.layers.borrow().clone();
         edit(&mut organization, &mut layers).map_err(|error| error.to_string())?;
+        layers
+            .sync_touchscreen_profiles(&organization)
+            .map_err(|error| error.to_string())?;
         let removed: Vec<_> = self
             .layers
             .borrow()
-            .names()
-            .into_iter()
-            .filter(|key| !layers.layers().contains_key(key))
+            .configurations()
+            .filter(|configuration| !layers.has_configuration_owner(&configuration.name))
+            .map(|configuration| configuration.name.clone())
             .collect();
         if !removed.is_empty() {
             self.artwork.remove_layers(&removed)?;

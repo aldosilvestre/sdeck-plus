@@ -373,6 +373,36 @@ impl LayerStore {
         Ok(())
     }
 
+    /// Update ownership after keypad organization edits without disk I/O.
+    /// New profiles start blank; new keypad pages never remigrate touch data.
+    pub fn sync_touchscreen_profiles(&mut self, organization: &Organization) -> io::Result<()> {
+        if self.touchscreens.profiles.is_empty() {
+            return Ok(());
+        }
+        let profiles = organization.profiles();
+        self.touchscreens
+            .profiles
+            .retain(|name, _| profiles.contains(name));
+        for name in profiles {
+            if !self.touchscreens.profiles.contains_key(&name) {
+                let owner = next_owner(&self.touchscreens, &[], &self.layers)?;
+                self.touchscreens.profiles.insert(
+                    name,
+                    Profile {
+                        selected: 0,
+                        pages: vec![empty_page(owner)],
+                    },
+                );
+            }
+        }
+        self.touchscreens.layer_profiles = self
+            .layers
+            .keys()
+            .map(|key| (key.clone(), organization.profile_for_key(key)))
+            .collect();
+        Ok(())
+    }
+
     pub fn touchscreen_owner(&self, layer: &str) -> Option<&str> {
         self.touchscreens.page(layer).map(|page| page.name.as_str())
     }

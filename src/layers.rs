@@ -271,7 +271,7 @@ impl LayerStore {
     pub fn create(&mut self, name: &str) -> io::Result<()> {
         let name = name.trim();
         validate_name(name)?;
-        if self.layers.contains_key(name) || self.layers.len() >= MAX_LAYERS {
+        if self.has_configuration_owner(name) || self.layers.len() >= MAX_LAYERS {
             return Err(invalid("duplicate layer or layer limit reached"));
         }
         self.layers.insert(
@@ -303,9 +303,22 @@ impl LayerStore {
         Ok(true)
     }
     pub fn bind(&mut self, layer: &str, trigger: Trigger, action: Action) -> io::Result<()> {
-        if self.binding_layer(layer, &trigger).is_none() {
-            return Err(invalid("unknown layer"));
-        }
+        let owner = self
+            .binding_layer(layer, &trigger)
+            .ok_or_else(|| invalid("unknown layer"))?
+            .name
+            .clone();
+        self.bind_configuration(&owner, trigger, action)
+    }
+
+    /// Address an exact stored owner, without redirecting legacy touch rows.
+    /// Bundle audio relocation must rewrite selected and unselected pages alike.
+    pub(crate) fn bind_configuration(
+        &mut self,
+        owner: &str,
+        trigger: Trigger,
+        action: Action,
+    ) -> io::Result<()> {
         validate_trigger(&trigger)?;
         validate_action(&action)?;
         let action = normalize_keyboard_action(action)?;
@@ -314,10 +327,13 @@ impl LayerStore {
                 return Err(invalid("unknown target layer"));
             }
         }
-        self.binding_layer_mut(layer, &trigger)
-            .expect("checked")
-            .bindings
-            .insert(trigger.clone(), action);
+        let data = if self.layers.contains_key(owner) {
+            self.layers.get_mut(owner)
+        } else {
+            self.touchscreens.page_mut(owner)
+        }
+        .ok_or_else(|| invalid("unknown configuration owner"))?;
+        data.bindings.insert(trigger, action);
         Ok(())
     }
     pub fn unbind(&mut self, layer: &str, trigger: &Trigger) -> io::Result<bool> {

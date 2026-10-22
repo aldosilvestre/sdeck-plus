@@ -114,7 +114,7 @@ impl FeatureRuntime {
     }
 
     fn reload_configuration(&self, root: &Path) -> std::io::Result<()> {
-        let layers = LayerStore::open_at(root)?;
+        let mut layers = LayerStore::open_at(root)?;
         if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -122,7 +122,8 @@ impl FeatureRuntime {
             ));
         }
         let organization = Organization::open_at(root, &layers)?;
-        let artwork = ArtworkStore::open_at_for_layer(root, Some(layers.active()))?;
+        let mut artwork = ArtworkStore::open_at_for_layer(root, Some(layers.active()))?;
+        layers.initialize_touchscreens(&organization, &mut artwork)?;
         let obs = ObsConfig::load_at(root)?;
         *self.layers.borrow_mut() = layers;
         *self.organization.borrow_mut() = Some(organization);

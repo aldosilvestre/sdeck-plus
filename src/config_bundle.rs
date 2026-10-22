@@ -28,12 +28,13 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-const CONFIGS: [&str; 5] = [
+const CONFIGS: [&str; 6] = [
     "layers.conf",
     "organization.json",
     "artwork.conf",
     "obs.json",
     "info.json",
+    "touchscreen.json",
 ];
 const MAX_FILE: usize = 32 * 1024 * 1024;
 const MAX_CONFIG: usize = 4 * 1024 * 1024;
@@ -224,12 +225,13 @@ fn validate(stage: &Path) -> io::Result<LayerStore> {
     if !stage.join("layers.conf").is_file() {
         return Err(invalid("bundle requires layers.conf"));
     }
-    let layers = LayerStore::open_at(stage)?;
+    let mut layers = LayerStore::open_at(stage)?;
     if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
         return Err(invalid("invalid or recovered layer configuration"));
     }
-    Organization::open_at(stage, &layers)?;
-    ArtworkStore::open_at_for_layer(stage, Some(layers.active()))?;
+    let organization = Organization::open_at(stage, &layers)?;
+    let mut artwork = ArtworkStore::open_at_for_layer(stage, Some(layers.active()))?;
+    layers.initialize_touchscreens(&organization, &mut artwork)?;
     ObsConfig::load_at(stage)?;
     if stage.join("info.json").exists() {
         #[derive(Deserialize)]
@@ -250,9 +252,9 @@ fn validate(stage: &Path) -> io::Result<LayerStore> {
 
 fn audio_bindings(layers: &LayerStore) -> Vec<(String, crate::layers::Trigger, PathBuf)> {
     layers
-        .layers()
-        .iter()
-        .flat_map(|(name, layer)| {
+        .configurations()
+        .flat_map(|layer| {
+            let name = &layer.name;
             layer.bindings.iter().filter_map(move |(trigger, action)| {
                 if let Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) =
                     action
@@ -272,7 +274,7 @@ fn bind_audio(
     trigger: crate::layers::Trigger,
     path: PathBuf,
 ) -> io::Result<()> {
-    layers.bind(
+    layers.bind_configuration(
         layer,
         trigger,
         Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })),
@@ -386,7 +388,7 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
         }
         persist_layers(&layers)?;
         // Strict artwork loading may migrate a legacy manifest in the snapshot.
-        for name in ["layers.conf", "artwork.conf"] {
+        for name in ["layers.conf", "artwork.conf", "touchscreen.json"] {
             if stage.join(name).exists() {
                 files.remove(name);
                 add(

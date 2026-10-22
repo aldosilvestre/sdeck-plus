@@ -152,6 +152,19 @@ control number **1** to **4**, and give each section its own **Tap** and
 bindings, which still work for taps that no section binding claims. Flick and
 swipes always apply to the whole strip.
 
+Touchscreen bindings, section information and strip/section images belong to
+**the profile**, not its keypad pages or folders. Changing a keypad page or
+opening a folder does not change the selected touchscreen page. Dial bindings
+and their live-information settings still belong to the keypad page.
+
+Existing configurations migrate automatically: each distinct complete touch
+configuration in a profile becomes an independent touchscreen page. Equal
+configurations share one page; existing actions, None bindings, delayed returns,
+section information and image references are preserved. The active keypad
+page's touch configuration is selected initially. Legacy records are retained,
+and migration is not repeated on restart. Invalid touchscreen configuration
+blocks saving rather than replacing the original file.
+
 ![Touch strip selected in the editor](docs/screenshots/touch-strip.png)
 
 **Button text.** **Add text** opens the text editor: font, size, orientation
@@ -329,7 +342,7 @@ Images are copied into the application's XDG data directory, so the original fil
 
 ## Application layers and actions
 
-Layers and action bindings are stored independently in `layers.conf` in the same app data directory; per-page artwork remains in its separate artwork store. Select a profile tab and use **Organize** to create, associate or delete a profile. The built-in `Base` profile and its first page cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
+Keypad/dial layers and legacy action bindings are stored in `layers.conf` in the same app data directory. Profile-owned touch pages and their independent selection are stored in `touchscreen.json`; artwork remains in its separate assignment store. Select a profile tab and use **Organize** to create, associate or delete a profile. The built-in `Base` profile and its first page cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
 
 ### Pages and their folders
 

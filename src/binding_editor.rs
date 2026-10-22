@@ -220,7 +220,14 @@ pub fn control_summary(
     control: ControlKind,
     number: u8,
 ) -> String {
-    let bindings = store.layers().get(layer).map(|layer| &layer.bindings);
+    let sample = if control == ControlKind::Touch {
+        Trigger::TouchTap
+    } else {
+        Trigger::KeyPress(1)
+    };
+    let bindings = store
+        .binding_layer(layer, &sample)
+        .map(|layer| &layer.bindings);
     let mut lines: Vec<String> = events_for_control(control)
         .into_iter()
         .map(|event| {
@@ -306,10 +313,7 @@ fn action_summary(action: Option<&Action>) -> String {
 }
 
 pub fn existing_action(store: &LayerStore, layer: &str, trigger: &Trigger) -> Option<Action> {
-    store
-        .layers()
-        .get(layer)
-        .and_then(|layer| layer.bindings.get(trigger).cloned())
+    store.binding(layer, trigger)
 }
 
 #[cfg(test)]

@@ -317,14 +317,28 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         info: Rc::default(),
     };
+    let organization =
+        sdeck_plus::organization::Organization::open_at(layers.borrow().root(), &layers.borrow());
+    if let (Ok(organization), Some(store)) = (&organization, artwork.store.borrow_mut().as_mut()) {
+        if let Err(error) = layers
+            .borrow_mut()
+            .initialize_touchscreens(organization, store)
+        {
+            lifecycle.borrow_mut().shutdown();
+            window.set_child(Some(&Label::new(Some(
+                "Touchscreen configuration unavailable. Writes are disabled.",
+            ))));
+            window.present();
+            show_artwork_error(&window, &format!("Could not initialize touchscreen pages: {error}. Original configurations have been retained; repair the app data directory and restart."));
+            return;
+        }
+    }
     let widgets = build_widgets(
         window.clone(),
         layers.clone(),
         artwork.clone(),
         layer_sender.clone(),
     );
-    let organization =
-        sdeck_plus::organization::Organization::open_at(layers.borrow().root(), &layers.borrow());
     widgets.feature_runtime.configure(
         organization,
         sdeck_plus::obs::ObsConfig::load(),
@@ -771,7 +785,7 @@ fn build_widgets(
     appearance.append(&artwork_section);
     settings_card.append(&appearance);
     let layer_hint = Label::new(Some(
-        "Touch gestures bind the whole strip. Artwork targets are independent of encoder actions.",
+        "Touchscreen pages belong to the profile, independently of keypad pages and folders.",
     ));
     layer_hint.add_css_class("muted");
     layer_hint.set_xalign(0.0);
@@ -1972,7 +1986,12 @@ impl BindingUi {
             .ok_or_else(|| "Select a control number.".to_string())?;
         let trigger = trigger_from_selection(self.control_kind(), number, self.event_kind())
             .map_err(|error| error.0)?;
-        Ok((layer, trigger))
+        let owner = layers
+            .borrow()
+            .binding_layer(&layer, &trigger)
+            .map(|data| data.name.clone())
+            .unwrap_or(layer);
+        Ok((owner, trigger))
     }
 
     fn binding_from_widgets(
@@ -2342,7 +2361,12 @@ fn matching_binding(
     store.matching_binding(event).map(|(trigger, action)| {
         let page_return = store.page_return(store.active(), &trigger);
         (
-            binding_identity(store.active(), &trigger),
+            binding_identity(
+                store
+                    .binding_layer(store.active(), &trigger)
+                    .map_or(store.active(), |data| data.name.as_str()),
+                &trigger,
+            ),
             action,
             page_return,
         )
@@ -2452,10 +2476,12 @@ impl ArtworkUi {
 
     /// The target's own artwork, drawn under its live picture.
     fn info_background(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        let layers = self.layers.borrow();
+        let owner = layers.artwork_owner(layer, target);
         self.store
             .borrow()
             .as_ref()?
-            .assigned_path_in_layer(layer, target)
+            .assigned_path_in_layer(owner, target)
     }
 
     fn info_command(
@@ -2567,7 +2593,12 @@ impl ArtworkUi {
     }
 
     fn capture_owner(&self) -> ChooserOwner {
-        let name = self.layers.borrow().active().to_owned();
+        let name = {
+            let layers = self.layers.borrow();
+            layers
+                .artwork_owner(layers.active(), self.selected_target.get())
+                .to_owned()
+        };
         let incarnation = self
             .chooser_owners
             .borrow_mut()
@@ -2609,7 +2640,14 @@ impl ArtworkUi {
 
     fn refresh(&self, force: bool) {
         let layer = self.layers.borrow().active().to_owned();
-        if !force && self.last_layer.borrow().as_deref() == Some(&layer) {
+        let touch_owner = self
+            .layers
+            .borrow()
+            .touchscreen_owner(&layer)
+            .unwrap_or(&layer)
+            .to_owned();
+        let cache_key = format!("{}:{layer}:{touch_owner}", layer.len());
+        if !force && self.last_layer.borrow().as_deref() == Some(&cache_key) {
             return;
         }
         let (paths, commands) = {
@@ -2624,12 +2662,18 @@ impl ArtworkUi {
                 .map(|(target, picture)| {
                     (
                         picture.clone(),
-                        store.assigned_path_in_layer(&layer, *target),
+                        store.assigned_path_in_layer(
+                            self.layers.borrow().artwork_owner(&layer, *target),
+                            *target,
+                        ),
                         store.button_text_in_layer(&layer, *target).cloned(),
                     )
                 })
                 .collect::<Vec<_>>();
-            (paths, desired_artwork_commands(store, &layer))
+            (
+                paths,
+                desired_artwork_commands_for_owners(store, &layer, &touch_owner),
+            )
         };
         let commands = self.with_info(&layer, commands);
         for (picture, path, text) in paths {
@@ -2637,7 +2681,7 @@ impl ArtworkUi {
         }
         self.paint_info_previews(&layer);
         let _ = self.output.send(ArtworkCommand::Replace(commands));
-        *self.last_layer.borrow_mut() = Some(layer);
+        *self.last_layer.borrow_mut() = Some(cache_key);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
             editor.load_context(false);
             editor.refresh_preview();
@@ -2667,7 +2711,10 @@ impl ArtworkUi {
                 return;
             };
             (
-                store.assigned_path_in_layer(&layer, *target),
+                store.assigned_path_in_layer(
+                    self.layers.borrow().artwork_owner(&layer, *target),
+                    *target,
+                ),
                 store.button_text_in_layer(&layer, *target).cloned(),
             )
         };
@@ -2694,7 +2741,10 @@ impl ArtworkUi {
             owner.target,
             path,
         )?;
-        let active = self.layers.borrow().active() == owner.name;
+        let active = {
+            let layers = self.layers.borrow();
+            layers.artwork_owner(layers.active(), owner.target) == owner.name
+        };
         if active {
             self.refresh(true);
         }
@@ -2741,7 +2791,7 @@ fn assign_chooser_artwork(
     target: ArtworkTarget,
     path: &std::path::Path,
 ) -> Result<(), String> {
-    if !layers.borrow().layers().contains_key(owner) {
+    if !layers.borrow().has_configuration_owner(owner) {
         return Err(format!("The chooser's layer '{owner}' was removed. Close it and choose an image for an existing layer."));
     }
     store
@@ -2807,7 +2857,7 @@ fn add_artwork_controls(
     );
     let picker = gtk::DropDown::new(Some(targets), gtk::Expression::NONE);
     picker.add_css_class("artwork-target");
-    parent.append(&labeled("Artwork target (active layer)", &picker));
+    parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {
         if let Some(target) = ArtworkTarget::ALL.get(picker.selected() as usize) {
@@ -2820,9 +2870,13 @@ fn add_artwork_controls(
     let controls = GtkBox::new(Orientation::Horizontal, 4);
     controls.add_css_class("artwork-controls");
     let choose = ui::button("image-x-generic-symbolic", "Image…");
-    choose.set_tooltip_text(Some("Choose image for this region in the active layer"));
+    choose.set_tooltip_text(Some(
+        "Choose an image for the current keypad or profile touchscreen page",
+    ));
     let clear = ui::button("edit-clear-symbolic", "Clear");
-    clear.set_tooltip_text(Some("Clear artwork for this region in the active layer"));
+    clear.set_tooltip_text(Some(
+        "Clear the image on the current keypad or profile touchscreen page",
+    ));
     controls.append(&choose);
     controls.append(&clear);
     parent.append(&controls);
@@ -2870,7 +2924,12 @@ fn add_artwork_controls(
     let artwork = artwork.clone();
     let parent_window = window.clone();
     clear.connect_clicked(move |_| {
-        let layer = artwork.layers.borrow().active().to_owned();
+        let layer = {
+            let layers = artwork.layers.borrow();
+            layers
+                .artwork_owner(layers.active(), artwork.selected_target.get())
+                .to_owned()
+        };
         let cleared = {
             let mut store = artwork.store.borrow_mut();
             store
@@ -2892,7 +2951,16 @@ fn add_artwork_controls(
     picker
 }
 
+#[cfg(test)]
 fn desired_artwork_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand> {
+    desired_artwork_commands_for_owners(store, layer, layer)
+}
+
+fn desired_artwork_commands_for_owners(
+    store: &ArtworkStore,
+    layer: &str,
+    touch_owner: &str,
+) -> Vec<ArtworkCommand> {
     let mut commands = (1..=8)
         .map(|key| {
             let target = ArtworkTarget::Keypad(key);
@@ -2909,7 +2977,7 @@ fn desired_artwork_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCom
             }
         })
         .collect::<Vec<_>>();
-    commands.extend(touch_strip_commands(store, layer));
+    commands.extend(touch_strip_commands(store, touch_owner));
     commands
 }
 
@@ -3146,6 +3214,7 @@ mod tests {
     mod profile_manager_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
+    mod touchscreen_tests;
 
     include!("button_text_editor_tests.rs");
 

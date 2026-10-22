@@ -666,3 +666,64 @@ fn failed_export_rename_cleans_exclusive_temporary_file() {
     assert!(destination.is_dir());
     assert_eq!(fs::read_dir(&f.0).unwrap().count(), 1);
 }
+
+#[test]
+fn touchscreen_pages_and_unselected_audio_roundtrip_with_independent_owners() {
+    let fixture = Fixture::new();
+    let source = fixture.root("touch-source");
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    let mut organization = Organization::open_at(&source, &layers).unwrap();
+    let keypad = organization.create_page(&mut layers).unwrap();
+    let mut artwork = ArtworkStore::open_at_for_layer(&source, Some("Base")).unwrap();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    let first = layers.touchscreen_owner("Base").unwrap().to_owned();
+    layers
+        .bind("Base", Trigger::ZoneTap(1), Action::Emit("first".into()))
+        .unwrap();
+    let second = layers.create_touchscreen_page("Base").unwrap();
+    let audio = fixture.0.join("touch.wav");
+    fs::write(&audio, b"portable touch audio").unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::ZoneTap(1),
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                path: audio,
+            })),
+        )
+        .unwrap();
+    layers.select_touchscreen_page("Base", &first);
+    layers.persist().unwrap();
+    organization.persist().unwrap();
+    let bundle = fixture.0.join("touch.sdeck-plus.json");
+    export(&source, &bundle).unwrap();
+    assert!(contents(&bundle).contains_key("touchscreen.json"));
+    let target = fixture.0.join("touch-target");
+    import(&bundle, &target).unwrap();
+    let mut restored = LayerStore::open_at(&target).unwrap();
+    let organization = Organization::open_at(&target, &restored).unwrap();
+    let mut artwork = ArtworkStore::open_at_for_layer(&target, Some(restored.active())).unwrap();
+    restored
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    assert_eq!(
+        restored.touchscreen_pages("Base"),
+        vec![first.clone(), second.clone()]
+    );
+    assert_eq!(restored.active(), keypad);
+    assert_eq!(restored.touchscreen_owner("Base"), Some(first.as_str()));
+    assert_eq!(
+        restored.binding("Base", &Trigger::ZoneTap(1)),
+        Some(Action::Emit("first".into()))
+    );
+    restored.select_touchscreen_page("Base", &second);
+    let Some(Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path }))) =
+        restored.binding("Base", &Trigger::ZoneTap(1))
+    else {
+        panic!("touch audio missing")
+    };
+    assert!(path.starts_with(target.join("media")));
+    assert_eq!(fs::read(path).unwrap(), b"portable touch audio");
+}
