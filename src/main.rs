@@ -456,7 +456,7 @@ fn build_widgets(
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and action. More actions contains System, Multimedia, Organization, Device and OBS."),
+        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and action. More actions contains System, Multimedia, Organization, Device and OBS. Touchscreen pages belong to the profile: select the touch strip to add or choose a Touch page. Under Organization, assign Next touchscreen page to Swipe left and Previous touchscreen page to Swipe right on each touch page."),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
     ] {
         let step = GtkBox::new(Orientation::Vertical, 8);
@@ -680,6 +680,7 @@ fn build_widgets(
     settings_heading.add_css_class("section-label");
     settings_heading.add_css_class("control-heading");
     settings_heading.set_xalign(0.0);
+    settings_card.append(feature_runtime.touchscreen_controls());
     settings_card.append(&settings_heading);
     // Keep a usable form width without padding short actions to the chassis height.
     settings_card.set_size_request(300, -1);
@@ -1930,6 +1931,8 @@ impl BindingUi {
     }
 
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
+        self.feature_editor
+            .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
         let Ok((layer, trigger)) = self.selected_layer_and_trigger(layers) else {
             self.status.set_text("Select a valid control event.");

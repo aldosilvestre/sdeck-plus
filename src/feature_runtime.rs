@@ -24,6 +24,7 @@ mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
+mod touchscreen;
 
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
@@ -224,6 +225,7 @@ pub(crate) struct FeatureRuntime {
     device: Rc<RefCell<Option<mpsc::Sender<DeviceAction>>>>,
     events: Rc<RefCell<Option<mpsc::Sender<MonitorEvent>>>>,
     page_controls: page_controls::PageControls,
+    touchscreen_controls: touchscreen::TouchscreenControls,
     organization_management: GtkBox,
     profile_delete: Button,
     profile_tabs: gtk::Notebook,
@@ -362,6 +364,7 @@ impl FeatureRuntime {
             device: Rc::new(RefCell::new(None)),
             events: Rc::new(RefCell::new(None)),
             page_controls,
+            touchscreen_controls: touchscreen::TouchscreenControls::new(),
             organization_management,
             profile_delete,
             profile_tabs,
@@ -386,6 +389,7 @@ impl FeatureRuntime {
             obs_valid: Rc::new(Cell::new(true)),
         };
         runtime.page_controls.bind(&runtime);
+        runtime.touchscreen_controls.bind(&runtime);
         let callback = runtime.clone();
         runtime
             .profile_tabs
@@ -921,6 +925,7 @@ impl FeatureRuntime {
             }
         }
         self.refresh_profiles();
+        self.refresh_touchscreen_controls();
     }
 
     fn refresh_selection(&self) {
@@ -985,6 +990,7 @@ impl FeatureRuntime {
             }
             Action::Feature(feature) => match feature {
                 FeatureAction::Navigation(action) => self.navigate(&action),
+                FeatureAction::Touchscreen(action) => self.navigate_touchscreen(action),
                 FeatureAction::Device(action) => match self.device.borrow().as_ref() {
                     Some(output) => match output.send(action.clone()) {
                         Ok(()) => {

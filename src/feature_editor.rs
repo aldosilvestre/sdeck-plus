@@ -3,7 +3,7 @@ use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation, Tex
 use sdeck_plus::{
     desktop_actions::{DesktopAction, MediaCommand, ScrollDirection},
     device_control::DeviceAction,
-    features::FeatureAction,
+    features::{FeatureAction, TouchscreenAction},
     obs::ObsAction,
     organization::NavigationAction,
 };
@@ -50,6 +50,7 @@ pub(crate) struct EditorWidgets {
     browse_file: gtk::Button,
     browse_folder: gtk::Button,
     generation: Cell<u64>,
+    touchscreen: Cell<bool>,
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
 }
@@ -173,6 +174,7 @@ impl FeatureEditor {
             browse_file,
             browse_folder,
             generation: Cell::new(0),
+            touchscreen: Cell::new(false),
             picker: RefCell::new(None),
             audio_output,
         }));
@@ -206,9 +208,15 @@ impl FeatureEditor {
 
     fn choices(&self) -> impl Iterator<Item = Choice> {
         let category = self.category.selected();
-        Choice::ALL
-            .into_iter()
-            .filter(move |choice| choice.category() == category)
+        let touchscreen = self.touchscreen.get();
+        Choice::ALL.into_iter().filter(move |choice| {
+            choice.category() == category
+                && (touchscreen
+                    || !matches!(
+                        choice,
+                        Choice::NextTouchscreenPage | Choice::PreviousTouchscreenPage
+                    ))
+        })
     }
 
     fn choice(&self) -> Result<Choice, String> {
@@ -217,6 +225,12 @@ impl FeatureEditor {
         self.choices()
             .nth(selected)
             .ok_or_else(|| "Select a feature action.".into())
+    }
+
+    pub(crate) fn set_touchscreen(&self, touchscreen: bool) {
+        if self.touchscreen.replace(touchscreen) != touchscreen {
+            self.refresh_choices();
+        }
     }
 
     fn refresh_choices(&self) {
@@ -476,6 +490,10 @@ impl FeatureEditor {
             Choice::SetAudioOutput => FeatureAction::Desktop(self.audio_output.action()),
             Choice::NextPage => FeatureAction::Navigation(NavigationAction::NextPage),
             Choice::PreviousPage => FeatureAction::Navigation(NavigationAction::PreviousPage),
+            Choice::NextTouchscreenPage => FeatureAction::Touchscreen(TouchscreenAction::NextPage),
+            Choice::PreviousTouchscreenPage => {
+                FeatureAction::Touchscreen(TouchscreenAction::PreviousPage)
+            }
             Choice::GoToPage => FeatureAction::Navigation(NavigationAction::GoToPage(
                 numeric.parse().map_err(|error| invalid_number(&error))?,
             )),
@@ -585,6 +603,10 @@ impl FeatureEditor {
                 }
                 NavigationAction::ParentFolder => Choice::ParentFolder,
             },
+            FeatureAction::Touchscreen(TouchscreenAction::NextPage) => Choice::NextTouchscreenPage,
+            FeatureAction::Touchscreen(TouchscreenAction::PreviousPage) => {
+                Choice::PreviousTouchscreenPage
+            }
             FeatureAction::Device(action) => match action {
                 DeviceAction::Brightness(value) => {
                     self.number.set_text(&value.to_string());

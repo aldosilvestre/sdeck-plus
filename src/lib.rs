@@ -21,4 +21,6 @@ pub mod app_focus;
 #[cfg(test)]
 mod feature_persistence_tests;
 #[cfg(test)]
+mod touchscreen_navigation_tests;
+#[cfg(test)]
 mod touchscreen_tests;

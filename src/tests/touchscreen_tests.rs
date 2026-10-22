@@ -10,7 +10,8 @@ fn assert_profile_owner() {
     if !init_gtk_for_test() {
         return;
     }
-    let (root, mut store, mut images, source) = artwork_fixture("touchscreen-owner");
+    let (root, mut store, _, source) = artwork_fixture("touchscreen-owner");
+    let mut images = ArtworkStore::open_at_for_layer(store.root(), Some("Base")).unwrap();
     let mut organization = Organization::open_at(store.root(), &store).unwrap();
     images
         .assign_in_layer("Base", ArtworkTarget::TouchStripBackground, &source)
@@ -38,6 +39,8 @@ fn assert_profile_owner() {
         .initialize_touchscreens(&organization, &mut images)
         .unwrap();
     let owner = store.touchscreen_owner("Base").unwrap().to_owned();
+    store.persist().unwrap();
+    organization.persist().unwrap();
     let layers = Rc::new(RefCell::new(store));
     let (output, hardware) = mpsc::channel();
     let artwork = ArtworkUi {
@@ -51,9 +54,13 @@ fn assert_profile_owner() {
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         info: Rc::default(),
     };
-    let (commands, _requests) = mpsc::channel();
+    let (commands, requests) = mpsc::channel();
     let window = ApplicationWindow::builder().build();
     let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), commands);
+    let data_root = layers.borrow().root().to_owned();
+    assert!(widgets
+        .feature_runtime
+        .complete_configuration_import(&data_root, Ok(None)));
     // Test the real selected-control editor and hardware command composition.
     widgets.binding_ui.control_picker.set_selected(2);
     widgets.binding_ui.load_selected_binding(&layers);
@@ -84,8 +91,30 @@ fn assert_profile_owner() {
         artwork.info_background("Base", ArtworkTarget::TouchStripBackground),
         Some(first_path)
     );
-    let second = layers.borrow_mut().create_touchscreen_page("Base").unwrap();
-    artwork.refresh(false);
+    let controls = widgets.feature_runtime.touchscreen_controls();
+    assert!(controls.is_visible());
+    let mut buttons = Vec::new();
+    let mut child = controls.first_child();
+    while let Some(widget) = child {
+        if let Some(button) = widget.downcast_ref::<Button>() {
+            buttons.push(button.clone());
+        }
+        child = widget.next_sibling();
+    }
+    let button = |caption: &str| {
+        buttons
+            .iter()
+            .find(|button| button_caption(button).as_deref() == Some(caption))
+            .unwrap()
+    };
+    button("New touchscreen page").emit_clicked();
+    let second = layers
+        .borrow()
+        .touchscreen_owner("Base")
+        .unwrap()
+        .to_owned();
+    assert_ne!(second, owner);
+    assert_eq!(layers.borrow().touchscreen_pages("Base").len(), 2);
     assert!(
         hardware
             .try_iter()
@@ -106,6 +135,79 @@ fn assert_profile_owner() {
     assert!(artwork
         .info_background("Base", ArtworkTarget::TouchStripBackground)
         .is_none());
+    use sdeck_plus::features::{FeatureAction, TouchscreenAction};
+    let next = Action::Feature(FeatureAction::Touchscreen(TouchscreenAction::NextPage));
+    let previous = Action::Feature(FeatureAction::Touchscreen(TouchscreenAction::PreviousPage));
+    let picker = controls
+        .first_child()
+        .unwrap()
+        .next_sibling()
+        .unwrap()
+        .downcast::<gtk::DropDown>()
+        .unwrap();
+    let save = {
+        let mut all = Vec::new();
+        collect_layout_buttons(widgets.root.upcast_ref(), &mut all);
+        all.into_iter()
+            .find(|button| button_caption(button).as_deref() == Some("Save binding"))
+            .unwrap()
+    };
+    select_string(
+        &widgets.binding_ui.event_model,
+        &widgets.binding_ui.event_picker,
+        "Swipe right",
+    );
+    widgets.binding_ui.populate_action(&previous);
+    save.emit_clicked();
+    assert_eq!(
+        layers
+            .borrow()
+            .binding("Base", &Trigger::TouchSwipe(SwipeDirection::Right)),
+        Some(previous)
+    );
+    picker.set_selected(0);
+    select_string(
+        &widgets.binding_ui.event_model,
+        &widgets.binding_ui.event_picker,
+        "Swipe left",
+    );
+    widgets.binding_ui.populate_action(&next);
+    save.emit_clicked();
+    assert_eq!(
+        layers
+            .borrow()
+            .binding("Base", &Trigger::TouchSwipe(SwipeDirection::Left)),
+        Some(next)
+    );
+    assert!(
+        requests
+            .try_iter()
+            .all(|command| !matches!(command, LayerCommand::Execute { .. })),
+        "saving and selecting pages must not execute actions"
+    );
+    for (start_x, end_x, expected) in [(600, 20, second.as_str()), (20, 600, owner.as_str())] {
+        let event = protocol::Event::TouchFlick {
+            start_x,
+            start_y: 40,
+            end_x,
+            end_y: 40,
+        };
+        let (id, action, page_return) = matching_binding(&layers, &event).unwrap();
+        widgets
+            .feature_runtime
+            .execute_with_return(id, action, page_return);
+        assert_eq!(layers.borrow().touchscreen_owner("Base"), Some(expected));
+        assert_eq!(layers.borrow().active(), "Base");
+    }
+    assert!(!button("Previous touchscreen page").is_sensitive());
+    button("Next touchscreen page").emit_clicked();
+    assert_eq!(
+        layers.borrow().touchscreen_owner("Base"),
+        Some(second.as_str())
+    );
+    assert!(!button("Next touchscreen page").is_sensitive());
+    widgets.binding_ui.control_picker.set_selected(0);
+    assert!(!controls.is_visible());
     window.close();
     fs::remove_dir_all(root).unwrap();
 }

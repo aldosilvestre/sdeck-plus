@@ -11,6 +11,14 @@ Configuration follows a short path: choose a profile, select a control, choose
 an action, complete its fields, then save. Secondary organization and artwork
 tools use progressive disclosure instead of competing with action editing.
 
+Touchscreen configuration is profile-owned and has its own page selection,
+independent of keypad pages and folders. Only the touch inspector shows the
+compact **Touch page** selector, boundary-aware previous/next arrows and add
+button; it does not change the fixed hardware preview geometry. Each control
+retains an accessible name and tooltip. Organization actions distinguish keypad
+navigation from touchscreen navigation; existing swipe assignments are never
+silently replaced. Dial bindings remain on keypad pages.
+
 References consulted:
 
 - Agency Agents `UI Designer` (`~/.claude/agents/design-ui-designer.md`):

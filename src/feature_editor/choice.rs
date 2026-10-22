@@ -18,6 +18,8 @@ pub(super) enum Choice {
     StopAudio,
     NextPage,
     PreviousPage,
+    NextTouchscreenPage,
+    PreviousTouchscreenPage,
     GoToPage,
     OpenFolder,
     ParentFolder,
@@ -71,6 +73,8 @@ impl Choice {
             Self::StopAudio => "Stop audio started by a Play audio file action.",
             Self::NextPage => "Show the next page in the current profile folder.",
             Self::PreviousPage => "Show the previous page in the current profile folder.",
+            Self::NextTouchscreenPage => "Show the next touchscreen page in this profile without changing keypad pages or folders. Assign to Swipe left.",
+            Self::PreviousTouchscreenPage => "Show the previous touchscreen page in this profile without changing keypad pages or folders. Assign to Swipe right.",
             Self::GoToPage => "Show this page in the current profile folder. The first page is 1.",
             Self::OpenFolder => "Open an existing profile folder by name. This is not a filesystem path.",
             Self::ParentFolder => "Return to the parent profile folder.",
@@ -94,7 +98,7 @@ impl Choice {
         }
     }
 
-    pub(super) const ALL: [Self; 38] = [
+    pub(super) const ALL: [Self; 40] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
@@ -113,6 +117,8 @@ impl Choice {
         Self::StopAudio,
         Self::NextPage,
         Self::PreviousPage,
+        Self::NextTouchscreenPage,
+        Self::PreviousTouchscreenPage,
         Self::GoToPage,
         Self::OpenFolder,
         Self::ParentFolder,
@@ -154,6 +160,8 @@ impl Choice {
             | Self::PlayAudio
             | Self::StopAudio => 1,
             Self::NextPage
+            | Self::NextTouchscreenPage
+            | Self::PreviousTouchscreenPage
             | Self::PreviousPage
             | Self::GoToPage
             | Self::OpenFolder
@@ -198,6 +206,8 @@ impl Choice {
             Self::StopAudio => "Stop audio file",
             Self::NextPage => "Next page",
             Self::PreviousPage => "Previous page",
+            Self::NextTouchscreenPage => "Next touchscreen page",
+            Self::PreviousTouchscreenPage => "Previous touchscreen page",
             Self::GoToPage => "Go to page",
             Self::OpenFolder => "Open folder",
             Self::ParentFolder => "Parent folder",

@@ -321,6 +321,7 @@ impl LayerStore {
     ) -> io::Result<()> {
         validate_trigger(&trigger)?;
         validate_action(&action)?;
+        validate_binding_action(&trigger, &action)?;
         let action = normalize_keyboard_action(action)?;
         if let Action::SwitchLayer(target) = &action {
             if !self.layers.contains_key(target) {
@@ -659,6 +660,19 @@ fn validate_action(a: &Action) -> io::Result<()> {
         _ => Ok(()),
     }
 }
+fn validate_binding_action(trigger: &Trigger, action: &Action) -> io::Result<()> {
+    if matches!(
+        action,
+        Action::Feature(crate::features::FeatureAction::Touchscreen(_))
+    ) && !trigger.is_touchscreen()
+    {
+        return Err(invalid(
+            "touchscreen page actions require a touchscreen gesture",
+        ));
+    }
+    Ok(())
+}
+
 fn valid_shortcut_atom(value: &str) -> bool {
     !value.trim().is_empty()
         && value.len() <= 128
@@ -1012,6 +1026,7 @@ fn apply_row(
             let layer = canonical_layer_name(&unhex(layer)?);
             let trigger = decode_trigger(trigger)?;
             let mut action = decode_action(action)?;
+            validate_binding_action(&trigger, &action).map_err(|error| error.to_string())?;
             if let Action::SwitchLayer(target) = &mut action {
                 *target = canonical_layer_name(target);
             }

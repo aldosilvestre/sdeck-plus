@@ -8,6 +8,13 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Profile-owned touchscreen pages.** Touch gestures, section information and
+  strip/section images stay independent of keypad pages and folders. Select the
+  touch strip to add or select its pages; touchscreen-only next/previous actions
+  can be assigned to left/right swipes. Distinct legacy configurations become
+  separate touch pages without discarding assignments, and export/import includes
+  all touch pages and their local sounds. Dial bindings remain keypad-page-owned.
+
 - **Start in tray.** A tray checkbox, on by default, makes a normal launch
   begin hidden in the tray. Launching again while running opens the window,
   and an unavailable tray still shows it. `tray.json` gains `start_in_tray`;

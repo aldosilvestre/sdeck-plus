@@ -12,9 +12,9 @@ Branch: feat/profile-touchscreen-pages; delivery: feature-branch-chain (no publi
 ## Tasks
 
 - T1 [S1,S2,S4] inline; done; core profile-owned touch pages, lossless idempotent migration and storage tests; commit: eb94a99. Risk: item 1 (migration). Route: dependent core/UI/bundle units, no independent writers.
-- T2 [S1,S2,S4] inline; done; owner resolution for artwork, input, editor, worker snapshots and import/export; commit: pending. Risk: item 1 (persistence), item 3 (shared routing).
-- T3 [S2,S3] inline; in_progress; touchscreen page controls and explicit gesture navigation actions with UI tests and documentation; commit: pending. Risk: item 3 (shared editor/runtime).
-- T4 [S1-S4] delegated verifier after inline checks; pending; full feature verification, differential checks and review assessment; commit: pending. Risk: item 1 (migration).
+- T2 [S1,S2,S4] inline; done; owner resolution for artwork, input, editor, worker snapshots and import/export; commit: 365394b. Risk: item 1 (persistence), item 3 (shared routing).
+- T3 [S2,S3] inline; done; touchscreen page controls and explicit gesture navigation actions with UI tests and documentation; commit: pending. Risk: item 3 (shared editor/runtime).
+- T4 [S1-S4] delegated verifier after inline checks; in_progress; full feature verification, differential checks and review assessment; commit: pending. Risk: item 1 (migration).
 
 ## Log
 
@@ -30,6 +30,18 @@ L4 Architecture: use authoritative Organization::profile_for_key/profile_key; pr
 L5 Delivery selected: "Cadena sobre rama de funcionalidad (recomendado)". origin/HEAD confirms main; initial commit 6664119. Work units on child branches based on feature tracker, no push/PR/merge authorized.
 
 L6 Local Markdown is the required memory mechanism. Request linked from Obsidian project note at requests/sdeck-plus/profile-touchscreen-pages-2026-10-21.md. No callable project-confined Engram tools available; Engram mirror unavailable, no shared store used.
+
+L16 T3 GREEN: job-17 exit 0 after fresh crate rebuild; real GTK toolbar creation, selection, gesture saving, action dispatch, boundary sensitivity and hidden key-mode controls passed. Coalesced selection notifications now ignore the already-selected owner. No timeouts occurred; previous stopped/hung and compile-failure runs remain recorded. T4 full suite/fmt/clippy and independent verifier remain open.
+
+L15 Timestamp invalidation did not fix the cached metadata; job-16 exited 101 with the same source/artifact mismatch, without timeout. Performed one package-scoped `cargo clean -p sdeck-plus` (build products only, 4.2 GiB; no source/config/user data removed), then rebuild/check job-17 with 90-second command bound. No dependency or environment configuration changes.
+
+L14 Tooling incident isolated: job-15 exited 101 at compilation, not timeout. Diagnostics claimed absent public methods/enums that are present in current sources; differential scratch builds shared target/ with the live crate, causing inconsistent cached metadata/artifacts. No source loss or unexpected Git changes. Invalidate the current crate via src/lib.rs timestamp (no content edit), rebuild normally, and never share this target for future scratch package builds. Existing differential runtime output matched, but final checks must compile current sources afresh.
+
+L13 Verification incident: job-12 and job-13 hung at the new GTK control test and were explicitly stopped (not passed). GDB attachment unavailable (ptrace denied); no system setting changed. Likely reentrant/coalesced dropdown notifications after model replacement: callback refreshed even for the already-selected owner. Added an idempotent owner check before mutation/refresh. Differential job-14 passed exact stdout/stderr/exit comparisons against 6664119 with touchscreen ownership enabled only in candidate. New focused check uses an explicit timeout; no timeout counts as success.
+
+L12 T3 implementation: explicit Touchscreen NextPage/PreviousPage actions; offered only to touch controls and rejected on key/dial bindings by shared validation and load parser. Touch inspector has a separate selector, boundary-aware arrows and add control; physical preview geometry unchanged. RED missing enum observed; core swipe test passed. GTK test initially failed to locate new buttons because the existing collector filters captions; test now inspects actual toolbar children. Full display-backed suite/fmt/clippy launched (job-13); GTK end-to-end job-12 pending. No T3 checkoff yet. README, help, design contract, changelog and site updated.
+
+L11 Slice 2: 365394b on feat/touchscreen-integration, 414 authored lines. Native assessment nativeRisk medium, reviewDue false / under_budget; escalation item 3. Slice 3 begins on feat/touchscreen-navigation based on 365394b. No review START due; one independent verifier at feature closure covers all inline units.
 
 L10 T2 evidence: new bundle test RED (missing touchscreen.json), GREEN including unselected touch audio; all 17 bundle tests passed. New GTK owner/chooser/cache/identity integration test passed. Binary suite found existing compact-inspector assertion failure caused by longer new help copy; shortened help/label and reran exact failing test successfully, including all nested layout/workflow checks. Missing std::fs import in new test was corrected after compile failure. Full suite will run again at T4. New profiles get blank independent touch pages; removed profile owners invalidate choosers and release only unreferenced artwork. Raw bundle audio rewriting avoids redirecting retained legacy rows to selected touch pages.
 

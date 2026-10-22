@@ -7,10 +7,17 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::io;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchscreenAction {
+    NextPage,
+    PreviousPage,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FeatureAction {
     Desktop(DesktopAction),
     Navigation(NavigationAction),
+    Touchscreen(TouchscreenAction),
     Device(DeviceAction),
     Obs(ObsAction),
     Timer { seconds: u32 },
@@ -28,7 +35,7 @@ impl FeatureAction {
                 io::ErrorKind::InvalidInput,
                 "Timer duration must be between 1 second and 24 hours",
             )),
-            Self::Timer { .. } | Self::CancelTimer => Ok(()),
+            Self::Timer { .. } | Self::CancelTimer | Self::Touchscreen(_) => Ok(()),
         }
     }
 
@@ -36,6 +43,10 @@ impl FeatureAction {
         match self {
             Self::Desktop(action) => action.summary(),
             Self::Navigation(action) => action.summary(),
+            Self::Touchscreen(TouchscreenAction::NextPage) => "Next touchscreen page".into(),
+            Self::Touchscreen(TouchscreenAction::PreviousPage) => {
+                "Previous touchscreen page".into()
+            }
             Self::Device(action) => action.summary(),
             Self::Obs(action) => action.summary(),
             Self::Timer { seconds } => format!("Timer {seconds}s"),
