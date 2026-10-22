@@ -680,8 +680,8 @@ fn build_widgets(
     settings_heading.add_css_class("section-label");
     settings_heading.add_css_class("control-heading");
     settings_heading.set_xalign(0.0);
-    settings_card.append(feature_runtime.touchscreen_controls());
     settings_card.append(&settings_heading);
+    settings_card.append(feature_runtime.touchscreen_controls());
     // Keep a usable form width without padding short actions to the chassis height.
     settings_card.set_size_request(300, -1);
     settings_card.set_spacing(6);

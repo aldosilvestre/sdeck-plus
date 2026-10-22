@@ -55,12 +55,18 @@ fn assert_profile_owner() {
         info: Rc::default(),
     };
     let (commands, requests) = mpsc::channel();
-    let window = ApplicationWindow::builder().build();
+    let window = ApplicationWindow::builder()
+        .default_width(1000)
+        .default_height(700)
+        .build();
     let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), commands);
     let data_root = layers.borrow().root().to_owned();
     assert!(widgets
         .feature_runtime
         .complete_configuration_import(&data_root, Ok(None)));
+    window.set_child(Some(&widgets.root));
+    window.present();
+    wait_for_frame(&window);
     // Test the real selected-control editor and hardware command composition.
     widgets.binding_ui.control_picker.set_selected(2);
     widgets.binding_ui.load_selected_binding(&layers);
@@ -93,6 +99,11 @@ fn assert_profile_owner() {
     );
     let controls = widgets.feature_runtime.touchscreen_controls();
     assert!(controls.is_visible());
+    wait_for_frame(&window);
+    assert!(
+        controls.is_mapped(),
+        "touch page controls must be rendered, not merely present"
+    );
     let mut buttons = Vec::new();
     let mut child = controls.first_child();
     while let Some(widget) = child {

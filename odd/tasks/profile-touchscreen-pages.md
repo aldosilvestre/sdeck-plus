@@ -13,8 +13,8 @@ Branch: feat/profile-touchscreen-pages; delivery: feature-branch-chain (no publi
 
 - T1 [S1,S2,S4] inline; done; core profile-owned touch pages, lossless idempotent migration and storage tests; commit: eb94a99. Risk: item 1 (migration). Route: dependent core/UI/bundle units, no independent writers.
 - T2 [S1,S2,S4] inline; done; owner resolution for artwork, input, editor, worker snapshots and import/export; commit: 365394b. Risk: item 1 (persistence), item 3 (shared routing).
-- T3 [S2,S3] inline; done; touchscreen page controls and explicit gesture navigation actions with UI tests and documentation; commit: pending. Risk: item 3 (shared editor/runtime).
-- T4 [S1-S4] delegated verifier after inline checks; in_progress; full feature verification, differential checks and review assessment; commit: pending. Risk: item 1 (migration).
+- T3 [S2,S3] inline; done; touchscreen page controls and explicit gesture navigation actions with UI tests and documentation; commit: 631cade. Risk: item 3 (shared editor/runtime).
+- T4 [S1-S4] delegated verifier after inline checks; blocked; full feature verification, differential checks and review assessment; commit: evidence recorded below. Blocker: required gentle-ai-verify failed before agent_settled with Node WriteStream errno -122; no independent verdict produced. Needs user decision to restore writable storage/quota and authorize retry, or explicitly accept delivery without that proof. Risk: item 1 (migration).
 
 ## Log
 
@@ -30,6 +30,14 @@ L4 Architecture: use authoritative Organization::profile_for_key/profile_key; pr
 L5 Delivery selected: "Cadena sobre rama de funcionalidad (recomendado)". origin/HEAD confirms main; initial commit 6664119. Work units on child branches based on feature tracker, no push/PR/merge authorized.
 
 L6 Local Markdown is the required memory mechanism. Request linked from Obsidian project note at requests/sdeck-plus/profile-touchscreen-pages-2026-10-21.md. No callable project-confined Engram tools available; Engram mirror unavailable, no shared store used.
+
+L20 Required independent verifier unavailable: gentle-ai-verify task mvk61hhm-3-1r3o failed before agent_settled, process exit 1, Node WriteStream syscall write errno -122 (Unknown system error -122). No verdict or verification evidence was produced. No retry attempted. Writer checks remain GREEN but do not replace independent migration verification. T4 is blocked externally, not complete. Needs user decision: restore writable storage/quota and request retry, or explicitly accept unverified independent proof. Physical Stream Deck/HID verification also remains not performed; no user device/configuration was changed.
+
+L19 All current-source checks GREEN: job-19 exit 0; full display-backed `GDK_BACKEND=x11 cargo test --offline -- --test-threads=1`, 294 library + 40 binary tests, 0 doc tests; mapped new toolbar test and original layout assertion pass. `cargo fmt --all -- --check` and strict offline all-target/all-feature clippy passed. Independent verifier is the remaining required proof. Physical HID device checks not run; synthetic production event dispatch is covered.
+
+L18 Fresh suite job-18: all library tests passed, new GTK test passed, binary suite 39/40; existing layout test failed because inspector's first child became a toolbar instead of its heading. Kept heading first and placed touch toolbar directly beneath it (production structure correction, no weakening of old assertion). Expanded new GTK test to map/present the actual window and assert toolbar rendering. No timeout; fmt/clippy were skipped by && after suite failure and must run.
+
+L17 Slice 3: 631cade on feat/touchscreen-navigation, 508 authored lines. Native committed assessment: nativeRisk medium, reviewDue false / under_budget, escalation item 3; no START due. Total three behavior slices ~1764 authored lines (generated artifacts excluded). Final verification/closeout will be a separate small evidence commit; branches remain local and chained, no tracker PR created.
 
 L16 T3 GREEN: job-17 exit 0 after fresh crate rebuild; real GTK toolbar creation, selection, gesture saving, action dispatch, boundary sensitivity and hidden key-mode controls passed. Coalesced selection notifications now ignore the already-selected owner. No timeouts occurred; previous stopped/hung and compile-failure runs remain recorded. T4 full suite/fmt/clippy and independent verifier remain open.
 
