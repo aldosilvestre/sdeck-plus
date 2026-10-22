@@ -96,7 +96,10 @@ fn controller<T: IsA<gtk::EventController> + IsA<glib::Object> + glib::object::I
 
 #[test]
 fn dragging_keys_swaps_saved_actions_images_and_text() {
-    let _guard = gtk_test_lock();
+    run_gtk_test(assert_dragging_keys_swaps_saved_actions_images_and_text);
+}
+
+fn assert_dragging_keys_swaps_saved_actions_images_and_text() {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),

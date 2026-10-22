@@ -1,6 +1,9 @@
 #[test]
 fn button_text_alignment_icons_update_preview_and_save() {
-    let _guard = gtk_test_lock();
+    run_gtk_test(assert_button_text_alignment_icons_update_preview_and_save);
+}
+
+fn assert_button_text_alignment_icons_update_preview_and_save() {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),

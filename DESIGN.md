@@ -3,7 +3,7 @@
 ## 1. Atmosphere and identity
 
 sdeck-plus is a native hardware configuration desk, not a web dashboard. Ink-toned
-surfaces, luminous violet actions and cyan interaction cues frame the physical Stream Deck preview: eight
+surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview: eight
 keys, a touch strip and four circular encoders. Preserve its coordinates,
 artwork and existing functions.
 
@@ -31,49 +31,53 @@ References consulted:
 
 ## 2. Color
 
-Application chrome uses the branded dark palette, and a matching light palette (`src/ui-light.css`) when the host GTK theme is not dark (the dark preference is off and the theme name does not contain "dark"). The light file only redefines the `@desk_*` tokens and two shadows, so both modes share every rule and follow theme changes live. Explicit field, popup, menu and button surfaces prevent
+Application chrome uses the branded dark palette, and a matching light palette (`src/ui-light.css`) when the host GTK theme is not dark (the dark preference is off and the theme name does not contain "dark"). The light file only redefines the `@desk_*` tokens, primary-action states and two shadows, so both modes share every rule and follow theme changes live. Explicit field, popup, menu and button surfaces prevent
 mixed light/dark controls. Native dialogs, fonts and accessibility remain GTK-owned.
 
 | Role | Token |
 | --- | --- |
-| Shell / base surface | `@desk_bg`, `#10121d` |
-| Primary ink | `@desk_ink`, `#f1f3fb` |
-| Supporting ink | `@desk_muted`, `#afb9d0` |
-| Elevated editor / toolbar | `@desk_surface`, `#1b2033` |
-| Input surface | `@desk_field`, `#141827` |
-| Hover / pressed surface | `@desk_hover`, `#2b3350` |
-| Neutral divider / edge | `@desk_edge`, `#39435c` |
-| Interactive boundary / scrollbar thumb | `@desk_control_edge`, `#68789d` |
+| Shell / base surface | `@desk_bg`, `#15191f` |
+| Primary ink | `@desk_ink`, `#f1f4f7` |
+| Supporting ink | `@desk_muted`, `#b0bac6` |
+| Elevated editor / toolbar | `@desk_surface`, `#20262e` |
+| Input surface | `@desk_field`, `#191e25` |
+| Hover / pressed surface | `@desk_hover`, `#303943` |
+| Neutral divider / edge | `@desk_edge`, `#353e49` |
+| Interactive boundary / scrollbar thumb | `@desk_control_edge`, `#76828f` |
 | Scrollbar hover / drag | `@desk_muted` / `@desk_cyan` |
-| Primary action / selected tab | `@desk_violet`, `#a78bfa`, with `@desk_bg` ink |
-| Primary action hover / press | `#bba5ff` / `#9575ed` |
-| Keyboard focus / interaction cue | `@desk_cyan`, `#67e8f9` |
+| Primary action | `@desk_violet`, `#b6a1ef`, with `@desk_bg` ink |
+| Selected tab | `@desk_selection`, `#4e426d`, with `@desk_ink` ink |
+| Primary action hover / press | `#c7b6f5` / `#a58cde` |
+| Keyboard focus / interaction cue | `@desk_cyan`, `#85dce8` |
 | Error ink | `@desk_error`, `#fb7185` |
 | Success ink | `@desk_success`, `#7de2b3` |
 | Warning ink | `@desk_warning`, `#f9cc7a` |
 
-Light palette values: base `#f4f5fb`, surface `#ffffff`, field `#eef0f8`, hover
-`#e2e6f3`, edge `#cfd5e6`, interactive boundary `#8a96b5`, ink `#1b2033`,
-supporting ink `#55607a`, primary action `#6d4fd6` (hover `#5f43c8`, press
-`#4f35b0`), focus cue `#0e7490`, error `#c0243f`, success `#1b7f55`, warning
-`#9a6a00`. The silver hardware preview is identical in both modes.
+Light palette values: base `#f3f5f7`, surface `#ffffff`, field `#f7f8fa`, hover
+`#e6eaef`, edge `#d7dde4`, interactive boundary `#7a8491`, ink `#242c35`,
+supporting ink `#536170`, primary action `#6746bb` (hover `#5939a9`, press
+`#4c2f95`), selected tab `#e8e1f6`, focus cue `#0e7183`, error `#c0243f`,
+success `#1b7f55`, warning `#9a6a00`. The graphite hardware is identical in both modes.
 
 Status badges pair semantic tones with visible text and low-alpha surfaces.
-Color alone never communicates state. Hardware retains its existing silver
-chassis (`#f0f0f2` to `#c5c5ca`), black key/strip material (`#08090b`), inset key
-edge (`#36363a`), rail (`#b5b5bd` to `#e3e3e6`) and magenta encoders
-(`#c329b3` to `#710c72`). The control being edited has a 5px violet ring (`#7c3aed`) separated from the
-hardware by a 2px light gap, readable on the silver chassis and over artwork.
+Color alone never communicates state. Hardware uses a graphite chassis
+(`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
+(`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
+and neutral encoders (`#68737e` to `#343c44`). Subtle inset lighting gives the
+chassis and dials depth without changing their geometry. The control being
+edited retains a 5px violet ring (`#7c3aed`) separated from the hardware by a
+2px light gap, readable on the graphite chassis and over artwork.
 Live input is an inset outline drawn on the control itself, above any artwork:
 green `#22c55e` while a key or dial is held, amber `#f59e0b` for 300ms on a
 dial turn, and a cyan `#67e8f9` wash over each touched strip zone for 300ms (the
 800px strip maps to four 200px zones; a flick lights every zone it crosses).
-Keyboard focus keeps its cyan outline. Task tabs fill the active one with violet
-at 60% and weight 600; inactive tabs are transparent with supporting ink.
+Keyboard focus keeps its cyan outline. Task tabs use the selected-tab surface
+and weight 600; profile tabs add a fine violet inset edge. Inactive tabs are
+transparent with supporting ink; Appearance headings use supporting ink too.
 
 Interactive boundaries use their own neutral token rather than the quieter
-decorative card edge: 4.00:1 against the input surface and 3.66:1 against the
-editor surface. Scrollbar thumbs use the same token and an explicit solid fill,
+decorative card edge: at least 3:1 against input and editor surfaces in both
+palettes, with at least 4.5:1 for supporting text, selected-tab text and save labels. Scrollbar thumbs use the same token and an explicit solid fill,
 so a light desktop theme cannot supply a dark-on-dark gradient. Hover and drag
 increase thumb contrast without changing native scrolling geometry.
 
@@ -87,17 +91,17 @@ Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
 ## 4. Spacing and layout
 
-Default window: 1000x700. Shell margins: 24px. Tokens: 4px label stacks, 8px
+Default window: 1000x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
-24px primary region gaps. The compact page-navigation card retains 12px padding.
+16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
 6px so hardware/artwork geometry is unchanged. Icons are 16px, or 20px for
 section identity. Popover padding and header/body separation are 16px; text measure is at most 38
 characters.
 
 Profile tabs have a 12px gap before page navigation; navigation and the
-device/editor region have 24px separation. The device and editor also have
-24px horizontal separation, retained as a vertical gap when they stack.
+device/editor region have 16px separation. The device and editor also have
+16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
 the added return and information options within the default 1000x700 layout.
 Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
@@ -123,14 +127,29 @@ heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its 120px preview remains unchanged.
 
-The fixed-size device chassis is centered on both axes within the preview card.
+The fixed-size device chassis is centered within its natural-size preview card
+(440x428 including padding and border); that card never stretches to match a tall
+form. The inspector uses its content height, without an arbitrary minimum height.
+The complete configuration shell (header, profile toolbar, page navigation and
+body) is centered at its GTK natural content width on wide desktops. These bars
+share the shell's leading/trailing edges rather than spanning the viewport while
+the task occupies only its middle. The native FlowBox also retains its natural
+width, keeping the fixed preview beside a readable inspector instead of creating
+a large empty preview cell. Width is content-driven, not a fixed viewport request:
+the ordinary test forms measure roughly 860–875px, and longer forms can use more.
+At narrow widths the shell shrinks to the available width and the same native
+container stacks the regions; only vertical scrolling is needed at 640px.
+No custom layout manager or resize polling is used.
 
 The profile tabs, profile organization menu and OBS menu form a compact toolbar.
 The organization popover contains only profile creation, application association
 and profile deletion. The page bar groups compact previous/next/parent icons,
 page-owned folders, then New page followed by pencil and red-trash icons.
 The folder menu has no outer padding, preserving the page bar's 34px controls.
-Icon-only actions retain accessible names, tooltips and visible keyboard focus.
+Icon-only actions use square 34px hit areas and centered 16px symbolic icons;
+captioned actions use a 6px icon/text gap and the same control height. MenuButton
+styling belongs to its internal button, avoiding doubled padding and background
+seams. Icon-only actions retain accessible names, tooltips and visible keyboard focus.
 New page and rename open contextual native name dialogs; cancellation never
 creates a page. Destructive page, folder and profile operations confirm their
 specific scope. Folder creation, selection, linking and deletion belong to the
@@ -269,7 +288,8 @@ Navigation refreshes selector, bindings, summaries and artwork together.
 ## 7. Depth and surface
 
 Use ink-toned layering, neutral edges and a faint inset top light for
-toolbar/editor surfaces. Profile tabs use a violet wash instead of an underline;
+toolbar/editor surfaces. The profile toolbar has no competing outer outline.
+Profile tabs use a violet tonal fill and fine inset edge instead of an underline;
 the active tab and keyboard focus remain different states.
 The dimensional chassis, artwork cover/crop and circular encoder material
 remain intact. No new fonts, heavy shadows, ambient backgrounds or accent borders.

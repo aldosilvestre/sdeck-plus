@@ -15,7 +15,10 @@ fn collect_menu_buttons(widget: &gtk::Widget, buttons: &mut Vec<Button>) {
 
 #[test]
 fn menu_transfers_configuration_and_reloads_without_running_actions() {
-    let _guard = gtk_test_lock();
+    run_gtk_test(assert_menu_transfers_configuration_and_reloads_without_running_actions);
+}
+
+fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),

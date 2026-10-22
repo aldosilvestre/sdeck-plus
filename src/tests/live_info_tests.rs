@@ -20,7 +20,10 @@ fn info_pictures(commands: &mpsc::Receiver<ArtworkCommand>) -> Vec<(ArtworkTarge
 
 #[test]
 fn live_information_is_saved_drawn_on_keys_and_zones_and_updated_in_place() {
-    let _guard = gtk_test_lock();
+    run_gtk_test(assert_live_information_is_saved_drawn_on_keys_and_zones_and_updated_in_place);
+}
+
+fn assert_live_information_is_saved_drawn_on_keys_and_zones_and_updated_in_place() {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),

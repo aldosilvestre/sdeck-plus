@@ -416,10 +416,13 @@ fn build_widgets(
         );
     }
     let root = GtkBox::new(Orientation::Vertical, 16);
-    root.set_margin_top(24);
-    root.set_margin_bottom(24);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
+    // Center the complete desk at its natural measure, not just the hardware
+    // row. GTK still shrinks it to the available width on narrow desktops.
+    root.set_halign(gtk::Align::Center);
+    root.set_margin_top(16);
+    root.set_margin_bottom(16);
+    root.set_margin_start(16);
+    root.set_margin_end(16);
     root.add_css_class("app-shell");
     ui::track_motion(&root);
 
@@ -664,8 +667,8 @@ fn build_widgets(
     settings_heading.add_css_class("control-heading");
     settings_heading.set_xalign(0.0);
     settings_card.append(&settings_heading);
-    // Match the 414px chassis plus the preview card's padding and border.
-    settings_card.set_size_request(300, 428);
+    // Keep a usable form width without padding short actions to the chassis height.
+    settings_card.set_size_request(300, -1);
     settings_card.set_spacing(6);
     settings_card.set_hexpand(true);
     settings_card.set_valign(gtk::Align::Start);
@@ -1002,9 +1005,12 @@ fn build_widgets(
         .selection_mode(gtk::SelectionMode::None)
         .min_children_per_line(1)
         .max_children_per_line(2)
-        .column_spacing(24)
-        .row_spacing(24)
+        .column_spacing(16)
+        .row_spacing(16)
         .build();
+    // Natural-width FlowBox keeps the fixed preview and readable inspector
+    // together on wide desktops, while retaining GTK's native narrow wrapping.
+    body.set_halign(gtk::Align::Center);
     body.set_valign(gtk::Align::Start);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
@@ -1013,7 +1019,8 @@ fn build_widgets(
     sidebar.add_css_class("settings-sidebar");
     let device_area = card();
     device_area.add_css_class("device-canvas");
-    device_area.set_valign(gtk::Align::Fill);
+    device_area.set_halign(gtk::Align::Center);
+    device_area.set_valign(gtk::Align::Start);
     // Reference image coordinates scaled to a compact physical front. Fixed
     // geometry keeps loaded artwork and long live messages from resizing hardware.
     let chassis = gtk::Fixed::new();
@@ -1246,7 +1253,7 @@ fn build_widgets(
     body.insert(&device_area, -1);
     sidebar.append(&settings_card);
     body.insert(&sidebar, -1);
-    let profile_content = GtkBox::new(Orientation::Vertical, 24);
+    let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
     profile_content.append(&body);
     feature_runtime.attach_profile_content(&profile_content);
@@ -3126,7 +3133,7 @@ fn install_light_overrides(display: &gtk::gdk::Display) {
 mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::Mutex;
     mod button_swap_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
@@ -3140,14 +3147,31 @@ mod tests {
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
 
-    static GTK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     include!("button_text_editor_tests.rs");
 
-    fn gtk_test_lock() -> MutexGuard<'static, ()> {
-        GTK_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("GTK test lock should not be poisoned")
+    fn run_gtk_test(test: fn()) {
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return;
+        }
+        // A mutex serializes calls but libtest still gives each test a new thread.
+        // gtk-rs dispatches the entire body to one owner and resumes panics here.
+        gtk::test_synced(test);
+    }
+
+    #[test]
+    fn gtk_dispatch_preserves_owner_and_propagates_panics() {
+        run_gtk_test(|| assert!(gtk::is_initialized_main_thread()));
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return;
+        }
+        let owner = gtk::test_synced(|| thread::current().id());
+        let panic = std::panic::catch_unwind(|| run_gtk_test(|| panic!("GTK test sentinel")))
+            .expect_err("GTK assertions must fail the calling test");
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"GTK test sentinel"));
+        let next_owner = thread::spawn(|| gtk::test_synced(|| thread::current().id()))
+            .join()
+            .unwrap();
+        assert_eq!(owner, next_owner, "a panic must not poison later dispatch");
     }
 
     fn init_gtk_for_test() -> bool {
@@ -3239,7 +3263,10 @@ mod tests {
 
     #[test]
     fn binding_editor_hides_labeled_rows_for_inactive_controls_and_actions() {
-        let _guard = gtk_test_lock();
+        run_gtk_test(assert_binding_editor_hides_labeled_rows);
+    }
+
+    fn assert_binding_editor_hides_labeled_rows() {
         let Some(ui) = test_binding_ui() else {
             assert!(
                 std::env::var_os("DISPLAY").is_none()
@@ -4115,15 +4142,30 @@ mod tests {
             execute_layer_action_for(&mut executor, identity, &action, &output);
             assert!(matches!(
                 events.try_recv().unwrap(),
-                MonitorEvent::AppEvent { .. }
+                MonitorEvent::AppEvent { name } if name == "Action dispatched."
             ));
+            assert!(matches!(
+                events.try_recv().unwrap(),
+                MonitorEvent::ActionDispatched
+            ));
+            assert!(matches!(events.try_recv(), Err(mpsc::TryRecvError::Empty)));
         }
         // Then: each binding begins with the first chord and advances independently.
-        let recorded = recorded.lock().unwrap();
-        assert_eq!(recorded.len(), 4);
-        assert_eq!(recorded[0], recorded[1]);
-        assert_eq!(recorded[2], recorded[3]);
-        assert_ne!(recorded[0], recorded[2]);
+        let chord = |text| {
+            format!(
+                "{:?}",
+                sdeck_plus::keyboard::parse_chord(&[], text).unwrap()
+            )
+        };
+        assert_eq!(
+            *recorded.lock().unwrap(),
+            [
+                chord("CTRL+A"),
+                chord("CTRL+A"),
+                chord("CTRL+B"),
+                chord("CTRL+B")
+            ]
+        );
     }
 
     #[test]
@@ -4345,7 +4387,50 @@ mod tests {
         eprintln!("GTK physical shortcut production parser assertions executed");
     }
 
+    fn assert_visual_palette_contrast() {
+        let dark = include_str!("ui.css");
+        let light = include_str!("ui-light.css");
+        for css in [dark, light] {
+            let luminance = |token: &str| {
+                let prefix = format!("@define-color {token} #");
+                let hex = css
+                    .lines()
+                    .find_map(|line| line.strip_prefix(&prefix))
+                    .unwrap();
+                let channel = |offset| {
+                    let value =
+                        f64::from(u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap())
+                            / 255.0;
+                    if value <= 0.04045 {
+                        value / 12.92
+                    } else {
+                        ((value + 0.055) / 1.055).powf(2.4)
+                    }
+                };
+                0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+            };
+            for (foreground, background, minimum) in [
+                ("desk_control_edge", "desk_field", 3.0),
+                ("desk_control_edge", "desk_surface", 3.0),
+                ("desk_cyan", "desk_surface", 3.0),
+                ("desk_ink", "desk_surface", 4.5),
+                ("desk_muted", "desk_surface", 4.5),
+                ("desk_ink", "desk_selection", 4.5),
+                ("desk_bg", "desk_violet", 4.5),
+            ] {
+                let a = luminance(foreground);
+                let b = luminance(background);
+                let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                assert!(
+                    ratio >= minimum,
+                    "{foreground}/{background}: {ratio:.2}:1 < {minimum}:1"
+                );
+            }
+        }
+    }
+
     fn assert_production_layout_fits() {
+        assert_visual_palette_contrast();
         let window = ApplicationWindow::builder()
             .default_width(DEFAULT_WIDTH)
             .default_height(DEFAULT_HEIGHT)
@@ -4467,6 +4552,7 @@ mod tests {
         }
         assert_normal_no_scroll(&widgets, &content, &artwork, "empty");
         assert_inactive_backgrounds(&window, &widgets, &content, &artwork);
+        assert_compact_responsive_regions(&widgets, &content);
         assert_sidebar_hierarchy(&widgets, &content);
         assert_shared_artwork_editor(&widgets, &content, &artwork, &source);
         let (content_minimum, content_natural, _, _) = content.measure(Orientation::Horizontal, -1);
@@ -4769,7 +4855,29 @@ mod tests {
             return;
         };
         let directory = std::path::PathBuf::from(directory);
-        std::fs::create_dir_all(&directory).unwrap();
+        let settings = widgets.root.settings();
+        let theme = settings.gtk_theme_name();
+        let dark = settings.is_gtk_application_prefer_dark_theme();
+        for (name, prefer_dark) in [("dark", true), ("light", false)] {
+            settings.set_gtk_theme_name(Some(if prefer_dark {
+                "Adwaita-dark"
+            } else {
+                "Adwaita"
+            }));
+            settings.set_gtk_application_prefer_dark_theme(prefer_dark);
+            capture_frontend_variant(window, widgets, artwork, &directory.join(name));
+        }
+        settings.set_gtk_theme_name(theme.as_deref());
+        settings.set_gtk_application_prefer_dark_theme(dark);
+    }
+
+    fn capture_frontend_variant(
+        window: &ApplicationWindow,
+        widgets: &MonitorWidgets,
+        artwork: &ArtworkUi,
+        directory: &std::path::Path,
+    ) {
+        std::fs::create_dir_all(directory).unwrap();
         let settings = widgets.root.settings();
         let animations = settings.is_gtk_enable_animations();
         settings.set_gtk_enable_animations(false);
@@ -4911,14 +5019,17 @@ mod tests {
                 let content = panel.child().unwrap();
                 let header = content.first_child().unwrap();
                 let close = header.last_child().unwrap().downcast::<Button>().unwrap();
-                let scroller = content
+                // The configuration menu is a compact button group, while
+                // organization/folders/OBS wrap their longer forms in a scroller.
+                if let Ok(scroller) = content
                     .last_child()
                     .unwrap()
                     .downcast::<gtk::ScrolledWindow>()
-                    .unwrap();
-                scroller
-                    .vadjustment()
-                    .set_value(scroller.vadjustment().upper() - scroller.vadjustment().page_size());
+                {
+                    scroller.vadjustment().set_value(
+                        scroller.vadjustment().upper() - scroller.vadjustment().page_size(),
+                    );
+                }
                 rendered_texture(window, &panel)
                     .save_to_png(directory.join(format!("{width}x{height}-popover-{name}-end.png")))
                     .unwrap();
@@ -5622,20 +5733,16 @@ mod tests {
             );
             assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 6);
             assert_eq!(settings_bounds.y(), device_bounds.y());
-            assert!(
-                settings_bounds.height() >= device_bounds.height(),
-                "settings must be at least as tall as the preview"
+            assert_eq!(
+                device_bounds.height(),
+                428.0,
+                "preview keeps its natural height independently of editor"
             );
-            if matches!(action, 0 | 1 | 4) {
-                assert_eq!(
-                    settings_bounds.height(),
-                    device_bounds.height(),
-                    "compact settings and preview lower edges must align"
-                );
-            }
             let bounds = content.compute_bounds(&widgets.root).unwrap();
-            assert_eq!((bounds.x(), bounds.y()), (24.0, 24.0));
-            assert_eq!((bounds.width(), bounds.height()), (952.0, 652.0));
+            assert_eq!(bounds.y(), 16.0);
+            assert_eq!(bounds.height(), 668.0);
+            assert!((850.0..=968.0).contains(&bounds.width()));
+            assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
             let mut buttons = Vec::new();
             collect_layout_buttons(content, &mut buttons);
             for caption in ["Image…", "Clear"] {
@@ -5955,6 +6062,98 @@ mod tests {
             .unwrap()
     }
 
+    fn assert_compact_responsive_regions(widgets: &MonitorWidgets, content: &gtk::Widget) {
+        for (width, height) in [(1840, 980), (1000, 700), (640, 480)] {
+            widgets.root.allocate(width, height, -1, None);
+            let device = device_canvas(widgets).compute_bounds(content).unwrap();
+            let editor = sidebar_settings(widgets).compute_bounds(content).unwrap();
+            let shell = content.compute_bounds(&widgets.root).unwrap();
+            let header = content
+                .first_child()
+                .unwrap()
+                .compute_bounds(content)
+                .unwrap();
+            let tabs = widgets.feature_runtime.profile_tabs();
+            let tab_header = tabs.first_child().unwrap().compute_bounds(content).unwrap();
+            let body = device_canvas(widgets).parent().unwrap().parent().unwrap();
+            let pagebar = body
+                .parent()
+                .unwrap()
+                .first_child()
+                .unwrap()
+                .compute_bounds(content)
+                .unwrap();
+            for bar in [header, tab_header, pagebar] {
+                assert!((bar.x()).abs() <= 1.0);
+                assert!(
+                    (bar.width() - shell.width()).abs() <= 1.0,
+                    "configuration chrome must share the shell measure"
+                );
+            }
+            if width == 1840 {
+                assert!(
+                    (850.0..=1150.0).contains(&shell.width()),
+                    "wide configuration shell must not span the viewport: {shell:?}"
+                );
+                assert!((shell.x() + shell.width() / 2.0 - width as f32 / 2.0).abs() <= 1.0);
+                assert!(
+                    (device.x() - (shell.width() - editor.x() - editor.width())).abs() <= 32.0,
+                    "body should be centered under the bounded chrome"
+                );
+            } else if width == 640 {
+                assert_eq!(shell.width(), 608.0, "narrow shell uses available width");
+            }
+            assert!(
+                device.width() <= 460.0,
+                "fixed preview must not become a wide empty cell: {device:?}"
+            );
+            assert_eq!(
+                device.height(),
+                428.0,
+                "preview must not grow to match the form"
+            );
+            assert!(
+                editor.width() <= 600.0,
+                "editor needs a bounded reading measure: {editor:?}"
+            );
+            if width >= 1000 {
+                assert_eq!(device.y(), editor.y());
+                assert!(editor.x() - device.x() - device.width() <= 32.0);
+            } else {
+                assert!(editor.y() >= device.y() + device.height() + 15.0);
+            }
+            assert!(widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size());
+        }
+        let previous = widgets.binding_ui.action_picker.selected();
+        widgets.binding_ui.action_picker.set_selected(7);
+        widgets.root.allocate(1000, 700, -1, None);
+        assert!(
+            sidebar_settings(widgets).height() < 428,
+            "empty inspector should use its natural height"
+        );
+        widgets.binding_ui.action_picker.set_selected(previous);
+        widgets.root.allocate(1000, 700, -1, None);
+        let button = ui::icon_button("go-previous-symbolic", "Previous page");
+        let caption = ui::button("document-new-symbolic", "New page");
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        row.append(&button);
+        row.append(&caption);
+        let window = gtk::Window::new();
+        window.set_child(Some(&row));
+        window.present();
+        wait_for_frame(&window);
+        assert_eq!(
+            button.width(),
+            button.height(),
+            "icon-only hit area must be square"
+        );
+        assert_eq!(button.height(), caption.height());
+        let icon = button.child().unwrap();
+        let bounds = icon.compute_bounds(&button).unwrap();
+        assert!((bounds.x() + bounds.width() / 2.0 - button.width() as f32 / 2.0).abs() <= 1.0);
+        window.destroy();
+    }
+
     fn assert_sidebar_hierarchy(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         assert!(settings.next_sibling().is_none(), "no event card");
@@ -5970,8 +6169,8 @@ mod tests {
             .unwrap();
         assert_eq!(body.min_children_per_line(), 1);
         assert_eq!(body.max_children_per_line(), 2);
-        assert_eq!(body.column_spacing(), 24);
-        assert_eq!(body.row_spacing(), 24);
+        assert_eq!(body.column_spacing(), 16);
+        assert_eq!(body.row_spacing(), 16);
         assert_eq!(
             body.last_child()
                 .unwrap()
@@ -5989,7 +6188,7 @@ mod tests {
                 shell.margin_start(),
                 shell.margin_end()
             ),
-            (24, 24, 24, 24)
+            (16, 16, 16, 16)
         );
         for panel in [device_canvas(widgets), settings] {
             let panel = panel.downcast::<GtkBox>().unwrap();
@@ -6044,7 +6243,7 @@ mod tests {
         let region = device.parent().unwrap().parent().unwrap();
         let region_bounds = region.compute_bounds(content).unwrap();
         assert!(
-            region_bounds.y() - navigation_bounds.y() - navigation_bounds.height() >= 23.0,
+            region_bounds.y() - navigation_bounds.y() - navigation_bounds.height() >= 15.0,
             "page navigation and the main regions must remain separate"
         );
         for panel in [&device, &settings] {
@@ -6080,10 +6279,9 @@ mod tests {
         let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
         if settings.y() == device.y() {
-            assert!((settings.x() - device.x() - device.width() - 24.0).abs() <= 1.0);
+            assert!((16.0..=48.0).contains(&(settings.x() - device.x() - device.width())));
         } else {
-            assert!((settings.x() - device.x()).abs() <= 1.0);
-            assert!((settings.y() - device.y() - device.height() - 24.0).abs() <= 1.0);
+            assert!((settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0);
         }
         eprintln!("GTK sidebar geometry assertions executed");
     }

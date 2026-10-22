@@ -458,15 +458,20 @@ The application does not enable OBS's server or alter its configuration.
 
 At the default 1000 × 700 logical-pixel client size, the device canvas stays on the left, action settings on the right, and layer controls above. Longer action forms and smaller windows can scroll vertically. The documentation captures use 1000 × 950 to show complete forms. Live physical states and connection/error indicators remain. Summaries and long layer names are ellipsized; tooltips show full summaries and the editor retains full saved action fields.
 
-The window uses 24 logical pixels of outer padding and an ink-toned palette,
-with elevated navy surfaces, violet save actions and cyan keyboard focus.
-This appearance stays consistent under light and dark desktop themes.
-Profile tabs use a tonal selection highlight, and the **Appearance** group
+The window uses 16 logical pixels of outer padding, charcoal surfaces in dark
+mode and clean pale-gray surfaces in light mode, following the desktop GTK theme.
+The complete configuration desk—header, profile tabs, page bar and editor—is
+centered at its natural content width on wide displays, keeping toolbar actions
+near their task instead of stretching empty bars across the window. At 640 pixels
+it uses the available width and stacks the preview and editor without horizontal
+scrolling. Hardware proportions stay fixed; forms keep their natural height.
+Violet save actions and cyan keyboard focus stand apart from the quieter chrome.
+Profile tabs use a violet tonal selection with a fine accent edge, and the **Appearance** group
 separates button text and artwork from action editing. **Save binding** only
 persists the binding; **Test action** runs it immediately.
 
 Profile tabs and page navigation have a 12-pixel gap; the main preview and
-editor regions have 24-pixel separation. The editor uses 16-pixel padding
+editor regions have 16-pixel separation. The editor uses 16-pixel padding
 and 6-pixel gaps between related form groups; Appearance uses 4-pixel internal
 gaps. Executable/arguments and shortcut/modifiers share
 adaptive columns, stacking when their available width is too small. Modifier
@@ -477,8 +482,9 @@ above scrollable content. The text popup retains its full-size preview and
 native font chooser. Brief hover and press transitions follow GTK's animation
 setting and stop when animations are disabled.
 
-The physical preview retains its silver chassis, eight black keys, continuous
-touch-strip bezel and four purple knobs. The artwork strip keeps its 8:1 ratio;
+The physical preview uses a graphite chassis, pale branding, eight black keys,
+a continuous touch-strip bezel and four dimensional neutral-gray knobs in both themes.
+Its fixed physical coordinates and artwork geometry are unchanged. The artwork strip keeps its 8:1 ratio;
 transparent zones preserve strip-background layering. No sample artwork or audio
 values are injected by the running application; documentation fixtures supply
 their own demonstration data. Selection, live state, keyboard focus and connection status

@@ -1,13 +1,14 @@
-@define-color desk_bg #10121d;
-@define-color desk_surface #1b2033;
-@define-color desk_field #141827;
-@define-color desk_hover #2b3350;
-@define-color desk_edge #39435c;
-@define-color desk_control_edge #68789d;
-@define-color desk_ink #f1f3fb;
-@define-color desk_muted #afb9d0;
-@define-color desk_violet #a78bfa;
-@define-color desk_cyan #67e8f9;
+@define-color desk_bg #15191f;
+@define-color desk_surface #20262e;
+@define-color desk_field #191e25;
+@define-color desk_hover #303943;
+@define-color desk_edge #353e49;
+@define-color desk_control_edge #76828f;
+@define-color desk_ink #f1f4f7;
+@define-color desk_muted #b0bac6;
+@define-color desk_violet #b6a1ef;
+@define-color desk_selection #4e426d;
+@define-color desk_cyan #85dce8;
 @define-color desk_error #fb7185;
 @define-color desk_success #7de2b3;
 @define-color desk_warning #f9cc7a;
@@ -39,7 +40,7 @@ window, scrolledwindow, viewport, .app-shell {
     border: 1px solid @desk_edge;
     border-radius: 14px;
     padding: 12px;
-    box-shadow: inset 0 1px alpha(@desk_ink, 0.035);
+    box-shadow: inset 0 1px alpha(@desk_ink, 0.025);
 }
 .device-canvas { padding: 6px; }
 .editor-card { padding: 16px; }
@@ -64,7 +65,7 @@ button:hover { background-color: @desk_hover; }
 button:active { background-color: mix(@desk_hover, @desk_violet, 0.18); }
 button:checked { background-color: alpha(@desk_violet, 0.20); color: @desk_ink; }
 stackswitcher button { background-color: transparent; color: @desk_muted; }
-stackswitcher button:checked { background-color: alpha(@desk_violet, 0.60); color: @desk_ink; font-weight: 600; }
+stackswitcher button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 600; }
 button.flat { background-color: transparent; }
 button.flat:hover { background-color: @desk_hover; }
 button:disabled, button:disabled label, button:disabled image,
@@ -123,7 +124,12 @@ scrollbar slider {
 }
 scrollbar slider:hover { background-color: @desk_muted; }
 scrollbar slider:active { background-color: @desk_cyan; }
-.icon-action { min-height: 20px; padding: 6px 10px; }
+button.icon-action, menubutton.icon-action > button { min-height: 20px; padding: 6px 10px; }
+button.icon-only { min-width: 20px; padding: 6px; }
+/* Style the MenuButton's real hit surface, not its outer widget: otherwise
+   host-theme button padding and arrow material create a second inset frame. */
+menubutton.icon-action { padding: 0; }
+menubutton.icon-action > button > box { border-spacing: 0; }
 .page-folder-menu { padding: 0; }
 .field-help > button { min-height: 20px; padding: 0 4px; }
 .page-name-dialog button { margin: 0 6px 16px; }
@@ -146,10 +152,10 @@ scrollbar slider:active { background-color: @desk_cyan; }
     font-weight: 600;
 }
 .suggested-action:hover {
-    background-color: #bba5ff;
+    background-color: #c7b6f5;
 }
 .suggested-action:active {
-    background-color: #9575ed;
+    background-color: #a58cde;
 }
 .suggested-action:disabled {
     background-color: @desk_field;
@@ -190,7 +196,7 @@ scrollbar slider:active { background-color: @desk_cyan; }
 .profile-tabs > stack { margin-top: 12px; }
 .profile-tabs > header {
     background-color: @desk_surface;
-    border: 1px solid @desk_edge;
+    border: 1px solid transparent;
     border-radius: 14px;
     padding: 4px;
 }
@@ -205,28 +211,31 @@ scrollbar slider:active { background-color: @desk_cyan; }
 }
 .profile-tabs > header tab:hover { background-color: @desk_hover; color: @desk_ink; }
 .profile-tabs > header tab:checked {
-    background-color: alpha(@desk_violet, 0.20);
+    background-color: @desk_selection;
     color: @desk_ink;
-    box-shadow: none;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px @desk_violet;
 }
 .profile-tabs > header tab:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
-.appearance-heading { color: @desk_cyan; font-size: 13px; font-weight: 600; }
+.appearance-heading { color: @desk_muted; font-size: 13px; font-weight: 600; }
 .appearance-section { margin-top: 0; }
 .navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
 
 .hardware-chassis {
-    background: linear-gradient(135deg, #f0f0f2, #c5c5ca);
+    background: linear-gradient(135deg, #414951, #272d34);
     border-radius: 26px;
+    box-shadow: inset 0 1px alpha(#ffffff, 0.18), inset 0 -1px alpha(#000000, 0.45);
 }
-.hardware-brand { color: #202026; font-size: 13px; font-weight: 800; }
+.hardware-brand { color: #e1e6eb; font-size: 13px; font-weight: 800; }
 .hardware-bezel, .key-surface, .strip-surface, .touch-display { background: #08090b; }
 .hardware-bezel { border-radius: 2px; }
 .hardware-rail {
-    background: linear-gradient(180deg, #b5b5bd, #e3e3e6);
+    background: linear-gradient(180deg, #22282e, #343c44);
     border-radius: 28px;
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.35), inset 0 -1px alpha(#ffffff, 0.08);
 }
-.key-surface { border-radius: 8px; box-shadow: inset 0 0 0 2px #36363a; }
+.key-surface { border-radius: 8px; box-shadow: inset 0 0 0 2px #515b65; }
 .strip-zone { background: transparent; border-radius: 0; box-shadow: none; }
 .strip-zone:hover { background: alpha(#f0f0f2, 0.12); }
 .control-selectable {
@@ -238,12 +247,15 @@ scrollbar slider:active { background-color: @desk_cyan; }
     min-height: 0;
 }
 .encoder {
-    background: radial-gradient(circle at 35% 30%, #c329b3, #710c72);
+    background: radial-gradient(circle at 35% 30%, #68737e, #343c44);
+    box-shadow: inset 0 1px 1px alpha(#ffffff, 0.30), inset 0 -2px 2px alpha(#000000, 0.45), 0 2px 3px alpha(#000000, 0.35);
     border: none;
     border-radius: 50%;
     min-width: 46px;
     min-height: 46px;
 }
+.encoder:hover { background: radial-gradient(circle at 35% 30%, #7b8793, #414b55); }
+.encoder:active { background: radial-gradient(circle at 35% 30%, #505b66, #2b3239); }
 .encoder .control-tile { background: transparent; border: none; }
 .control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
 .key-surface.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }

@@ -96,12 +96,17 @@ fn dropdown(directory: &std::path::Path, picker: &gtk::DropDown, name: &str) {
 
 #[test]
 fn regenerate_documentation_screenshots_when_explicitly_requested() {
+    if std::env::var_os("STREAMDECK_DOC_SCREENSHOTS_DIR").is_some() {
+        gtk::test_synced(capture_documentation_screenshots);
+    }
+}
+
+fn capture_documentation_screenshots() {
     let Some(directory) = std::env::var_os("STREAMDECK_DOC_SCREENSHOTS_DIR") else {
         return;
     };
     let directory = std::path::PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
-    let _guard = gtk_test_lock();
     gtk::init().expect("documentation capture requires a native GTK display");
     let settings = gtk::Settings::default().unwrap();
     let original_theme = settings.gtk_theme_name();

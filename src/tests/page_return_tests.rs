@@ -3,7 +3,10 @@ use sdeck_plus::layers::PageReturn;
 
 #[test]
 fn page_return_option_is_saved_reloaded_and_tested_with_any_action() {
-    let _guard = gtk_test_lock();
+    run_gtk_test(assert_page_return_option_is_saved_reloaded_and_tested_with_any_action);
+}
+
+fn assert_page_return_option_is_saved_reloaded_and_tested_with_any_action() {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),

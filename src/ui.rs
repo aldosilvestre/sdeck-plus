@@ -137,8 +137,9 @@ pub(crate) fn assert_toast_lifecycle(toast: &Toast) {
 }
 
 pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
-    let content = GtkBox::new(Orientation::Horizontal, 8);
+    let content = GtkBox::new(Orientation::Horizontal, 6);
     content.set_halign(gtk::Align::Center);
+    content.set_valign(gtk::Align::Center);
     let image = Image::from_icon_name(icon);
     image.set_pixel_size(16);
     content.append(&image);
@@ -165,6 +166,10 @@ pub(crate) fn icon_button(icon: &str, caption: &str) -> Button {
         .tooltip_text(caption)
         .build();
     button.add_css_class("icon-action");
+    button.add_css_class("icon-only");
+    if let Some(image) = button.child().and_downcast::<Image>() {
+        image.set_pixel_size(16);
+    }
     button.update_property(&[gtk::accessible::Property::Label(caption)]);
     button
 }
@@ -172,6 +177,7 @@ pub(crate) fn icon_button(icon: &str, caption: &str) -> Button {
 pub(crate) fn menu_button(icon: &str, caption: &str, panel: &Popover) -> gtk::MenuButton {
     let button = gtk::MenuButton::builder()
         .child(&icon_caption(icon, caption))
+        .always_show_arrow(false)
         .popover(panel)
         .build();
     button.add_css_class("icon-action");
