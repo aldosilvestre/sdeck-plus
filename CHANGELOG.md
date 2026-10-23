@@ -6,8 +6,18 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ## [Unreleased]
 
+### Changed
+
+- The app always starts on the Base profile's first page instead of restoring the
+  page that was active when it last closed.
+
 ### Added
 
+- **Delete touchscreen pages.** A trash button beside the Touch page controls
+  deletes the selected touch page and its bindings and artwork after confirmation.
+  A profile always keeps at least one touch page.
+- **Swipes change touch page by default.** Unbound Swipe left shows the next touch
+  page and Swipe right the previous one. Any binding on the gesture overrides it.
 - **Page-owned dials.** Dial press/turn actions and live information now follow
   each profile's touchscreen pages, not keypad pages or folders. Existing touch
   pages retain their edits and start with a copy of their profile's main-page

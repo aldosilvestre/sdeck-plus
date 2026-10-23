@@ -10,6 +10,7 @@ pub(super) struct TouchscreenControls {
     previous: Button,
     next: Button,
     create: Button,
+    delete: Button,
     updating: Rc<Cell<bool>>,
 }
 impl TouchscreenControls {
@@ -22,9 +23,10 @@ impl TouchscreenControls {
         let previous = crate::ui::icon_button("go-previous-symbolic", "Previous touchscreen page");
         let next = crate::ui::icon_button("go-next-symbolic", "Next touchscreen page");
         let create = crate::ui::icon_button("list-add-symbolic", "New touchscreen page");
+        let delete = crate::ui::icon_button("edit-delete-symbolic", "Delete touchscreen page");
         root.append(&Label::new(Some("Touch page")));
         root.append(&picker);
-        for button in [&previous, &next, &create] {
+        for button in [&previous, &next, &create, &delete] {
             root.append(button);
         }
         root.set_visible(false);
@@ -35,6 +37,7 @@ impl TouchscreenControls {
             previous,
             next,
             create,
+            delete,
             updating: Rc::new(Cell::new(false)),
         }
     }
@@ -59,6 +62,9 @@ impl TouchscreenControls {
                 Err(error) => callback.report(&format!("Could not create touchscreen page: {error}"), true),
             }
         });
+        let callback = runtime.clone();
+        self.delete
+            .connect_clicked(move |_| callback.confirm_touchscreen_removal());
         let callback = runtime.clone();
         let updating = self.updating.clone();
         self.picker.connect_selected_notify(move |picker| {
@@ -138,6 +144,7 @@ impl FeatureRuntime {
         controls
             .create
             .set_sensitive(!pages.is_empty() && pages.len() < 64);
+        controls.delete.set_sensitive(pages.len() > 1);
         controls.root.set_visible(
             matches!(
                 self.ui.control_kind(),
@@ -145,6 +152,67 @@ impl FeatureRuntime {
             ) && !pages.is_empty(),
         );
         controls.updating.set(false);
+    }
+    fn confirm_touchscreen_removal(&self) {
+        let Some(parent) = self
+            .touchscreen_controls
+            .root
+            .root()
+            .and_then(|root| root.downcast::<gtk::Window>().ok())
+        else {
+            return;
+        };
+        let Some(profile) = self.touchscreen_profile() else {
+            return;
+        };
+        let (owner, number) = {
+            let layers = self.layers.borrow();
+            let Some(owner) = layers.touchscreen_owner(layers.active()).map(str::to_owned) else {
+                return;
+            };
+            let number = layers
+                .touchscreen_pages(&profile)
+                .iter()
+                .position(|page| *page == owner)
+                .map_or(1, |index| index + 1);
+            (owner, number)
+        };
+        let dialog = gtk::MessageDialog::builder()
+            .transient_for(&parent)
+            .modal(true)
+            .destroy_with_parent(true)
+            .message_type(gtk::MessageType::Question)
+            .text(format!("Delete touchscreen page {number}?"))
+            .secondary_text("This deletes the page's touch, dial and gesture bindings and artwork. Keypad pages are unchanged. It cannot be undone.")
+            .build();
+        dialog.add_button("Keep", gtk::ResponseType::Cancel);
+        dialog
+            .add_button("Delete page", gtk::ResponseType::Accept)
+            .add_css_class("destructive-action");
+        dialog.set_default_response(gtk::ResponseType::Cancel);
+        let callback = self.clone();
+        dialog.connect_response(move |dialog, response| {
+            if response == gtk::ResponseType::Accept {
+                match callback.remove_touchscreen_page(&profile, &owner) {
+                    Ok(()) => callback.report("Touchscreen page deleted.", false),
+                    Err(error) => callback
+                        .report(&format!("Could not delete touchscreen page: {error}"), true),
+                }
+            }
+            dialog.close();
+        });
+        dialog.present();
+    }
+    fn remove_touchscreen_page(&self, profile: &str, owner: &str) -> Result<(), String> {
+        let mut layers = self.layers.borrow().clone();
+        layers
+            .remove_touchscreen_page(profile, owner)
+            .map_err(|error| error.to_string())?;
+        self.artwork.remove_layers(&[owner.to_owned()])?;
+        *self.layers.borrow_mut() = layers;
+        self.refresh_selection();
+        self.persist(self.layers.borrow().clone());
+        Ok(())
     }
     pub(super) fn navigate_touchscreen(&self, action: TouchscreenAction) {
         let Some(profile) = self.touchscreen_profile() else {

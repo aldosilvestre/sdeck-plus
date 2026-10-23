@@ -103,6 +103,31 @@ impl Trigger {
     }
 }
 
+/// Unbound horizontal swipes change touchscreen page: left shows the next
+/// page, right the previous one. Any explicit binding takes precedence.
+fn default_swipe_binding(event: &Event) -> Option<(Trigger, Action)> {
+    use crate::features::{FeatureAction, TouchscreenAction};
+    let Event::TouchFlick {
+        start_x,
+        start_y,
+        end_x,
+        end_y,
+    } = *event
+    else {
+        return None;
+    };
+    let direction = swipe_direction(start_x, start_y, end_x, end_y)?;
+    let page = match direction {
+        SwipeDirection::Left => TouchscreenAction::NextPage,
+        SwipeDirection::Right => TouchscreenAction::PreviousPage,
+        _ => return None,
+    };
+    Some((
+        Trigger::TouchSwipe(direction),
+        Action::Feature(FeatureAction::Touchscreen(page)),
+    ))
+}
+
 /// Section (1 through 4) of the 800px touch strip that contains `x`.
 fn touch_zone(x: u16) -> Option<u8> {
     u8::try_from(x / 200)
@@ -505,6 +530,7 @@ impl LayerStore {
                 self.binding(&self.active, &trigger)
                     .map(|action| (trigger, action))
             })
+            .or_else(|| default_swipe_binding(event))
     }
     pub fn apply_switch(&mut self, target: &str) -> bool {
         self.select(target)

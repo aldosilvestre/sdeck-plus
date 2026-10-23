@@ -588,6 +588,32 @@ impl LayerStore {
         data.selected = data.pages.len() - 1;
         Ok(owner)
     }
+    /// Delete one touch page; a profile always keeps at least one. The selection
+    /// keeps pointing at the same page, or at the nearest one if it was removed.
+    pub fn remove_touchscreen_page(&mut self, profile: &str, owner: &str) -> io::Result<()> {
+        if self.touchscreens.invalid {
+            return Err(invalid("repair touchscreen configuration before saving"));
+        }
+        let data = self
+            .touchscreens
+            .profiles
+            .get_mut(profile)
+            .ok_or_else(|| invalid("unknown touchscreen profile"))?;
+        let index = data
+            .pages
+            .iter()
+            .position(|page| page.name == owner)
+            .ok_or_else(|| invalid("unknown touchscreen page"))?;
+        if data.pages.len() == 1 {
+            return Err(invalid("a profile must keep at least one touchscreen page"));
+        }
+        data.pages.remove(index);
+        if index < data.selected {
+            data.selected -= 1;
+        }
+        data.selected = data.selected.min(data.pages.len() - 1);
+        Ok(())
+    }
     pub fn select_touchscreen_page(&mut self, profile: &str, owner: &str) -> bool {
         let Some(profile) = self.touchscreens.profiles.get_mut(profile) else {
             return false;

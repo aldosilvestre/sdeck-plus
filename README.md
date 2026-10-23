@@ -183,21 +183,26 @@ unreadable or invalid recovery state is reported instead of silently replaced.
 **Touchscreen pages and swipe navigation.** Select a dial, the touch strip or a
 section to show **Touch page** above its editor. Use the page selector and arrows to
 browse independently, or **New touchscreen page** (+) to add and select a blank
+page. Use **Delete touchscreen page** (the trash button) to remove the selected
+touch page after confirming; its touch, dial and gesture bindings and artwork are
+deleted, keypad pages are unchanged, and a profile always keeps at least one touch
 page. Each profile remembers its selected touch page, including after restart.
 There are up to 64 touch pages per profile, separate from the keypad layer limit.
 
 Small chevrons at the strip's left/right edges indicate an available previous/next
 page, both on the device and in the window preview. Unavailable directions are
 hidden; a single-page profile shows neither. Indicators stay above section artwork
-and live information. They are visual hints, not automatic swipe assignments.
+and live information. They are visual hints; swipes work without any setup.
 
-On each touch page, select **Swipe left**, then **More actions > Organization >
-Next touchscreen page**, and save. Assign **Previous touchscreen page** to
-**Swipe right** in the same way. These actions are offered only for touchscreen
-controls; the existing Next/Previous page actions still navigate keypad pages.
-Neither touchscreen navigation action wraps at the first or last page. Existing
-swipe assignments are kept, not replaced automatically. Saving a navigation
-binding does not run it. A configured delayed return still targets its chosen
+By default, swiping left on the touch strip shows the next touch page and swiping
+right shows the previous one, with no binding to configure. The defaults apply
+only while the gesture has no binding of its own: to change a swipe, select
+**Swipe left** or **Swipe right**, choose any action (for example **More actions >
+Organization > Next touchscreen page**) and save; a Flick binding also takes
+precedence. Swipe up and down have no default. These touchscreen actions are
+offered only for touchscreen controls; the existing Next/Previous page actions
+still navigate keypad pages. Neither touchscreen navigation action wraps at the
+first or last page. Saving a navigation binding does not run it. A configured delayed return still targets its chosen
 keypad page; it does not select a touch page.
 
 ![Touch strip selected in the editor](docs/screenshots/touch-strip.png)
@@ -455,6 +460,8 @@ Profiles appear as native tabs, with **Base** always available. Create another
 profile in **Organize → New profile** using **Profile name** and **Create profile** (disabled until the name is new). Pages
 belong to their profile; folders belong to individual pages and do not create additional profile tabs.
 Switching tabs restores that profile's last selected page for the current session.
+Every time the app starts it opens on the **Base** profile's first page, whichever
+page was selected when it last closed.
 
 To make a profile application-specific, open **Organize → Edit profile**, choose it under
 **Profile to edit**, enter a window class or executable name under

@@ -14,10 +14,13 @@ tools use progressive disclosure instead of competing with action editing.
 Touchscreen configuration is profile-owned and has its own page selection,
 independent of keypad pages and folders. Only the touch inspector shows the
 compact **Touch page** selector, boundary-aware previous/next arrows and add
-button; it does not change the fixed hardware preview geometry. Each control
+and delete buttons (delete is disabled for a profile's last touch page and asks
+for confirmation); it does not change the fixed hardware preview geometry. Each control
 retains an accessible name and tooltip. Organization actions distinguish keypad
-navigation from touchscreen navigation; existing swipe assignments are never
-silently replaced. Dials follow the same selected touchscreen page, including
+navigation from touchscreen navigation. Unbound swipe left/right change touch
+page by default (next/previous); any explicit binding replaces that default, and
+existing swipe assignments are never silently replaced. The app always starts on
+the Base profile's first page. Dials follow the same selected touchscreen page, including
 press/turn actions, delayed returns and live information. Keypad navigation must
 not change them. On a v1 upgrade, copy each profile's main-page dials into its
 existing touch pages without replacing touch edits, artwork or legacy records.

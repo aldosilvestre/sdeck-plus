@@ -269,6 +269,10 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
             return;
         }
     };
+    // Every launch starts on Base (its first page), whatever was saved last.
+    layers
+        .borrow_mut()
+        .select(sdeck_plus::layers::DEFAULT_LAYER);
     let (sender, receiver) = mpsc::channel();
     let app_event_sender = sender.clone();
     let hid = event_api::start_hid_monitor(sender);
