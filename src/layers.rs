@@ -194,6 +194,11 @@ pub struct LayerStore {
     touchscreens: touchscreen::Touchscreens,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static INTERRUPT_TOUCH_SAVE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
 impl LayerStore {
     pub fn open() -> io::Result<Self> {
         let base = std::env::var_os("XDG_DATA_HOME")
@@ -207,6 +212,7 @@ impl LayerStore {
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
+        touchscreen::recover(&root)?;
         let mut store = Self {
             root,
             layers: BTreeMap::new(),

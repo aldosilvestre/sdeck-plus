@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 const FILE: &str = "touchscreen.json";
+const JOURNAL: &str = "touchscreen.save-journal";
+const BACKUP: &str = "layers.conf.rollback";
 const MAX_PAGES: usize = 64;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -150,50 +152,41 @@ impl Touchscreens {
         }
     }
 
-    /// Prepare both stores before publication. If publishing the touch file
-    /// fails, atomically restore the previous layers inode, including permissions.
+    /// The synced intent and staged touch inode make interrupted publication
+    /// restart-recoverable: pending touch means rollback; consumed touch means commit.
     pub(super) fn persist_with_layers(&self, root: &Path, layers: &[u8]) -> io::Result<()> {
+        recover(root)?;
         let touch_temp = self.stage(root)?;
         let layers_temp = stage_file(root, "layers.conf", layers)?;
         let layers_path = root.join("layers.conf");
         let Some(touch_temp) = touch_temp else {
             return fs::rename(layers_temp, layers_path);
         };
-        static NEXT_BACKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let backup = root.join(format!(
-            "layers.conf.rollback-{}-{}",
-            std::process::id(),
-            NEXT_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let had_layers = match fs::hard_link(&layers_path, &backup) {
-            Ok(()) => true,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        let previous = match fs::hard_link(&layers_path, root.join(BACKUP)) {
+            Ok(()) => b"layers".as_slice(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => b"empty".as_slice(),
             Err(error) => return Err(error),
         };
-        if let Err(error) = fs::rename(layers_temp, &layers_path) {
-            if had_layers {
-                let _ = fs::remove_file(&backup);
-            }
-            return Err(error);
-        }
-        if let Err(error) = fs::rename(touch_temp, root.join(FILE)) {
-            let restored = if had_layers {
-                fs::rename(&backup, &layers_path)
-            } else {
-                fs::remove_file(&layers_path)
-            };
-            return match restored {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(io::Error::other(format!(
-                    "{error}; could not restore layers: {rollback}; previous layers retained at {}",
-                    backup.display()
-                ))),
-            };
-        }
-        if had_layers {
-            let _ = fs::remove_file(backup);
-        }
-        Ok(())
+        fs::rename(stage_file(root, JOURNAL, previous)?, root.join(JOURNAL))?;
+        fs::File::open(root)?.sync_all()?;
+        let publication = (|| {
+            fs::rename(layers_temp, &layers_path)?;
+            fs::File::open(root)?.sync_all()?;
+            #[cfg(test)]
+            interrupt_save(1);
+            fs::rename(touch_temp, root.join(FILE))?;
+            fs::File::open(root)?.sync_all()?;
+            #[cfg(test)]
+            interrupt_save(2);
+            Ok(())
+        })();
+        recover(root).map_err(|error| {
+            io::Error::other(format!(
+                "paired save recovery pending at {}: {error}",
+                root.join(JOURNAL).display()
+            ))
+        })?;
+        publication
     }
 
     fn stage(&self, root: &Path) -> io::Result<Option<PathBuf>> {
@@ -296,6 +289,54 @@ impl Touchscreens {
         }
         self.layer_profiles.remove(name);
     }
+}
+
+/// Reconcile an interrupted pair before parsing either configuration file.
+/// Keep the backup linked until the recovery decision itself is durable.
+pub(super) fn recover(root: &Path) -> io::Result<()> {
+    let intent = match fs::read(root.join(JOURNAL)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return discard(&root.join(BACKUP))
+        }
+        Err(error) => return Err(error),
+    };
+    let had_layers = match intent.as_slice() {
+        b"layers" => true,
+        b"empty" => false,
+        _ => return Err(invalid("invalid paired save recovery journal")),
+    };
+    if root.join("touchscreen.json.tmp").try_exists()? {
+        if had_layers {
+            let restore = root.join("layers.conf.recover");
+            discard(&restore)?;
+            fs::hard_link(root.join(BACKUP), &restore)?;
+            fs::rename(restore, root.join("layers.conf"))?;
+        } else {
+            discard(&root.join("layers.conf"))?;
+        }
+    }
+    fs::File::open(root)?.sync_all()?;
+    fs::remove_file(root.join(JOURNAL))?;
+    fs::File::open(root)?.sync_all()?;
+    discard(&root.join(BACKUP))
+}
+
+fn discard(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+#[cfg(test)]
+fn interrupt_save(step: u8) {
+    super::INTERRUPT_TOUCH_SAVE.with(|flag| {
+        if flag.get() == step {
+            flag.set(0);
+            panic!("interrupted paired save");
+        }
+    });
 }
 
 fn stage_file(root: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {

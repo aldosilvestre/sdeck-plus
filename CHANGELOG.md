@@ -16,6 +16,8 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   all touch pages and their local sounds. Dial bindings remain keypad-page-owned.
   Paired saves stage keypad/touch data before publication and roll back the layer
   replacement when touchscreen publication fails, keeping failed saves restartable.
+  A durable recovery journal reconciles saves interrupted between file replacements
+  before either store loads, preserving completed pairs and restoring pending pairs.
 
 - **Start in tray.** A tray checkbox, on by default, makes a normal launch
   begin hidden in the tray. Launching again while running opens the window,

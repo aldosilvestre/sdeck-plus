@@ -233,6 +233,51 @@ fn migration_deduplicates_complete_configurations_and_keeps_legacy_data_and_imag
 }
 
 #[test]
+fn interrupted_paired_save_recovers_before_loading_either_store() {
+    for step in [1, 2] {
+        let fixture = Fixture::new();
+        let (mut layers, mut organization, mut artwork) = fixture.stores();
+        let page = organization.create_page(&mut layers).unwrap();
+        layers
+            .initialize_touchscreens(&organization, &mut artwork)
+            .unwrap();
+        layers
+            .bind("Base", Trigger::ZoneTap(1), Action::None)
+            .unwrap();
+        layers
+            .set_return(
+                "Base",
+                &Trigger::ZoneTap(1),
+                Some(PageReturn {
+                    layer: page.clone(),
+                    seconds: 2,
+                }),
+            )
+            .unwrap();
+        layers.persist().unwrap();
+        let snapshots = || {
+            ["layers.conf", "touchscreen.json"].map(|name| fs::read(fixture.0.join(name)).unwrap())
+        };
+        let previous = snapshots();
+        layers.remove(&page).unwrap();
+        crate::layers::INTERRUPT_TOUCH_SAVE.with(|flag| flag.set(step));
+        // Unwind skips the ordinary returned-error rollback, as process death does.
+        assert!(std::panic::catch_unwind(|| layers.persist()).is_err());
+        let expected = if step == 1 { previous } else { snapshots() };
+        for _ in 0..2 {
+            let reopened = LayerStore::open_at(&fixture.0).unwrap();
+            assert!(
+                reopened.diagnostics().is_empty(),
+                "{:?}",
+                reopened.diagnostics()
+            );
+            assert_eq!(reopened.names().contains(&page), step == 1);
+            assert_eq!(snapshots(), expected);
+        }
+    }
+}
+
+#[test]
 fn failed_layers_save_does_not_poison_touchscreen_restart() {
     let fixture = Fixture::new();
     let (mut layers, mut organization, mut artwork) = fixture.stores();
