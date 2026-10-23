@@ -262,6 +262,17 @@ fn v1_pages_seed_dials_from_profile_root_once_without_changing_touch_or_legacy()
         loaded.diagnostics()
     );
     loaded.select(&keypad);
+    assert_eq!(
+        loaded.binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::Emit("root".into())),
+        "v1 dials remain legacy-owned until initialization completes"
+    );
+    assert!(
+        loaded
+            .bind("@touchscreen:1", Trigger::EncoderPress(2), Action::None)
+            .is_err(),
+        "do not allow encoder rows to be written into an unupgraded v1 page"
+    );
     loaded
         .initialize_touchscreens(&organization, &mut artwork)
         .unwrap();

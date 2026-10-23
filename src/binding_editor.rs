@@ -220,10 +220,10 @@ pub fn control_summary(
     control: ControlKind,
     number: u8,
 ) -> String {
-    let sample = if control == ControlKind::Touch {
-        Trigger::TouchTap
-    } else {
-        Trigger::KeyPress(1)
+    let sample = match control {
+        ControlKind::Touch => Trigger::TouchTap,
+        ControlKind::Encoder => Trigger::EncoderPress(number),
+        ControlKind::Button => Trigger::KeyPress(number),
     };
     let bindings = store
         .binding_layer(layer, &sample)
@@ -422,6 +422,36 @@ mod tests {
         let summary = control_summary(&store, "Base", ControlKind::Button, 1);
         assert!(summary.ends_with('…'));
         assert!(summary.chars().count() <= 55);
+        let button_summary = summary;
+        let organization = crate::organization::Organization::open_at(&path, &store).unwrap();
+        let mut artwork =
+            crate::local_artwork::ArtworkStore::open_at_for_layer(&path, Some("Base")).unwrap();
+        store
+            .initialize_touchscreens(&organization, &mut artwork)
+            .unwrap();
+        let first = store.touchscreen_owner("Base").unwrap().to_owned();
+        store
+            .bind(
+                "Base",
+                Trigger::EncoderPress(4),
+                Action::Emit("page-owned".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            control_summary(&store, "Base", ControlKind::Encoder, 4),
+            "Press: Emit page-owned\nCW: Layer Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
+        );
+        store.create_touchscreen_page("Base").unwrap();
+        assert_eq!(
+            control_summary(&store, "Base", ControlKind::Encoder, 4),
+            "Press: Unassigned\nCW: Unassigned\nCCW: Unassigned"
+        );
+        assert_eq!(
+            control_summary(&store, "Base", ControlKind::Button, 1),
+            button_summary
+        );
+        store.select_touchscreen_page("Base", &first);
+        assert!(control_summary(&store, "Base", ControlKind::Encoder, 4).contains("page-owned"));
         let _ = fs::remove_dir_all(path);
     }
 

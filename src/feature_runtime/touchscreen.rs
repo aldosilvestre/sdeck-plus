@@ -1,4 +1,4 @@
-//! Independent touchscreen page controls on the touch inspector.
+//! Shared touchscreen page controls on touch and dial inspectors.
 use super::*;
 use sdeck_plus::features::TouchscreenAction;
 
@@ -15,7 +15,7 @@ pub(super) struct TouchscreenControls {
 impl TouchscreenControls {
     pub(super) fn new() -> Self {
         let root = GtkBox::new(Orientation::Horizontal, 6);
-        root.set_tooltip_text(Some("Independent touchscreen pages for this profile; keypad pages and folders are unchanged. Edge indicators show available pages; assign swipe actions separately."));
+        root.set_tooltip_text(Some("Touchscreen pages include their dials; keypad pages and folders are unchanged. Edge indicators show available pages; assign swipe actions separately."));
         let model = gtk::StringList::new(&[]);
         let picker = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
         picker.update_property(&[gtk::accessible::Property::Label("Touchscreen page")]);
@@ -54,7 +54,7 @@ impl TouchscreenControls {
                 Ok(_) => {
                     callback.refresh_selection();
                     callback.persist(callback.layers.borrow().clone());
-                    callback.report("Touchscreen page created. Configure its gestures and artwork independently.", false);
+                    callback.report("Touchscreen page created. Configure its dials, gestures and artwork independently.", false);
                 }
                 Err(error) => callback.report(&format!("Could not create touchscreen page: {error}"), true),
             }
@@ -138,9 +138,12 @@ impl FeatureRuntime {
         controls
             .create
             .set_sensitive(!pages.is_empty() && pages.len() < 64);
-        controls
-            .root
-            .set_visible(self.ui.control_kind() == crate::ControlKind::Touch && !pages.is_empty());
+        controls.root.set_visible(
+            matches!(
+                self.ui.control_kind(),
+                crate::ControlKind::Touch | crate::ControlKind::Encoder
+            ) && !pages.is_empty(),
+        );
         controls.updating.set(false);
     }
     pub(super) fn navigate_touchscreen(&self, action: TouchscreenAction) {

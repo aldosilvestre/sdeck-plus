@@ -180,8 +180,8 @@ interrupted saves: startup restores the previous pair if touch publication was
 pending, or keeps the completed pair. Recovery runs before either store is read;
 unreadable or invalid recovery state is reported instead of silently replaced.
 
-**Touchscreen pages and swipe navigation.** Select the touch strip or a section
-to show **Touch page** above its editor. Use the page selector and arrows to
+**Touchscreen pages and swipe navigation.** Select a dial, the touch strip or a
+section to show **Touch page** above its editor. Use the page selector and arrows to
 browse independently, or **New touchscreen page** (+) to add and select a blank
 page. Each profile remembers its selected touch page, including after restart.
 There are up to 64 touch pages per profile, separate from the keypad layer limit.

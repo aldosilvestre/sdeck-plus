@@ -682,6 +682,9 @@ fn touchscreen_pages_and_unselected_audio_roundtrip_with_independent_owners() {
     layers
         .bind("Base", Trigger::ZoneTap(1), Action::Emit("first".into()))
         .unwrap();
+    layers
+        .bind("Base", Trigger::EncoderPress(4), Action::None)
+        .unwrap();
     let second = layers.create_touchscreen_page("Base").unwrap();
     let audio = fixture.0.join("touch.wav");
     fs::write(&audio, b"portable touch audio").unwrap();
@@ -689,6 +692,15 @@ fn touchscreen_pages_and_unselected_audio_roundtrip_with_independent_owners() {
         .bind(
             "Base",
             Trigger::ZoneTap(1),
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                path: audio.clone(),
+            })),
+        )
+        .unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::EncoderClockwise(4),
             Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
                 path: audio,
             })),
@@ -718,11 +730,22 @@ fn touchscreen_pages_and_unselected_audio_roundtrip_with_independent_owners() {
         restored.binding("Base", &Trigger::ZoneTap(1)),
         Some(Action::Emit("first".into()))
     );
+    assert_eq!(
+        restored.binding("Base", &Trigger::EncoderPress(4)),
+        Some(Action::None)
+    );
     restored.select_touchscreen_page("Base", &second);
     let Some(Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path }))) =
         restored.binding("Base", &Trigger::ZoneTap(1))
     else {
         panic!("touch audio missing")
+    };
+    assert!(path.starts_with(target.join("media")));
+    assert_eq!(fs::read(path).unwrap(), b"portable touch audio");
+    let Some(Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path }))) =
+        restored.binding("Base", &Trigger::EncoderClockwise(4))
+    else {
+        panic!("dial audio missing")
     };
     assert!(path.starts_with(target.join("media")));
     assert_eq!(fs::read(path).unwrap(), b"portable touch audio");

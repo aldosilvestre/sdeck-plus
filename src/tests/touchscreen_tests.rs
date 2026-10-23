@@ -309,6 +309,15 @@ fn assert_profile_owner() {
     images
         .copy_touchscreen_assignments(&[("Base".into(), page.clone())])
         .unwrap();
+    for key in ["Base", page.as_str()] {
+        store
+            .bind(
+                key,
+                Trigger::EncoderPress(1),
+                Action::Emit("first dial".into()),
+            )
+            .unwrap();
+    }
     store
         .initialize_touchscreens(&organization, &mut images)
         .unwrap();
@@ -372,6 +381,32 @@ fn assert_profile_owner() {
         Some(first_path)
     );
     let controls = widgets.feature_runtime.touchscreen_controls();
+    widgets.binding_ui.control_picker.set_selected(1);
+    widgets.binding_ui.load_selected_binding(&layers);
+    assert!(
+        controls.is_visible(),
+        "dials must expose their touchscreen page context"
+    );
+    assert_eq!(
+        widgets
+            .binding_ui
+            .selected_layer_and_trigger(&layers)
+            .unwrap()
+            .0,
+        owner
+    );
+    let dial_event = protocol::Event::EncoderButton {
+        index: 0,
+        pressed: true,
+    };
+    let dial_identity = matching_binding(&layers, &dial_event).unwrap().0;
+    layers.borrow_mut().select(&page);
+    assert_eq!(
+        matching_binding(&layers, &dial_event).unwrap().0,
+        dial_identity
+    );
+    layers.borrow_mut().select("Base");
+    widgets.binding_ui.control_picker.set_selected(2);
     assert!(controls.is_visible());
     wait_for_frame(&window);
     assert!(
@@ -437,6 +472,41 @@ fn assert_profile_owner() {
             .find(|button| button_caption(button).as_deref() == Some("Save binding"))
             .unwrap()
     };
+    widgets.binding_ui.control_picker.set_selected(1);
+    select_string(
+        &widgets.binding_ui.event_model,
+        &widgets.binding_ui.event_picker,
+        "Press",
+    );
+    widgets.binding_ui.populate_action(&Action::None);
+    save.emit_clicked();
+    assert_eq!(
+        layers.borrow().binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::None)
+    );
+    assert_eq!(
+        widgets
+            .binding_ui
+            .selected_layer_and_trigger(&layers)
+            .unwrap()
+            .0,
+        second
+    );
+    picker.set_selected(0);
+    assert_eq!(
+        layers.borrow().binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::Emit("first dial".into()))
+    );
+    assert_eq!(
+        matching_binding(&layers, &dial_event).unwrap().0,
+        dial_identity
+    );
+    picker.set_selected(1);
+    assert_eq!(
+        layers.borrow().binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::None)
+    );
+    widgets.binding_ui.control_picker.set_selected(2);
     select_string(
         &widgets.binding_ui.event_model,
         &widgets.binding_ui.event_picker,

@@ -615,7 +615,9 @@ impl LayerStore {
         true
     }
     pub fn binding_layer(&self, layer: &str, trigger: &Trigger) -> Option<&Layer> {
-        if trigger.belongs_to_touchscreen_page() {
+        if trigger.belongs_to_touchscreen_page()
+            && (!self.touchscreens.needs_dial_migration || trigger.is_touchscreen())
+        {
             if let Some(page) = self.touchscreens.page(layer) {
                 return Some(page);
             }
@@ -627,7 +629,10 @@ impl LayerStore {
         layer: &str,
         trigger: &Trigger,
     ) -> Option<&mut Layer> {
-        if trigger.belongs_to_touchscreen_page() && self.touchscreens.page(layer).is_some() {
+        if trigger.belongs_to_touchscreen_page()
+            && (!self.touchscreens.needs_dial_migration || trigger.is_touchscreen())
+            && self.touchscreens.page(layer).is_some()
+        {
             return self.touchscreens.page_mut(layer);
         }
         self.layers.get_mut(layer)
