@@ -11,7 +11,7 @@ Branch: feat/profile-dial-editor (child of feat/profile-touchscreen-dials); feat
 ## Tasks
 
 - T1 [S1-S3] inline; done; versioned dial ownership and idempotent existing-page migration, preserving legacy rows/returns/info; commit: 2795822. Risk: item 1 (stored config upgrade), item 3 (shared ownership).
-- T2 [S1,S2] inline; done; editor page context/summaries, effective live info, bundle regression and user docs; commit: slice 2 (recorded after commit). Risk: item 1 (v1 pre-initialization write guard), item 3 (shared editor/render routing).
+- T2 [S1,S2] inline; done; editor page context/summaries, effective live info, bundle regression and user docs; commit: c7f37cb. Risk: item 1 (v1 pre-initialization write guard), item 3 (shared editor/render routing).
 - T3 [S1-S3] inline checks plus delegated independent verifier; in_progress; full suite, baseline differential, committed slice assessments and parent spot check; commit: pending. Risk: items 1 and 3.
 
 ## Log
@@ -21,6 +21,10 @@ L1 Original request: "esta funcionando. Pero me olvide de comentarte que tambien
 L2 User selected S2 then S3. V1 touch-page storage lacks source keypad provenance; seed existing pages from Organization::profile_key, not current keypad selection. Retain edited touch bindings/artwork and legacy records. Fresh legacy migration compares complete touch+dial configurations. New empty touch pages remain empty, like existing touch behavior. No actual user config migration, install or publishing authorized.
 
 L3 Route: one dependent behavior; inline implementation, not independent writers. Read-only map mvkdeoou-9-vgpj supplies ownership/editor/bundle seams. Independent verifier at feature end for named risks. Use a separate ownership predicate: is_touchscreen remains gesture-only for navigation-action validation. Preserve exact-owner bundle writes, exact-rotation precedence and paired publication/recovery.
+
+L13 Final checks observed: job-44 exit 0, promoted public integration regressions 2/2, fmt and strict all-target/all-feature clippy. Production source unchanged since independent PASS. Job-45 baseline f4327f8 and candidate public-interface differential: both exit 0, identical 1221-byte stdout and empty stderr for keypad/touch execution and summaries, legacy uninitialized dials, blank-touch/keypad isolation. Parent exact mapped GTK editor spot check exit 0. Scratch baseline compiled separately with existing exact-fingerprint dependencies; never used a scratch Cargo package with live target. New dial behavior remains physically untested; no install or real-data migration. T3 proof complete, evidence commit/assessment/record closure pending.
+
+L12 Independent mvke3kda-a-nj82 PASS S1/S2/S3, no blockers/advisories: 18 touch tests, 7 editor, audio bundle, 2 mapped GTK tests; all 4 dials/exact directions and pending-v1 immutable rejection public probes (2 passed). Initial isolated rustup invocation lacked default toolchain; direct installed rustc resolved harness issue without installation. No real config/device access. Source c7f37cb. Parent is promoting executed assertion bodies into tests/profile_touchscreen_verification.rs with isolated self-cleaning fixtures, not modifying production logic. Native slice 2 assessment medium/reviewDue false, item1 escalation; no new native START due. T3 remains open for regression execution, differential and parent spot check.
 
 L11 Slice 2 boundary: 2795822..HEAD on child branch feat/profile-dial-editor. ~180 authored lines; includes integration and pending-v1 safety guard. No source/doc work pending; T3 final evidence remains.
 
