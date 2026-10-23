@@ -8,6 +8,42 @@ use crate::{
 use std::fs;
 
 #[test]
+fn touchscreen_navigation_indicators_follow_profile_page_boundaries() {
+    let root = std::env::temp_dir().join(format!("sdeck-touch-bounds-{}", std::process::id()));
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    let mut organization = Organization::open_at(&root, &layers).unwrap();
+    let keypad = organization.create_page(&mut layers).unwrap();
+    let folder = organization
+        .create_folder(&mut layers, "Indicators")
+        .unwrap();
+    layers.create("Studio").unwrap();
+    organization.sync(&layers);
+    let mut artwork = ArtworkStore::open_at_for_layer(&root, Some("Base")).unwrap();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    let first = layers.touchscreen_owner("Base").unwrap().to_owned();
+    assert_eq!(layers.touchscreen_navigation("Base"), (false, false));
+    let middle = layers.create_touchscreen_page("Base").unwrap();
+    let last = layers.create_touchscreen_page("Base").unwrap();
+    for (page, expected) in [
+        (&first, (false, true)),
+        (&middle, (true, true)),
+        (&last, (true, false)),
+    ] {
+        layers.select_touchscreen_page("Base", page);
+        for keypad_page in ["Base", keypad.as_str(), folder.as_str()] {
+            layers.select(keypad_page);
+            assert_eq!(layers.touchscreen_navigation(keypad_page), expected);
+            assert_eq!(layers.active(), keypad_page);
+            assert_eq!(layers.touchscreen_owner(keypad_page), Some(page.as_str()));
+        }
+        assert_eq!(layers.touchscreen_navigation("Studio"), (false, false));
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn horizontal_swipes_select_touch_navigation_without_changing_keypad_bindings() {
     let root = std::env::temp_dir().join(format!("sdeck-touch-nav-{}", std::process::id()));
     let mut layers = LayerStore::open_at(&root).unwrap();

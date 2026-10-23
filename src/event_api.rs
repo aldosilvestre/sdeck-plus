@@ -97,6 +97,15 @@ pub enum ArtworkCommand {
         path: Option<PathBuf>,
         text: crate::button_text::ButtonText,
     },
+    /// Complete stateless touch-zone foreground with page-availability indicators.
+    ComposeTouchscreenZone {
+        zone: u8,
+        path: Option<PathBuf>,
+        strip_path: Option<PathBuf>,
+        value: Option<crate::info::InfoValue>,
+        previous: bool,
+        next: bool,
+    },
     /// A live information picture replaces a key or touch-zone image.
     ComposeInfo {
         target: ArtworkTarget,
@@ -259,6 +268,24 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
             ArtworkTarget::Keypad(key),
             image_output::prepare_button_jpeg(path.as_deref(), &text)?,
         ),
+        ArtworkCommand::ComposeTouchscreenZone {
+            zone,
+            path,
+            strip_path,
+            value,
+            previous,
+            next,
+        } => (
+            ArtworkTarget::EncoderZone(zone),
+            image_output::prepare_touchscreen_zone_jpeg(
+                zone,
+                path.as_deref(),
+                strip_path.as_deref(),
+                value.as_ref(),
+                previous,
+                next,
+            )?,
+        ),
         ArtworkCommand::ComposeInfo {
             target,
             path,
@@ -297,6 +324,9 @@ fn process_artwork(
             | ArtworkCommand::Clear { target }
             | ArtworkCommand::ComposeInfo { target, .. } => *target,
             ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
+            ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
+                ArtworkTarget::EncoderZone(*zone)
+            }
             ArtworkCommand::Replace(_) => continue,
         };
         let result = prepare(command).and_then(|reports| {
@@ -471,6 +501,59 @@ fn transmit_reports<E: std::fmt::Display>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn touchscreen_indicator_commands_reach_only_the_requested_zone() {
+        let (sender, commands) = std::sync::mpsc::channel();
+        sender
+            .send(super::ArtworkCommand::ComposeTouchscreenZone {
+                zone: 4,
+                path: None,
+                strip_path: None,
+                value: None,
+                previous: false,
+                next: true,
+            })
+            .unwrap();
+        let (events, received) = std::sync::mpsc::channel();
+        let mut reports = Vec::new();
+        super::process_artwork(
+            &commands,
+            &super::StopSignal::default(),
+            &events,
+            super::prepare_artwork,
+            |report| {
+                reports.push(report.to_vec());
+                Ok::<_, String>(report.len())
+            },
+        );
+        let jpeg =
+            crate::image_output::prepare_touchscreen_zone_jpeg(4, None, None, None, false, true)
+                .unwrap();
+        let expected = crate::image_output::encode_reports(
+            crate::local_artwork::ArtworkTarget::EncoderZone(4),
+            &jpeg,
+        )
+        .unwrap();
+        assert_eq!(
+            reports,
+            expected
+                .into_iter()
+                .map(|report| report.0)
+                .collect::<Vec<_>>()
+        );
+        let results = received
+            .try_iter()
+            .filter_map(|event| match event {
+                super::MonitorEvent::ArtworkResult { target, result } => Some((target, result)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results,
+            [(crate::local_artwork::ArtworkTarget::EncoderZone(4), Ok(()))]
+        );
+    }
+
     use super::*;
 
     #[test]

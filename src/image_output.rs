@@ -239,6 +239,119 @@ pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<V
     encode_jpeg(&compose_button_image(source, text)?)
 }
 
+/// Compose a transparent touch-zone foreground, painting page indicators last.
+/// Only the outer edges of zones 1 and 4 can show previous/next availability.
+pub fn compose_touchscreen_zone(
+    zone: u8,
+    background: Option<&Path>,
+    value: Option<&crate::info::InfoValue>,
+    previous: bool,
+    next: bool,
+) -> Result<Pixbuf, String> {
+    let size = dimensions(ArtworkTarget::EncoderZone(zone))?;
+    let image = if let Some(value) = value {
+        crate::info_render::compose_zone_image(value, background)?
+    } else if let Some(background) = background {
+        resize_background(size, background)?
+    } else {
+        let image = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
+            .ok_or("could not allocate touchscreen foreground")?;
+        image.fill(0);
+        image
+    };
+    let previous = zone == 1 && previous;
+    let next = zone == 4 && next;
+    if !previous && !next {
+        return Ok(image);
+    }
+    let result = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
+        .ok_or("could not allocate touchscreen indicators")?;
+    result.fill(0);
+    image.composite(
+        &result,
+        0,
+        0,
+        200,
+        100,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        InterpType::Nearest,
+        255,
+    );
+    let overlay = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
+        .ok_or("could not allocate touchscreen indicator overlay")?;
+    overlay.fill(0);
+    for (show, center, left) in [(previous, 16i32, true), (next, 184, false)] {
+        if !show {
+            continue;
+        }
+        for dy in -22i32..=22 {
+            for dx in -14i32..=14 {
+                if (dx.abs() - 10).max(0).pow(2) + (dy.abs() - 18).max(0).pow(2) <= 16 {
+                    overlay.put_pixel((center + dx) as u32, (50 + dy) as u32, 12, 17, 23, 210);
+                }
+            }
+        }
+        for dy in -14i32..=14 {
+            let x = if left {
+                8 + dy.abs() * 3 / 4
+            } else {
+                192 - dy.abs() * 3 / 4
+            };
+            for dx in -1..=1 {
+                overlay.put_pixel((x + dx) as u32, (50 + dy) as u32, 255, 255, 255, 255);
+            }
+        }
+    }
+    overlay.composite(
+        &result,
+        0,
+        0,
+        200,
+        100,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        InterpType::Nearest,
+        255,
+    );
+    Ok(result)
+}
+
+/// Encode the same indicated zone foreground as the preview over its strip crop.
+pub fn prepare_touchscreen_zone_jpeg(
+    zone: u8,
+    background: Option<&Path>,
+    strip_background: Option<&Path>,
+    value: Option<&crate::info::InfoValue>,
+    previous: bool,
+    next: bool,
+) -> Result<Vec<u8>, String> {
+    let overlay = compose_touchscreen_zone(zone, background, value, previous, next)?;
+    if let Some(strip) = strip_background {
+        let strip = prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
+        let section = strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100);
+        overlay.composite(
+            &section,
+            0,
+            0,
+            200,
+            100,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            InterpType::Nearest,
+            255,
+        );
+        return encode_jpeg(&section);
+    }
+    encode_jpeg(&overlay)
+}
+
 /// Encode a live information picture as a device-ready JPEG for a key or touch
 /// section, drawn over `background` (the target's own artwork) when there is one.
 pub fn prepare_info_jpeg(
@@ -389,6 +502,73 @@ mod tests {
         let data = image.read_pixel_bytes();
         let offset = y * stride + x * channels;
         [data[offset], data[offset + 1], data[offset + 2]]
+    }
+
+    #[test]
+    fn touchscreen_indicators_appear_only_at_available_outer_edges() {
+        for (previous, next) in [(false, false), (false, true), (true, true), (true, false)] {
+            for zone in 1..=4 {
+                let image = compose_touchscreen_zone(zone, None, None, previous, next).unwrap();
+                assert_eq!((image.width(), image.height()), (200, 100));
+                let bytes = image.read_pixel_bytes();
+                let alpha = |x: usize, y: usize| {
+                    bytes[y * image.rowstride() as usize + x * image.n_channels() as usize + 3]
+                };
+                assert_eq!(alpha(8, 50), if zone == 1 && previous { 255 } else { 0 });
+                assert_eq!(alpha(192, 50), if zone == 4 && next { 255 } else { 0 });
+                assert_eq!(alpha(100, 50), 0, "indicators must not cover the center");
+            }
+        }
+    }
+
+    #[test]
+    fn touchscreen_indicators_survive_artwork_and_live_value_redraws() {
+        let own = fixture(200, 100);
+        let strip = fixture(800, 100);
+        for reading in ["Volume: 0.20", "Volume: 0.80"] {
+            let value = crate::info::parse_volume(reading).unwrap();
+            for (zone, x) in [(1, 8), (4, 192)] {
+                let image =
+                    compose_touchscreen_zone(zone, Some(&own), Some(&value), true, true).unwrap();
+                assert_eq!(pixel(&image, x, 50), [255, 255, 255]);
+                assert_eq!(pixel(&image, 100, 5), [0, 0, 255]);
+                let jpeg = prepare_touchscreen_zone_jpeg(
+                    zone,
+                    Some(&own),
+                    Some(&strip),
+                    Some(&value),
+                    true,
+                    true,
+                )
+                .unwrap();
+                let device = Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
+                assert!(pixel(&device, x, 50).iter().all(|channel| *channel > 215));
+                for (actual, expected) in pixel(&device, 100, 5)
+                    .into_iter()
+                    .zip(pixel(&image, 100, 5))
+                {
+                    assert!(actual.abs_diff(expected) < 15);
+                }
+            }
+        }
+        fs::remove_file(own).unwrap();
+        fs::remove_file(strip).unwrap();
+    }
+
+    #[test]
+    fn touchscreen_composition_without_indicators_preserves_existing_info_output() {
+        let strip = fixture(800, 100);
+        let value = crate::info::parse_volume("Volume: 0.45").unwrap();
+        for zone in 1..=4 {
+            let old =
+                prepare_info_jpeg(ArtworkTarget::EncoderZone(zone), &value, None, Some(&strip))
+                    .unwrap();
+            let new =
+                prepare_touchscreen_zone_jpeg(zone, None, Some(&strip), Some(&value), false, false)
+                    .unwrap();
+            assert_eq!(new, old);
+        }
+        fs::remove_file(strip).unwrap();
     }
 
     #[test]

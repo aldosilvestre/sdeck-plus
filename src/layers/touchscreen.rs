@@ -504,6 +504,23 @@ impl LayerStore {
     pub fn touchscreen_owner(&self, layer: &str) -> Option<&str> {
         self.touchscreens.page(layer).map(|page| page.name.as_str())
     }
+    /// Available previous/next touch pages for a keypad layer, without changing selection.
+    pub fn touchscreen_navigation(&self, layer: &str) -> (bool, bool) {
+        let profile = self
+            .touchscreens
+            .layer_profiles
+            .get(layer)
+            .map(String::as_str)
+            .unwrap_or(layer);
+        let pages = self.touchscreen_pages(profile);
+        let selected = pages
+            .iter()
+            .position(|owner| Some(owner.as_str()) == self.touchscreen_owner(layer));
+        selected
+            .map(|index| (index > 0, index + 1 < pages.len()))
+            .unwrap_or_default()
+    }
+
     pub fn touchscreen_pages(&self, profile: &str) -> Vec<String> {
         self.touchscreens
             .profiles
