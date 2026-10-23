@@ -176,6 +176,11 @@ browse independently, or **New touchscreen page** (+) to add and select a blank
 page. Each profile remembers its selected touch page, including after restart.
 There are up to 64 touch pages per profile, separate from the keypad layer limit.
 
+Small chevrons at the strip's left/right edges indicate an available previous/next
+page, both on the device and in the window preview. Unavailable directions are
+hidden; a single-page profile shows neither. Indicators stay above section artwork
+and live information. They are visual hints, not automatic swipe assignments.
+
 On each touch page, select **Swipe left**, then **More actions > Organization >
 Next touchscreen page**, and save. Assign **Previous touchscreen page** to
 **Swipe right** in the same way. These actions are offered only for touchscreen

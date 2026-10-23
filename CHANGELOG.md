@@ -8,6 +8,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Touchscreen page indicators.** Left/right edge chevrons show available previous/
+  next touch pages on the device and preview, stay visible over artwork/live info,
+  and disappear at the corresponding bounds. Existing swipe bindings are unchanged.
+
 - **Profile-owned touchscreen pages.** Touch gestures, section information and
   strip/section images stay independent of keypad pages and folders. Select the
   touch strip to add or select its pages; touchscreen-only next/previous actions

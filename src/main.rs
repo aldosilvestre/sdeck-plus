@@ -2487,12 +2487,35 @@ impl ArtworkUi {
             .assigned_path_in_layer(owner, target)
     }
 
+    fn indicated_zone(&self, layer: &str, zone: u8) -> bool {
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        (zone == 1 && previous) || (zone == 4 && next)
+    }
+
+    fn touchscreen_zone_command(&self, layer: &str, zone: u8) -> ArtworkCommand {
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        let source = self.layers.borrow().zone_info_source(layer, zone);
+        ArtworkCommand::ComposeTouchscreenZone {
+            zone,
+            path: self.info_background(layer, ArtworkTarget::EncoderZone(zone)),
+            strip_path: self.info_background(layer, ArtworkTarget::TouchStripBackground),
+            value: source.map(|source| self.info_value(source)),
+            previous,
+            next,
+        }
+    }
+
     fn info_command(
         &self,
         layer: &str,
         target: ArtworkTarget,
         source: sdeck_plus::info::InfoSource,
     ) -> ArtworkCommand {
+        if let ArtworkTarget::EncoderZone(zone) = target {
+            if self.indicated_zone(layer, zone) {
+                return self.touchscreen_zone_command(layer, zone);
+            }
+        }
         ArtworkCommand::ComposeInfo {
             target,
             path: self.info_background(layer, target),
@@ -2542,12 +2565,29 @@ impl ArtworkUi {
         other.extend(info(|target| {
             matches!(target, ArtworkTarget::EncoderZone(_))
         }));
+        for zone in [1, 4] {
+            if self.indicated_zone(layer, zone) {
+                other.retain(|command| !matches!(command,
+                    ArtworkCommand::Assign { target: ArtworkTarget::EncoderZone(shown), .. }
+                    | ArtworkCommand::Clear { target: ArtworkTarget::EncoderZone(shown) }
+                    | ArtworkCommand::ComposeInfo { target: ArtworkTarget::EncoderZone(shown), .. }
+                    | ArtworkCommand::ComposeTouchscreenZone { zone: shown, .. } if *shown == zone
+                ));
+                other.push(self.touchscreen_zone_command(layer, zone));
+            }
+        }
         other
     }
 
     /// Draw the same picture in the window's preview of `target`.
     fn paint_info_preview(&self, target: ArtworkTarget, value: &sdeck_plus::info::InfoValue) {
         let layer = self.layers.borrow().active().to_owned();
+        if let ArtworkTarget::EncoderZone(zone) = target {
+            if self.indicated_zone(&layer, zone) {
+                self.paint_touchscreen_zone(&layer, zone, Some(value));
+                return;
+            }
+        }
         let background = self.info_background(&layer, target);
         let image = match target {
             ArtworkTarget::Keypad(_) => {
@@ -2567,6 +2607,48 @@ impl ArtworkUi {
                 }
             }
             Err(error) => eprintln!("Could not draw live information preview: {error}"),
+        }
+    }
+
+    fn paint_touchscreen_zone(
+        &self,
+        layer: &str,
+        zone: u8,
+        value: Option<&sdeck_plus::info::InfoValue>,
+    ) {
+        let target = ArtworkTarget::EncoderZone(zone);
+        let background = self.info_background(layer, target);
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        match sdeck_plus::image_output::compose_touchscreen_zone(
+            zone,
+            background.as_deref(),
+            value,
+            previous,
+            next,
+        ) {
+            Ok(image) => {
+                if let Some((_, picture)) = self
+                    .pictures
+                    .borrow()
+                    .iter()
+                    .find(|(shown, _)| *shown == target)
+                {
+                    picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                    picture.set_visible(true);
+                }
+            }
+            Err(error) => eprintln!("Could not draw touchscreen page indicator: {error}"),
+        }
+    }
+
+    fn paint_navigation_previews(&self, layer: &str) {
+        for zone in [1, 4] {
+            // Information previews already paint their indicators with their value.
+            if self.indicated_zone(layer, zone)
+                && self.layers.borrow().zone_info_source(layer, zone).is_none()
+            {
+                self.paint_touchscreen_zone(layer, zone, None);
+            }
         }
     }
 
@@ -2649,7 +2731,8 @@ impl ArtworkUi {
             .touchscreen_owner(&layer)
             .unwrap_or(&layer)
             .to_owned();
-        let cache_key = format!("{}:{layer}:{touch_owner}", layer.len());
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(&layer);
+        let cache_key = format!("{}:{layer}:{touch_owner}:{previous}:{next}", layer.len());
         if !force && self.last_layer.borrow().as_deref() == Some(&cache_key) {
             return;
         }
@@ -2683,6 +2766,7 @@ impl ArtworkUi {
             set_button_picture(&picture, path, text.as_ref());
         }
         self.paint_info_previews(&layer);
+        self.paint_navigation_previews(&layer);
         let _ = self.output.send(ArtworkCommand::Replace(commands));
         *self.last_layer.borrow_mut() = Some(cache_key);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
@@ -2725,6 +2809,9 @@ impl ArtworkUi {
             if picture_target == target {
                 set_button_picture(picture, path.clone(), text.as_ref());
             }
+        }
+        if !matches!(target, ArtworkTarget::Keypad(_)) {
+            self.paint_navigation_previews(&layer);
         }
     }
 

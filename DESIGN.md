@@ -18,6 +18,10 @@ button; it does not change the fixed hardware preview geometry. Each control
 retains an accessible name and tooltip. Organization actions distinguish keypad
 navigation from touchscreen navigation; existing swipe assignments are never
 silently replaced. Dial bindings remain on keypad pages.
+Compact white chevrons on dark translucent badges show previous/next availability
+at the touchscreen's left/right outer edges. Hide unavailable directions and both
+for a single page. Paint them last over section artwork/live information in both
+physical output and preview, without resizing controls or changing stored artwork.
 
 References consulted:
 

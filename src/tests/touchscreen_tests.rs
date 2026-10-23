@@ -3,6 +3,263 @@ use sdeck_plus::organization::Organization;
 use std::fs;
 
 #[test]
+fn touchscreen_page_indicators_follow_selection_artwork_and_live_info() {
+    run_gtk_test(assert_touchscreen_page_indicators);
+}
+fn assert_touchscreen_page_indicators() {
+    use sdeck_plus::info::{Glyph, InfoSource, InfoValue};
+    if !init_gtk_for_test() {
+        return;
+    }
+    fn drain(receiver: &mpsc::Receiver<ArtworkCommand>) -> Vec<ArtworkCommand> {
+        receiver
+            .try_iter()
+            .flat_map(|command| match command {
+                ArtworkCommand::Replace(commands) => commands,
+                command => vec![command],
+            })
+            .collect()
+    }
+    fn indicators(commands: &[ArtworkCommand]) -> Vec<(u8, bool, bool)> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                ArtworkCommand::ComposeTouchscreenZone {
+                    zone,
+                    previous,
+                    next,
+                    ..
+                } => Some((*zone, *previous, *next)),
+                _ => None,
+            })
+            .collect()
+    }
+    fn keys(commands: &[ArtworkCommand]) -> Vec<String> {
+        commands
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    ArtworkCommand::Assign {
+                        target: ArtworkTarget::Keypad(_),
+                        ..
+                    } | ArtworkCommand::Clear {
+                        target: ArtworkTarget::Keypad(_),
+                        ..
+                    } | ArtworkCommand::ComposeButton { .. }
+                        | ArtworkCommand::ComposeInfo {
+                            target: ArtworkTarget::Keypad(_),
+                            ..
+                        }
+                )
+            })
+            .map(|command| format!("{command:?}"))
+            .collect()
+    }
+    fn arrow(artwork: &ArtworkUi, zone: u8, x: usize) {
+        let pictures = artwork.pictures.borrow();
+        let (_, picture) = pictures
+            .iter()
+            .find(|(target, _)| *target == ArtworkTarget::EncoderZone(zone))
+            .unwrap();
+        assert!(picture.get_visible());
+        let texture = picture
+            .paintable()
+            .unwrap()
+            .downcast::<gtk::gdk::Texture>()
+            .unwrap();
+        let mut pixels = vec![0; 200 * 100 * 4];
+        texture.download(&mut pixels, 200 * 4);
+        assert_eq!(
+            &pixels[(50 * 200 + x) * 4..(50 * 200 + x) * 4 + 4],
+            &[255; 4]
+        );
+    }
+    let (root, mut store, mut images, source) = artwork_fixture("touch-indicators");
+    let mut organization = Organization::open_at(store.root(), &store).unwrap();
+    let keypad = organization.create_page(&mut store).unwrap();
+    let folder = organization
+        .create_folder(&mut store, "Indicators")
+        .unwrap();
+    store
+        .initialize_touchscreens(&organization, &mut images)
+        .unwrap();
+    store.select("Base");
+    let first = store.touchscreen_owner("Base").unwrap().to_owned();
+    images
+        .assign_in_layer(&first, ArtworkTarget::TouchStripBackground, &source)
+        .unwrap();
+    for zone in [1, 4] {
+        images
+            .assign_in_layer(&first, ArtworkTarget::EncoderZone(zone), &source)
+            .unwrap();
+    }
+    for (trigger, info) in [
+        (Trigger::EncoderPress(1), InfoSource::Cpu),
+        (Trigger::KeyPress(1), InfoSource::Volume),
+    ] {
+        store
+            .bind("Base", trigger.clone(), Action::Emit("unchanged".into()))
+            .unwrap();
+        store.set_info("Base", &trigger, Some(info)).unwrap();
+    }
+    store.persist().unwrap();
+    organization.persist().unwrap();
+    let layers = Rc::new(RefCell::new(store));
+    let (output, hardware) = mpsc::channel();
+    let artwork = ArtworkUi {
+        store: Rc::new(RefCell::new(Some(images))),
+        layers: layers.clone(),
+        pictures: Rc::new(RefCell::new(Vec::new())),
+        output,
+        last_layer: Rc::new(RefCell::new(None)),
+        chooser_owners: Rc::new(RefCell::new(Default::default())),
+        selected_target: Rc::new(Cell::new(ArtworkTarget::TouchStripBackground)),
+        text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
+    };
+    let (commands, _requests) = mpsc::channel();
+    let window = ApplicationWindow::builder()
+        .default_width(1000)
+        .default_height(700)
+        .build();
+    install_style(&window);
+    let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), commands);
+    window.set_child(Some(&widgets.root));
+    window.present();
+    wait_for_frame(&window);
+    drain(&hardware);
+    artwork.refresh(true);
+    let initial = drain(&hardware);
+    assert!(
+        indicators(&initial).is_empty(),
+        "one page has no indicators"
+    );
+    let original_keys = keys(&initial);
+    widgets.binding_ui.control_picker.set_selected(2);
+    let create = widgets
+        .feature_runtime
+        .touchscreen_controls()
+        .last_child()
+        .unwrap()
+        .downcast::<Button>()
+        .unwrap();
+    create.emit_clicked();
+    let middle = layers
+        .borrow()
+        .touchscreen_owner("Base")
+        .unwrap()
+        .to_owned();
+    create.emit_clicked();
+    let last = layers
+        .borrow()
+        .touchscreen_owner("Base")
+        .unwrap()
+        .to_owned();
+    for owner in [&middle, &last] {
+        artwork
+            .store
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .assign_in_layer(owner, ArtworkTarget::EncoderZone(4), &source)
+            .unwrap();
+    }
+    drain(&hardware);
+    for (owner, expected) in [
+        (&first, vec![(4, false, true)]),
+        (&middle, vec![(1, true, true), (4, true, true)]),
+        (&last, vec![(1, true, false)]),
+    ] {
+        layers.borrow_mut().select_touchscreen_page("Base", owner);
+        artwork.refresh(true);
+        let snapshot = drain(&hardware);
+        assert_eq!(indicators(&snapshot), expected);
+        assert_eq!(
+            keys(&snapshot),
+            original_keys,
+            "touch changes cannot change keypad images"
+        );
+        let strip = snapshot
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    ArtworkCommand::Assign {
+                        target: ArtworkTarget::TouchStripBackground,
+                        ..
+                    } | ArtworkCommand::Clear {
+                        target: ArtworkTarget::TouchStripBackground
+                    }
+                )
+            })
+            .unwrap();
+        for (index, command) in snapshot.iter().enumerate() {
+            if let ArtworkCommand::ComposeTouchscreenZone { zone, .. } = command {
+                assert!(
+                    index > strip,
+                    "indicators must follow full-strip replacement"
+                );
+                arrow(&artwork, *zone, if *zone == 1 { 8 } else { 192 });
+            }
+        }
+    }
+    layers.borrow_mut().select_touchscreen_page("Base", &middle);
+    artwork.refresh(true);
+    drain(&hardware);
+    let cpu = InfoValue::gauge(Glyph::Chip, 30, "30%".into());
+    artwork.update_info(InfoSource::Cpu, cpu.clone());
+    assert!(
+        matches!(drain(&hardware).as_slice(), [ArtworkCommand::ComposeTouchscreenZone { zone: 1, previous: true, next: true, value: Some(value), .. }] if value == &cpu)
+    );
+    arrow(&artwork, 1, 8);
+    artwork.restore_button_preview(&ArtworkTarget::EncoderZone(4));
+    arrow(&artwork, 4, 192);
+    artwork.update_info(InfoSource::Cpu, cpu);
+    assert!(
+        drain(&hardware).is_empty(),
+        "identical values must not redraw"
+    );
+    artwork.update_info(
+        InfoSource::Volume,
+        InfoValue::gauge(Glyph::Speaker, 45, "45%".into()),
+    );
+    assert!(matches!(
+        drain(&hardware).as_slice(),
+        [ArtworkCommand::ComposeInfo {
+            target: ArtworkTarget::Keypad(1),
+            ..
+        }]
+    ));
+    for keypad_page in [&keypad, &folder] {
+        layers.borrow_mut().select(keypad_page);
+        artwork.refresh(false);
+        assert_eq!(
+            indicators(&drain(&hardware)),
+            [(1, true, true), (4, true, true)]
+        );
+        assert_eq!(
+            layers.borrow().touchscreen_owner(keypad_page),
+            Some(middle.as_str())
+        );
+    }
+    layers.borrow_mut().select("Studio");
+    artwork.refresh(false);
+    assert!(
+        indicators(&drain(&hardware)).is_empty(),
+        "another single-page profile has no arrows"
+    );
+    layers.borrow_mut().select("Base");
+    artwork.refresh(false);
+    assert_eq!(
+        indicators(&drain(&hardware)),
+        [(1, true, true), (4, true, true)]
+    );
+    window.close();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn touch_editor_artwork_and_identity_follow_profile_owner_not_keypad_page() {
     run_gtk_test(assert_profile_owner);
 }

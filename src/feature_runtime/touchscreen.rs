@@ -15,7 +15,7 @@ pub(super) struct TouchscreenControls {
 impl TouchscreenControls {
     pub(super) fn new() -> Self {
         let root = GtkBox::new(Orientation::Horizontal, 6);
-        root.set_tooltip_text(Some("Independent touchscreen pages for this profile; keypad pages and folders are unchanged."));
+        root.set_tooltip_text(Some("Independent touchscreen pages for this profile; keypad pages and folders are unchanged. Edge indicators show available pages; assign swipe actions separately."));
         let model = gtk::StringList::new(&[]);
         let picker = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
         picker.update_property(&[gtk::accessible::Property::Label("Touchscreen page")]);
