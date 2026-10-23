@@ -1,6 +1,6 @@
 # Profile-owned touchscreen dials
 Objective: dials follow each profile's selected touchscreen page, independent of keypad navigation.
-Branch: feat/profile-dial-editor (child of feat/profile-touchscreen-dials); feature-branch-chain from f4327f8; runners: offline Cargo tests (display-backed GTK), fmt, clippy. Forecast: ~500 changed lines across two dependent work units.
+Branch: feat/profile-dial-verification (child of feat/profile-dial-editor, then feat/profile-touchscreen-dials); feature-branch-chain from f4327f8; runners: offline Cargo tests (display-backed GTK), fmt, clippy. Forecast: ~500 changed lines across two dependent work units.
 
 ## Specs
 
@@ -12,7 +12,7 @@ Branch: feat/profile-dial-editor (child of feat/profile-touchscreen-dials); feat
 
 - T1 [S1-S3] inline; done; versioned dial ownership and idempotent existing-page migration, preserving legacy rows/returns/info; commit: 2795822. Risk: item 1 (stored config upgrade), item 3 (shared ownership).
 - T2 [S1,S2] inline; done; editor page context/summaries, effective live info, bundle regression and user docs; commit: c7f37cb. Risk: item 1 (v1 pre-initialization write guard), item 3 (shared editor/render routing).
-- T3 [S1-S3] inline checks plus delegated independent verifier; in_progress; full suite, baseline differential, committed slice assessments and parent spot check; commit: pending. Risk: items 1 and 3.
+- T3 [S1-S3] inline checks plus delegated independent verifier; done; full suite, baseline differential, committed slice assessments and parent spot check; commit: 51732bf. Risk: items 1 and 3.
 
 ## Log
 
@@ -21,6 +21,8 @@ L1 Original request: "esta funcionando. Pero me olvide de comentarte que tambien
 L2 User selected S2 then S3. V1 touch-page storage lacks source keypad provenance; seed existing pages from Organization::profile_key, not current keypad selection. Retain edited touch bindings/artwork and legacy records. Fresh legacy migration compares complete touch+dial configurations. New empty touch pages remain empty, like existing touch behavior. No actual user config migration, install or publishing authorized.
 
 L3 Route: one dependent behavior; inline implementation, not independent writers. Read-only map mvkdeoou-9-vgpj supplies ownership/editor/bundle seams. Independent verifier at feature end for named risks. Use a separate ownership predicate: is_touchscreen remains gesture-only for navigation-action validation. Preserve exact-owner bundle writes, exact-rotation precedence and paired publication/recovery.
+
+L14 Closure: slice 3 committed as 51732bf3be9595720e0d7b25d8aa71164dbf3014, public regression tests and evidence. Native assessment vs c7f37cb: medium, reviewDue false/under_budget, no independent verifier required for this test-only slice. T1/T2 independent verification remains PASS. All 3 tasks complete on observed checks; no failed/skipped/pending required software checks. Initial fixture/rustup/JavaScript parsing harness errors were corrected and are not application failures. Authored slice totals: 384 +188 +193, plus passive closure metadata; cached local feature-branch-chain used. No native review approval claimed for these new targets. Hardware test and real-config migration not performed; publishing/install not authorized. Engram mirror remains unavailable; local document plus authorized vault record retained.
 
 L13 Final checks observed: job-44 exit 0, promoted public integration regressions 2/2, fmt and strict all-target/all-feature clippy. Production source unchanged since independent PASS. Job-45 baseline f4327f8 and candidate public-interface differential: both exit 0, identical 1221-byte stdout and empty stderr for keypad/touch execution and summaries, legacy uninitialized dials, blank-touch/keypad isolation. Parent exact mapped GTK editor spot check exit 0. Scratch baseline compiled separately with existing exact-fingerprint dependencies; never used a scratch Cargo package with live target. New dial behavior remains physically untested; no install or real-data migration. T3 proof complete, evidence commit/assessment/record closure pending.
 
