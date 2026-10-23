@@ -154,15 +154,25 @@ swipes always apply to the whole strip.
 
 Touchscreen bindings, section information and strip/section images belong to
 **the profile**, not its keypad pages or folders. Changing a keypad page or
-opening a folder does not change the selected touchscreen page. Dial bindings
-and their live-information settings still belong to the keypad page.
+opening a folder does not change the selected touchscreen page. Dial press,
+clockwise/counterclockwise turns and legacy exact-tick rotations belong to that
+same touch page, including delayed returns and live-information settings.
+Keypad bindings remain independent.
 
 Existing configurations migrate automatically: each distinct complete touch
-configuration in a profile becomes an independent touchscreen page. Equal
+and dial configuration in a profile becomes an independent touchscreen page. Equal
 configurations share one page; existing actions, None bindings, delayed returns,
 section information and image references are preserved. The active keypad
 page's touch configuration is selected initially. Legacy records are retained,
-and migration is not repeated on restart. Invalid touchscreen configuration
+and migration is not repeated on restart.
+
+When upgrading existing version-1 touch pages, each keeps its edited touch
+bindings, artwork and selection, and receives a copy of the dials from its
+profile's main keypad page. Other keypad pages are not used as seeds. Original
+legacy records remain available; subsequent edits to the new page-owned dials
+are never overwritten on restart. New touch pages start blank. The upgraded
+`touchscreen.json` uses version 2; older app versions cannot read this format.
+Invalid touchscreen configuration
 blocks saving rather than replacing the original file. Keypad and touch files
 are both staged before publication. If the final touchscreen replacement fails,
 the previous layer file is restored. A synced recovery journal also protects
@@ -367,7 +377,7 @@ Images are copied into the application's XDG data directory, so the original fil
 
 ## Application layers and actions
 
-Keypad/dial layers and legacy action bindings are stored in `layers.conf` in the same app data directory. Profile-owned touch pages and their independent selection are stored in `touchscreen.json`; artwork remains in its separate assignment store. Select a profile tab and use **Organize** to create, associate or delete a profile. The built-in `Base` profile and its first page cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
+Keypad layers and retained legacy action bindings are stored in `layers.conf` in the same app data directory. Profile-owned touch pages and their independent selection are stored in `touchscreen.json`; artwork remains in its separate assignment store. Select a profile tab and use **Organize** to create, associate or delete a profile. The built-in `Base` profile and its first page cannot be removed; legacy files that named the protected layer `default` are migrated to `Base`.
 
 ### Pages and their folders
 

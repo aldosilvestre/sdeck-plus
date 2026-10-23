@@ -96,7 +96,248 @@ fn touch_configuration_is_profile_owned_across_pages_and_folders() {
     layers
         .bind(&page, Trigger::EncoderPress(1), Action::None)
         .unwrap();
-    assert_eq!(layers.binding("Base", &Trigger::EncoderPress(1)), None);
+    assert_eq!(
+        layers.binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::None)
+    );
+}
+
+#[test]
+fn dials_follow_touch_pages_across_keypad_navigation_and_profiles() {
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, mut artwork) = fixture.stores();
+    let keypad = organization.create_page(&mut layers).unwrap();
+    let folder = organization.create_folder(&mut layers, "Tools").unwrap();
+    layers.create("Studio").unwrap();
+    organization.sync(&layers);
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    let first = layers.touchscreen_owner("Base").unwrap().to_owned();
+    let triggers = [
+        Trigger::EncoderPress(1),
+        Trigger::EncoderClockwise(1),
+        Trigger::EncoderCounterClockwise(1),
+        Trigger::Rotation(1, 1),
+    ];
+    for trigger in &triggers {
+        layers
+            .bind("Base", trigger.clone(), Action::Emit("first".into()))
+            .unwrap();
+    }
+    layers
+        .set_info("Base", &triggers[0], Some(InfoSource::Clock))
+        .unwrap();
+    layers
+        .set_return(
+            "Base",
+            &triggers[0],
+            Some(PageReturn {
+                layer: "Studio".into(),
+                seconds: 3,
+            }),
+        )
+        .unwrap();
+    for key in ["Base", keypad.as_str(), folder.as_str()] {
+        layers.select(key);
+        for trigger in &triggers {
+            assert_eq!(
+                layers.binding(key, trigger),
+                Some(Action::Emit("first".into()))
+            );
+            assert_eq!(layers.binding_layer(key, trigger).unwrap().name, first);
+        }
+        assert_eq!(layers.zone_info_source(key, 1), Some(InfoSource::Clock));
+        assert_eq!(
+            layers.page_return(key, &triggers[0]).unwrap().layer,
+            "Studio"
+        );
+        assert_eq!(
+            layers.matching_action(&Event::Rotation { index: 0, ticks: 1 }),
+            Some(Action::Emit("first".into()))
+        );
+    }
+    let second = layers.create_touchscreen_page("Base").unwrap();
+    assert_eq!(layers.active(), folder);
+    assert_eq!(layers.binding(&folder, &triggers[0]), None);
+    assert_eq!(layers.zone_info_source(&folder, 1), None);
+    assert_eq!(layers.page_return(&folder, &triggers[0]), None);
+    layers
+        .bind(&folder, triggers[0].clone(), Action::None)
+        .unwrap();
+    layers
+        .bind(
+            &folder,
+            triggers[1].clone(),
+            Action::Emit("directional".into()),
+        )
+        .unwrap();
+    layers
+        .bind(&folder, triggers[3].clone(), Action::Emit("exact".into()))
+        .unwrap();
+    assert_eq!(
+        layers.matching_action(&Event::Rotation { index: 0, ticks: 1 }),
+        Some(Action::Emit("exact".into()))
+    );
+    assert_eq!(
+        layers.matching_action(&Event::Rotation { index: 0, ticks: 2 }),
+        Some(Action::Emit("directional".into()))
+    );
+    layers.unbind(&folder, &triggers[3]).unwrap();
+    assert_eq!(
+        layers.matching_action(&Event::Rotation { index: 0, ticks: 1 }),
+        Some(Action::Emit("directional".into()))
+    );
+    assert_eq!(layers.binding("Studio", &triggers[0]), None);
+    layers
+        .bind("Studio", triggers[0].clone(), Action::Emit("studio".into()))
+        .unwrap();
+    layers.persist().unwrap();
+    organization.persist().unwrap();
+    let (mut loaded, organization, mut artwork) = fixture.stores();
+    loaded
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    assert_eq!(loaded.touchscreen_owner("Base"), Some(second.as_str()));
+    assert_eq!(loaded.binding("Base", &triggers[0]), Some(Action::None));
+    assert_eq!(
+        loaded.binding("Studio", &triggers[0]),
+        Some(Action::Emit("studio".into()))
+    );
+    assert!(loaded.select_touchscreen_page("Base", &first));
+    assert_eq!(
+        loaded.binding("Base", &triggers[0]),
+        Some(Action::Emit("first".into()))
+    );
+    assert_eq!(loaded.zone_info_source("Base", 1), Some(InfoSource::Clock));
+}
+
+#[test]
+fn v1_pages_seed_dials_from_profile_root_once_without_changing_touch_or_legacy() {
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, _artwork) = fixture.stores();
+    let keypad = organization.create_page(&mut layers).unwrap();
+    layers.create("Studio").unwrap();
+    organization.sync(&layers);
+    for (key, text) in [
+        ("Base", "root"),
+        (keypad.as_str(), "keypad"),
+        ("Studio", "studio"),
+    ] {
+        layers
+            .bind(key, Trigger::EncoderPress(1), Action::Emit(text.into()))
+            .unwrap();
+    }
+    layers
+        .set_info("Base", &Trigger::EncoderPress(1), Some(InfoSource::Clock))
+        .unwrap();
+    layers
+        .set_return(
+            "Base",
+            &Trigger::EncoderPress(1),
+            Some(PageReturn {
+                layer: "Studio".into(),
+                seconds: 2,
+            }),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    organization.persist().unwrap();
+    let legacy = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let document = serde_json::json!({"version":1,"profiles":[
+        {"name":"Base","selected":1,"pages":[
+            {"owner":"@touchscreen:1","bindings":[{"trigger":"tap","action":"emit:6564697465642d6669727374"}]},
+            {"owner":"@touchscreen:2","bindings":[{"trigger":"tap","action":"emit:6564697465642d7365636f6e64"}]}]},
+        {"name":"Studio","selected":0,"pages":[{"owner":"@touchscreen:3","bindings":[]}]}
+    ]});
+    fs::write(
+        fixture.0.join("touchscreen.json"),
+        serde_json::to_vec(&document).unwrap(),
+    )
+    .unwrap();
+    let (mut loaded, organization, mut artwork) = fixture.stores();
+    assert!(
+        loaded.diagnostics().is_empty(),
+        "{:?}",
+        loaded.diagnostics()
+    );
+    loaded.select(&keypad);
+    loaded
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    assert_eq!(loaded.active(), keypad);
+    assert_eq!(loaded.touchscreen_owner("Base"), Some("@touchscreen:2"));
+    for (owner, text) in [
+        ("@touchscreen:1", "edited-first"),
+        ("@touchscreen:2", "edited-second"),
+    ] {
+        assert_eq!(
+            loaded.binding(owner, &Trigger::TouchTap),
+            Some(Action::Emit(text.into()))
+        );
+        assert_eq!(
+            loaded.binding(owner, &Trigger::EncoderPress(1)),
+            Some(Action::Emit("root".into()))
+        );
+        assert_eq!(loaded.zone_info_source(owner, 1), Some(InfoSource::Clock));
+        assert_eq!(
+            loaded
+                .page_return(owner, &Trigger::EncoderPress(1))
+                .unwrap()
+                .seconds,
+            2
+        );
+    }
+    assert_eq!(
+        loaded.binding("Studio", &Trigger::EncoderPress(1)),
+        Some(Action::Emit("studio".into()))
+    );
+    assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), legacy);
+    let upgraded: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.0.join("touchscreen.json")).unwrap()).unwrap();
+    assert_eq!(upgraded["version"], 2);
+    loaded
+        .bind("Base", Trigger::EncoderPress(1), Action::None)
+        .unwrap();
+    loaded.persist().unwrap();
+    let before = fs::read(fixture.0.join("touchscreen.json")).unwrap();
+    let (mut reopened, organization, mut artwork) = fixture.stores();
+    reopened
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    assert_eq!(
+        reopened.binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::None)
+    );
+    assert_eq!(
+        fs::read(fixture.0.join("touchscreen.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn fresh_migration_distinguishes_dial_variants_with_identical_touch() {
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, mut artwork) = fixture.stores();
+    let keypad = organization.create_page(&mut layers).unwrap();
+    layers
+        .bind("Base", Trigger::EncoderPress(1), Action::None)
+        .unwrap();
+    layers
+        .bind(
+            &keypad,
+            Trigger::EncoderPress(1),
+            Action::Emit("different".into()),
+        )
+        .unwrap();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    assert_eq!(layers.touchscreen_pages("Base").len(), 2);
+    assert_eq!(
+        layers.binding("Base", &Trigger::EncoderPress(1)),
+        Some(Action::Emit("different".into()))
+    );
 }
 
 #[test]

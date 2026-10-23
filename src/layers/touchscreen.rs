@@ -18,6 +18,7 @@ pub(super) struct Touchscreens {
     profiles: BTreeMap<String, Profile>,
     layer_profiles: BTreeMap<String, String>,
     pub(super) invalid: bool,
+    needs_dial_migration: bool,
 }
 #[derive(Clone, Debug)]
 struct Profile {
@@ -67,12 +68,15 @@ impl Touchscreens {
         }
         let document: Document =
             serde_json::from_slice(&fs::read(path)?).map_err(io::Error::other)?;
-        if document.version != 1 || document.profiles.len() > MAX_LAYERS {
+        if !matches!(document.version, 1 | 2) || document.profiles.len() > MAX_LAYERS {
             return Err(invalid(
                 "unsupported or oversized touchscreen configuration",
             ));
         }
-        let mut result = Self::default();
+        let mut result = Self {
+            needs_dial_migration: document.version == 1,
+            ..Self::default()
+        };
         let mut owners = BTreeSet::new();
         for profile in document.profiles {
             validate_name(&profile.name)?;
@@ -96,7 +100,9 @@ impl Touchscreens {
                     let trigger =
                         decode_trigger(&binding.trigger).map_err(|error| invalid(&error))?;
                     let action = decode_action(&binding.action).map_err(|error| invalid(&error))?;
-                    if !trigger.is_touchscreen()
+                    validate_binding_action(&trigger, &action)?;
+                    if !(trigger.is_touchscreen()
+                        || document.version == 2 && trigger.belongs_to_touchscreen_page())
                         || data
                             .bindings
                             .insert(trigger.clone(), action.clone())
@@ -236,7 +242,7 @@ impl Touchscreens {
             })
             .collect::<io::Result<Vec<_>>>()?;
         let bytes = serde_json::to_vec_pretty(&Document {
-            version: 1,
+            version: if self.needs_dial_migration { 1 } else { 2 },
             profiles,
         })
         .map_err(io::Error::other)?;
@@ -357,6 +363,17 @@ fn empty_page(name: String) -> Layer {
     }
 }
 impl Trigger {
+    // Ownership includes dials; gesture-only action eligibility does not.
+    fn belongs_to_touchscreen_page(&self) -> bool {
+        self.is_touchscreen()
+            || matches!(
+                self,
+                Self::EncoderPress(_)
+                    | Self::EncoderClockwise(_)
+                    | Self::EncoderCounterClockwise(_)
+                    | Self::Rotation(_, _)
+            )
+    }
     pub fn is_touchscreen(&self) -> bool {
         matches!(
             self,
@@ -392,6 +409,30 @@ impl LayerStore {
             .keys()
             .map(|key| (key.clone(), organization.profile_for_key(key)))
             .collect();
+        if next.needs_dial_migration {
+            // V1 deduplicated touch pages without retaining keypad provenance.
+            // Seed from each profile root, never from current keypad selection.
+            for (name, profile) in &mut next.profiles {
+                let root = organization
+                    .profile_key(name)
+                    .and_then(|key| self.layers.get(&key))
+                    .ok_or_else(|| invalid("unknown touchscreen profile for dial migration"))?;
+                for page in &mut profile.pages {
+                    for (trigger, action) in &root.bindings {
+                        if trigger.belongs_to_touchscreen_page() && !trigger.is_touchscreen() {
+                            page.bindings.insert(trigger.clone(), action.clone());
+                            if let Some(value) = root.returns.get(trigger) {
+                                page.returns.insert(trigger.clone(), value.clone());
+                            }
+                            if let Some(source) = root.displays.get(trigger) {
+                                page.displays.insert(trigger.clone(), *source);
+                            }
+                        }
+                    }
+                }
+            }
+            next.needs_dial_migration = false;
+        }
         let mut copies = Vec::new();
         for name in organization.profiles() {
             if next.profiles.contains_key(&name) {
@@ -414,19 +455,19 @@ impl LayerStore {
                 let bindings = legacy
                     .bindings
                     .iter()
-                    .filter(|(trigger, _)| trigger.is_touchscreen())
+                    .filter(|(trigger, _)| trigger.belongs_to_touchscreen_page())
                     .map(|(trigger, action)| (trigger.clone(), action.clone()))
                     .collect();
                 let returns = legacy
                     .returns
                     .iter()
-                    .filter(|(trigger, _)| trigger.is_touchscreen())
+                    .filter(|(trigger, _)| trigger.belongs_to_touchscreen_page())
                     .map(|(trigger, value)| (trigger.clone(), value.clone()))
                     .collect();
                 let displays = legacy
                     .displays
                     .iter()
-                    .filter(|(trigger, _)| trigger.is_touchscreen())
+                    .filter(|(trigger, _)| trigger.belongs_to_touchscreen_page())
                     .map(|(trigger, source)| (trigger.clone(), *source))
                     .collect();
                 let mut page = Layer {
@@ -574,7 +615,7 @@ impl LayerStore {
         true
     }
     pub fn binding_layer(&self, layer: &str, trigger: &Trigger) -> Option<&Layer> {
-        if trigger.is_touchscreen() {
+        if trigger.belongs_to_touchscreen_page() {
             if let Some(page) = self.touchscreens.page(layer) {
                 return Some(page);
             }
@@ -586,7 +627,7 @@ impl LayerStore {
         layer: &str,
         trigger: &Trigger,
     ) -> Option<&mut Layer> {
-        if trigger.is_touchscreen() && self.touchscreens.page(layer).is_some() {
+        if trigger.belongs_to_touchscreen_page() && self.touchscreens.page(layer).is_some() {
             return self.touchscreens.page_mut(layer);
         }
         self.layers.get_mut(layer)

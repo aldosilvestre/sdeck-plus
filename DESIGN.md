@@ -17,7 +17,10 @@ compact **Touch page** selector, boundary-aware previous/next arrows and add
 button; it does not change the fixed hardware preview geometry. Each control
 retains an accessible name and tooltip. Organization actions distinguish keypad
 navigation from touchscreen navigation; existing swipe assignments are never
-silently replaced. Dial bindings remain on keypad pages.
+silently replaced. Dials follow the same selected touchscreen page, including
+press/turn actions, delayed returns and live information. Keypad navigation must
+not change them. On a v1 upgrade, copy each profile's main-page dials into its
+existing touch pages without replacing touch edits, artwork or legacy records.
 Compact white chevrons on dark translucent badges show previous/next availability
 at the touchscreen's left/right outer edges. Hide unavailable directions and both
 for a single page. Paint them last over section artwork/live information in both

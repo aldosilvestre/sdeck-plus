@@ -8,6 +8,11 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Page-owned dials.** Dial press/turn actions and live information now follow
+  each profile's touchscreen pages, not keypad pages or folders. Existing touch
+  pages retain their edits and start with a copy of their profile's main-page
+  dials; legacy records are kept. Touchscreen storage upgrades to version 2.
+
 - **Touchscreen page indicators.** Left/right edge chevrons show available previous/
   next touch pages on the device and preview, stay visible over artwork/live info,
   and disappear at the corresponding bounds. Existing swipe bindings are unchanged.
@@ -17,7 +22,7 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   touch strip to add or select its pages; touchscreen-only next/previous actions
   can be assigned to left/right swipes. Distinct legacy configurations become
   separate touch pages without discarding assignments, and export/import includes
-  all touch pages and their local sounds. Dial bindings remain keypad-page-owned.
+  all touch pages and their local sounds.
   Paired saves stage keypad/touch data before publication and roll back the layer
   replacement when touchscreen publication fails, keeping failed saves restartable.
   A durable recovery journal reconciles saves interrupted between file replacements

@@ -205,6 +205,23 @@ fn assert_touchscreen_page_indicators() {
         }
     }
     layers.borrow_mut().select_touchscreen_page("Base", &middle);
+    assert_eq!(
+        layers.borrow().zone_info_source("Base", 1),
+        None,
+        "a blank touch page must not inherit another page's dial information"
+    );
+    layers
+        .borrow_mut()
+        .bind(
+            &middle,
+            Trigger::EncoderPress(1),
+            Action::Emit("middle".into()),
+        )
+        .unwrap();
+    layers
+        .borrow_mut()
+        .set_info(&middle, &Trigger::EncoderPress(1), Some(InfoSource::Cpu))
+        .unwrap();
     artwork.refresh(true);
     drain(&hardware);
     let cpu = InfoValue::gauge(Glyph::Chip, 30, "30%".into());
