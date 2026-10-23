@@ -1,6 +1,6 @@
 # Profile-owned touchscreen pages
 Objective: independent touchscreen configuration and pages per profile, preserving legacy configurations.
-Branch: feat/profile-touchscreen-pages; delivery: feature-branch-chain (no publication authorized); forecast: ~1800–2600 authored lines; runners: cargo test --offline, GTK display-backed tests, fmt and clippy.
+Branch: feat/touchscreen-persistence-fix (feature-branch-chain from feat/profile-touchscreen-pages; local only); runners: cargo test --offline, GTK display-backed tests, fmt and clippy.
 
 ## Specs
 
@@ -14,9 +14,9 @@ Branch: feat/profile-touchscreen-pages; delivery: feature-branch-chain (no publi
 - T1 [S1,S2,S4] inline; done; core profile-owned touch pages, lossless idempotent migration and storage tests; commit: eb94a99. Risk: item 1 (migration). Route: dependent core/UI/bundle units, no independent writers.
 - T2 [S1,S2,S4] inline; done; owner resolution for artwork, input, editor, worker snapshots and import/export; commit: 365394b. Risk: item 1 (persistence), item 3 (shared routing).
 - T3 [S2,S3] inline; done; touchscreen page controls and explicit gesture navigation actions with UI tests and documentation; commit: 631cade. Risk: item 3 (shared editor/runtime).
-- T5 [S1-S4] inline incident diagnosis; done; temporary-storage quota resolved by explicitly authorized verified move; commit: evidence pending. Job-20 exit 0, 54,946 entries and SHA-256/path/mode/symlink manifests matched; /tmp 2% used (~16 GiB free), original scratch preserved under target/quota-recovery/sdeck-verify-dhYDcd.
-- T6 [S1,S2] inline; done; correct paired layers/touch persistence failure handling and pin reported blocker plus staging/publication boundaries; commit: pending. Risk: item 1 (stored data). Route: one bounded correction batch after independent verifier finding.
-- T4 [S1-S4] delegated verifier after inline checks; in_progress; targeted re-verification of the reported persistence blocker after T6; commit: evidence pending. S2/S3/S4 passed independent verification; S1 requires corrected save-failure proof. Risk: item 1 (migration).
+- T5 [S1-S4] inline incident diagnosis; done; temporary-storage quota resolved by explicitly authorized verified move; commit: eba3b43 (incident evidence). Job-20 exit 0, 54,946 entries and SHA-256/path/mode/symlink manifests matched; /tmp 2% used (~16 GiB free), original scratch preserved under target/quota-recovery/sdeck-verify-dhYDcd.
+- T6 [S1,S2] inline; done; correct paired layers/touch persistence failure handling and pin reported blocker plus staging/publication boundaries; commit: eba3b43. Risk: item 1 (stored data). Route: one bounded correction batch after independent verifier finding.
+- T4 [S1-S4] delegated verifier after inline checks; done; targeted re-verification passed for eba3b43 (verified candidate), parent spot check exit 0. S1 PASS, S2 PASS, S3 PASS (synthetic dispatch), S4 PASS for migration. Physical HID not tested. Risk: item 1 (migration).
 
 ## Log
 
@@ -32,6 +32,8 @@ L4 Architecture: use authoritative Organization::profile_for_key/profile_key; pr
 L5 Delivery selected: "Cadena sobre rama de funcionalidad (recomendado)". origin/HEAD confirms main; initial commit 6664119. Work units on child branches based on feature tracker, no push/PR/merge authorized.
 
 L6 Local Markdown is the required memory mechanism. Request linked from Obsidian project note at requests/sdeck-plus/profile-touchscreen-pages-2026-10-21.md. No callable project-confined Engram tools available; Engram mirror unavailable, no shared store used.
+
+L30 Final independent targeted recheck mvk9dso2-5-0496 PASS: all three committed failure-boundary regressions passed (exit 0), unchanged original public repro compiled and passed (exit 0), save error remained Is a directory but restart diagnostics [] and touchscreen bytes changed false. S1 updated to PASS; S2/S3/S4 retained PASS (S4 migration), no reported blocker remains. Parent spot check `cargo test --offline --lib touchscreen_tests::failed_ -- --test-threads=1 --nocapture` passed 3/3, exit 0; git diff --check exit 0. Final correction eba3b43 native committed assessment medium / reviewDue false, under_budget; no native review START due or approval claimed. Final functional proof: 297 lib + 40 GTK, fmt and strict clippy GREEN. Physical device test not performed. Retained verifier scratch directories /tmp/sdeck-independent-P21e0h (~1.1 GiB) and /tmp/sdeck-recheck-Y5t6LK (~828 MiB) were not deleted (no authorization); large original scratch is preserved under target/quota-recovery. All feature tasks complete; no push, PR, install, real-data migration or system permission/quota changes executed.
 
 L29 Correction full checks GREEN: job-23 exit 0; 297 library tests + 40 GTK binary tests, 0 doc tests, fmt check and strict all-target/all-feature clippy passed. T6 completed its implementation/self-checks. T4 now runs one targeted independent recheck of the reported S1 persistence blocker, retaining prior S2/S3/S4 verdicts. Correction is its own high-risk work-unit commit on a dependent child branch.
 
