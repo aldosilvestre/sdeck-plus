@@ -144,11 +144,64 @@ impl Touchscreens {
     }
 
     pub(super) fn persist(&self, root: &Path) -> io::Result<()> {
+        match self.stage(root)? {
+            Some(temp) => fs::rename(temp, root.join(FILE)),
+            None => Ok(()),
+        }
+    }
+
+    /// Prepare both stores before publication. If publishing the touch file
+    /// fails, atomically restore the previous layers inode, including permissions.
+    pub(super) fn persist_with_layers(&self, root: &Path, layers: &[u8]) -> io::Result<()> {
+        let touch_temp = self.stage(root)?;
+        let layers_temp = stage_file(root, "layers.conf", layers)?;
+        let layers_path = root.join("layers.conf");
+        let Some(touch_temp) = touch_temp else {
+            return fs::rename(layers_temp, layers_path);
+        };
+        static NEXT_BACKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let backup = root.join(format!(
+            "layers.conf.rollback-{}-{}",
+            std::process::id(),
+            NEXT_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let had_layers = match fs::hard_link(&layers_path, &backup) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = fs::rename(layers_temp, &layers_path) {
+            if had_layers {
+                let _ = fs::remove_file(&backup);
+            }
+            return Err(error);
+        }
+        if let Err(error) = fs::rename(touch_temp, root.join(FILE)) {
+            let restored = if had_layers {
+                fs::rename(&backup, &layers_path)
+            } else {
+                fs::remove_file(&layers_path)
+            };
+            return match restored {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(io::Error::other(format!(
+                    "{error}; could not restore layers: {rollback}; previous layers retained at {}",
+                    backup.display()
+                ))),
+            };
+        }
+        if had_layers {
+            let _ = fs::remove_file(backup);
+        }
+        Ok(())
+    }
+
+    fn stage(&self, root: &Path) -> io::Result<Option<PathBuf>> {
         if self.invalid {
             return Err(invalid("repair touchscreen configuration before saving"));
         }
         if self.profiles.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let profiles = self
             .profiles
@@ -197,12 +250,7 @@ impl Touchscreens {
         if bytes.len() as u64 > MAX_BYTES {
             return Err(invalid("touchscreen configuration is too large"));
         }
-        let temp = root.join("touchscreen.json.tmp");
-        use std::io::Write;
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(temp, root.join(FILE))
+        stage_file(root, FILE, &bytes).map(Some)
     }
 
     pub(super) fn page(&self, layer: &str) -> Option<&Layer> {
@@ -248,6 +296,15 @@ impl Touchscreens {
         }
         self.layer_profiles.remove(name);
     }
+}
+
+fn stage_file(root: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    use std::io::Write;
+    let temp = root.join(format!("{name}.tmp"));
+    let mut file = fs::File::create(&temp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(temp)
 }
 
 fn empty_page(name: String) -> Layer {

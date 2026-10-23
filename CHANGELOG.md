@@ -14,6 +14,8 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   can be assigned to left/right swipes. Distinct legacy configurations become
   separate touch pages without discarding assignments, and export/import includes
   all touch pages and their local sounds. Dial bindings remain keypad-page-owned.
+  Paired saves stage keypad/touch data before publication and roll back the layer
+  replacement when touchscreen publication fails, keeping failed saves restartable.
 
 - **Start in tray.** A tray checkbox, on by default, makes a normal launch
   begin hidden in the tray. Launching again while running opens the window,

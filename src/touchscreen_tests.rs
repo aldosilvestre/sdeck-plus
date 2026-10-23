@@ -233,6 +233,120 @@ fn migration_deduplicates_complete_configurations_and_keeps_legacy_data_and_imag
 }
 
 #[test]
+fn failed_layers_save_does_not_poison_touchscreen_restart() {
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, mut artwork) = fixture.stores();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    layers.persist().unwrap();
+    organization.persist().unwrap();
+    let old_layers = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let old_touch = fs::read(fixture.0.join("touchscreen.json")).unwrap();
+    let page = organization.create_page(&mut layers).unwrap();
+    layers
+        .bind("Base", Trigger::ZoneTap(1), Action::None)
+        .unwrap();
+    layers
+        .set_return(
+            "Base",
+            &Trigger::ZoneTap(1),
+            Some(PageReturn {
+                layer: page,
+                seconds: 2,
+            }),
+        )
+        .unwrap();
+    fs::create_dir(fixture.0.join("layers.conf.tmp")).unwrap();
+    assert!(layers.persist().is_err());
+    assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), old_layers);
+    assert_eq!(
+        fs::read(fixture.0.join("touchscreen.json")).unwrap(),
+        old_touch
+    );
+    let reopened = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(
+        reopened.diagnostics().is_empty(),
+        "failed save poisoned restart: {:?}",
+        reopened.diagnostics()
+    );
+}
+
+#[test]
+fn failed_touch_staging_preserves_layers_and_existing_return_targets() {
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, mut artwork) = fixture.stores();
+    let page = organization.create_page(&mut layers).unwrap();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    layers
+        .bind("Base", Trigger::ZoneTap(1), Action::None)
+        .unwrap();
+    layers
+        .set_return(
+            "Base",
+            &Trigger::ZoneTap(1),
+            Some(PageReturn {
+                layer: page.clone(),
+                seconds: 2,
+            }),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let old_layers = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let old_touch = fs::read(fixture.0.join("touchscreen.json")).unwrap();
+    layers.remove(&page).unwrap();
+    fs::create_dir(fixture.0.join("touchscreen.json.tmp")).unwrap();
+    assert!(layers.persist().is_err());
+    assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), old_layers);
+    assert_eq!(
+        fs::read(fixture.0.join("touchscreen.json")).unwrap(),
+        old_touch
+    );
+    assert!(LayerStore::open_at(&fixture.0)
+        .unwrap()
+        .diagnostics()
+        .is_empty());
+}
+
+#[test]
+fn failed_touch_publication_rolls_back_the_prepared_layer_replacement() {
+    let fixture = Fixture::new();
+    let (mut layers, organization, mut artwork) = fixture.stores();
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    layers.persist().unwrap();
+    let old_layers = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let old_touch = fs::read(fixture.0.join("touchscreen.json")).unwrap();
+    layers.create("Unsaved").unwrap();
+    // A destination directory allows staging but makes the final rename fail.
+    fs::rename(
+        fixture.0.join("touchscreen.json"),
+        fixture.0.join("original-touchscreen.json"),
+    )
+    .unwrap();
+    fs::create_dir(fixture.0.join("touchscreen.json")).unwrap();
+    assert!(layers.persist().is_err());
+    assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), old_layers);
+    assert_eq!(
+        fs::read(fixture.0.join("original-touchscreen.json")).unwrap(),
+        old_touch
+    );
+    fs::remove_dir(fixture.0.join("touchscreen.json")).unwrap();
+    fs::rename(
+        fixture.0.join("original-touchscreen.json"),
+        fixture.0.join("touchscreen.json"),
+    )
+    .unwrap();
+    assert!(LayerStore::open_at(&fixture.0)
+        .unwrap()
+        .diagnostics()
+        .is_empty());
+}
+
+#[test]
 fn malformed_touch_storage_is_not_replaced_and_rejected_changes_do_not_mutate_state() {
     let fixture = Fixture::new();
     let bad = b"{broken";

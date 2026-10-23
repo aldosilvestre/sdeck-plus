@@ -163,7 +163,10 @@ configurations share one page; existing actions, None bindings, delayed returns,
 section information and image references are preserved. The active keypad
 page's touch configuration is selected initially. Legacy records are retained,
 and migration is not repeated on restart. Invalid touchscreen configuration
-blocks saving rather than replacing the original file.
+blocks saving rather than replacing the original file. Keypad and touch files
+are both staged before publication. If the final touchscreen replacement fails,
+the previous layer file is restored; a rollback error retains its layer backup
+and reports the recovery path instead of silently claiming success.
 
 **Touchscreen pages and swipe navigation.** Select the touch strip or a section
 to show **Touch page** above its editor. Use the page selector and arrows to

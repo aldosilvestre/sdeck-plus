@@ -547,7 +547,6 @@ impl LayerStore {
         Ok(())
     }
     pub fn persist(&self) -> io::Result<()> {
-        self.touchscreens.persist(&self.root)?;
         let mut text = format!("{VERSION}\nactive\t{}\n", hex(self.active.as_bytes()));
         for layer in self.layers.values() {
             text.push_str(&format!("layer\t{}\n", hex(layer.name.as_bytes())));
@@ -577,12 +576,8 @@ impl LayerStore {
                 ));
             }
         }
-        let temp = self.root.join("layers.conf.tmp");
-        let mut file = fs::File::create(&temp)?;
-        use std::io::Write;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(temp, self.root.join("layers.conf"))
+        self.touchscreens
+            .persist_with_layers(&self.root, text.as_bytes())
     }
 }
 
