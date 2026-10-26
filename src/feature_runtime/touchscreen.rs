@@ -183,8 +183,9 @@ impl FeatureRuntime {
             .destroy_with_parent(true)
             .message_type(gtk::MessageType::Question)
             .text(format!("Delete touchscreen page {number}?"))
-            .secondary_text("This deletes the page's touch, dial and gesture bindings and artwork. Keypad pages are unchanged. It cannot be undone.")
+            .secondary_text("Its bindings and artwork are deleted. This cannot be undone.")
             .build();
+        super::pages::style_confirm_dialog(&dialog);
         dialog.add_button("Keep", gtk::ResponseType::Cancel);
         dialog
             .add_button("Delete page", gtk::ResponseType::Accept)

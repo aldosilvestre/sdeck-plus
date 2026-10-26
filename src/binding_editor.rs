@@ -191,7 +191,7 @@ pub fn action_from_fields(
         ActionKind::MoveToLayer => {
             let target = layer_destination.trim();
             if !store.layers().contains_key(target) {
-                return Err("destination layer does not exist".into());
+                return Err("destination profile or page does not exist".into());
             }
             Action::SwitchLayer(target.into())
         }
@@ -290,7 +290,7 @@ fn action_summary(action: Option<&Action>) -> String {
     let text = match action {
         None => return "Unassigned".into(),
         Some(Action::None) => "None".into(),
-        Some(Action::SwitchLayer(target)) => format!("Layer {target}"),
+        Some(Action::SwitchLayer(target)) => format!("Go to {target}"),
         Some(Action::Command(command)) => format!("Run {command}"),
         Some(Action::KeyPress { key }) => format!("Shortcut {key}"),
         Some(Action::Launch { executable, .. }) => format!("Open {}", executable.display()),
@@ -375,7 +375,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             control_summary(&store, "Base", ControlKind::Encoder, 4),
-            "Press: Shortcut ENTER\nCW: Layer Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
+            "Press: Shortcut ENTER\nCW: Go to Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
         );
         store
             .bind(
@@ -439,7 +439,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             control_summary(&store, "Base", ControlKind::Encoder, 4),
-            "Press: Emit page-owned\nCW: Layer Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
+            "Press: Emit page-owned\nCW: Go to Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
         );
         store.create_touchscreen_page("Base").unwrap();
         assert_eq!(

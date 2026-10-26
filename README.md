@@ -6,7 +6,9 @@
 > [!NOTE]
 > This project is still under construction.
 
-sdeck-plus is a GTK4 control desk for the Elgato Stream Deck + (VID `0x0FD9`, PID `0x0084`) on Arch Linux. Configure actions and live information for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, style button text, route audio and connect to OBS Studio.
+sdeck-plus is a native GTK4 control desk for the Elgato Stream Deck + (Stream Deck Plus; VID `0x0FD9`, PID `0x0084`) on Linux, developed and tested on Arch Linux. Configure actions and live information for eight keys, four encoders and touch-strip gestures, organize profiles into folders and pages, style button text, route audio and connect to OBS Studio.
+
+**Website:** <https://aldosilvestre.github.io/sdeck-plus/>
 
 ## Screenshots
 
@@ -52,7 +54,7 @@ images.
 ![Key press, dial turn and touch zone highlighted over assigned artwork](docs/screenshots/live-input-feedback.png)
 
 **Action types.** The **Action** menu offers layer/page switching, shell
-commands, launching applications, keyboard shortcuts, legacy events, the
+commands, launching applications, keyboard shortcuts, named events, the
 categorized **More actions**, **Play sound** and **None**.
 **None** keeps a saved binding but does nothing when pressed. It can still
 display live information and does not schedule a page return.
@@ -415,7 +417,7 @@ To configure an action, choose the layer at the top, then select a physical cont
 3. Pick an action and fill only its visible fields. The existing layer, command, application, shortcut and legacy-event choices remain available. **More actions** opens typed category-specific fields described below. Shortcuts accept a full chord such as `CTRL + D` or one key with optional modifier checkboxes.
 4. Click **Save binding** to create or update that control event, or **Remove binding** to clear it. A floating toast confirms success only after the binding is written to disk; validation or saving problems show an error toast. Success disappears after five seconds; errors remain until dismissed or replaced by another notification. Saving never executes the action. Selecting an already configured control event loads its saved action for inspection and editing.
 
-Hover a physical control to see assignments for the selected keypad page or profile touchscreen page, including **Unassigned** events: encoders include **Press**, **CW** (clockwise), and **CCW** (counterclockwise); the touch strip includes tap, hold, flick, and directional swipes. Legacy exact-tick rotation overrides appear separately. Long action text is shortened; select the event to inspect its full saved fields. Summaries refresh after saving/removing bindings, selecting/creating/removing layers, and input-driven **Move to layer** actions. Selection highlighting is separate from live pressed-state highlighting, and live input does not replace assignment summaries. The shared **Image…** and **×** edit the explicitly selected artwork target, independently of the binding editor.
+Hover a physical control to see assignments for the selected keypad page or profile touchscreen page, including **Unassigned** events: encoders include **Press**, **CW** (clockwise), and **CCW** (counterclockwise); the touch strip includes tap, hold, flick, and directional swipes. Legacy exact-tick rotation overrides appear separately. Long action text is shortened; select the event to inspect its full saved fields. Summaries refresh after saving/removing bindings, selecting/creating/removing layers, and input-driven **Go to profile or page** actions. Selection highlighting is separate from live pressed-state highlighting, and live input does not replace assignment summaries. The shared **Image…** and **×** edit the explicitly selected artwork target, independently of the binding editor.
 
 ### Extended actions on Arch Linux
 

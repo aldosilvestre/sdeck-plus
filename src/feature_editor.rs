@@ -408,6 +408,39 @@ impl FeatureEditor {
         self.direction_row.set_visible(choice == Choice::Scroll);
     }
 
+    /// Run `notify` whenever the user (or code) changes any editable field.
+    pub(crate) fn connect_changed(&self, notify: impl Fn() + Clone + 'static) {
+        for entry in [&self.first, &self.second, &self.number] {
+            let notify = notify.clone();
+            entry.connect_changed(move |_| notify());
+        }
+        for dropdown in [&self.category, &self.action, &self.direction] {
+            let notify = notify.clone();
+            dropdown.connect_selected_notify(move |_| notify());
+        }
+        let text_notify = notify.clone();
+        self.text.buffer().connect_changed(move |_| text_notify());
+        self.flag.connect_toggled(move |_| notify());
+    }
+
+    /// Raw widget values, used to tell whether the editor differs from a saved state.
+    pub(crate) fn snapshot(&self) -> String {
+        let buffer = self.text.buffer();
+        [
+            self.category.selected().to_string(),
+            self.action.selected().to_string(),
+            self.first.text().to_string(),
+            self.second.text().to_string(),
+            buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string(),
+            self.number.text().to_string(),
+            self.direction.selected().to_string(),
+            self.flag.is_active().to_string(),
+        ]
+        .join("\u{1f}")
+    }
+
     pub(crate) fn reset(&self) {
         self.invalidate_picker();
         self.audio_output.select(None);

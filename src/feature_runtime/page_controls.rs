@@ -80,6 +80,7 @@ impl PageControls {
         let folder_count = gtk::Label::new(Some("0"));
         let folder_button = GtkBox::new(Orientation::Horizontal, 8);
         folder_button.append(&gtk::Image::from_icon_name("folder-symbolic"));
+        folder_button.append(&gtk::Label::new(Some("Folders")));
         folder_button.append(&folder_count);
         let folder_menu = gtk::MenuButton::builder()
             .child(&folder_button)
@@ -92,7 +93,7 @@ impl PageControls {
         root.append(&folder_menu);
         let create = ui::button("document-new-symbolic", "New page");
         let rename = ui::icon_button("document-edit-symbolic", "Rename page");
-        let delete = ui::icon_button("edit-delete-symbolic", "Delete page");
+        let delete = ui::button("edit-delete-symbolic", "Delete page");
         delete.add_css_class("destructive-action");
         for button in [&create, &rename, &delete] {
             root.append(button);

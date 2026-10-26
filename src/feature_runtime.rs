@@ -283,7 +283,7 @@ impl FeatureRuntime {
         timer_status.set_visible(false);
         let page_controls = page_controls::PageControls::new();
         let organization_management = GtkBox::new(Orientation::Vertical, 12);
-        let legacy_picker = crate::labeled("Layer (organization unavailable)", &ui.layer_picker);
+        let legacy_picker = crate::labeled("Page (organization unavailable)", &ui.layer_picker);
         legacy_picker.set_visible(false);
         organization_management.append(&legacy_picker);
         let profile_tabs = gtk::Notebook::builder()
@@ -921,7 +921,7 @@ impl FeatureRuntime {
             }
             None => {
                 self.indicator
-                    .set_text("Organization unavailable · layer bindings remain editable");
+                    .set_text("Organization unavailable · page bindings remain editable");
             }
         }
         self.refresh_profiles();
@@ -976,7 +976,7 @@ impl FeatureRuntime {
                     self.refresh_selection();
                     self.persist(self.layers.borrow().clone());
                 } else {
-                    self.report("Destination layer is unavailable.", true);
+                    self.report("Destination profile or page is unavailable.", true);
                 }
             }
             Action::Emit(name) => {

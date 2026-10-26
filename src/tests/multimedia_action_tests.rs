@@ -52,6 +52,14 @@ fn assert_none_and_audio_output_bindings_are_editable_saved_and_dispatched() {
         for label in &widgets.key_labels {
             ui.action_picker.set_selected(1);
             key_button(label).emit_clicked();
+            // The unsaved edit is only discarded after the user agrees to it.
+            discard_dialog().response(ResponseType::Accept);
+            assert!(
+                !ui.is_dirty(),
+                "a freshly loaded control must be clean: {:?} vs {:?}",
+                ui.baseline.borrow(),
+                ui.fingerprint()
+            );
             assert_eq!(ui.action_kind(), ActionKind::None);
             assert_eq!(ui.binding_from_widgets(&layers).unwrap().2, Action::None);
         }

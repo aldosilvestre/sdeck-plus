@@ -446,7 +446,7 @@ fn build_widgets(
 
     let header = GtkBox::new(Orientation::Horizontal, 12);
     let heading = GtkBox::new(Orientation::Vertical, 4);
-    let title = Label::new(Some("STREAM DECK +"));
+    let title = Label::new(Some("SDECK-PLUS"));
     title.add_css_class("title");
     title.set_xalign(0.0);
     heading.append(&title);
@@ -460,8 +460,9 @@ fn build_widgets(
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and action. More actions contains System, Multimedia, Organization, Device and OBS. Touchscreen pages belong to the profile: select the touch strip to add or choose a Touch page. Under Organization, assign Next touchscreen page to Swipe left and Previous touchscreen page to Swipe right on each touch page."),
+        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and an action. More actions adds System, Multimedia, Organization, Device and OBS."),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
+        ("view-grid-symbolic", "Touch strip pages", "Touchscreen pages belong to the profile. Select the touch strip to add or choose a Touch page. Swiping left or right changes page unless you bind those swipes to something else."),
     ] {
         let step = GtkBox::new(Orientation::Vertical, 8);
         step.append(&ui::section_heading(icon, title));
@@ -542,11 +543,11 @@ fn build_widgets(
     let event_model = gtk::StringList::new(&["Press"]);
     let event_picker = gtk::DropDown::new(Some(event_model.clone()), gtk::Expression::NONE);
     let action_model = gtk::StringList::new(&[
-        "Move to layer",
+        "Go to profile or page",
         "Run command",
         "Open application",
         "Shortcut",
-        "Emit legacy event",
+        "Send named event",
         "More actions",
         "Play sound",
         "None",
@@ -586,7 +587,7 @@ fn build_widgets(
     remove_binding.add_css_class("destructive-action");
     let control_number_row = labeled("Number", &control_number_picker);
     let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
-    let text_row = labeled("Command / key / shortcut key / legacy event", &text_entry);
+    let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
     let application_row = labeled("Application executable", &application_entry);
     let args_scroller = gtk::ScrolledWindow::builder()
         .min_content_height(48)
@@ -602,10 +603,10 @@ fn build_widgets(
         .column_spacing(12)
         .row_spacing(8)
         .build();
-    modifier_buttons.attach(&super_mod, 0, 0, 1, 1);
-    modifier_buttons.attach(&shift_mod, 1, 0, 1, 1);
-    modifier_buttons.attach(&ctrl_mod, 0, 1, 1, 1);
-    modifier_buttons.attach(&alt_mod, 1, 1, 1, 1);
+    modifier_buttons.attach(&ctrl_mod, 0, 0, 1, 1);
+    modifier_buttons.attach(&alt_mod, 1, 0, 1, 1);
+    modifier_buttons.attach(&shift_mod, 0, 1, 1, 1);
+    modifier_buttons.attach(&super_mod, 1, 1, 1, 1);
     let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
@@ -761,6 +762,7 @@ fn build_widgets(
     let binding_feedback = GtkBox::new(Orientation::Vertical, 12);
     binding_feedback.append(&binding_buttons);
     binding_feedback.append(&binding_ui.status);
+    binding_feedback.append(&binding_ui.undo_remove);
     settings_card.append(&binding_feedback);
     let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
@@ -948,6 +950,7 @@ fn build_widgets(
                     };
                     match snapshot {
                         Ok(snapshot) => {
+                            ui.mark_clean();
                             if runtime.save_binding(snapshot) {
                                 ui.status.set_text("Binding updated; saving to disk…");
                             } else {
@@ -979,6 +982,18 @@ fn build_widgets(
         let artwork = artwork.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_trigger(&layers) {
             Ok((layer, trigger)) => {
+                let previous = {
+                    let store = layers.borrow();
+                    store
+                        .binding(&layer, &trigger)
+                        .map(|action| RemovedBinding {
+                            layer: layer.clone(),
+                            trigger: trigger.clone(),
+                            action,
+                            page_return: store.page_return(&layer, &trigger),
+                            info: store.info_source(&layer, &trigger),
+                        })
+                };
                 let snapshot = {
                     let mut store = layers.borrow_mut();
                     store
@@ -990,6 +1005,9 @@ fn build_widgets(
                         runtime.persist(snapshot);
                         ui.clear_action_fields();
                         ui.status.set_text("Binding removed.");
+                        ui.mark_clean();
+                        *ui.removed.borrow_mut() = previous;
+                        ui.undo_remove.set_visible(ui.removed.borrow().is_some());
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
@@ -1001,6 +1019,55 @@ fn build_widgets(
                 }
             }
             Err(error) => ui.error(&error),
+        });
+    }
+    {
+        let layers = layers.clone();
+        let runtime = feature_runtime.clone();
+        let ui = binding_ui.clone();
+        let artwork = artwork.clone();
+        let toast = toast.clone();
+        binding_ui.undo_remove.clone().connect_clicked(move |_| {
+            let Some(removed) = ui.removed.borrow_mut().take() else {
+                return;
+            };
+            ui.undo_remove.set_visible(false);
+            let snapshot = {
+                let mut store = layers.borrow_mut();
+                store
+                    .bind(
+                        &removed.layer,
+                        removed.trigger.clone(),
+                        removed.action.clone(),
+                    )
+                    .and_then(|_| {
+                        store.set_return(
+                            &removed.layer,
+                            &removed.trigger,
+                            removed.page_return.clone(),
+                        )
+                    })
+                    .and_then(|_| store.set_info(&removed.layer, &removed.trigger, removed.info))
+                    .map(|_| store.clone())
+            };
+            match snapshot {
+                Ok(snapshot) => {
+                    let saving = runtime.save_binding(snapshot);
+                    ui.load_selected_binding(&layers);
+                    ui.refresh_summaries(&layers);
+                    artwork.refresh(true);
+                    if saving {
+                        ui.status.set_text("Binding restored; saving to disk…");
+                    } else {
+                        ui.error("Could not save binding: saving worker is unavailable.");
+                    }
+                }
+                Err(error) => {
+                    let message = format!("Could not restore binding: {error}");
+                    ui.error(&message);
+                    toast.show(&message, true);
+                }
+            }
         });
     }
     let feedback = GtkBox::new(Orientation::Horizontal, 8);
@@ -1566,6 +1633,21 @@ struct BindingUi {
     info_location_row: GtkBox,
     // Same order as the physical selection widgets: eight buttons, touch, four encoders.
     summaries: Vec<Label>,
+    shortcut_preview: Label,
+    /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
+    baseline: std::rc::Rc<RefCell<Option<String>>>,
+    undo_remove: Button,
+    removed: Rc<RefCell<Option<RemovedBinding>>>,
+}
+
+/// What `Remove` deleted, kept so the feedback line can offer to bring it back.
+#[derive(Clone)]
+struct RemovedBinding {
+    layer: String,
+    trigger: Trigger,
+    action: Action,
+    page_return: Option<sdeck_plus::layers::PageReturn>,
+    info: Option<sdeck_plus::info::InfoSource>,
 }
 
 impl BindingUi {
@@ -1662,7 +1744,16 @@ impl BindingUi {
         let refresh = refresh_info.clone();
         info_toggle.connect_toggled(move |_| refresh());
         info_source.connect_selected_notify(move |_| refresh_info());
-        Self {
+        let undo_remove = ui::button("edit-undo-symbolic", "Undo remove");
+        undo_remove.set_tooltip_text(Some("Restore the binding you just removed"));
+        undo_remove.set_halign(gtk::Align::Start);
+        undo_remove.set_visible(false);
+        let shortcut_preview = Label::new(None);
+        shortcut_preview.add_css_class("muted");
+        shortcut_preview.set_xalign(0.0);
+        shortcut_preview.set_visible(false);
+        modifier_row.append(&shortcut_preview);
+        let ui = Self {
             layer_picker,
             layer_model,
             control_picker,
@@ -1708,12 +1799,18 @@ impl BindingUi {
                     label.set_width_chars(10);
                     label.set_max_width_chars(12);
                     label.set_tooltip_text(Some(
-                        "Assignments in the selected layer. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
+                        "Assignments in the selected page. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
                     ));
                     label
                 })
                 .collect(),
-        }
+            shortcut_preview,
+            baseline: std::rc::Rc::new(RefCell::new(None)),
+            undo_remove,
+            removed: Rc::new(RefCell::new(None)),
+        };
+        ui.connect_dirty_tracking();
+        ui
     }
 
     fn error(&self, message: &str) {
@@ -1872,7 +1969,7 @@ impl BindingUi {
             ActionKind::RunCommand => "Run a shell command with /bin/sh. Saving does not run it.",
             ActionKind::OpenApplication => "Enter the executable path and one argument per line.",
             ActionKind::Shortcut => "Type a key or full chord. The checkboxes add modifiers.",
-            ActionKind::EmitLegacy => "Emit a named internal event for an existing legacy binding.",
+            ActionKind::EmitLegacy => "Send a named internal event. Mainly used by older bindings.",
             ActionKind::Extended => "",
         });
         if matches!(kind, ActionKind::Shortcut) {
@@ -1935,11 +2032,14 @@ impl BindingUi {
     }
 
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
+        self.undo_remove.set_visible(false);
+        *self.removed.borrow_mut() = None;
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
         let Ok((layer, trigger)) = self.selected_layer_and_trigger(layers) else {
             self.status.set_text("Select a valid control event.");
+            self.mark_clean();
             return;
         };
         let action = {
@@ -1964,6 +2064,105 @@ impl BindingUi {
             }
         }
         self.update_action_visibility();
+        self.mark_clean();
+    }
+
+    /// Snapshot of every editable field, compared with the last loaded or saved state.
+    fn fingerprint(&self) -> String {
+        let buffer = self.args_view.buffer();
+        [
+            self.action_picker.selected().to_string(),
+            self.layer_target_picker.selected().to_string(),
+            self.text_entry.text().to_string(),
+            self.application_entry.text().to_string(),
+            buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string(),
+            self.shortcut_modifiers().join("+"),
+            self.return_toggle.is_active().to_string(),
+            self.return_target.selected().to_string(),
+            self.return_seconds.text().to_string(),
+            self.info_toggle.is_active().to_string(),
+            self.info_source.selected().to_string(),
+            self.info_location.text().to_string(),
+            self.feature_editor.snapshot(),
+        ]
+        .join("\u{1f}")
+    }
+
+    /// Treat the current fields as saved: later edits are measured against them.
+    fn mark_clean(&self) {
+        *self.baseline.borrow_mut() = Some(self.fingerprint());
+    }
+
+    fn on_edited(&self) {
+        self.update_shortcut_preview();
+        if self.is_dirty() {
+            self.status.set_text("Unsaved changes.");
+        }
+    }
+
+    /// True when an editor field differs from the binding last loaded or saved.
+    fn is_dirty(&self) -> bool {
+        self.baseline
+            .borrow()
+            .as_ref()
+            .is_some_and(|saved| *saved != self.fingerprint())
+    }
+
+    fn update_shortcut_preview(&self) {
+        let text = match sdeck_plus::keyboard::parse_chord(
+            &self.shortcut_modifiers(),
+            &self.text_entry.text(),
+        ) {
+            Ok(chord) if self.action_kind() == ActionKind::Shortcut => {
+                format!("Presses {}", chord.label())
+            }
+            _ => String::new(),
+        };
+        self.shortcut_preview.set_text(&text);
+        self.shortcut_preview.set_visible(!text.is_empty());
+    }
+
+    fn connect_dirty_tracking(&self) {
+        let notify = {
+            let ui = self.clone();
+            move || ui.on_edited()
+        };
+        for entry in [
+            &self.text_entry,
+            &self.application_entry,
+            &self.return_seconds,
+            &self.info_location,
+        ] {
+            let notify = notify.clone();
+            entry.connect_changed(move |_| notify());
+        }
+        for picker in [
+            &self.action_picker,
+            &self.layer_target_picker,
+            &self.return_target,
+            &self.info_source,
+        ] {
+            let notify = notify.clone();
+            picker.connect_selected_notify(move |_| notify());
+        }
+        for check in [
+            &self.super_mod,
+            &self.shift_mod,
+            &self.ctrl_mod,
+            &self.alt_mod,
+            &self.return_toggle,
+            &self.info_toggle,
+        ] {
+            let notify = notify.clone();
+            check.connect_toggled(move |_| notify());
+        }
+        let args_notify = notify.clone();
+        self.args_view
+            .buffer()
+            .connect_changed(move |_| args_notify());
+        self.feature_editor.connect_changed(notify);
     }
 
     /// Selected control number; 0 means the whole touch strip.
@@ -1984,9 +2183,9 @@ impl BindingUi {
         layers: &RefCell<LayerStore>,
     ) -> Result<(String, Trigger), String> {
         let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
-            .ok_or_else(|| "Select a layer.".to_string())?;
+            .ok_or_else(|| "Select a profile or page.".to_string())?;
         if !layers.borrow().layers().contains_key(&layer) {
-            return Err("Selected layer no longer exists.".into());
+            return Err("Selected profile or page no longer exists.".into());
         }
         let number = self
             .control_number()
@@ -2301,7 +2500,8 @@ fn connect_control_selection(
     let ui = ui.clone();
     let layers = layers.clone();
     let heading = heading.clone();
-    button.connect_clicked(move |_| {
+    let guard = ui.clone();
+    let switch: Rc<dyn Fn()> = Rc::new(move || {
         if let Err(error) = ui.select_control(control, Some(number), false) {
             ui.status.set_text(&error);
             return;
@@ -2310,6 +2510,56 @@ fn connect_control_selection(
         heading.set_text(&control_heading(control, Some(number)));
         ui.load_selected_binding(&layers);
     });
+    button.connect_clicked(move |button| {
+        if guard.is_dirty() {
+            confirm_discard(button, switch.clone());
+        } else {
+            switch();
+        }
+    });
+}
+
+/// Selecting another control reloads the editor, so unsaved edits need a choice first.
+fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
+    let Some(parent) = anchor
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+    else {
+        proceed();
+        return;
+    };
+    let dialog = gtk::MessageDialog::builder()
+        .transient_for(&parent)
+        .modal(true)
+        .destroy_with_parent(true)
+        .message_type(gtk::MessageType::Question)
+        .text("Discard unsaved changes?")
+        .secondary_text(
+            "You edited this binding without saving it. Selecting another control discards those edits.",
+        )
+        .build();
+    dialog.add_css_class("confirm-dialog");
+    let mut child = dialog.message_area().first_child();
+    while let Some(widget) = child {
+        if let Some(label) = widget.downcast_ref::<Label>() {
+            label.set_justify(gtk::Justification::Center);
+        }
+        child = widget.next_sibling();
+    }
+    dialog.set_resizable(false);
+    dialog.set_default_size(360, -1);
+    dialog.add_button("Keep editing", gtk::ResponseType::Cancel);
+    dialog
+        .add_button("Discard changes", gtk::ResponseType::Accept)
+        .add_css_class("destructive-action");
+    dialog.set_default_response(gtk::ResponseType::Cancel);
+    dialog.connect_response(move |dialog, response| {
+        dialog.close();
+        if response == gtk::ResponseType::Accept {
+            proceed();
+        }
+    });
+    dialog.present();
 }
 
 fn event_label(event: EventKind) -> &'static str {
@@ -3363,11 +3613,11 @@ mod tests {
         let event_model = gtk::StringList::new(&["Press"]);
         let event_picker = gtk::DropDown::new(Some(event_model.clone()), gtk::Expression::NONE);
         let action_model = gtk::StringList::new(&[
-            "Move to layer",
+            "Go to profile or page",
             "Run command",
             "Open application",
             "Shortcut",
-            "Emit legacy event",
+            "Send named event",
             "More actions",
             "Play sound",
             "None",
@@ -3385,8 +3635,8 @@ mod tests {
         let ctrl_mod = CheckButton::with_label("CTRL");
         let alt_mod = CheckButton::with_label("ALT");
         let control_number_row = labeled("Number", &control_number_picker);
-        let layer_target_row = labeled("Destination layer", &layer_target_picker);
-        let text_row = labeled("Command / key / shortcut key / legacy event", &text_entry);
+        let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
+        let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
         let application_row = labeled("Application executable", &application_entry);
         let args_scroller = gtk::ScrolledWindow::builder().child(&args_view).build();
         let args_row = labeled("Application arguments", &args_scroller);
@@ -3650,6 +3900,8 @@ mod tests {
         assert!(!ui.args_row.is_visible());
         assert!(!ui.modifier_row.is_visible());
         assert_legacy_keys_load_without_rewriting_and_save_as_shortcuts(&ui);
+        assert_unsaved_edits_are_flagged_and_shortcut_is_previewed(&ui);
+        assert_discard_prompt_guards_unsaved_edits();
         ui.control_picker.set_selected(2);
         ui.update_for_control(true);
         assert!(ui.control_number_row.is_visible());
@@ -4408,11 +4660,11 @@ mod tests {
         assert_eq!(
             labels,
             [
-                "Move to layer",
+                "Go to profile or page",
                 "Run command",
                 "Open application",
                 "Shortcut",
-                "Emit legacy event",
+                "Send named event",
                 "More actions",
                 "Play sound",
                 "None",
@@ -4440,6 +4692,64 @@ mod tests {
             assert_eq!(ui.modifier_row.is_visible(), index == 3);
             assert_eq!(ui.text_row.is_visible(), matches!(index, 1 | 3 | 4));
         }
+    }
+
+    fn assert_unsaved_edits_are_flagged_and_shortcut_is_previewed(ui: &BindingUi) {
+        let root = std::env::temp_dir().join(format!(
+            "streamdeck-dirty-editor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let layers = RefCell::new(LayerStore::open_at(&root).unwrap());
+        ui.layer_picker.set_selected(0);
+        ui.select_control(ControlKind::Button, Some(1), true)
+            .unwrap();
+        ui.load_selected_binding(&layers);
+        assert!(!ui.is_dirty(), "loading must leave the editor clean");
+        assert_ne!(ui.status.text(), "Unsaved changes.");
+        ui.action_picker.set_selected(3);
+        ui.text_entry.set_text("p");
+        ui.ctrl_mod.set_active(true);
+        assert_eq!(ui.status.text(), "Unsaved changes.");
+        assert_eq!(ui.shortcut_preview.text(), "Presses Ctrl + P");
+        // Saving treats the current fields as the new baseline.
+        ui.mark_clean();
+        ui.status.set_text("Binding updated; saving to disk…");
+        assert_eq!(ui.status.text(), "Binding updated; saving to disk…");
+        ui.text_entry.set_text("q");
+        assert_eq!(ui.status.text(), "Unsaved changes.");
+        // Reloading the control discards the edits and clears the flag.
+        ui.load_selected_binding(&layers);
+        assert_ne!(ui.status.text(), "Unsaved changes.");
+        ui.action_picker.set_selected(3);
+        ui.text_entry.set_text("not-a-key");
+        assert_eq!(ui.shortcut_preview.text(), "");
+        assert!(!ui.shortcut_preview.is_visible());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn assert_discard_prompt_guards_unsaved_edits() {
+        let window = gtk::Window::new();
+        let anchor = Button::new();
+        window.set_child(Some(&anchor));
+        let switched = Rc::new(Cell::new(0));
+        let proceed: Rc<dyn Fn()> = {
+            let switched = switched.clone();
+            Rc::new(move || switched.set(switched.get() + 1))
+        };
+        confirm_discard(&anchor, proceed.clone());
+        discard_dialog().response(ResponseType::Cancel);
+        assert_eq!(switched.get(), 0, "Keep editing must not switch controls");
+        confirm_discard(&anchor, proceed.clone());
+        discard_dialog().response(ResponseType::Accept);
+        assert_eq!(switched.get(), 1, "Discard changes must switch controls");
+        // With no window there is nobody to ask, so the switch just happens.
+        confirm_discard(&Button::new(), proceed);
+        assert_eq!(switched.get(), 2);
+        window.destroy();
     }
 
     fn assert_legacy_keys_load_without_rewriting_and_save_as_shortcuts(ui: &BindingUi) {
@@ -4989,12 +5299,14 @@ mod tests {
                     .unwrap()
                     .downcast::<Button>()
                     .unwrap();
+                ui.mark_clean();
                 button.emit_clicked();
                 assert_eq!(ui.control_picker.selected(), 2);
                 assert_eq!(ui.event_model.n_items(), 7);
             }
         }
         let button = key_button(&widgets.key_labels[7]);
+        ui.mark_clean();
         button.emit_clicked();
         assert_eq!(ui.control_number_picker.selected(), 7);
         assert_eq!(ui.text_entry.text(), command);
@@ -5296,6 +5608,25 @@ mod tests {
             assert_eq!(action, expected);
             assert!(commands.try_recv().is_err());
         }
+
+        // Remove deletes the binding, and the feedback line can bring it back.
+        let removed_action = layers.borrow().binding(&layer, &trigger).unwrap();
+        find("Remove").emit_clicked();
+        while commands.try_recv().is_ok() {}
+        assert!(layers.borrow().binding(&layer, &trigger).is_none());
+        let undo = ui.undo_remove.clone();
+        assert!(undo.is_visible());
+        undo.emit_clicked();
+        assert_eq!(
+            layers.borrow().binding(&layer, &trigger),
+            Some(removed_action)
+        );
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            LayerCommand::SaveBinding(..)
+        ));
+        assert!(!undo.is_visible());
+        while commands.try_recv().is_ok() {}
 
         let original = layers.borrow().active().to_owned();
         let keys = layers.borrow().names();
@@ -5858,6 +6189,8 @@ mod tests {
                     .tooltip_text()
                     .unwrap()
                     .contains(&format!("Encoder {}", index + 1)));
+                // The checks above poke the editor directly; treat it as saved.
+                widgets.binding_ui.mark_clean();
                 knob.emit_clicked();
                 assert!(knob.has_css_class("control-selected"));
                 label.set_text(&format!("DIAL {}\n3 ticks · +3", index + 1));
@@ -6175,6 +6508,20 @@ mod tests {
                     .map(|label| label.text())
             })
             .or_else(|| button.tooltip_text())
+    }
+
+    /// The discard prompt specifically, so a stray dialog from another test cannot answer it.
+    fn discard_dialog() -> gtk::MessageDialog {
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|window| window.downcast::<gtk::MessageDialog>().ok())
+            .find(|dialog| {
+                dialog.is_visible()
+                    && dialog.property::<Option<String>>("text").as_deref()
+                        == Some("Discard unsaved changes?")
+            })
+            .expect("unsaved edits must prompt before switching")
     }
 
     fn current_dialog() -> gtk::Dialog {
@@ -6955,7 +7302,7 @@ mod tests {
             )
             .unwrap();
         ui.refresh_summaries(&layers);
-        assert_eq!(ui.summaries[0].text(), "Press: Layer Studio");
+        assert_eq!(ui.summaries[0].text(), "Press: Go to Studio");
         layers
             .borrow_mut()
             .bind(
@@ -7007,7 +7354,7 @@ mod tests {
         ui.layer_model.remove(index as u32);
         ui.layer_picker.set_selected(0);
         ui.refresh_summaries(&layers);
-        assert_eq!(ui.summaries[0].text(), "Press: Layer Studio");
+        assert_eq!(ui.summaries[0].text(), "Press: Go to Studio");
         assert!(remove_selected_layer(&layers, 0).is_none());
         // Removing a destination also removes inbound switches from Base.
         let studio = layer_index(&layers, "Studio");

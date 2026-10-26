@@ -58,7 +58,9 @@ impl ConfigurationMenu {
         content.set_margin_end(16);
         content.set_margin_top(16);
         content.set_margin_bottom(16);
-        content.append(&ui::panel_body(help_body));
+        let help_scroller = ui::panel_body(help_body);
+        help_scroller.set_max_content_height(420);
+        content.append(&help_scroller);
         help_dialog.connect_response(|dialog, _| dialog.hide());
         help_dialog.connect_close_request(|dialog| {
             dialog.hide();

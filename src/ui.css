@@ -135,6 +135,20 @@ menubutton.icon-action > button > box { border-spacing: 0; }
 .page-name-dialog button { margin: 0 6px 16px; }
 .page-name-dialog button:first-child { margin-left: 16px; }
 .page-name-dialog button:last-child { margin-right: 16px; }
+.confirm-dialog label { margin: 0 16px; font-size: 14px; color: @desk_muted; }
+.confirm-dialog label.title { margin: 16px 16px 4px; font-size: 16px; font-weight: 700; color: @desk_ink; }
+.confirm-dialog button label { margin: 0; font-size: inherit; color: inherit; }
+.confirm-dialog button { margin: 12px 4px 16px; min-height: 20px; padding: 4px 12px; }
+.confirm-dialog button:first-child { margin-left: 16px; }
+.confirm-dialog button:last-child { margin-right: 16px; }
+.confirm-dialog button.destructive-action {
+    color: @desk_error;
+    background-image: none;
+    background-color: alpha(@desk_error, 0.14);
+    border-color: alpha(@desk_error, 0.5);
+    font-weight: 600;
+}
+.confirm-dialog button.destructive-action:hover { background-color: alpha(@desk_error, 0.24); }
 .icon-action:disabled, .icon-action:disabled label, .icon-action:disabled image {
     color: @desk_muted;
     opacity: 1;

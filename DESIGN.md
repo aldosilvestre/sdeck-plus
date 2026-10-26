@@ -125,6 +125,13 @@ the added return and information options within the default 1000x700 layout.
 Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
 Binding feedback stays with its action buttons at a 12px vertical gap,
 while the Appearance separator keeps action and artwork sections distinct.
+That status line reads "Unsaved changes." as soon as any editor field differs
+from the loaded or saved binding; loading, saving or removing resets it.
+Selecting another preview control while edits are unsaved asks first with the
+compact confirmation style (Keep editing is the default, Discard changes is
+destructive). Remove leaves an Undo remove button under that status line until
+another control is loaded; it re-saves the binding, its page return and its
+live information.
 The related controls inside Appearance use 4px gaps so expanded artwork and
 the taller shortcut/argument fields still fit the default client height.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
@@ -132,8 +139,10 @@ Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
 Executable and arguments are one related adaptive group: two columns with a
 16px gap when each can receive at least 180px, otherwise stacked with 12px
 separation. Shortcut input and modifiers use the same adaptive group; modifiers
-form a two-by-two grid with 12px columns and 8px rows instead of a cramped line.
-Commands and legacy events occupy a full-width field. Hidden fields also hide
+form a two-by-two grid with 12px columns and 8px rows instead of a cramped line,
+ordered Ctrl, Alt, Shift, Super. A muted line under the grid previews the chord
+once it parses (for example "Presses Ctrl + Alt + P") and stays hidden otherwise.
+Commands and named events occupy a full-width field. Hidden fields also hide
 their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.

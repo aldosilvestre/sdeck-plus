@@ -240,6 +240,8 @@ fn capture_documentation_screenshots() {
     artwork.refresh(false);
 
     // When: drive the same native controls as configuration, never Test action.
+    // The setup above edits fields directly, so treat the editor as saved before navigating.
+    widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let capture = |name: &str| save(&directory, widgets.root.upcast_ref(), name);
     capture("main-window");
@@ -284,6 +286,7 @@ fn capture_documentation_screenshots() {
         )));
     widgets.binding_ui.feature_editor.wait_for_audio_outputs();
     capture("more-actions-audio-output");
+    widgets.binding_ui.mark_clean();
     widgets.encoder_labels[0]
         .ancestor(Button::static_type())
         .unwrap()
@@ -296,6 +299,7 @@ fn capture_documentation_screenshots() {
         &widgets.binding_ui.event_picker,
         "encoder-events",
     );
+    widgets.binding_ui.mark_clean();
     widgets
         .touch_status
         .next_sibling()
@@ -311,6 +315,7 @@ fn capture_documentation_screenshots() {
     widgets.root.vadjustment().set_value(0.0);
     capture("touch-strip");
 
+    widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let editor = &widgets._text_editor;
     wait_for_frame(&widgets.root);

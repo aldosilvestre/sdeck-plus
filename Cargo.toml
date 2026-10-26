@@ -3,6 +3,12 @@ name = "sdeck-plus"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "GTK4 control desk for the Elgato Stream Deck + (Stream Deck Plus) on Linux"
+repository = "https://github.com/aldosilvestre/sdeck-plus"
+homepage = "https://aldosilvestre.github.io/sdeck-plus/"
+readme = "README.md"
+keywords = ["streamdeck", "elgato", "gtk4", "linux", "obs"]
+categories = ["hardware-support", "gui"]
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.9", features = ["v4_8"] }
