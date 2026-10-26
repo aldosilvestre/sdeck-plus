@@ -32,11 +32,21 @@ mod shortcut_reference;
 mod tray;
 mod tray_preference;
 mod ui;
+// Layout containers live beside ui.rs but are mounted here, because the
+// ui_showcase example includes ui.rs by path.
+#[path = "ui/clamp.rs"]
+mod clamp;
+#[path = "ui/scaled_bin.rs"]
+mod scaled_bin;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
 const DEFAULT_WIDTH: i32 = 1000;
 const DEFAULT_HEIGHT: i32 = 700;
+/// Largest presentation scale of the hardware preview when space allows.
+const PREVIEW_MAX_SCALE: f64 = 1.5;
+/// Widest configuration shell (including its margins) before it centers.
+const SHELL_MAX_WIDTH: i32 = 1272;
 
 enum LayerCommand {
     Persist(LayerStore, Option<sdeck_plus::organization::Organization>),
@@ -434,9 +444,8 @@ fn build_widgets(
         );
     }
     let root = GtkBox::new(Orientation::Vertical, 16);
-    // Center the complete desk at its natural measure, not just the hardware
-    // row. GTK still shrinks it to the available width on narrow desktops.
-    root.set_halign(gtk::Align::Center);
+    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
+    // below), then centers; it still shrinks to narrow desktops.
     root.set_margin_top(16);
     root.set_margin_bottom(16);
     root.set_margin_start(16);
@@ -1096,8 +1105,8 @@ fn build_widgets(
         .build();
     // Natural-width FlowBox keeps the fixed preview and readable inspector
     // together on wide desktops, while retaining GTK's native narrow wrapping.
-    body.set_halign(gtk::Align::Center);
-    body.set_valign(gtk::Align::Start);
+    // Spare height reaches the preview row, which scales the hardware into it.
+    body.set_vexpand(true);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
     sidebar.set_hexpand(true);
@@ -1105,14 +1114,11 @@ fn build_widgets(
     sidebar.add_css_class("settings-sidebar");
     let device_area = card();
     device_area.add_css_class("device-canvas");
-    device_area.set_halign(gtk::Align::Center);
-    device_area.set_valign(gtk::Align::Start);
     // Reference image coordinates scaled to a compact physical front. Fixed
     // geometry keeps loaded artwork and long live messages from resizing hardware.
     let chassis = gtk::Fixed::new();
     chassis.set_halign(gtk::Align::Center);
     chassis.set_valign(gtk::Align::Center);
-    chassis.set_vexpand(true);
     chassis.add_css_class("hardware-chassis");
     chassis.set_size_request(426, 414);
     device_area.append(&chassis);
@@ -1336,7 +1342,13 @@ fn build_widgets(
         );
     }
 
-    body.insert(&device_area, -1);
+    // The fixed hardware geometry is presented through one uniform scale, so
+    // spare width/height enlarges the whole preview without moving controls.
+    let preview = scaled_bin::ScaledBin::new(&device_area, PREVIEW_MAX_SCALE);
+    preview.set_hexpand(true);
+    preview.set_vexpand(true);
+    preview.add_css_class("device-preview");
+    body.insert(&preview, -1);
     sidebar.append(&settings_card);
     body.insert(&sidebar, -1);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
@@ -1353,7 +1365,7 @@ fn build_widgets(
     let viewport = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&root)
+        .child(&clamp::Clamp::new(&root, SHELL_MAX_WIDTH))
         .build();
     feature_runtime.attach_configuration_root(viewport.upcast_ref());
     MonitorWidgets {
@@ -4938,6 +4950,9 @@ mod tests {
             .downcast::<gtk::Viewport>()
             .unwrap()
             .child()
+            .unwrap()
+            // The width clamp wraps the shell.
+            .first_child()
             .unwrap();
         let motion = shell.settings();
         let animations = motion.is_gtk_enable_animations();
@@ -5018,6 +5033,9 @@ mod tests {
             .downcast::<gtk::Viewport>()
             .unwrap()
             .child()
+            .unwrap()
+            // The width clamp wraps the shell.
+            .first_child()
             .unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
@@ -6228,16 +6246,16 @@ mod tests {
                 device_bounds.y()
             );
             assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 6);
-            assert_eq!(settings_bounds.y(), device_bounds.y());
-            assert_eq!(
-                device_bounds.height(),
-                428.0,
-                "preview keeps its natural height independently of editor"
+            assert!((settings_bounds.y() - device_bounds.y()).abs() <= 0.5);
+            let scale = preview_scale(widgets);
+            assert!(
+                (device_bounds.height() - 428.0 * scale).abs() <= 1.0,
+                "preview card scales uniformly, never stretches: {device_bounds:?} at {scale}"
             );
             let bounds = content.compute_bounds(&widgets.root).unwrap();
             assert_eq!(bounds.y(), 16.0);
             assert_eq!(bounds.height(), 668.0);
-            assert!((850.0..=968.0).contains(&bounds.width()));
+            assert_eq!(bounds.width(), 968.0, "shell uses the full window width");
             assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
             let mut buttons = Vec::new();
             collect_layout_buttons(content, &mut buttons);
@@ -6550,6 +6568,19 @@ mod tests {
             .unwrap()
     }
 
+    /// Uniform presentation scale of the hardware preview, from the chassis bounds.
+    fn preview_scale(widgets: &MonitorWidgets) -> f32 {
+        let chassis = key_button(&widgets.key_labels[0]).parent().unwrap();
+        let preview = device_canvas(widgets)
+            .parent()
+            .unwrap()
+            .downcast::<scaled_bin::ScaledBin>()
+            .unwrap();
+        let bounds = chassis.compute_bounds(&preview).unwrap();
+        assert!((bounds.width() / 426.0 - preview.scale() as f32).abs() < 0.01);
+        bounds.width() / 426.0
+    }
+
     fn key_button(label: &Label) -> Button {
         label
             .parent()
@@ -6585,7 +6616,13 @@ mod tests {
                 .unwrap();
             let tabs = widgets.feature_runtime.profile_tabs();
             let tab_header = tabs.first_child().unwrap().compute_bounds(content).unwrap();
-            let body = device_canvas(widgets).parent().unwrap().parent().unwrap();
+            let body = device_canvas(widgets)
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap();
             let pagebar = body
                 .parent()
                 .unwrap()
@@ -6601,9 +6638,10 @@ mod tests {
                 );
             }
             if width == 1840 {
-                assert!(
-                    (850.0..=1150.0).contains(&shell.width()),
-                    "wide configuration shell must not span the viewport: {shell:?}"
+                assert_eq!(
+                    shell.width(),
+                    (SHELL_MAX_WIDTH - 32) as f32,
+                    "wide configuration shell stops at its maximum measure: {shell:?}"
                 );
                 assert!((shell.x() + shell.width() / 2.0 - width as f32 / 2.0).abs() <= 1.0);
                 assert!(
@@ -6613,21 +6651,30 @@ mod tests {
             } else if width == 640 {
                 assert_eq!(shell.width(), 608.0, "narrow shell uses available width");
             }
+            let scale = preview_scale(widgets);
+            assert!((1.0..=PREVIEW_MAX_SCALE as f32).contains(&scale));
             assert!(
-                device.width() <= 460.0,
-                "fixed preview must not become a wide empty cell: {device:?}"
+                (device.width() - 440.0 * scale).abs() <= 1.0
+                    && (device.height() - 428.0 * scale).abs() <= 1.0,
+                "preview scales uniformly instead of stretching: {device:?} at {scale}"
             );
-            assert_eq!(
-                device.height(),
-                428.0,
-                "preview must not grow to match the form"
-            );
+            let cell = device_canvas(widgets).parent().unwrap();
             assert!(
-                editor.width() <= 600.0,
+                cell.width() as f32 - device.width() <= 64.0
+                    || cell.height() as f32 - device.height() <= 64.0,
+                "preview must fill its region in one dimension: {device:?}, cell {}x{}",
+                cell.width(),
+                cell.height()
+            );
+            if width >= 1280 {
+                assert!(scale >= 1.25, "spare room enlarges the preview: {scale}");
+            }
+            assert!(
+                editor.width() <= 640.0,
                 "editor needs a bounded reading measure: {editor:?}"
             );
             if width >= 1000 {
-                assert_eq!(device.y(), editor.y());
+                assert!((device.y() - editor.y()).abs() <= 0.5);
                 assert!(editor.x() - device.x() - device.width() <= 32.0);
             } else {
                 assert!(editor.y() >= device.y() + device.height() + 15.0);
@@ -6764,7 +6811,11 @@ mod tests {
                 .compute_bounds(content)
                 .unwrap();
             if panel.has_css_class("device-canvas") {
-                assert_eq!((first.width(), first.height()), (426.0, 414.0));
+                let scale = preview_scale(widgets);
+                assert!(
+                    (first.width() - 426.0 * scale).abs() <= 1.0
+                        && (first.height() - 414.0 * scale).abs() <= 1.0
+                );
                 assert!(
                     (first.x() + first.width() / 2.0 - bounds.x() - bounds.width() / 2.0).abs()
                         <= 1.0,
@@ -6786,12 +6837,21 @@ mod tests {
                 "shared CSS top padding: {first:?}, {bounds:?}"
             );
         }
+        let cell = device.parent().unwrap().compute_bounds(content).unwrap();
         let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
-        if settings.y() == device.y() {
-            assert!((16.0..=48.0).contains(&(settings.x() - device.x() - device.width())));
+        if (settings.y() - device.y()).abs() <= 0.5 {
+            // A height-limited preview is centered in its column.
+            let slack = (cell.width() - device.width()) / 2.0;
+            assert!(
+                (settings.x() - device.x() - device.width() - slack - 16.0).abs() <= 1.0,
+                "column gap: {settings:?}, {device:?}, {cell:?}"
+            );
         } else {
-            assert!((settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0);
+            assert!(
+                (settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0,
+                "stacked regions keep a 16px gap: {settings:?}, {device:?}"
+            );
         }
         eprintln!("GTK sidebar geometry assertions executed");
     }
@@ -6829,14 +6889,27 @@ mod tests {
             .parent()
             .unwrap();
         let front = chassis.compute_bounds(content).unwrap();
-        assert_eq!((front.width(), front.height()), (426.0, 414.0));
+        // The preview may be scaled uniformly; hardware coordinates are unchanged.
+        let scale = front.width() / 426.0;
+        assert!((1.0..=PREVIEW_MAX_SCALE as f32).contains(&scale));
+        let close = |actual: f32, expected: f32| (actual - expected * scale).abs() <= 0.5;
+        assert!(
+            close(front.height(), 414.0),
+            "uniform preview scale: {front:?}"
+        );
         assert!((front.width() / front.height() - 774.0 / 752.0).abs() < 0.02);
         for column in 0..4 {
-            assert_eq!(key_bounds[column].width(), 60.0);
-            assert_eq!(key_bounds[column + 4].x(), key_bounds[column].x());
-            assert_eq!(key_bounds[column + 4].y() - key_bounds[column].y(), 67.0);
+            assert!(close(key_bounds[column].width(), 60.0));
+            assert!((key_bounds[column + 4].x() - key_bounds[column].x()).abs() <= 0.5);
+            assert!(close(
+                key_bounds[column + 4].y() - key_bounds[column].y(),
+                67.0
+            ));
             if column < 3 {
-                assert_eq!(key_bounds[column + 1].x() - key_bounds[column].x(), 91.0);
+                assert!(close(
+                    key_bounds[column + 1].x() - key_bounds[column].x(),
+                    91.0
+                ));
             }
         }
         let bezel = pictures
@@ -6857,7 +6930,7 @@ mod tests {
             "one continuous bezel surrounds the artwork strip"
         );
         let bezel_bounds = bezel.compute_bounds(content).unwrap();
-        assert_eq!((bezel_bounds.width(), bezel_bounds.height()), (374.0, 77.0));
+        assert!(close(bezel_bounds.width(), 374.0) && close(bezel_bounds.height(), 77.0));
         assert!(strip.x() > bezel_bounds.x() && strip.y() > bezel_bounds.y());
         assert!(strip.x() + strip.width() < bezel_bounds.x() + bezel_bounds.width());
         let rail = chassis.last_child().unwrap();
@@ -6866,11 +6939,8 @@ mod tests {
         for key in key_bounds.iter().take(4) {
             let current = knob.unwrap();
             let bounds = current.compute_bounds(content).unwrap();
-            assert_eq!((bounds.width(), bounds.height()), (46.0, 46.0));
-            assert_eq!(
-                bounds.x() + bounds.width() / 2.0,
-                key.x() + key.width() / 2.0
-            );
+            assert!(close(bounds.width(), 46.0) && close(bounds.height(), 46.0));
+            assert!((bounds.x() + bounds.width() / 2.0 - key.x() - key.width() / 2.0).abs() <= 0.5);
             knob = current.next_sibling();
         }
         for (target, picture) in pictures.iter() {
