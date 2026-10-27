@@ -201,9 +201,27 @@ styling belongs to its internal button, avoiding doubled padding and background
 seams. Icon-only actions retain accessible names, tooltips and visible keyboard focus.
 New page and rename open contextual native name dialogs; cancellation never
 creates a page. Destructive page, folder and profile operations confirm their
-specific scope. Folder creation, selection, linking and deletion belong to the
+specific scope. Folder creation, renaming, linking and deletion belong to the
 current page, not the whole profile. Linking persists the selected control's
-navigation binding without executing it. The physical preview and a minimum-300px inspector sit side by side
+navigation binding without executing it.
+The **Page folders** popover keeps the shared header (title, Close) and reads
+top to bottom: a context line "Folders on “page”" with a one-line helper about
+linking; a linked create row (entry with the "New folder name" placeholder and
+a suggested-action add icon; Enter creates) with live validation beneath it
+(blank disables the button silently; duplicate or invalid names disable it and
+show the reason in error color); then a boxed list of the page's folders,
+sorted by name, scrolling past about 240px. Each 40px row shows a violet
+folder icon, the bold name (ellipsized at the end) and frameless trailing
+icon actions Open, Link to control, Rename and red Delete, each with a tooltip
+and accessible name that include the folder name ("Rename folder Studio").
+Activating a row opens the folder. Creating keeps the popover open, clears
+the entry and lists the new folder without leaving the page. Rename swaps the
+name for a prefilled, selected entry: Enter saves, Escape or moving focus
+away cancels, and validation errors stay inline without ending the edit.
+Delete still confirms and is unavailable while artwork writes are disabled.
+A page without folders shows a dim folder icon and "No folders on this page
+yet". Rows use only `@desk_*` tokens, so light and dark themes match, and
+keyboard focus draws the cyan focus ring. The physical preview and a minimum-300px inspector sit side by side
 when roomy and stack at narrow desktop widths. The outer `ScrolledWindow`
 owns primary vertical overflow. A text editor may scroll its own text; native
 popovers contain secondary content. No primary field forces horizontal scroll.

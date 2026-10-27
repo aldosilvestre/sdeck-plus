@@ -24,7 +24,7 @@ line after clicking).
 ## Tasks
 - [x] P1 `Organization::rename_folder(layers, old, new)` with lib tests (rename, descendants, links follow, invalid/duplicate/unknown rejected, unchanged on error).
 - [x] P2 Popover redesign: inline create row (entry + add button, Enter creates, live validation message, button disabled when blank/invalid/duplicate); folder list (boxed rows: icon, name, Open/Link/Rename/Delete flat icon buttons with tooltips and accessible names, row activation opens); inline rename (Enter saves, Escape cancels); empty state. GTK tests.
-- [ ] P3 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots (page-folders).
+- [x] P3 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots (page-folders).
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -64,5 +64,17 @@ tests + 1 name-check unit test pass; full `GDK_BACKEND=x11 cargo test --offline
 --bin sdeck-plus` 57 passed. fmt/clippy clean. Commit: see git log
 (`feat(folders): redesign the page folders popover`). Engram mirror pending.
 
+### P3
+Route: delegated direct (writer). DESIGN.md (Page folders popover contract),
+README.md (create, open, link, rename, delete), CHANGELOG.md (Changed + Added).
+The documentation fixture now gives the Base page three folders (Studio tools,
+Audio mix, Lighting); regenerated docs/screenshots (page-folders.png 458x437;
+other changed PNGs differ only in the "Folders 3" page-bar count).
+Test-first exception: passive docs/screenshots; checked by reading the PNG.
+Checks: cargo fmt --check ok; clippy -D warnings ok; headless
+`cargo test --offline` 333 lib + 57 bin + 2 ok; display bin suite 57 passed;
+git diff --check clean. Commit: see git log (`docs: describe the page folders
+popover ...`). Engram mirror pending.
+
 ## Next step
-P3.
+Human review; push/PR remain the user's decision.

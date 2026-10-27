@@ -8,6 +8,14 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Page folders popover.** Folders are listed as rows with Open, Link to
+  control, Rename and Delete icon actions (tooltips and accessible names
+  include the folder name) instead of a dropdown with captioned buttons. The
+  create row validates as you type (duplicate and invalid names are explained,
+  blank names disable the add button), Enter creates, and creating keeps the
+  popover open on the owning page. A page without folders shows an empty
+  state.
+
 - **Modern binding icons.** Every icon is redrawn as a duotone (a soft fill
   under a crisp round stroke) with clearer shapes for weak glyphs (toggle
   switch, beamed notes, folder with a front edge, hold progress ring, tap
@@ -33,6 +41,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   clear heading.
 
 ### Added
+
+- **Rename page folders** in place from **Page folders** (Enter saves, Escape
+  cancels). Layer keys, the folder's pages and nested folders are kept, and the
+  owning page's links to the folder follow the new name.
 
 - **Live information matches binding icons.** Live touch sections sit on the
   same translucent section tile as binding icons, with the icon on the left and

@@ -403,12 +403,23 @@ folders, bindings and artwork. Renaming preserves its identity and contents.
 The previous, next and parent arrows form one group before the page name and
 have accessible labels and tooltips.
 
-The folder icon in the page bar opens **Page folders**. Create a folder,
-select one of this page's folders, then **Open folder**, **Link to control**
-or **Delete folder**. Linking saves navigation for the selected physical
-control and event without opening the folder. Deleting removes only this
-page's folder and its local links; other pages can keep independent folders
-with the same name. **Parent** returns to the exact owning page.
+The folder icon in the page bar opens **Page folders**, which lists this
+page's folders. Type a name in **New folder name** and press Enter (or the add
+button) to create one; the popover stays open and the new folder appears in
+the list. Blank names cannot be created, and duplicate or invalid names are
+explained under the entry before you submit. Each folder row has icon actions:
+
+- **Open** (or activate the row) enters the folder.
+- **Link to control** saves navigation to the folder on the selected physical
+  control and event without opening it.
+- **Rename** edits the name in place: Enter saves, Escape cancels. Renaming
+  keeps the folder's pages, bindings and artwork, and this page's controls
+  linked to the folder follow the new name.
+- **Delete** asks for confirmation, then removes only this page's folder and
+  its local links; other pages can keep independent folders with the same
+  name.
+
+**Parent** returns to the exact owning page.
 
 Organization metadata writes version 2 with stable page-owner keys. Existing
 version-1 folders attach to their former parent view's first surviving page
@@ -417,7 +428,7 @@ Invalid metadata remains untouched and disables organization writes.
 
 ![New page name prompt](docs/screenshots/new-page-name.png)
 ![Rename current page](docs/screenshots/rename-page.png)
-![Folders owned by the current page](docs/screenshots/page-folders.png)
+![Page folders: create row and folder list with open, link, rename and delete actions](docs/screenshots/page-folders.png)
 
 To configure an action, choose the layer at the top, then select a physical control:
 

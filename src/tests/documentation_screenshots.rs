@@ -123,10 +123,11 @@ fn capture_documentation_screenshots() {
     let mut organization = sdeck_plus::organization::Organization::in_memory(&store);
     organization.set_profile_application("OBS", "obs").unwrap();
     organization.rename_page(&store, "Everyday").unwrap();
-    organization
-        .create_folder(&mut store, "Studio tools")
-        .unwrap();
-    store.select("Base");
+    // A few page folders so the Page folders popover shows a real list.
+    for folder in ["Studio tools", "Audio mix", "Lighting"] {
+        organization.create_folder(&mut store, folder).unwrap();
+        store.select("Base");
+    }
     organization
         .create_named_page(&mut store, "Production")
         .unwrap();
