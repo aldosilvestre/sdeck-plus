@@ -26,7 +26,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 - [x] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
 - [x] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
 - [x] L5 Touch-section tiles clearly see-through (~0.15 fill over the strip, ~0.10 over section artwork, soft vertical fade, subtle edge); legibility from the icon/text soft shadow, chevrons still last.
-- [ ] L6 Better icons everywhere: duotone (soft accent fill ~35% under a ~1.85-unit round stroke), soft drop shadow instead of the hard outline on hardware, per-category accents on hardware images, redrawn weak glyphs; contact sheet inspected.
+- [x] L6 Better icons everywhere: duotone (soft accent fill ~35% under a ~1.85-unit round stroke), soft drop shadow instead of the hard outline on hardware, per-category accents on hardware images, redrawn weak glyphs; contact sheet inspected.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -147,3 +147,42 @@ RED: `section_tiles_are_clearly_see_through` (alpha 89 at y=12, expected
 with bounds moved to the new intended values: alpha 8..60 at the tile bottom
 (was 60..255).
 Checks: fmt ok; clippy ok; lib 324 ok; display bin suite 53/53.
+Commit 6aa1067.
+
+### L6 (delegated writer, route: delegated direct; user feedback "better icons")
+`binding_icons::paint` draws every glyph as a duotone through a `Pen`: soft
+fill at `SOFT_ALPHA` (0.35) of the ink under a crisp 1.85-unit round stroke
+(2.2-2.6 for chevrons, transport bars, the text T), grouped so a translucent
+ink fades evenly. `paint_outlined` (name kept for API stability) now draws a
+soft drop shadow (`with_soft_shadow`: 3 rings x 12 stamps at 28/15/8% black,
+0.6-2.3 units out, dropped 0.6 units) instead of the hard 80% outline;
+captions (`draw_caption`) and live-information text (`info_render::draw_text`)
+use the same shadow. `BindingIcon::category()`/`accent()` and `IconCategory`
+color device icons by family: navigation white, media violet, audio cyan, OBS
+red, system amber, web blue, weather blue-grey, load green; live information
+keeps its own accents. Preview dials (`.dial-icon`) use the family accent;
+menus, gesture badges and the Action menu keep the theme foreground (light /
+dark parity); the artwork-target mini map gains a soft cell fill.
+Redrawn: toggle (switch), play sound (beamed notes), folder (front edge),
+parent folder (arrow inside folder), open file (text lines), application (3
+tiles + circle), tap (burst), hold (progress ring), snow (flakes), sleep (true
+crescent path + star), next/previous page (chevron on soft disc), more (soft
+pill), generic (sparkle, was identical to hold).
+Contact sheet: `STREAMDECK_ICON_SHEET=<png> cargo test --offline --lib
+icon_contact_sheet` (lib test, opt-in, writes nothing when unset; also writes
+`-partN.png` crops). Inspected twice; iteration 2 fixed hold/generic
+confusion, wifi-like tap, dot-like snow and weak caption contrast on light
+artwork (stronger shadow).
+RED: `every_icon_is_a_duotone_of_a_soft_fill_under_a_crisp_stroke` (old
+renderer: "go-to-page: soft layer 10") and
+`hardware_icons_sit_on_a_soft_drop_shadow_not_a_hard_outline` (old: "246 soft,
+619 dark") observed failing against the pre-L6 renderer after implementation
+(tests written alongside, not strictly first); `hardware_accents_follow_the_icon_family`
+was RED by construction (missing API). Pure shape changes have no RED.
+Test adjustments: key/section pixel helpers (`bright`, `bright_in`,
+`bright_columns`, GTK `bright_pixels`) count lit pixels (any channel > 180)
+instead of near-white, since icons are now accent-colored.
+Size: ~750 changed lines in `binding_icons.rs`, above the 400-line heuristic
+because every glyph is redrawn; not split.
+Checks: fmt ok; clippy ok; headless `cargo test --offline` ok (328+53+2);
+display bin suite 53/53; examples build ok; `git diff --check` ok.

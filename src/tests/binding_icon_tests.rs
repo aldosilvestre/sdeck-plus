@@ -256,7 +256,8 @@ fn picture(fixture: &IconFixture, target: ArtworkTarget) -> Picture {
         .unwrap()
 }
 
-/// Near-white pixels of a picture's paintable in `rows`.
+/// Lit pixels (near-white captions or accent-colored icons) of a picture's
+/// paintable in `rows`.
 fn bright_pixels(picture: &Picture, rows: std::ops::Range<usize>) -> usize {
     let texture = picture
         .paintable()
@@ -268,7 +269,7 @@ fn bright_pixels(picture: &Picture, rows: std::ops::Range<usize>) -> usize {
     rows.flat_map(|y| (0..width).map(move |x| (y * width + x) * 4))
         .filter(|offset| {
             // Memory format is native-endian B8G8R8A8 premultiplied.
-            pixels[offset + 3] > 200 && pixels[*offset] > 200 && pixels[offset + 1] > 200
+            pixels[offset + 3] > 200 && pixels[*offset..offset + 3].iter().any(|c| *c > 180)
         })
         .count()
 }

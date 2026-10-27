@@ -221,9 +221,9 @@ fn make_layout(
     layout
 }
 
-/// The reading's icon from the binding icon vocabulary, in its accent color
-/// with the vocabulary's dark outline so it reads over any artwork. A muted
-/// speaker keeps a grey speaker with a red cross.
+/// The reading's icon from the binding icon vocabulary, as a duotone in its
+/// accent color over the vocabulary's soft shadow so it reads over any
+/// artwork. A muted speaker keeps a grey speaker with a red cross.
 fn draw_icon(
     cairo: &Context,
     value: &InfoValue,
@@ -253,21 +253,19 @@ fn draw_icon(
     Ok(())
 }
 
-/// Text with the same thin dark outline the key text editor uses.
+/// Text over the soft shadow binding icons and captions use.
 fn draw_text(
     cairo: &Context,
     layout: &pango::Layout,
     (x, y): (f64, f64),
     fill: Color,
 ) -> Result<(), cairo::Error> {
-    cairo.move_to(x, y);
-    pangocairo::functions::layout_path(cairo, layout);
-    cairo.set_source_rgba(0.0, 0.0, 0.0, 0.9);
-    cairo.set_line_width(3.5);
-    cairo.set_line_join(cairo::LineJoin::Round);
-    cairo.stroke_preserve()?;
-    set(cairo, fill);
-    cairo.fill()
+    binding_icons::with_soft_shadow(cairo, 1.0, |cairo| {
+        cairo.move_to(x, y);
+        set(cairo, fill);
+        pangocairo::functions::show_layout(cairo, layout);
+        Ok(())
+    })
 }
 
 fn draw(cairo: &Context, value: &InfoValue) -> Result<(), cairo::Error> {
