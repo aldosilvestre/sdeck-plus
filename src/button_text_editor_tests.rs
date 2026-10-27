@@ -681,13 +681,30 @@ fn assert_live_text_preview(
 
 fn assert_text_popup_fits(editor: &button_text_editor::ButtonTextEditor) {
     let content = editor.panel.child().unwrap();
+    // Save follows the form's state and Remove exists only for saved text, so
+    // they must be unclipped but not necessarily sensitive or shown.
+    for button in [&editor.save, &editor.remove] {
+        if !button.is_visible() {
+            continue;
+        }
+        assert!(button.is_mapped());
+        let bounds = button.compute_bounds(&content).unwrap();
+        assert!(
+            bounds.x() >= 0.0
+                && bounds.y() >= 0.0
+                && bounds.x() + bounds.width() <= content.width() as f32 + 1.0
+                && bounds.y() + bounds.height() <= content.height() as f32 + 1.0,
+            "{:?} is clipped in the text popup: {bounds:?}",
+            button.tooltip_text()
+        );
+    }
+    assert!(editor.save.is_visible(), "Save text is always offered");
     for widget in [
         editor.input.clone().upcast::<gtk::Widget>(),
         editor.font.clone().upcast(),
         editor.size.clone().upcast(),
         editor.preview.clone().upcast(),
-        editor.save.clone().upcast(),
-        editor.remove.clone().upcast(),
+        editor.context_line.clone().upcast(),
     ]
     .into_iter()
     .chain(

@@ -1,7 +1,7 @@
 //! Native keypad text controls sharing the hardware image compositor.
 
 use super::{labeled, ui, ArtworkUi};
-use gtk::{prelude::*, Box as GtkBox, Label, Orientation, Picture};
+use gtk::{glib, prelude::*, Box as GtkBox, Label, Orientation, Picture};
 use sdeck_plus::{
     button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment},
     local_artwork::ArtworkTarget,
@@ -24,16 +24,33 @@ pub(super) struct ButtonTextEditor {
     pub(super) save: gtk::Button,
     pub(super) remove: gtk::Button,
     pub(super) preview: Picture,
+    /// Names the edited key and page, e.g. "Key 3 on “Everyday / Page 1”".
+    pub(super) context_line: Label,
+    /// Shown while the form differs from the key's saved text.
+    pub(super) unsaved: Label,
+    /// Ctrl+Enter saves from anywhere in the popup; plain Enter stays a new line.
+    pub(super) save_shortcut: gtk::Shortcut,
     status: Label,
     loading: Cell<bool>,
     control_available: Cell<bool>,
     context: RefCell<Option<(String, ArtworkTarget)>>,
+    /// The key's saved text, `None` when it has none.
+    saved: RefCell<Option<ButtonText>>,
+    /// The page indicator whose tooltip carries the current view's name.
+    page_label: RefCell<Option<glib::WeakRef<Label>>>,
     artwork: ArtworkUi,
 }
 
 impl ButtonTextEditor {
     pub(super) fn new(artwork: &ArtworkUi) -> Rc<Self> {
         let content = GtkBox::new(Orientation::Vertical, 8);
+        let context_line = Label::new(None);
+        context_line.add_css_class("muted");
+        context_line.add_css_class("button-text-context");
+        context_line.set_xalign(0.0);
+        context_line.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        context_line.set_max_width_chars(40);
+        content.append(&context_line);
         let body = GtkBox::new(Orientation::Horizontal, 16);
         let form = GtkBox::new(Orientation::Vertical, 8);
         form.set_hexpand(true);
@@ -100,10 +117,26 @@ impl ButtonTextEditor {
         remove.set_has_frame(false);
         buttons.append(&save);
         buttons.append(&remove);
+        let unsaved = Label::new(Some("Unsaved changes"));
+        unsaved.add_css_class("muted");
+        unsaved.add_css_class("button-text-unsaved");
+        unsaved.set_hexpand(true);
+        unsaved.set_xalign(1.0);
+        unsaved.set_visible(false);
+        buttons.append(&unsaved);
         content.append(&buttons);
         let panel = ui::popover("Button text", &content);
         // The native font dialog must not dismiss and reset this editing form.
         panel.set_autohide(false);
+        let save_shortcut = gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("<Control>Return|<Control>KP_Enter"),
+            None::<gtk::ShortcutAction>,
+        );
+        let shortcuts = gtk::ShortcutController::new();
+        // Capture runs before the text view would insert a new line.
+        shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
+        shortcuts.add_shortcut(save_shortcut.clone());
+        panel.add_controller(shortcuts);
         let open = ui::menu_button("format-text-plaintext-symbolic", "Add text", &panel);
         open.set_halign(gtk::Align::Start);
         let root = GtkBox::new(Orientation::Vertical, 8);
@@ -121,12 +154,28 @@ impl ButtonTextEditor {
             save,
             remove,
             preview,
+            context_line,
+            unsaved,
+            save_shortcut,
             status,
             loading: Cell::new(false),
             control_available: Cell::new(true),
             context: RefCell::new(None),
+            saved: RefCell::new(None),
+            page_label: RefCell::new(None),
             artwork: artwork.clone(),
         });
+        let weak = Rc::downgrade(&editor);
+        editor
+            .save_shortcut
+            .set_action(Some(gtk::CallbackAction::new(move |_, _| {
+                if let Some(editor) = weak.upgrade() {
+                    if editor.can_save() {
+                        editor.persist(false);
+                    }
+                }
+                glib::Propagation::Stop
+            })));
         let weak = Rc::downgrade(&editor);
         editor.input.buffer().connect_changed(move |_| {
             if let Some(editor) = weak.upgrade() {
@@ -217,13 +266,16 @@ impl ButtonTextEditor {
         if !matches!(target, ArtworkTarget::Keypad(_)) {
             return;
         }
-        let value = self
+        let saved = self
             .artwork
             .store
             .borrow()
             .as_ref()
             .and_then(|store| store.button_text_in_layer(&layer, target).cloned())
-            .unwrap_or_default();
+            .filter(|value| !value.text.is_empty());
+        let value = saved.clone().unwrap_or_default();
+        *self.saved.borrow_mut() = saved;
+        self.refresh_context_line();
         let caption = if value.text.is_empty() {
             "Add text"
         } else {
@@ -266,6 +318,70 @@ impl ButtonTextEditor {
         if let Err(error) = self.render_preview(&value) {
             self.feedback(&error, true);
         }
+        self.update_state();
+    }
+
+    /// Follow the page indicator's tooltip, which names the current view.
+    pub(super) fn follow_page_label(self: &Rc<Self>, indicator: &Label) {
+        *self.page_label.borrow_mut() = Some(indicator.downgrade());
+        let weak = Rc::downgrade(self);
+        indicator.connect_tooltip_text_notify(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                editor.refresh_context_line();
+            }
+        });
+        self.refresh_context_line();
+    }
+
+    fn refresh_context_line(&self) {
+        let ArtworkTarget::Keypad(key) = self.artwork.selected_target.get() else {
+            return;
+        };
+        let page = self
+            .page_label
+            .borrow()
+            .as_ref()
+            .and_then(glib::WeakRef::upgrade)
+            .and_then(|label| label.tooltip_text())
+            .map(|name| name.to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| self.artwork.layers.borrow().active().to_owned());
+        let line = format!("Key {key} on “{page}”");
+        self.context_line.set_text(&line);
+        self.context_line.set_tooltip_text(Some(&line));
+    }
+
+    /// The form value when it is valid, nonblank and differs from the saved text.
+    fn savable(&self) -> Result<ButtonText, &'static str> {
+        let value = self.value().map_err(|_| "Complete the form to save")?;
+        if value.text.trim().is_empty() || value.validate().is_err() {
+            return Err("Type some text to save");
+        }
+        if Some(&value) == self.saved.borrow().as_ref() {
+            return Err("No changes to save");
+        }
+        Ok(value)
+    }
+
+    fn can_save(&self) -> bool {
+        self.savable().is_ok()
+    }
+
+    fn is_dirty(&self) -> bool {
+        let baseline = self.saved.borrow().clone().unwrap_or_default();
+        self.value().map_or(true, |value| value != baseline)
+    }
+
+    /// Save, Remove and the unsaved hint follow the form against the saved text.
+    fn update_state(&self) {
+        let savable = self.savable();
+        self.save.set_sensitive(savable.is_ok());
+        self.save.set_tooltip_text(Some(match savable {
+            Ok(_) => "Save text (Ctrl+Enter)",
+            Err(reason) => reason,
+        }));
+        self.remove.set_visible(self.saved.borrow().is_some());
+        self.unsaved.set_visible(self.is_dirty());
     }
 
     pub(super) fn set_control_available(&self, available: bool) {
@@ -328,12 +444,13 @@ impl ButtonTextEditor {
         }
         match self.value().and_then(|value| self.render_preview(&value)) {
             Ok(()) => {
-                self.status.set_text("Unsaved changes");
+                self.status.set_text("");
                 self.status.set_tooltip_text(None);
                 ui::clear_feedback(&self.status);
             }
             Err(error) => self.feedback(&error, true),
         }
+        self.update_state();
     }
 
     pub(super) fn refresh_preview(&self) {
@@ -371,6 +488,10 @@ impl ButtonTextEditor {
     }
 
     fn persist(&self, remove: bool) {
+        // Signals may still reach an insensitive or hidden button.
+        if (remove && self.saved.borrow().is_none()) || (!remove && !self.can_save()) {
+            return;
+        }
         let result = (|| {
             let mut value = self.value()?;
             if remove {

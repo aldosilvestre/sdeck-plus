@@ -799,6 +799,7 @@ fn build_widgets(
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
     *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
+    text_editor.follow_page_label(&feature_runtime.indicator);
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
@@ -3925,6 +3926,7 @@ mod tests {
     use std::sync::Mutex;
     mod binding_icon_tests;
     mod button_swap_tests;
+    mod button_text_popup_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
     mod documentation_screenshots;
