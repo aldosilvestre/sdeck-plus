@@ -850,7 +850,7 @@ fn glyph(cairo: &Context, icon: BindingIcon) -> Result<(), cairo::Error> {
                 1.0
             };
             dot(cairo, -6.0 * side, 0.0, 4.0)?;
-            polyline(cairo, &[(-1.0 * side, 0.0), (10.0 * side, 0.0)]);
+            polyline(cairo, &[(-side, 0.0), (10.0 * side, 0.0)]);
             polyline(
                 cairo,
                 &[(6.0 * side, -4.5), (10.5 * side, 0.0), (6.0 * side, 4.5)],
