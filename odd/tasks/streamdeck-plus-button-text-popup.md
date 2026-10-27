@@ -22,7 +22,7 @@ there is no keyboard shortcut to save.
 
 ## Tasks
 - [x] T1 Context and state: header context "Key N on “<page>”"; Save insensitive when unchanged or invalid; Remove only when the key has saved text; Ctrl+Enter saves; unsaved-changes hint; GTK tests.
-- [ ] T2 Layout: single 3x3 "Position" grid replacing the two alignment rows; orientation as compact icon toggles; preview drawn on the key's real background (artwork or binding icon tile) with an overflow warning when the text does not fit; fit tests still pass. GTK tests.
+- [x] T2 Layout: single 3x3 "Position" grid replacing the two alignment rows; orientation as compact icon toggles; preview drawn on the key's real background (artwork or binding icon tile) with an overflow warning when the text does not fit; fit tests still pass. GTK tests.
 - [ ] T3 DESIGN.md, README.md, CHANGELOG.md, regenerated button-text-editor screenshot.
 
 ## Route
@@ -58,5 +58,34 @@ bin suite 60/60; git diff --check ok. Commit: see git log
 (`feat(button-text): show context and saved state in the text popup`).
 Engram mirror pending.
 
+### T2
+Route: delegated direct (writer). src/button_text_editor.rs: the two alignment
+rows are replaced by one 3x3 "Position" grid (`position: [ToggleButton; 9]`,
+row-major, grouped, 14px key-outline glyph with a dot, tooltips/accessible
+names Top left .. Bottom right; `position_index`/`position_alignment` map
+HorizontalAlignment x VerticalAlignment). Orientation is a linked pair of
+icon toggles drawing upright/rotated "Ab" (accessible names Horizontal /
+Vertical). Both sit in one row. The preview uses the new
+`ArtworkUi::key_text_image` (main.rs): the key's artwork (artwork owner), else
+its binding icon tile via `ControlIcon::compose` when the text leaves room,
+else the neutral black key, which is the same choice `set_button_picture`
+makes; nothing is stored. `text_fits` measures Pango ink extents exactly like
+`compose_button_image` (116px inside 2px margins; the key is square so
+rotation does not change fit) and shows "Text does not fit; try a smaller
+size" under the preview; Save stays allowed. The "Unsaved changes" hint moved
+under the preview: in the button row it widened the popup while it was being
+mapped and GTK/X11 closed it (found by the `STREAMDECK_TEXT_QA_DIR` fit path).
+CSS in src/ui.css uses existing tokens (light parity through ui-light.css
+token overrides; no light-specific rule needed).
+RED: the preview-background test failed against the old preview composition
+(key 2 drew a black key instead of its icon tile); grid/overflow tests failed
+to compile before `position`/`overflow`/`text_fits` existed. GREEN: `cargo
+test --bin sdeck-plus button_text` 7 passed, also with `STREAMDECK_TEXT_QA_DIR`
+(640x480/1000x700/1280x800 fit, light+dark).
+Checks: fmt ok; clippy -D warnings ok; headless 333 lib + 63 bin + 2 ok; display
+bin suite 63/63; git diff --check ok. Commit: see git log
+(`feat(button-text): position grid, icon orientation and real key preview`).
+Engram mirror pending.
+
 ## Next step
-T2.
+T3.

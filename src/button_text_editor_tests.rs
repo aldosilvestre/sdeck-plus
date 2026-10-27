@@ -61,10 +61,10 @@ fn assert_button_text_editor() {
     rendered_text_popup(&editor.panel, || editor.open.popup());
     assert!(editor.panel.is_mapped(), "new text popup must be mapped");
     assert!(editor.panel.is_visible());
-    for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+    for button in editor.orientation.iter().chain(editor.position.iter()) {
         assert!(
             button.label().is_none(),
-            "alignment controls must be icon-only"
+            "orientation and position controls must be icon-only"
         );
         assert!(button.child().is_some());
         assert!(button
@@ -84,7 +84,6 @@ fn assert_button_text_editor() {
     .into_iter()
     .enumerate()
     {
-        editor.horizontal[horizontal].emit_clicked();
         for (vertical, expected_vertical) in [
             VerticalAlignment::Top,
             VerticalAlignment::Center,
@@ -93,21 +92,13 @@ fn assert_button_text_editor() {
         .into_iter()
         .enumerate()
         {
-            editor.vertical[vertical].emit_clicked();
+            editor.position[vertical * 3 + horizontal].emit_clicked();
             let value = editor.value().unwrap();
             assert_eq!(value.horizontal_alignment, expected_horizontal);
             assert_eq!(value.vertical_alignment, expected_vertical);
             assert_eq!(
                 editor
-                    .horizontal
-                    .iter()
-                    .filter(|button| button.is_active())
-                    .count(),
-                1
-            );
-            assert_eq!(
-                editor
-                    .vertical
+                    .position
                     .iter()
                     .filter(|button| button.is_active())
                     .count(),
@@ -118,8 +109,7 @@ fn assert_button_text_editor() {
     }
     editor.size.set_value(30.0);
     editor.orientation[1].set_active(true);
-    editor.horizontal[2].set_active(true);
-    editor.vertical[2].set_active(true);
+    editor.position[8].set_active(true);
     assert_font_dialog_keeps_draft(editor);
     let mut font = gtk::pango::FontDescription::new();
     font.set_family("Serif");
@@ -292,9 +282,8 @@ fn assert_button_text_editor() {
                     for (index, name) in ["start", "center", "end"].into_iter().enumerate() {
                         let texture = rendered_text_popup(&editor.panel, || {
                             editor.open.popup();
-                            editor.horizontal[index].set_active(true);
-                            editor.vertical[index].set_active(true);
-                            assert!(editor.horizontal[index].grab_focus());
+                            editor.position[index * 4].set_active(true);
+                            assert!(editor.position[index * 4].grab_focus());
                             window.set_focus_visible(true);
                         });
                         assert_text_popup_fits(editor);
@@ -308,14 +297,14 @@ fn assert_button_text_editor() {
                     window.set_focus_visible(false);
                     let texture = rendered_text_popup(&editor.panel, || {
                         editor.open.popup();
-                        for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+                        for button in &editor.position {
                             button.set_sensitive(false);
                         }
                     });
                     texture
                         .save_to_png(directory.join(format!("text-alignment-disabled-{theme}.png")))
                         .unwrap();
-                    for button in editor.horizontal.iter().chain(editor.vertical.iter()) {
+                    for button in &editor.position {
                         button.set_sensitive(true);
                     }
                     editor.panel.popdown();
@@ -565,8 +554,7 @@ fn assert_saved_text_on_streamdeck() {
         editor.input.buffer().set_text(&format!("Key {key}"));
         editor.size.set_value(18.0);
         editor.orientation[orientation].set_active(true);
-        editor.horizontal[2].set_active(true);
-        editor.vertical[2].set_active(true);
+        editor.position[8].set_active(true);
         let value = editor.value().unwrap();
         assert_live_text_preview(
             editor,
@@ -711,8 +699,7 @@ fn assert_text_popup_fits(editor: &button_text_editor::ButtonTextEditor) {
         editor
             .orientation
             .iter()
-            .chain(editor.horizontal.iter())
-            .chain(editor.vertical.iter())
+            .chain(editor.position.iter())
             .map(|button| button.clone().upcast()),
     ) {
         assert!(widget.is_mapped());

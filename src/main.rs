@@ -3266,6 +3266,29 @@ impl ArtworkUi {
         })
     }
 
+    /// The 120x120 key picture for `text` as the key shows it: over its own
+    /// artwork, else over its binding icon tile (when the text leaves room for
+    /// the icon), else on the neutral black key. Also returns whether the key
+    /// shows anything. Derived when drawing; nothing is stored.
+    fn key_text_image(
+        &self,
+        layer: &str,
+        target: ArtworkTarget,
+        text: &sdeck_plus::button_text::ButtonText,
+    ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
+        let path = self.info_background(layer, target);
+        if path.is_none() {
+            if let Some(icon) = self.control_icon(layer, target) {
+                if let Some(image) = icon.compose(Some(text))? {
+                    return Ok((image, true));
+                }
+            }
+        }
+        let shown = path.is_some() || !text.text.is_empty();
+        let image = sdeck_plus::image_output::compose_button_image(path.as_deref(), text)?;
+        Ok((image, shown))
+    }
+
     /// Whether `target` shows live information on `layer`.
     fn shows_info(&self, layer: &str, target: ArtworkTarget) -> bool {
         self.info_targets(layer)

@@ -300,6 +300,21 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
+.button-text-choices button { min-width: 28px; }
+.button-text-position button {
+    min-width: 24px;
+    min-height: 18px;
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+.button-text-position button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
+.button-text-context { font-size: 0.9em; }
+.button-text-unsaved { font-size: 0.9em; }
+.button-text-overflow { font-size: 0.9em; }
 
 .hardware-chassis {
     background: linear-gradient(135deg, #414951, #272d34);

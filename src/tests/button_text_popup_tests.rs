@@ -240,3 +240,305 @@ fn assert_ctrl_enter_saves() {
         gtk::PropagationPhase::Capture
     );
 }
+
+fn preview_pixels(editor: &button_text_editor::ButtonTextEditor) -> Vec<u8> {
+    let texture = editor
+        .preview
+        .paintable()
+        .unwrap()
+        .downcast::<gtk::gdk::Texture>()
+        .unwrap();
+    assert_eq!((texture.width(), texture.height()), (120, 120));
+    let mut pixels = vec![0; 120 * 120 * 4];
+    texture.download(&mut pixels, 120 * 4);
+    pixels
+}
+
+fn assert_same_pixels(actual: &[u8], expected: &[u8], what: &str) {
+    let differing = actual
+        .iter()
+        .zip(expected)
+        .filter(|(actual, expected)| actual != expected)
+        .count();
+    assert!(
+        actual.len() == expected.len() && differing == 0,
+        "{what}: {differing} of {} bytes differ",
+        expected.len()
+    );
+}
+
+fn pixbuf_pixels(image: &gtk::gdk_pixbuf::Pixbuf) -> Vec<u8> {
+    let texture = gtk::gdk::Texture::for_pixbuf(image);
+    let mut pixels = vec![0; 120 * 120 * 4];
+    texture.download(&mut pixels, 120 * 4);
+    pixels
+}
+
+#[test]
+fn button_text_position_grid_maps_every_alignment() {
+    run_gtk_test(assert_position_grid);
+}
+
+fn assert_position_grid() {
+    use sdeck_plus::button_text::{HorizontalAlignment, TextOrientation, VerticalAlignment};
+    let Some(fixture) = popup_fixture("text-position", |_, images, _| {
+        images
+            .set_button_text_in_layer(
+                "Base",
+                ArtworkTarget::Keypad(6),
+                ButtonText {
+                    text: "Saved".into(),
+                    horizontal_alignment: HorizontalAlignment::Right,
+                    vertical_alignment: VerticalAlignment::Top,
+                    orientation: TextOrientation::Vertical,
+                    ..ButtonText::default()
+                },
+            )
+            .unwrap();
+    }) else {
+        return;
+    };
+    let editor = fixture.editor();
+    fixture.open(1);
+    let names = [
+        "Top left",
+        "Top center",
+        "Top right",
+        "Middle left",
+        "Center",
+        "Middle right",
+        "Bottom left",
+        "Bottom center",
+        "Bottom right",
+    ];
+    let horizontal = [
+        HorizontalAlignment::Left,
+        HorizontalAlignment::Center,
+        HorizontalAlignment::Right,
+    ];
+    let vertical = [
+        VerticalAlignment::Top,
+        VerticalAlignment::Center,
+        VerticalAlignment::Bottom,
+    ];
+    // Then: the default value selects the center cell.
+    assert!(editor.position[4].is_active());
+    editor.input.buffer().set_text("Go");
+    for (index, button) in editor.position.iter().enumerate() {
+        assert!(button.label().is_none(), "position cells are icon-only");
+        assert!(button.child().is_some());
+        assert_eq!(button.tooltip_text().as_deref(), Some(names[index]));
+        assert!(
+            button.is_focusable(),
+            "position cells are keyboard reachable"
+        );
+        // When: a cell is chosen.
+        button.emit_clicked();
+        // Then: exactly that cell is active and the value maps row x column.
+        let active: Vec<_> = editor
+            .position
+            .iter()
+            .enumerate()
+            .filter(|(_, button)| button.is_active())
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(active, vec![index]);
+        let value = editor.value().unwrap();
+        assert_eq!(value.horizontal_alignment, horizontal[index % 3]);
+        assert_eq!(value.vertical_alignment, vertical[index / 3]);
+        wait_for_frame(&editor.panel);
+        assert!(
+            editor.panel.is_visible(),
+            "choosing {} keeps the popup open",
+            names[index]
+        );
+    }
+    // The grid shares one row with the orientation pair.
+    let grid = editor.position[0].parent().unwrap();
+    let orientation = editor.orientation[0].parent().unwrap();
+    assert_eq!(
+        grid.parent().and_then(|field| field.parent()),
+        orientation.parent().and_then(|field| field.parent()),
+        "orientation and position share one compact row"
+    );
+    for (button, name) in editor.orientation.iter().zip(["Horizontal", "Vertical"]) {
+        assert!(
+            button.label().is_none(),
+            "orientation toggles are icon-only"
+        );
+        assert!(button
+            .tooltip_text()
+            .is_some_and(|tooltip| tooltip.starts_with(name)));
+    }
+    assert!(orientation.has_css_class("linked"));
+    // A saved value activates its own cell and orientation.
+    editor.panel.popdown();
+    fixture.open(6);
+    assert!(editor.position[2].is_active());
+    assert!(editor.orientation[1].is_active());
+}
+
+#[test]
+fn button_text_preview_uses_the_keys_real_background() {
+    run_gtk_test(assert_preview_background);
+}
+
+fn assert_preview_background() {
+    use sdeck_plus::binding_icons::BindingIcon;
+    use sdeck_plus::button_text::VerticalAlignment;
+    let action = Action::Command("make".into());
+    let bound = action.clone();
+    let Some(fixture) = popup_fixture("text-background", move |store, images, source| {
+        store.bind("Base", Trigger::KeyPress(2), bound).unwrap();
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), source)
+            .unwrap();
+    }) else {
+        return;
+    };
+    let editor = fixture.editor();
+    let artwork_root = fixture.root.join("artwork");
+    let files = || {
+        let mut files: Vec<_> = walk_files(&artwork_root);
+        files.sort();
+        files
+    };
+    let before = files();
+    // Given: key 1 with artwork.
+    fixture.open(1);
+    editor.input.buffer().set_text("Art");
+    let value = editor.value().unwrap();
+    let path = fixture
+        .artwork
+        .store
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1));
+    assert!(path.is_some());
+    assert_same_pixels(
+        &preview_pixels(editor),
+        &pixbuf_pixels(
+            &sdeck_plus::image_output::compose_button_image(path.as_deref(), &value).unwrap(),
+        ),
+        "text over the key's artwork",
+    );
+    editor.panel.popdown();
+    // Given: key 2 without artwork but with a binding icon.
+    fixture.open(2);
+    let icon = BindingIcon::for_action(&action);
+    let caption = sdeck_plus::binding_editor::action_caption(&action);
+    let empty = editor.value().unwrap();
+    assert_same_pixels(
+        &preview_pixels(editor),
+        &pixbuf_pixels(
+            &sdeck_plus::binding_icons::compose_key_image(icon, &caption, Some(&empty))
+                .unwrap()
+                .unwrap(),
+        ),
+        "an empty draft shows the key's icon tile",
+    );
+    editor.input.buffer().set_text("Build");
+    editor.position[1].emit_clicked();
+    let top = editor.value().unwrap();
+    assert_eq!(top.vertical_alignment, VerticalAlignment::Top);
+    assert_same_pixels(
+        &preview_pixels(editor),
+        &pixbuf_pixels(
+            &sdeck_plus::binding_icons::compose_key_image(icon, &caption, Some(&top))
+                .unwrap()
+                .unwrap(),
+        ),
+        "top text sits above the key's icon, as on the device",
+    );
+    // Centered text leaves no room for the icon: the neutral key background.
+    editor.position[4].emit_clicked();
+    let centered = editor.value().unwrap();
+    assert_same_pixels(
+        &preview_pixels(editor),
+        &pixbuf_pixels(&sdeck_plus::image_output::compose_button_image(None, &centered).unwrap()),
+        "centered text leaves the neutral key background",
+    );
+    // Given: key 3 with neither artwork nor binding.
+    editor.panel.popdown();
+    fixture.open(3);
+    editor.input.buffer().set_text("Plain");
+    editor.position[1].emit_clicked();
+    let plain = editor.value().unwrap();
+    assert_same_pixels(
+        &preview_pixels(editor),
+        &pixbuf_pixels(&sdeck_plus::image_output::compose_button_image(None, &plain).unwrap()),
+        "an unbound key without artwork is neutral",
+    );
+    // Derived previews are never written into the artwork store.
+    assert_eq!(files(), before);
+}
+
+fn walk_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+#[test]
+fn button_text_overflow_warns_without_blocking_save() {
+    run_gtk_test(assert_overflow_warning);
+}
+
+fn assert_overflow_warning() {
+    let Some(fixture) = popup_fixture("text-overflow", |_, _, _| {}) else {
+        return;
+    };
+    let editor = fixture.editor();
+    fixture.open(1);
+    assert!(!editor.overflow.is_visible(), "an empty draft fits");
+    // Given: short text at a small size.
+    editor.input.buffer().set_text("Mute");
+    editor.size.set_value(18.0);
+    assert!(!editor.overflow.is_visible());
+    // When: the size makes it wider than the key.
+    editor.size.set_value(60.0);
+    // Then: an inline warning appears, and Save is still allowed.
+    assert!(editor.overflow.is_visible());
+    assert!(editor.overflow.is_mapped());
+    assert_eq!(
+        editor.overflow.text(),
+        "Text does not fit; try a smaller size"
+    );
+    assert!(editor.overflow.has_css_class("feedback-warning"));
+    assert!(editor.save.is_sensitive(), "overflow is informational");
+    // The key is square, so rotating overflowing text keeps the warning.
+    editor.orientation[1].emit_clicked();
+    assert!(editor.overflow.is_visible());
+    assert!(!button_text_editor::text_fits(&editor.value().unwrap()));
+    editor.orientation[0].emit_clicked();
+    editor.size.set_value(24.0);
+    editor
+        .input
+        .buffer()
+        .set_text("One\nTwo\nThree\nFour\nFive");
+    editor.orientation[0].emit_clicked();
+    assert!(
+        editor.overflow.is_visible(),
+        "five lines are too tall at 24px"
+    );
+    editor.size.set_value(12.0);
+    assert!(!editor.overflow.is_visible());
+    // Saving keeps the overflowing text as typed.
+    editor.size.set_value(60.0);
+    editor.save.emit_clicked();
+    assert_eq!(fixture.saved(1).unwrap().font_size, 60);
+}
