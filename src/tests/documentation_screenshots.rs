@@ -349,6 +349,8 @@ fn capture_documentation_screenshots() {
     widgets.binding_ui.mark_clean();
     widgets
         .touch_status
+        .parent()
+        .unwrap()
         .next_sibling()
         .unwrap()
         .downcast::<gtk::Overlay>()

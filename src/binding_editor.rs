@@ -304,6 +304,99 @@ pub fn action_caption(action: &Action) -> String {
     action_summary(Some(action))
 }
 
+/// A whole-strip touch gesture shown as a badge above the preview strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripGesture {
+    SwipeLeft,
+    SwipeRight,
+    Tap,
+    Hold,
+}
+
+impl StripGesture {
+    pub const ALL: [Self; 4] = [Self::SwipeLeft, Self::SwipeRight, Self::Tap, Self::Hold];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SwipeLeft => "Swipe left",
+            Self::SwipeRight => "Swipe right",
+            Self::Tap => "Tap",
+            Self::Hold => "Hold",
+        }
+    }
+
+    /// The gesture's own glyph, drawn before its action's icon.
+    pub fn icon(self) -> crate::binding_icons::BindingIcon {
+        use crate::binding_icons::BindingIcon;
+        match self {
+            Self::SwipeLeft => BindingIcon::SwipeLeft,
+            Self::SwipeRight => BindingIcon::SwipeRight,
+            Self::Tap => BindingIcon::Tap,
+            Self::Hold => BindingIcon::Hold,
+        }
+    }
+
+    fn trigger(self) -> Trigger {
+        use crate::layers::SwipeDirection;
+        match self {
+            Self::SwipeLeft => Trigger::TouchSwipe(SwipeDirection::Left),
+            Self::SwipeRight => Trigger::TouchSwipe(SwipeDirection::Right),
+            Self::Tap => Trigger::TouchTap,
+            Self::Hold => Trigger::TouchPress,
+        }
+    }
+
+    /// What an unbound gesture does: horizontal swipes change touch page.
+    fn default_action(self) -> Option<Action> {
+        use crate::features::{FeatureAction, TouchscreenAction};
+        let page = match self {
+            Self::SwipeLeft => TouchscreenAction::NextPage,
+            Self::SwipeRight => TouchscreenAction::PreviousPage,
+            Self::Tap | Self::Hold => return None,
+        };
+        Some(Action::Feature(FeatureAction::Touchscreen(page)))
+    }
+}
+
+/// One strip gesture that does something on the current touch page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GestureBinding {
+    pub gesture: StripGesture,
+    pub icon: crate::binding_icons::BindingIcon,
+    pub summary: String,
+    /// The built-in swipe paging of an unbound swipe.
+    pub default: bool,
+}
+
+impl GestureBinding {
+    pub fn description(&self) -> String {
+        let default = if self.default { " (default)" } else { "" };
+        format!("{}{default}: {}", self.gesture.label(), self.summary)
+    }
+}
+
+/// Swipe left/right, tap and hold of the whole strip on `layer`'s touch page,
+/// in that order. Unbound swipes report their default paging; explicit
+/// `None` bindings and unassigned taps or holds are omitted.
+pub fn strip_gestures(store: &LayerStore, layer: &str) -> Vec<GestureBinding> {
+    use crate::binding_icons::BindingIcon;
+    StripGesture::ALL
+        .into_iter()
+        .filter_map(|gesture| {
+            let bound = store.binding(layer, &gesture.trigger());
+            let default = bound.is_none();
+            let action = bound.or_else(|| gesture.default_action())?;
+            let icon = BindingIcon::for_action(&action);
+            icon.shown_on_controls().then(|| GestureBinding {
+                gesture,
+                icon,
+                summary: action_summary(Some(&action)),
+                default,
+            })
+        })
+        .collect()
+}
+
 fn summary_event_label(event: EventKind) -> &'static str {
     match event {
         EventKind::ButtonPress | EventKind::EncoderPress => "Press",
@@ -718,6 +811,59 @@ mod tests {
             existing_action(&store, "Base", &Trigger::Rotation(1, 2)),
             Some(Action::Emit("legacy-exact".into()))
         );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn strip_gestures_list_swipes_tap_and_hold_with_default_paging() {
+        use crate::binding_icons::BindingIcon;
+        use crate::layers::SwipeDirection;
+        let (path, mut store) = temp_store();
+        let gestures = strip_gestures(&store, "Base");
+        let shown: Vec<_> = gestures
+            .iter()
+            .map(|gesture| (gesture.gesture, gesture.icon, gesture.default))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (StripGesture::SwipeLeft, BindingIcon::NextPage, true),
+                (StripGesture::SwipeRight, BindingIcon::PreviousPage, true),
+            ]
+        );
+        store
+            .bind(
+                "Base",
+                Trigger::TouchSwipe(SwipeDirection::Left),
+                Action::None,
+            )
+            .unwrap();
+        store
+            .bind(
+                "Base",
+                Trigger::TouchSwipe(SwipeDirection::Right),
+                Action::Emit("lights".into()),
+            )
+            .unwrap();
+        store
+            .bind("Base", Trigger::TouchTap, Action::Command("ls".into()))
+            .unwrap();
+        store
+            .bind("Base", Trigger::TouchPress, Action::None)
+            .unwrap();
+        let gestures = strip_gestures(&store, "Base");
+        assert_eq!(
+            gestures
+                .iter()
+                .map(|gesture| (gesture.gesture, gesture.icon, gesture.default))
+                .collect::<Vec<_>>(),
+            [
+                (StripGesture::SwipeRight, BindingIcon::NamedEvent, false),
+                (StripGesture::Tap, BindingIcon::Command, false),
+            ],
+            "an explicit None hides the default and shows nothing"
+        );
+        assert_eq!(gestures[1].description(), "Tap: Run ls");
         let _ = fs::remove_dir_all(path);
     }
 }

@@ -65,6 +65,11 @@ pub enum BindingIcon {
     Stream,
     MicrophoneMute,
     Visibility,
+    /// Whole-strip gestures, drawn before the gesture's action icon.
+    SwipeLeft,
+    SwipeRight,
+    Tap,
+    Hold,
     /// The "More actions" family as a whole.
     More,
     /// Fallback for anything without a dedicated picture.
@@ -72,7 +77,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 41] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -108,6 +113,10 @@ impl BindingIcon {
         Self::Stream,
         Self::MicrophoneMute,
         Self::Visibility,
+        Self::SwipeLeft,
+        Self::SwipeRight,
+        Self::Tap,
+        Self::Hold,
         Self::More,
         Self::Generic,
     ];
@@ -237,6 +246,10 @@ impl BindingIcon {
             Self::Stream => "stream",
             Self::MicrophoneMute => "microphone-mute",
             Self::Visibility => "visibility",
+            Self::SwipeLeft => "swipe-left",
+            Self::SwipeRight => "swipe-right",
+            Self::Tap => "tap",
+            Self::Hold => "hold",
             Self::More => "more",
             Self::Generic => "generic",
         }
@@ -828,6 +841,33 @@ fn glyph(cairo: &Context, icon: BindingIcon) -> Result<(), cairo::Error> {
             cairo.close_path();
             cairo.stroke()?;
             dot(cairo, 0.0, 0.0, 3.2)
+        }
+        BindingIcon::SwipeLeft | BindingIcon::SwipeRight => {
+            // A fingertip with a motion trail behind it.
+            let side = if icon == BindingIcon::SwipeLeft {
+                -1.0
+            } else {
+                1.0
+            };
+            dot(cairo, -6.0 * side, 0.0, 4.0)?;
+            polyline(cairo, &[(-1.0 * side, 0.0), (10.0 * side, 0.0)]);
+            polyline(
+                cairo,
+                &[(6.0 * side, -4.5), (10.5 * side, 0.0), (6.0 * side, 4.5)],
+            );
+            cairo.stroke()
+        }
+        BindingIcon::Tap => {
+            dot(cairo, 0.0, 2.0, 4.0)?;
+            cairo.new_sub_path();
+            cairo.arc(0.0, 2.0, 9.0, PI * 1.15, PI * 1.85);
+            cairo.stroke()
+        }
+        BindingIcon::Hold => {
+            dot(cairo, 0.0, 0.0, 4.0)?;
+            cairo.new_sub_path();
+            cairo.arc(0.0, 0.0, 9.5, 0.0, TAU);
+            cairo.stroke()
         }
         BindingIcon::More => {
             for x in [-7.5, 0.0, 7.5] {

@@ -1188,8 +1188,14 @@ fn build_widgets(
     touch_status.add_css_class("touch-display");
     touch_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     touch_status.set_max_width_chars(32);
-    touch_status.set_size_request(328, 16);
-    bezel.put(&touch_status, 23.0, 3.0);
+    touch_status.set_hexpand(true);
+    touch_status.set_size_request(-1, 16);
+    // The live status and the strip's gesture badges share the header line.
+    let strip_header = GtkBox::new(Orientation::Horizontal, 6);
+    strip_header.set_size_request(328, 16);
+    strip_header.append(&touch_status);
+    strip_header.append(&binding_ui.gesture_badges);
+    bezel.put(&strip_header, 23.0, 3.0);
     let strip_button = Button::new();
     strip_button.add_css_class("control-selectable");
     strip_button.add_css_class("strip-surface");
@@ -1661,6 +1667,8 @@ struct BindingUi {
     dial_legends: Vec<Label>,
     /// The caption's action icon, drawn on each preview knob (preview-only).
     dial_icons: Vec<gtk::DrawingArea>,
+    /// Swipe, tap and hold badges in the preview strip's header line.
+    gesture_badges: GtkBox,
     shortcut_preview: Label,
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
@@ -1843,6 +1851,12 @@ impl BindingUi {
                     label
                 })
                 .collect(),
+            gesture_badges: {
+                let row = GtkBox::new(Orientation::Horizontal, 4);
+                row.add_css_class("gesture-badges");
+                row.set_valign(gtk::Align::Center);
+                row
+            },
             dial_icons: (0..4)
                 .map(|_| {
                     let icon = binding_icon::binding_icon(BindingIcon::Generic);
@@ -1894,9 +1908,21 @@ impl BindingUi {
                     })
                 })
                 .collect::<Vec<_>>();
-            (summaries, legends)
+            let gestures = sdeck_plus::binding_editor::strip_gestures(&store, &layer);
+            (summaries, legends, gestures)
         };
-        let (texts, legends) = texts;
+        let (texts, legends, gestures) = texts;
+        while let Some(child) = self.gesture_badges.first_child() {
+            self.gesture_badges.remove(&child);
+        }
+        for gesture in &gestures {
+            self.gesture_badges.append(&binding_icon::gesture_badge(
+                gesture.gesture.icon(),
+                gesture.icon,
+                &gesture.description(),
+                gesture.default,
+            ));
+        }
         for (label, text) in self.summaries.iter().zip(texts) {
             label.set_text(&text.replace('\n', " · "));
             label.set_tooltip_text(Some(&text));
@@ -5723,6 +5749,8 @@ mod tests {
                     None,
                     widgets
                         .touch_status
+                        .parent()
+                        .unwrap()
                         .next_sibling()
                         .unwrap()
                         .downcast::<gtk::Overlay>()
@@ -6280,6 +6308,8 @@ mod tests {
             capture("encoder-clockwise-brightness");
             widgets
                 .touch_status
+                .parent()
+                .unwrap()
                 .next_sibling()
                 .unwrap()
                 .downcast::<gtk::Overlay>()

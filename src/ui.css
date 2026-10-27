@@ -333,6 +333,8 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 /* Preview-only caption naming each dial's assigned action. */
 .dial-legend { color: #d5dce5; font-size: 10px; font-weight: 600; }
 .dial-icon { color: #e1e6eb; }
+.gesture-badge { color: #e1e6eb; background: rgba(225, 230, 235, 0.14); border-radius: 8px; padding: 2px 5px; }
+.gesture-badge.default { color: #9aa5b1; background: rgba(225, 230, 235, 0.06); }
 .control-selectable:focus-visible {
     outline: 2px solid @desk_cyan;
     outline-offset: -2px;

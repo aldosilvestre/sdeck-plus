@@ -25,7 +25,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [x] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
 - [x] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
-- [ ] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
+- [x] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
 - [ ] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
 - [ ] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
 - [ ] T11 Docs + regenerated screenshots for T7-T10.
@@ -148,3 +148,18 @@ worker (`prepare_icon_jpeg` over the strip crop, or black).
 RED: `touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile` (no tile)
 and `edge_page_indicators_keep_their_room_beside_the_section_icon` (signature),
 then GREEN. Checks: clippy ok, display bin suite only the known failure.
+
+### T8 (delegated writer)
+Placement: the preview strip's header line (beside "Touch strip · waiting for
+input", above the sections) holds compact badges in the order swipe left,
+swipe right, tap, hold: gesture glyph (new `swipe-left`, `swipe-right`, `tap`,
+`hold` icons) + action icon, 11px, pale pill; unbound swipes show their
+default touch paging dimmed (`default` class); explicit None and unassigned
+tap/hold show nothing. Tooltip/accessible name e.g. "Swipe left (default):
+Next touchscreen page". Device: unchanged on purpose; its edge chevrons
+already show swipe paging and badges would cover section content.
+`binding_editor::strip_gestures`/`StripGesture`/`GestureBinding` (lib).
+Three test sibling walks now step out of the new header row.
+RED: lib `strip_gestures_list_swipes_tap_and_hold_with_default_paging` and GTK
+`strip_header_shows_gesture_badges_without_covering_the_sections` (no
+items/field), then GREEN. Checks: clippy ok, display bin suite 50/51 (known).

@@ -555,3 +555,88 @@ fn assert_device_icons() {
     }
     eprintln!("GTK device binding icon assertions executed");
 }
+
+#[test]
+fn strip_header_shows_gesture_badges_without_covering_the_sections() {
+    run_gtk_test(assert_gesture_badges);
+}
+
+fn assert_gesture_badges() {
+    use sdeck_plus::layers::SwipeDirection;
+    let Some(fixture) = fixture("gesture-badges", |store| {
+        store
+            .bind(
+                "Base",
+                Trigger::TouchSwipe(SwipeDirection::Right),
+                Action::Emit("lights".into()),
+            )
+            .unwrap();
+        store
+            .bind("Base", Trigger::TouchTap, Action::Command("ls".into()))
+            .unwrap();
+    }) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let row = &widgets.binding_ui.gesture_badges;
+    let badges = || {
+        descendants::<GtkBox>(row.upcast_ref())
+            .into_iter()
+            .filter(|badge| badge.has_css_class("gesture-badge"))
+            .collect::<Vec<_>>()
+    };
+    let shown: Vec<(Vec<String>, bool, String)> = badges()
+        .iter()
+        .map(|badge| {
+            (
+                icon_ids(badge.upcast_ref()),
+                badge.has_css_class("default"),
+                badge.tooltip_text().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (
+                vec!["swipe-left".to_owned(), "next-page".to_owned()],
+                true,
+                "Swipe left (default): Next touchscreen page".to_owned()
+            ),
+            (
+                vec!["swipe-right".to_owned(), "named-event".to_owned()],
+                false,
+                "Swipe right: Emit lights".to_owned()
+            ),
+            (
+                vec!["tap".to_owned(), "command".to_owned()],
+                false,
+                "Tap: Run ls".to_owned()
+            ),
+        ]
+    );
+    // The badges share the strip header line and stay above the sections.
+    assert_eq!(row.parent(), widgets.touch_status.parent());
+    let content = widgets.root.child().unwrap();
+    let header = row.compute_bounds(&content).unwrap();
+    for zone in &widgets.zone_widgets {
+        let zone = zone.compute_bounds(&content).unwrap();
+        assert!(header.y() + header.height() <= zone.y() + 0.5);
+    }
+    fixture
+        .layers
+        .borrow_mut()
+        .bind(
+            "Base",
+            Trigger::TouchSwipe(SwipeDirection::Left),
+            Action::None,
+        )
+        .unwrap();
+    widgets.binding_ui.refresh_summaries(&fixture.layers);
+    assert_eq!(
+        badges().len(),
+        2,
+        "an explicit None removes the default badge"
+    );
+    eprintln!("GTK strip gesture badge assertions executed");
+}

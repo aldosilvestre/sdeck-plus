@@ -118,3 +118,27 @@ fn sync_check(item: &gtk::ListItem, check: &Image, picker: &gtk::DropDown) {
     let selected = item.item().is_some() && item.position() == picker.selected();
     check.set_opacity(if selected { 1.0 } else { 0.0 });
 }
+
+/// A compact badge for one strip gesture: the gesture glyph, then its
+/// action's icon. Default behavior (unbound swipe paging) is dimmed.
+pub(crate) fn gesture_badge(
+    gesture: BindingIcon,
+    action: BindingIcon,
+    description: &str,
+    default: bool,
+) -> GtkBox {
+    let badge = GtkBox::new(Orientation::Horizontal, 2);
+    badge.add_css_class("gesture-badge");
+    if default {
+        badge.add_css_class("default");
+    }
+    for icon in [gesture, action] {
+        let area = binding_icon(icon);
+        area.set_content_width(11);
+        area.set_content_height(11);
+        badge.append(&area);
+    }
+    badge.set_tooltip_text(Some(description));
+    badge.update_property(&[gtk::accessible::Property::Label(description)]);
+    badge
+}
