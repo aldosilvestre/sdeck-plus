@@ -505,7 +505,7 @@ fn capture_documentation_screenshots() {
     capture("live-information-settings");
 
     // Then: every documented artifact was rendered, with no dispatched action.
-    assert_eq!(widgets.status.text(), "SEARCHING");
+    assert_eq!(widgets.status.text(), "Not connected");
     assert!(commands.try_iter().all(|command| !matches!(
         command,
         LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_)

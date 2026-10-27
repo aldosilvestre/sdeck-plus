@@ -129,3 +129,92 @@ fn assert_page_toolbar_hierarchy() {
     }
     eprintln!("GTK page toolbar hierarchy assertions executed");
 }
+
+#[test]
+fn header_states_connection_in_plain_language() {
+    run_gtk_test(assert_header_connection_states);
+}
+
+fn assert_header_connection_states() {
+    let Some(fixture) = fixture("header", |_| {}) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let (status, detail) = (&widgets.status, &widgets.connection_detail);
+    let assert_state = |badge: &str, tone: &str, text: &str, tooltip: &str| {
+        assert_eq!(status.text(), badge);
+        for class in ["status-idle", "status-online", "status-error"] {
+            assert_eq!(
+                status.has_css_class(class),
+                class == tone,
+                "{badge}: {class}"
+            );
+        }
+        assert_eq!(detail.text(), text);
+        assert!(
+            !detail.text().contains("VID"),
+            "technical IDs stay out of the text"
+        );
+        for label in [status, detail] {
+            let hint = label.tooltip_text().unwrap_or_default();
+            assert!(
+                hint.contains(tooltip),
+                "{badge} tooltip {hint:?} lacks {tooltip:?}"
+            );
+        }
+    };
+    let not_connected = "Stream Deck + not connected — plug it in";
+    // Before the HID worker reports anything, the header already speaks plainly.
+    assert_state(
+        "Not connected",
+        "status-idle",
+        not_connected,
+        "VID 0FD9 / PID 0084",
+    );
+    for (state, badge, tone, text, tooltip) in [
+        (
+            ConnectionState::Searching,
+            "Not connected",
+            "status-idle",
+            not_connected,
+            "VID 0FD9 / PID 0084",
+        ),
+        (
+            ConnectionState::Unavailable(
+                "Device not found · connect Stream Deck + (VID 0FD9 / PID 0084)".into(),
+            ),
+            "Not connected",
+            "status-idle",
+            not_connected,
+            "Device not found",
+        ),
+        (
+            ConnectionState::Unavailable("Device found but could not open: denied".into()),
+            "Unavailable",
+            "status-error",
+            "Stream Deck + found but unavailable — hover for details",
+            "could not open: denied",
+        ),
+        (
+            ConnectionState::Disconnected("HID read ended: gone".into()),
+            "Disconnected",
+            "status-idle",
+            "Stream Deck + disconnected — plug it back in",
+            "HID read ended: gone",
+        ),
+        (
+            ConnectionState::Connected,
+            "Connected",
+            "status-online",
+            "Stream Deck + connected — keys, dials and touch strip are live",
+            "VID 0FD9 / PID 0084",
+        ),
+    ] {
+        assert_eq!(
+            show_connection_state(status, detail, &state),
+            state == ConnectionState::Connected
+        );
+        assert_state(badge, tone, text, tooltip);
+    }
+    eprintln!("GTK plain-language connection header assertions executed");
+}

@@ -460,9 +460,8 @@ fn build_widgets(
     title.set_xalign(0.0);
     heading.append(&title);
     header.append(&heading);
-    let status = Label::new(Some("SEARCHING"));
+    let status = Label::new(None);
     status.add_css_class("status");
-    status.add_css_class("status-idle");
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
@@ -483,7 +482,8 @@ fn build_widgets(
     header.append(&help_menu);
     root.append(&header);
 
-    let connection_detail = Label::new(Some("Looking for USB device · VID 0FD9 / PID 0084"));
+    let connection_detail = Label::new(None);
+    show_connection_state(&status, &connection_detail, &ConnectionState::Searching);
     connection_detail.add_css_class("muted");
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1465,34 +1465,11 @@ fn start_event_updates(
                 } => {
                     feature_runtime.complete_key_swap(&layer, first, second, result);
                 }
-                MonitorEvent::Connection(state) => match state {
-                    ConnectionState::Searching => {
-                        status.set_text("SEARCHING");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text("Looking for USB device · VID 0FD9 / PID 0084");
-                    }
-                    ConnectionState::Connected => {
-                        status.set_text("CONNECTED");
-                        status.remove_css_class("status-idle");
-                        status.add_css_class("status-online");
-                        connection_detail
-                            .set_text("Stream Deck + connected · HID input and artwork active");
+                MonitorEvent::Connection(state) => {
+                    if show_connection_state(status, connection_detail, &state) {
                         artwork.refresh(true);
                     }
-                    ConnectionState::Unavailable(detail) => {
-                        status.set_text("UNAVAILABLE");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text(&detail);
-                    }
-                    ConnectionState::Disconnected(detail) => {
-                        status.set_text("DISCONNECTED");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text(&detail);
-                    }
-                },
+                }
                 MonitorEvent::Input(event) => {
                     if let Some((identity, action, page_return)) = matching_binding(&layers, &event)
                     {
@@ -3373,6 +3350,57 @@ fn show_artwork_error(window: &ApplicationWindow, message: &str) {
         .build();
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.show();
+}
+
+/// Presents the device connection in plain language: a semantic badge plus a
+/// short next step. Technical identifiers and worker diagnostics stay in the
+/// tooltip. Returns whether the device is connected.
+fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState) -> bool {
+    const USB_ID: &str = "USB device VID 0FD9 / PID 0084";
+    let not_connected = "Stream Deck + not connected — plug it in";
+    let (badge, tone, text, hint) = match state {
+        ConnectionState::Searching => (
+            "Not connected",
+            "status-idle",
+            not_connected,
+            format!("Looking for the {USB_ID}"),
+        ),
+        // Discovery reports a missing device as unavailable on every retry.
+        ConnectionState::Unavailable(reason) if reason.starts_with("Device not found") => (
+            "Not connected",
+            "status-idle",
+            not_connected,
+            reason.clone(),
+        ),
+        ConnectionState::Unavailable(reason) => (
+            "Unavailable",
+            "status-error",
+            "Stream Deck + found but unavailable — hover for details",
+            format!("{reason}\n{USB_ID}"),
+        ),
+        ConnectionState::Disconnected(reason) => (
+            "Disconnected",
+            "status-idle",
+            "Stream Deck + disconnected — plug it back in",
+            format!("{reason}\n{USB_ID}"),
+        ),
+        ConnectionState::Connected => (
+            "Connected",
+            "status-online",
+            "Stream Deck + connected — keys, dials and touch strip are live",
+            format!("{USB_ID} · HID input and artwork active"),
+        ),
+    };
+    status.set_text(badge);
+    for class in ["status-idle", "status-online", "status-error"] {
+        status.remove_css_class(class);
+    }
+    status.add_css_class(tone);
+    detail.set_text(text);
+    for label in [status, detail] {
+        label.set_tooltip_text(Some(&hint));
+    }
+    matches!(state, ConnectionState::Connected)
 }
 
 fn set_pressed(widget: &gtk::Widget, pressed: bool) {

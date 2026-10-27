@@ -195,13 +195,22 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
     font-size: 13px;
     font-weight: 600;
 }
+/* Connection badge: semantic tone, tinted fill and a visible edge, always
+   with text so color is never the only signal. */
 .status-idle {
     color: @desk_warning;
-    background-color: alpha(@desk_warning, 0.12);
+    background-color: alpha(@desk_warning, 0.16);
+    border: 1px solid alpha(@desk_warning, 0.55);
 }
 .status-online {
     color: @desk_success;
-    background-color: alpha(@desk_success, 0.12);
+    background-color: alpha(@desk_success, 0.16);
+    border: 1px solid alpha(@desk_success, 0.55);
+}
+.status-error {
+    color: @desk_error;
+    background-color: alpha(@desk_error, 0.16);
+    border: 1px solid alpha(@desk_error, 0.55);
 }
 .feedback-error { color: @desk_error; }
 .destructive-action:not(:disabled) { color: @desk_error; }

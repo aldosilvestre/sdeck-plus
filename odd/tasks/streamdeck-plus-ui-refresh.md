@@ -21,7 +21,7 @@ modifier grid, loose option checkboxes, low-visibility status line).
 ## Tasks
 - [x] T1 Layout uses available width/height: preview + inspector scale, no dead band.
 - [x] T2 Toolbar hierarchy: navigation vs management groups; destructive/secondary actions lighter.
-- [ ] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
+- [x] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
 - [ ] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
 - [ ] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
 - [ ] T6 Docs: DESIGN.md, README if affected, CHANGELOG, regenerated screenshots.
@@ -61,4 +61,13 @@ tooltips and accessible names (delete keeps destructive styling + confirmation).
 Organize/OBS beside the profile tabs are frameless. RED observed first:
 `ui_refresh_tests::page_toolbar_separates_navigation_from_page_management`
 failed ("navigation is one linked group"), then GREEN. Checks: fmt ok, clippy ok,
-headless ok, display bin suite 41/42 (only the known base failure).
+headless ok, display bin suite 41/42 (only the known base failure). Commit 2312728.
+
+### T3 (delegated writer)
+`show_connection_state` maps each `ConnectionState` to a badge (Not connected /
+Unavailable / Disconnected / Connected) with warning, error or success tokens and
+a plain next step ("Stream Deck + not connected — plug it in"); VID/PID and worker
+diagnostics move to the tooltip. Badges gained a tinted edge. RED observed first:
+`ui_refresh_tests::header_states_connection_in_plain_language` failed to compile
+(presenter missing), then GREEN. Checks: fmt ok, clippy ok, headless ok, display
+bin suite 42/43 (only the known base failure).
