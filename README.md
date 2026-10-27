@@ -28,7 +28,11 @@ GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
 
 **Main window.** Connection status, profile tabs, page navigation, the
 hardware preview with the assigned artwork, and the binding editor for the
-selected control.
+selected control. The header says in plain words whether the Stream Deck + is
+connected (for example "Stream Deck + not connected — plug it in") next to a
+colored **Not connected**, **Unavailable**, **Disconnected** or **Connected**
+badge; hover it for the USB IDs and technical details. Each dial in the preview
+shows the action it is assigned to.
 
 ![Main window with Key 1 selected](docs/screenshots/main-window.png)
 
@@ -392,7 +396,8 @@ Keypad layers and retained legacy action bindings are stored in `layers.conf` in
 configuration unchanged. The adjacent pencil renames the current page;
 the red trash button deletes it after confirmation, including its owned
 folders, bindings and artwork. Renaming preserves its identity and contents.
-The compact previous, next and parent icons have accessible labels and tooltips.
+The previous, next and parent arrows form one group before the page name and
+have accessible labels and tooltips.
 
 The folder icon in the page bar opens **Page folders**. Create a folder,
 select one of this page's folders, then **Open folder**, **Link to control**
@@ -414,7 +419,7 @@ To configure an action, choose the layer at the top, then select a physical cont
 
 1. Click one of the eight buttons (two rows of four), the horizontal touch strip, or one of the four encoders beneath it. Clicking an artwork zone also selects the whole touch strip; zones are image regions, not separate gesture bindings.
 2. Pick an event valid for that control: button press; encoder press/clockwise/counterclockwise; or touch tap, press-and-hold, generic swipe/flick, and directional swipes.
-3. Pick an action and fill only its visible fields. The existing layer, command, application, shortcut and legacy-event choices remain available. **More actions** opens typed category-specific fields described below. Shortcuts accept a full chord such as `CTRL + D` or one key with optional modifier checkboxes.
+3. Pick an action and fill only its visible fields. The existing layer, command, application, shortcut and legacy-event choices remain available. **More actions** opens typed category-specific fields described below. Shortcuts accept a full chord such as `CTRL + D` or one key with the optional **Ctrl**, **Alt**, **Shift** and **Super** modifier toggles.
 4. Click **Save binding** to create or update that control event, or **Remove binding** to clear it. A floating toast confirms success only after the binding is written to disk; validation or saving problems show an error toast. Success disappears after five seconds; errors remain until dismissed or replaced by another notification. Saving never executes the action. Selecting an already configured control event loads its saved action for inspection and editing.
 
 Hover a physical control to see assignments for the selected keypad page or profile touchscreen page, including **Unassigned** events: encoders include **Press**, **CW** (clockwise), and **CCW** (counterclockwise); the touch strip includes tap, hold, flick, and directional swipes. Legacy exact-tick rotation overrides appear separately. Long action text is shortened; select the event to inspect its full saved fields. Summaries refresh after saving/removing bindings, selecting/creating/removing layers, and input-driven **Go to profile or page** actions. Selection highlighting is separate from live pressed-state highlighting, and live input does not replace assignment summaries. The shared **Image…** and **×** edit the explicitly selected artwork target, independently of the binding editor.
@@ -517,11 +522,12 @@ At the default 1000 × 700 logical-pixel client size, the device canvas stays on
 
 The window uses 16 logical pixels of outer padding, charcoal surfaces in dark
 mode and clean pale-gray surfaces in light mode, following the desktop GTK theme.
-The complete configuration desk—header, profile tabs, page bar and editor—is
-centered at its natural content width on wide displays, keeping toolbar actions
-near their task instead of stretching empty bars across the window. At 640 pixels
-it uses the available width and stacks the preview and editor without horizontal
-scrolling. Hardware proportions stay fixed; forms keep their natural height.
+The complete configuration desk—header, profile tabs, page bar and editor—uses
+the window's width up to 1240 pixels and centers beyond that. The hardware
+preview grows with spare room (up to 1.5 times) while keeping its proportions,
+and the editor widens with it. At 640 pixels it uses the available width and
+stacks the preview and editor without horizontal scrolling. Forms keep their
+natural height.
 Violet save actions and cyan keyboard focus stand apart from the quieter chrome.
 Profile tabs use a violet tonal selection with a fine accent edge, and the **Appearance** group
 separates button text and artwork from action editing. **Save binding** only
@@ -531,8 +537,11 @@ Profile tabs and page navigation have a 12-pixel gap; the main preview and
 editor regions have 16-pixel separation. The editor uses 16-pixel padding
 and 6-pixel gaps between related form groups; Appearance uses 4-pixel internal
 gaps. Executable/arguments and shortcut/modifiers share
-adaptive columns, stacking when their available width is too small. Modifier
-checkboxes use a two-by-two grid, and hidden fields do not leave empty cells.
+adaptive columns, stacking when their available width is too small. Modifiers
+are one row of toggle buttons, and hidden fields do not leave empty cells. An
+**Options** heading groups the page-return and live-information choices, and
+the binding status appears right under **Save binding**, **Test action** and
+**Remove**.
 
 Organization, OBS and help panels keep their title and **Close** button visible
 above scrollable content. The text popup retains its full-size preview and

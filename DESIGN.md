@@ -77,8 +77,9 @@ supporting ink `#536170`, primary action `#6746bb` (hover `#5939a9`, press
 `#4c2f95`), selected tab `#e8e1f6`, focus cue `#0e7183`, error `#c0243f`,
 success `#1b7f55`, warning `#9a6a00`. The graphite hardware is identical in both modes.
 
-Status badges pair semantic tones with visible text and low-alpha surfaces.
-Color alone never communicates state. Hardware uses a graphite chassis
+Status badges pair semantic tones with visible text, a low-alpha fill and a
+55%-alpha edge of the same token: warning for Not connected/Disconnected, error
+for Unavailable and success for Connected. Color alone never communicates state. Hardware uses a graphite chassis
 (`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
 (`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
 and neutral encoders (`#68737e` to `#343c44`). Subtle inset lighting gives the
@@ -91,7 +92,8 @@ dial turn, and a cyan `#67e8f9` wash over each touched strip zone for 300ms (the
 800px strip maps to four 200px zones; a flick lights every zone it crosses).
 Keyboard focus keeps its cyan outline. Task tabs use the selected-tab surface
 and weight 600; profile tabs add a fine violet inset edge. Inactive tabs are
-transparent with supporting ink; Appearance headings use supporting ink too.
+transparent with supporting ink. Inspector section headings (Options,
+Appearance) use primary ink at 13px/700.
 
 Interactive boundaries use their own neutral token rather than the quieter
 decorative card edge: at least 3:1 against input and editor surfaces in both
@@ -103,8 +105,11 @@ increase thumb contrast without changing native scrolling geometry.
 
 Use the system GTK font. App title: 20px/700. Inspector title: 18px/700.
 Section labels: 14px/600. Body, controls and field labels: 14px. Supporting
-metadata: 13px. Existing physical-device branding and the tiny touch display
-retain their material typography; neither carries configuration instructions.
+metadata: 13px. Binding status: 13px/600 primary ink. Existing physical-device
+branding keeps its material typography. The preview-only touch placeholder
+("Touch strip · waiting for input") is 11px/600 mint on black, and each preview
+dial's caption is 10px/600 pale graphite ink; neither carries configuration
+instructions or reaches the physical device.
 Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
 ## 4. Spacing and layout
@@ -123,10 +128,13 @@ device/editor region have 16px separation. The device and editor also have
 The editor uses 16px inner padding and 6px between related form groups, keeping
 the added return and information options within the default 1000x700 layout.
 Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
-Binding feedback stays with its action buttons at a 12px vertical gap,
-while the Appearance separator keeps action and artwork sections distinct.
-That status line reads "Unsaved changes." as soon as any editor field differs
-from the loaded or saved binding; loading, saving or removing resets it.
+A small "Options" heading groups the page-return and live-information checks.
+Binding feedback sits directly under its action buttons at an 8px vertical gap
+in primary ink, while the Appearance separator, a 4px extra top margin and an
+ink "Appearance" heading keep action and artwork sections distinct.
+That status line reads "Unsaved changes." in the warning tone as soon as any
+editor field differs from the loaded or saved binding; loading, saving or
+removing resets it.
 Selecting another preview control while edits are unsaved asks first with the
 compact confirmation style (Keep editing is the default, Discard changes is
 destructive). Remove leaves an Undo remove button under that status line until
@@ -139,8 +147,9 @@ Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
 Executable and arguments are one related adaptive group: two columns with a
 16px gap when each can receive at least 180px, otherwise stacked with 12px
 separation. Shortcut input and modifiers use the same adaptive group; modifiers
-form a two-by-two grid with 12px columns and 8px rows instead of a cramped line,
-ordered Ctrl, Alt, Shift, Super. A muted line under the grid previews the chord
+are one linked row of named toggle buttons ordered Ctrl, Alt, Shift, Super
+(4px/10px padding, checked state uses the selected-tab surface with a violet
+inset edge, tooltip "Hold X with the key"). A muted line under the row previews the chord
 once it parses (for example "Presses Ctrl + Alt + P") and stays hidden otherwise.
 Commands and named events occupy a full-width field. Hidden fields also hide
 their layout cells, and the group disappears for actions that do not use it,
@@ -154,24 +163,37 @@ heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its 120px preview remains unchanged.
 
-The fixed-size device chassis is centered within its natural-size preview card
-(440x428 including padding and border); that card never stretches to match a tall
-form. The inspector uses its content height, without an arbitrary minimum height.
+The fixed-geometry device chassis sits in its preview card (440x428 at 1x,
+including padding and border). The card is presented through `ScaledBin`
+(`src/ui/scaled_bin.rs`): one uniform transform between 1.0x and 1.5x that
+fits the card into its region's width and height, top-aligned and horizontally
+centered. Hardware coordinates, artwork targets and the card's minimum size
+never change, so scaling only uses spare room and never adds scrolling; the
+card never stretches non-uniformly to match a tall form. GTK applies the same
+transform to drawing and pointer picking, so selection, drag-and-drop and
+focus keep working. The inspector uses its content height, without an
+arbitrary minimum height.
 The complete configuration shell (header, profile toolbar, page navigation and
-body) is centered at its GTK natural content width on wide desktops. These bars
-share the shell's leading/trailing edges rather than spanning the viewport while
-the task occupies only its middle. The native FlowBox also retains its natural
-width, keeping the fixed preview beside a readable inspector instead of creating
-a large empty preview cell. Width is content-driven, not a fixed viewport request:
-the ordinary test forms measure roughly 860–875px, and longer forms can use more.
+body) fills the available width up to 1240px (1272px including margins), then
+centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
+share the shell's leading/trailing edges. The native FlowBox decides wrapping
+from natural widths, so the preview's natural width stays unscaled; spare
+width reaches both regions through horizontal expansion and spare height
+reaches the preview row through vertical expansion. At 1000x700 the preview
+is about 1.1x; at 1280x800 and wider it reaches at least 1.25x.
 At narrow widths the shell shrinks to the available width and the same native
 container stacks the regions; only vertical scrolling is needed at 640px.
-No custom layout manager or resize polling is used.
+These two size-only containers are the only custom layout; there is no resize
+polling.
 
-The profile tabs, profile organization menu and OBS menu form a compact toolbar.
-The organization popover contains only profile creation, application association
-and profile deletion. The page bar groups compact previous/next/parent icons,
-page-owned folders, then New page followed by pencil and red-trash icons.
+The profile tabs, profile organization menu and OBS menu form a compact toolbar;
+Organize and OBS are frameless (hover shows the surface) so they stay secondary
+to the tabs. The organization popover contains only profile creation, application
+association and profile deletion. The page bar separates navigation from
+management: a linked previous/next/parent segmented group leads the
+breadcrumb with a 12px gap, and page-owned folders and New page trail it,
+followed by frameless square pencil and red-trash icons (still named, with
+tooltips; deletion still confirms).
 The folder menu has no outer padding, preserving the page bar's 34px controls.
 Icon-only actions use square 34px hit areas and centered 16px symbolic icons;
 captioned actions use a 6px icon/text gap and the same control height. MenuButton

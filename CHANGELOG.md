@@ -10,6 +10,18 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 - The app always starts on the Base profile's first page instead of restoring the
   page that was active when it last closed.
+- **Main window refresh.** The window fills its width (up to 1240px) and the
+  hardware preview scales uniformly into spare room (up to 1.5x) without changing
+  hardware coordinates, artwork or the 1000x700 no-scroll layout. The page bar
+  groups previous/next/parent before the page name and keeps folders and page
+  management after it, with lighter rename/delete icons; Organize and OBS are
+  frameless. The header states the connection in plain language with a colored
+  badge, moving the USB IDs to its tooltip. Preview dials show their assigned
+  action and the touch strip placeholder is easier to read. In the editor,
+  shortcut modifiers are one row of Ctrl/Alt/Shift/Super toggles, an Options
+  heading groups the return and live-information choices, the binding status sits
+  under the action buttons (warning-toned while unsaved) and Appearance has a
+  clear heading.
 
 ### Added
 

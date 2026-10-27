@@ -24,7 +24,7 @@ modifier grid, loose option checkboxes, low-visibility status line).
 - [x] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
 - [x] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
 - [x] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
-- [ ] T6 Docs: DESIGN.md, README if affected, CHANGELOG, regenerated screenshots.
+- [x] T6 Docs: DESIGN.md, README if affected, CHANGELOG, regenerated screenshots.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files (src/ui.css, src/main.rs,
@@ -94,4 +94,19 @@ changes."; Appearance uses the same ink heading with extra separation. RED
 observed first: `ui_refresh_tests::inspector_groups_modifiers_options_status_and_appearance`
 failed ("row.has_css_class(linked)"), then GREEN. No-scroll 1000x700 assertions
 still pass. Checks: fmt ok, clippy ok, headless ok, examples build ok, display
-bin suite 44/45 (only the known base failure).
+bin suite 44/45 (only the known base failure). Commit 1d8810e.
+
+### T6 (delegated writer)
+DESIGN.md (badges, typography, spacing/layout incl. ScaledBin/Clamp, page bar,
+modifier row, Options/status), README.md (header wording, layout, modifier
+toggles, page arrows) and CHANGELOG.md updated; docs/index.html had no stale text.
+Screenshots regenerated with the documented command; main-window(-light).png
+inspected in both palettes. No meaningful RED (documentation only). Final checks:
+fmt ok; clippy ok; headless `cargo test --offline` ok (307 + 45 + 2); display bin
+suite 44/45 (only the known base failure); `git diff --check` ok.
+
+## Next step
+Human review of the branch; push/PR remain the user's decision. Open follow-up:
+the known touchscreen indicator test failure on base. The 1000x950 doc capture
+still shows spare height below the inspector because the preview is width-limited
+at 1000px; scale fills height on wider windows.
