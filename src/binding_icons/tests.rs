@@ -438,6 +438,9 @@ fn live_information_glyphs_come_from_the_binding_vocabulary() {
         (Glyph::Chip, Some(BindingIcon::Cpu)),
         (Glyph::Memory, Some(BindingIcon::Memory)),
         (Glyph::Thermometer, Some(BindingIcon::Temperature)),
+        (Glyph::Play, Some(BindingIcon::Play)),
+        (Glyph::Pause, Some(BindingIcon::Pause)),
+        (Glyph::MediaIdle, Some(BindingIcon::MediaIdle)),
     ] {
         assert_eq!(BindingIcon::for_glyph(glyph), icon, "{glyph:?}");
         if let Some(icon) = icon {
@@ -582,6 +585,8 @@ fn hardware_accents_follow_the_icon_family() {
         (BindingIcon::PlayPause, C::Media),
         (BindingIcon::NextTrack, C::Media),
         (BindingIcon::PlaySound, C::Media),
+        (BindingIcon::Play, C::Media),
+        (BindingIcon::MediaIdle, C::Media),
         (BindingIcon::VolumeUp, C::Audio),
         (BindingIcon::Mute, C::Audio),
         (BindingIcon::AudioOutput, C::Audio),

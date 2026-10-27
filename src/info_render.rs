@@ -715,7 +715,67 @@ mod tests {
             detailed(Glyph::None, None, "10:24", "Fri 16 Oct"),
             detailed(Glyph::Record, None, "REC LIVE", "Main scene"),
             detailed(Glyph::Rain, None, "--", "set a location"),
+            detailed(Glyph::Play, None, "So What", "Miles Davis"),
+            InfoValue {
+                inactive: true,
+                ..detailed(Glyph::Pause, None, "Naima", "John Coltrane")
+            },
+            crate::info::format_now_playing(None),
         ]
+    }
+
+    /// Pixels close to an ink, ignoring the shadow and antialiasing.
+    fn inked(image: &Pixbuf, color: Color) -> usize {
+        let bytes = image.read_pixel_bytes();
+        let channels = image.n_channels() as usize;
+        bytes
+            .chunks(channels)
+            .filter(|p| (channels < 4 || p[3] > 200) && near([p[0], p[1], p[2]], color))
+            .count()
+    }
+
+    #[test]
+    fn now_playing_states_render_on_keys_and_sections() {
+        let all = samples();
+        let [playing, paused, idle] = &all[all.len() - 3..] else {
+            unreachable!()
+        };
+        for value in [playing, paused, idle] {
+            let key = compose_info_image(value, None).unwrap();
+            let section = compose_zone_image(value, None, false, false).unwrap();
+            // Playing ink is the media violet; paused and idle icons are grey.
+            let violet = inked(&key, MEDIA) + inked(&section, MEDIA);
+            let grey = inked(&key, GREY) + inked(&section, GREY);
+            if value.glyph == Glyph::Play {
+                assert!(violet > 100 && grey == 0, "{value:?}: {violet} {grey}");
+            } else {
+                assert!(violet == 0 && grey > 100, "{value:?}: {violet} {grey}");
+            }
+            // Every state keeps its icon and text inside the key.
+            let plan = key_plan(value);
+            assert!(plan.icon.is_some(), "{value:?} draws its icon");
+            assert_eq!(plan.headline.is_some(), !value.headline.is_empty());
+            for text in plan.texts() {
+                assert!(f64::from(text.layout.pixel_size().0) <= text.rect.width + 0.5);
+            }
+        }
+        // A long title shrinks, then ends in an ellipsis instead of overflowing.
+        let long = InfoValue {
+            headline: "Bohemian Rhapsody (Remastered 2011)".into(),
+            ..playing.clone()
+        };
+        for plan in [key_plan(&long), zone_plan(&long, false, true)] {
+            let headline = plan.headline.unwrap();
+            assert!(headline.layout.is_ellipsized(), "long titles ellipsize");
+            assert!(f64::from(headline.layout.pixel_size().0) <= headline.rect.width + 0.5);
+        }
+        // Nothing playing shows its whole caption on keys and sections.
+        assert_eq!(key_plan(idle).details.len(), 2);
+        assert_eq!(zone_plan(idle, true, true).details.len(), 2);
+        assert!(key_plan(idle)
+            .details
+            .iter()
+            .all(|detail| !detail.layout.is_ellipsized()));
     }
 
     #[test]
@@ -842,6 +902,9 @@ mod tests {
             Glyph::Fog,
             Glyph::Record,
             Glyph::Live,
+            Glyph::Play,
+            Glyph::Pause,
+            Glyph::MediaIdle,
         ] {
             let image = compose_info_image(&InfoValue::text(glyph, ""), None).unwrap();
             assert_ne!(

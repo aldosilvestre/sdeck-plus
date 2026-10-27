@@ -454,12 +454,12 @@ impl NowPlaying {
 }
 
 /// Playing: play glyph, title and artist. Paused: the same with the pause
-/// glyph, greyed out. No player: an idle glyph and "Nothing playing".
+/// glyph, greyed out. No player: a grey idle glyph over a plain "Nothing
+/// playing" caption (not greyed, so it stays legible), like OBS idle.
 pub fn format_now_playing(player: Option<&PlayerState>) -> InfoValue {
     let Some(player) = player.filter(|player| player.status != PlaybackStatus::Stopped) else {
         return InfoValue {
             detail: wrap_words("Nothing playing", 14, 2),
-            inactive: true,
             ..InfoValue::text(Glyph::MediaIdle, "")
         };
     };
@@ -824,7 +824,7 @@ mod tests {
         let nothing = now.value(Ok(vec![])).unwrap();
         assert_eq!(
             shown(&nothing),
-            (Glyph::MediaIdle, None, "", "Nothing\nplaying", true)
+            (Glyph::MediaIdle, None, "", "Nothing\nplaying", false)
         );
         let stopped = vec![player("mpv", PlaybackStatus::Stopped, Some("Gone"))];
         assert_eq!(now.value(Ok(stopped)).unwrap(), nothing);

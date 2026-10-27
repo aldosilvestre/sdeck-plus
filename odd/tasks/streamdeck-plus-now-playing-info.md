@@ -31,7 +31,7 @@ MPRIS over the D-Bus session bus for media actions (src/desktop_actions/mpris.rs
 
 ## Tasks
 - [x] N1 Core: `InfoSource::NowPlaying` (id, label, glyphs), MPRIS reader with a testable bus abstraction, player selection and value formatting; lib tests (playing, paused, stopped, none, multiple players, missing metadata, bus error).
-- [ ] N2 Worker + UI: polled/refreshed on the info worker, selectable in the live information settings, rendered with new binding-vocabulary glyphs (play, pause, idle media); GTK/render tests.
+- [x] N2 Worker + UI: polled/refreshed on the info worker, selectable in the live information settings, rendered with new binding-vocabulary glyphs (play, pause, idle media); GTK/render tests.
 - [ ] N3 DESIGN.md, docs/index.html (live information), README features bullet, CHANGELOG.md, regenerated screenshots; manual check with `dbus-run-session` + mpv if available.
 
 ## Route
@@ -63,5 +63,26 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   `NowPlaying`, `PlayerState`, `read_players_on`, glyphs). GREEN: lib 342/342.
 - Checks: fmt ok, clippy -D warnings ok, headless suite ok, display bin 63/63.
 
+### N2
+- Route: delegated direct (same writer; binding_icons.rs, info_render.rs, GTK test).
+- Worker: `InfoReader` reads `NowPlaying` on the existing info worker thread every 1 s
+  (wired in N1); never on the GTK thread. Settings: the source list is built from
+  `InfoSource::ALL`, so "Now playing" is offered last (existing indices unchanged).
+- Icons: new `BindingIcon::Play` (`play`, rounded triangle) and `BindingIcon::MediaIdle`
+  (`media-idle`, eighth note struck through), media family (violet), added to `ALL`
+  (53). `Glyph::Pause` reuses the existing `pause` bars. `for_glyph` maps all three.
+- Render: Play inks the media violet; Pause and the idle icon are grey (the idle caption
+  stays white, like OBS idle). Contact sheet inspected; the play triangle got round
+  joins to match pause/stop.
+- Tests: `info_render::now_playing_states_render_on_keys_and_sections` (accent per state,
+  fit on key and section, long title ellipsized, full "Nothing playing" caption);
+  `tests::live_info_tests::now_playing_is_selectable_and_draws_its_three_states_on_keys_and_sections`
+  (GTK: offered by label, saved on a key and a touch section, each state redraws both).
+- RED/GREEN: icons were added before their mapping test (no separate RED); the render
+  sample first failed the existing 18px headline floor for "Blue in Green" (long titles
+  shrink to 60% = 14px per the existing fit rule), so samples use short titles and long
+  titles are covered by the dedicated ellipsis assertion. GREEN: lib 343/343, display bin 64/64.
+- Checks: fmt ok, clippy -D warnings ok, headless suite ok.
+
 ## Next step
-N2.
+N3.

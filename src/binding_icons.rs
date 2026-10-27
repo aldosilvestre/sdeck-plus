@@ -82,6 +82,10 @@ pub enum BindingIcon {
     Cpu,
     Memory,
     Temperature,
+    /// Now playing: media is playing.
+    Play,
+    /// Now playing: no media is playing.
+    MediaIdle,
     /// The "More actions" family as a whole.
     More,
     /// Fallback for anything without a dedicated picture.
@@ -89,7 +93,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 53] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -139,6 +143,8 @@ impl BindingIcon {
         Self::Cpu,
         Self::Memory,
         Self::Temperature,
+        Self::Play,
+        Self::MediaIdle,
         Self::More,
         Self::Generic,
     ];
@@ -167,9 +173,9 @@ impl BindingIcon {
             Glyph::Record => Self::Record,
             Glyph::Live => Self::Stream,
             Glyph::ObsIdle => Self::ObsScene,
-            Glyph::Play => Self::PlayPause,
+            Glyph::Play => Self::Play,
             Glyph::Pause => Self::Pause,
-            Glyph::MediaIdle => Self::PlaySound,
+            Glyph::MediaIdle => Self::MediaIdle,
         })
     }
 
@@ -312,6 +318,8 @@ impl BindingIcon {
             Self::Cpu => "cpu",
             Self::Memory => "memory",
             Self::Temperature => "temperature",
+            Self::Play => "play",
+            Self::MediaIdle => "media-idle",
             Self::More => "more",
             Self::Generic => "generic",
         }
@@ -386,7 +394,9 @@ impl BindingIcon {
             | Self::Pause
             | Self::Stop
             | Self::NextTrack
-            | Self::PreviousTrack => C::Media,
+            | Self::PreviousTrack
+            | Self::Play
+            | Self::MediaIdle => C::Media,
             Self::VolumeUp | Self::VolumeDown | Self::Mute | Self::AudioOutput | Self::Volume => {
                 C::Audio
             }
@@ -1443,6 +1453,25 @@ fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Erro
             pen.line(cairo)?;
             circle(cairo, 0.0, 6.0, 2.2);
             pen.solid(cairo)
+        }
+        BindingIcon::Play => {
+            // Round corners, like the pause bars and the stop square.
+            cairo.save()?;
+            cairo.set_line_join(cairo::LineJoin::Round);
+            closed(cairo, &[(-6.0, -9.5), (9.5, 0.0), (-6.0, 9.5)]);
+            let result = pen.duo(cairo);
+            cairo.restore()?;
+            result
+        }
+        BindingIcon::MediaIdle => {
+            // An eighth note, struck through like "None".
+            circle(cairo, -4.5, 6.0, 3.6);
+            pen.duo(cairo)?;
+            polyline(cairo, &[(-0.9, 6.0), (-0.9, -9.5)]);
+            cairo.curve_to(1.0, -6.0, 6.5, -5.5, 6.0, -0.5);
+            pen.line(cairo)?;
+            polyline(cairo, &[(-9.5, -9.5), (9.5, 9.5)]);
+            pen.line(cairo)
         }
         BindingIcon::More => {
             rounded(cairo, -11.0, -5.5, 22.0, 11.0, 5.5);
