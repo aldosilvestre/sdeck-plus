@@ -312,7 +312,7 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
     color: @desk_ink;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
-.button-text-context { font-size: 0.9em; }
+.button-text-context { font-size: 0.9em; margin-bottom: 4px; }
 .button-text-unsaved { font-size: 0.9em; }
 .button-text-overflow { font-size: 0.9em; }
 

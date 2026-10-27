@@ -77,18 +77,21 @@ impl ButtonTextEditor {
         font.set_title("Choose text font");
         let size = gtk::SpinButton::with_range(6.0, 120.0, 1.0);
         size.set_numeric(true);
-        let type_row = GtkBox::new(Orientation::Horizontal, 8);
-        type_row.append(&labeled("Font", &font));
-        type_row.append(&labeled("Size (px)", &size));
-        form.append(&type_row);
         let (orientation_row, orientation) = orientation_group();
         let (position_grid, position) = position_grid();
-        let layout_row = GtkBox::new(Orientation::Horizontal, 16);
+        // One grid keeps Position aligned under Size and Orientation under Font.
+        let fields = gtk::Grid::builder()
+            .column_spacing(8)
+            .row_spacing(8)
+            .build();
+        fields.attach(&labeled("Font", &font), 0, 0, 1, 1);
+        fields.attach(&labeled("Size (px)", &size), 1, 0, 1, 1);
         let orientation_field = labeled("Orientation", &orientation_row);
         orientation_field.set_valign(gtk::Align::Start);
-        layout_row.append(&orientation_field);
-        layout_row.append(&labeled("Position", &position_grid));
-        form.append(&layout_row);
+        orientation_row.set_halign(gtk::Align::Start);
+        fields.attach(&orientation_field, 0, 1, 1, 1);
+        fields.attach(&labeled("Position", &position_grid), 1, 1, 1, 1);
+        form.append(&fields);
         body.append(&form);
         let preview_column = GtkBox::new(Orientation::Vertical, 8);
         preview_column.set_valign(gtk::Align::Start);
