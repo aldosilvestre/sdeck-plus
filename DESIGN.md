@@ -219,23 +219,32 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   clearing text or artwork keeps the clear icon. Organize uses the manage
   (tools) icon and button text uses the plain text icon.
 - **Binding icons:** one vocabulary (`src/binding_icons.rs`) maps every
-  action to a monochrome vector glyph on a 24-unit grid with 2-unit round
-  strokes: go to page, next/previous page, folder, parent folder, command,
+  action to a duotone vector glyph on a 24-unit grid: a soft fill (35% of
+  the ink) under a crisp 1.85-unit round stroke (2.2-2.6 for chevrons, bars
+  and the text T), round caps and joins: go to page, next/previous page, folder, parent folder, command,
   application, shortcut, named event, play sound, media transport, volume,
   mute, audio output, scroll, text, open file, website, close application,
   shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
   stream, microphone mute and visibility, plus `more` for More actions, `none`
-  (menus only) and a `generic` fallback. The caller supplies the ink, so the
-  same picture serves the window (theme foreground, 16px, decorative with the
-  label carrying the name) and the device (near-white `#f0f2fa` with a dark
-  outline). The Action menu shows the icon before each row name and keeps the
+  (menus only) and a `generic` fallback (a four-pointed sparkle). The caller
+  supplies the ink, so the same picture serves the window (theme foreground
+  for both layers, 16px, decorative with the label carrying the name) and the
+  device. On keys, touch sections and preview dials the ink is the icon
+  family's accent from the `@desk_*` palette: navigation, folders and
+  gestures neutral `#f0f2fa`, media violet `#baa3f5`, audio cyan `#85dee9`,
+  OBS red `#fa7387`, system and apps amber `#facc7a`, web blue `#7db3fa`,
+  weather `#b8c9eb`, load readings green `#7de3b3`. Instead of a hard outline,
+  device icons and captions sit on a soft dark drop shadow (three rings of
+  12 stamps at 28/15/8% black, 0.6-2.3 units out, dropped 0.6 units), so they
+  read over light artwork without a box. The Action menu shows the icon before each row name and keeps the
   check mark on the selected row. Each preview dial draws its caption's icon
-  (20px, pale `#e1e6eb`) on the knob face; it never takes clicks and never
+  (20px, in its family accent like the device) on the knob face; it never takes clicks and never
   reaches the device. A key with no artwork of its own and no live information
   shows the icon (50px) with the action summary in up to two 14px bold lines
-  below it, on black. A touch section with no artwork shows a translucent
-  graphite tile (rounded 12px, 35% alpha, fine light edge) over the strip, so
-  strip artwork shows through and around it, with a 58px icon on the left and
+  below it, on black. A touch section with no artwork shows a see-through
+  graphite veil (rounded 14px, 15% alpha at the top fading to half at the
+  bottom, light edge fading 12% to 4%) over the strip, so strip artwork shows
+  through and around it and legibility comes from the shadowed icon and text, with a 58px icon on the left and
   up to two 17px bold caption lines beside it; a section that carries a page
   indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
   placement: top text puts the icon below it, bottom text above it, and
@@ -249,13 +258,13 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   `brightness`, muted speaker = `mute` (grey speaker, red cross), headphones =
   `audio-output`, recording = `record`, live = `stream`, OBS idle =
   `obs-scene`, plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
-  `storm`, `fog`, `cpu`, `memory` and `temperature`, outlined like key icons
-  and inked in the reading's accent color (cyan audio, amber sun/storm, violet
+  `storm`, `fog`, `cpu`, `memory` and `temperature`, duotone and shadowed
+  like key icons and inked in the reading's accent color (cyan audio, amber sun/storm, violet
   load, green temperature turning amber/red, grey when inactive). Time and
   date has no icon. A key stacks icon (32-44px, shrinks first), a 24px bold
   value, an 8px bar and 14px detail lines, centered inside a 4px margin;
   detail lines that do not fit are left out, so nothing is cut at the edge. A
-  touch section draws the binding section tile (35% alpha; 25% over the
+  touch section draws the binding section tile (15% alpha; 10% over the
   section's own artwork) with a 52px icon on the left and a 26px value, bar
   and up to two 13px detail lines beside it; an indicated edge keeps 30px and
   a 44px icon. Long values shrink to fit, then ellipsize.
@@ -275,8 +284,8 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   the closed Action button show the chosen action's icon, while the Action
   menu row keeps `more`.
 - **Artwork targets:** every row of the Artwork target menu starts with a
-  26x22 mini map of the eight keys over the four strip sections, outlined at
-  half ink with its target filled (the whole strip row for the background),
+  26x22 mini map of the eight keys over the four strip sections, soft-filled
+  and outlined at half ink with its target filled (the whole strip row for the background),
   and menu rows end with the target's assigned action icon (key press; section
   tap, then hold), refreshed whenever the menu opens.
 - **Labeled field:** associated, visible label; expected-format placeholder;
@@ -295,8 +304,8 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   field only for Weather. Keys, dials and a tap or hold on one touch section; the
   picture is drawn by `info_render` directly over the key's own artwork (120x120)
   or the touch section's (200x100, icon left, value/bar/detail right), never on
-  a solid background of its own. Icons and text carry a dark outline for
-  legibility and the bar a translucent track. Icon colors
+  a solid background of its own. Icons and text carry the soft drop shadow
+  for legibility and the bar a translucent track. Icon colors
   follow the palette: cyan audio, amber light, violet load that turns amber at
   70 and red at 85, grey when inactive, red for the muted cross and recording.
   Readings come from a worker thread, never the GTK thread.

@@ -124,7 +124,7 @@ exactly the page you picked. Saving a binding does not start the wait.
 tick **Show live information** and pick what to show. On a key the icon,
 value, bar and caption are drawn directly over the key's own image, with
 transparent empty space, and always fit inside the key; on a touch section they
-sit on the same translucent graphite tile as binding icons (icon on the left,
+sit on the same see-through graphite tile as binding icons (icon on the left,
 value, bar and caption beside it). The icons come from the binding icon
 vocabulary in each reading's accent color. They update by themselves: a
 speaker with a volume bar (crossed out and greyed while muted), the audio output
@@ -537,12 +537,16 @@ Profile tabs use a violet tonal selection with a fine accent edge, and the **App
 separates button text and artwork from action editing. **Save binding** only
 persists the binding; **Test action** runs it immediately.
 
-**Binding icons.** Every action has a simple icon, used consistently: the
+**Binding icons.** Every action has a two-tone icon (a soft fill under a crisp
+line), used consistently: the
 **Action** menu shows one beside each type, each preview dial shows its action's
 icon on the knob above its caption, and keys and touch sections without artwork
 of their own show their action's icon with a short caption, both in the preview
-and on the Stream Deck itself. Touch sections place a large icon beside its
-caption on a translucent tile that lets the strip background show through, and
+and on the Stream Deck itself. On the device and on the preview dials each
+family has its own color (media violet, audio cyan, OBS red, apps and system
+amber, websites blue, pages and folders white), and a soft shadow keeps icons
+and captions readable over light artwork. Touch sections place a large icon beside its
+caption on a see-through tile that lets the strip background show through, and
 leave room for the page arrows. Above the preview strip, small badges list what
 swipe left, swipe right, tap and hold do (dimmed when an unbound swipe keeps
 its default page change). **More actions** shows each category and action with

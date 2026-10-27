@@ -8,6 +8,15 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Modern binding icons.** Every icon is redrawn as a duotone (a soft fill
+  under a crisp round stroke) with clearer shapes for weak glyphs (toggle
+  switch, beamed notes, folder with a front edge, hold progress ring, tap
+  burst, snowflakes, sparkle fallback). Keys, touch sections and preview dials
+  color icons by family (media violet, audio cyan, OBS red, system amber, web
+  blue, navigation white) and replace the hard dark outline of icons and
+  captions with a soft drop shadow. Menus keep the theme color.
+- **See-through touch section tiles.** The section tile drops to 15% (10%
+  over section artwork) and fades towards the bottom, with a subtler edge.
 - The app always starts on the Base profile's first page instead of restoring the
   page that was active when it last closed.
 - **Main window refresh.** The window fills its width (up to 1240px) and the

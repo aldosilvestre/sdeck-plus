@@ -122,6 +122,9 @@ live-information, touch-strip, main-window, main-window-light. No meaningful
 RED (documentation).
 Final checks: fmt ok; clippy ok; headless `cargo test --offline` ok
 (323+53+2); display bin suite 53/53; examples build ok; `git diff --check` ok.
+Commit 6656dcc; docs (DESIGN/README/CHANGELOG, 15 regenerated screenshots) in
+the following `docs:` commit. Engram mirror still pending (not available to
+the writer).
 
 ## Next step
 Human review of `feat/live-info-icons`; push/PR remain the user's decision.
@@ -186,3 +189,6 @@ Size: ~750 changed lines in `binding_icons.rs`, above the 400-line heuristic
 because every glyph is redrawn; not split.
 Checks: fmt ok; clippy ok; headless `cargo test --offline` ok (328+53+2);
 display bin suite 53/53; examples build ok; `git diff --check` ok.
+Commit 6656dcc; docs (DESIGN/README/CHANGELOG, 15 regenerated screenshots) in
+the following `docs:` commit. Engram mirror still pending (not available to
+the writer).
