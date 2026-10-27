@@ -306,7 +306,7 @@ impl FolderPanel {
         };
         let open = button("folder-open-symbolic", format!("Open folder {name}"));
         let link = button(
-            "insert-link-symbolic",
+            "sdeck-link-symbolic",
             format!("Link folder {name} to control"),
         );
         let rename = button("document-edit-symbolic", format!("Rename folder {name}"));

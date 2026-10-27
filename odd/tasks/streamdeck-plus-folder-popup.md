@@ -78,3 +78,13 @@ popover ...`). Engram mirror pending.
 
 ## Next step
 Human review; push/PR remain the user's decision.
+
+### P4 (inline, user feedback: replace the odd link glyph)
+The theme drew `insert-link-symbolic` as a filter-like glyph. Folder rows now
+use a bundled `sdeck-link-symbolic` chain icon
+(assets/icons/scalable/actions/, registered in icons.gresource.xml and tracked
+by build.rs). It is drawn as filled even-odd rings, because GTK fills symbolic
+shapes and a stroke-only SVG rendered as a blob. The screenshot generator now
+calls `app_icon::register()` as the app does at startup, so bundled icons
+resolve. No meaningful RED (icon shape); checked by reading page-folders.png.
+Checks: fmt ok; clippy ok; display bin suite 57/57; git diff --check ok.

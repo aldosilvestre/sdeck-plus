@@ -108,6 +108,8 @@ fn capture_documentation_screenshots() {
     let directory = std::path::PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
     gtk::init().expect("documentation capture requires a native GTK display");
+    // Bundled action icons resolve through the app resource path, as at startup.
+    crate::app_icon::register().unwrap();
     let settings = gtk::Settings::default().unwrap();
     let original_theme = settings.gtk_theme_name();
     let original_dark = settings.is_gtk_application_prefer_dark_theme();
