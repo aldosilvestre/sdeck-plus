@@ -94,3 +94,12 @@ Not changed: Edit text's `insert-text-symbolic` lives in
 RED: `binding_icon_tests::icon_actions_share_one_size_and_one_delete_icon`
 (profile delete used edit-delete), then GREEN. Checks: fmt ok, clippy ok,
 display bin suite 48/49 (only the known base failure).
+
+## Next step
+Blocked on edit surface: physical-device output of key and touch-section icons
+needs `src/event_api.rs` (one new `ArtworkCommand` variant carrying target,
+icon, caption, optional user text, strip path and page indicators) and
+`src/image_output.rs` (JPEG preparation over the strip crop with indicators
+last, reusing the private `encode_jpeg`/`prepare_background`). Then T2/T4
+device wiring in `desired_artwork_commands_for_owners`/`with_info`, then T6
+(DESIGN/README/CHANGELOG, a screenshot fixture key without artwork, regenerate).
