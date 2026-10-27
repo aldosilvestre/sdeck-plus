@@ -35,8 +35,11 @@ pub struct PlayerState {
     pub title: Option<String>,
     /// `xesam:artist` entries joined with `, `; `None` when missing or blank.
     pub artist: Option<String>,
-    /// The player's `Identity` (e.g. `Firefox`), read only when the title is missing.
+    /// The player's `Identity` (e.g. `Firefox`).
     pub identity: Option<String>,
+    /// The player's `DesktopEntry`: its `.desktop` file name without the
+    /// suffix (e.g. `firefox`, `com.spotify.Client`).
+    pub desktop_entry: Option<String>,
 }
 
 // Replace the D-Bus boundary, preserving real message encoding and decoding.
@@ -162,33 +165,40 @@ fn read_player(bus: &mut impl Bus, bus_name: String) -> io::Result<PlayerState> 
                 .join(", ")
         })
         .and_then(non_blank);
-    let identity = if title.is_none() {
-        read_identity(bus, &bus_name)
-    } else {
-        None
-    };
+    let (identity, desktop_entry) = read_root(bus, &bus_name);
     Ok(PlayerState {
         bus_name,
         status,
         title,
         artist,
         identity,
+        desktop_entry,
     })
 }
 
-fn read_identity(bus: &mut impl Bus, bus_name: &str) -> Option<String> {
-    bus.call(
-        bus_name,
-        PLAYER_PATH,
-        PROPERTIES_INTERFACE,
-        "Get",
-        Some(&(ROOT_INTERFACE, "Identity").to_variant()),
-        READ_TIMEOUT_MS,
-    )
-    .ok()?
-    .get::<(glib::Variant,)>()
-    .and_then(|(value,)| value.get::<String>())
-    .and_then(non_blank)
+/// `Identity` and `DesktopEntry` from the root interface, in one call; both
+/// are optional, so a failure leaves them out.
+fn read_root(bus: &mut impl Bus, bus_name: &str) -> (Option<String>, Option<String>) {
+    let properties = bus
+        .call(
+            bus_name,
+            PLAYER_PATH,
+            PROPERTIES_INTERFACE,
+            "GetAll",
+            Some(&(ROOT_INTERFACE,).to_variant()),
+            READ_TIMEOUT_MS,
+        )
+        .ok()
+        .and_then(|reply| reply.get::<(HashMap<String, glib::Variant>,)>())
+        .map(|(properties,)| properties)
+        .unwrap_or_default();
+    let text = |name: &str| {
+        properties
+            .get(name)
+            .and_then(glib::Variant::get::<String>)
+            .and_then(non_blank)
+    };
+    (text("Identity"), text("DesktopEntry"))
 }
 
 fn non_blank(text: String) -> Option<String> {

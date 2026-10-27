@@ -249,7 +249,8 @@ struct StatusBus {
     names: Vec<String>,
     /// Bus name -> (PlaybackStatus, Metadata) as the player reports them.
     players: BTreeMap<String, (String, glib::Variant)>,
-    identities: BTreeMap<String, String>,
+    /// Bus name -> (Identity, DesktopEntry) on the root interface.
+    roots: BTreeMap<String, (String, String)>,
     calls: Vec<Call>,
     fail: Option<(&'static str, &'static str)>,
 }
@@ -282,6 +283,19 @@ impl Bus for StatusBus {
         }
         match method {
             "ListNames" => Ok((self.names.clone(),).to_variant()),
+            "GetAll"
+                if parameters.and_then(|value| value.get::<(String,)>())
+                    == Some((ROOT_INTERFACE.into(),)) =>
+            {
+                let (identity, entry) = self
+                    .roots
+                    .get(destination)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no root"))?;
+                let mut properties = std::collections::HashMap::new();
+                properties.insert("Identity".to_owned(), identity.to_variant());
+                properties.insert("DesktopEntry".to_owned(), entry.to_variant());
+                Ok((properties,).to_variant())
+            }
             "GetAll" => {
                 assert_eq!(
                     parameters.and_then(|value| value.get::<(String,)>()),
@@ -295,17 +309,6 @@ impl Bus for StatusBus {
                 properties.insert("PlaybackStatus".to_owned(), status.to_variant());
                 properties.insert("Metadata".to_owned(), metadata.clone());
                 Ok((properties,).to_variant())
-            }
-            "Get" => {
-                assert_eq!(
-                    parameters.and_then(|value| value.get::<(String, String)>()),
-                    Some((ROOT_INTERFACE.into(), "Identity".into()))
-                );
-                let identity = self
-                    .identities
-                    .get(destination)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no identity"))?;
-                Ok((identity.to_variant(),).to_variant())
             }
             _ => panic!("the status reader must not call {method}"),
         }
@@ -373,6 +376,7 @@ fn status_reader_reports_every_player_sorted_with_title_and_artists() {
                 title: Some("Song".into()),
                 artist: Some("Solo".into()),
                 identity: None,
+                desktop_entry: None,
             },
             PlayerState {
                 bus_name: format!("{SERVICE_PREFIX}zeta"),
@@ -380,6 +384,7 @@ fn status_reader_reports_every_player_sorted_with_title_and_artists() {
                 title: Some("Under Pressure".into()),
                 artist: Some("Queen, David Bowie".into()),
                 identity: None,
+                desktop_entry: None,
             },
         ]
     );
@@ -397,25 +402,41 @@ fn status_reader_reports_every_player_sorted_with_title_and_artists() {
 }
 
 #[test]
-fn status_reader_falls_back_to_the_player_identity_without_a_title() {
+fn status_reader_reads_identity_and_desktop_entry_from_the_root_interface() {
     // Given a stopped player and a playing one without usable metadata.
     let mut bus = status_fixture(&[
         ("browser", "Playing", metadata(Some("  "), None)),
         ("idle", "Stopped", metadata(None, None)),
     ]);
-    bus.identities
-        .insert(format!("{SERVICE_PREFIX}browser"), "Firefox".into());
+    bus.roots.insert(
+        format!("{SERVICE_PREFIX}browser"),
+        ("Firefox".into(), "firefox".into()),
+    );
     // When the reader runs.
     let players = read_players_on(&mut bus).unwrap();
-    // Then blank titles are missing and the identity is read only when needed.
+    // Then blank titles are missing; Identity and DesktopEntry come in one call.
     assert_eq!(players[0].title, None);
     assert_eq!(players[0].artist, None);
     assert_eq!(players[0].identity.as_deref(), Some("Firefox"));
+    assert_eq!(players[0].desktop_entry.as_deref(), Some("firefox"));
     assert_eq!(players[1].status, PlaybackStatus::Stopped);
-    assert_eq!(
-        players[1].identity, None,
-        "a missing identity is not an error"
-    );
+    assert_eq!(players[1].identity, None, "a missing root is not an error");
+    assert_eq!(players[1].desktop_entry, None);
+    // Two bounded reads per player: its Player and its root properties.
+    let reads: Vec<_> = bus
+        .calls
+        .iter()
+        .filter(|call| call.destination.ends_with("browser"))
+        .map(|call| {
+            call.parameters
+                .as_ref()
+                .unwrap()
+                .get::<(String,)>()
+                .unwrap()
+                .0
+        })
+        .collect();
+    assert_eq!(reads, [PLAYER_INTERFACE, ROOT_INTERFACE]);
 }
 
 #[test]

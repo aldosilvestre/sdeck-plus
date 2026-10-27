@@ -301,6 +301,9 @@ fn draw_icon(
     rect: Rect,
     color: Color,
 ) -> Result<(), cairo::Error> {
+    if let (Some(app), Glyph::Play | Glyph::Pause) = (&value.app_icon, value.glyph) {
+        return draw_app_icon(cairo, app, value, rect, color);
+    }
     let Some(icon) = BindingIcon::for_glyph(value.glyph) else {
         return Ok(());
     };
@@ -322,6 +325,65 @@ fn draw_icon(
         result?;
     }
     Ok(())
+}
+
+/// Opacity of a paused application's icon.
+const PAUSED_APP_ALPHA: f64 = 0.6;
+
+/// The playing application's icon in full color, filling the icon slot
+/// (dimmed while paused), with a round play or pause badge at its
+/// bottom-right corner in the reading's accent.
+fn draw_app_icon(
+    cairo: &Context,
+    app: &crate::info::AppIcon,
+    value: &InfoValue,
+    rect: Rect,
+    color: Color,
+) -> Result<(), cairo::Error> {
+    let (width, height) = app.size();
+    let image = cairo::ImageSurface::create_for_data(
+        app.argb().to_vec(),
+        cairo::Format::ARgb32,
+        width,
+        height,
+        width * 4,
+    )?;
+    let scale = rect.width / f64::from(width.max(height));
+    cairo.save()?;
+    cairo.translate(
+        rect.x + (rect.width - f64::from(width) * scale) / 2.0,
+        rect.y + (rect.height - f64::from(height) * scale) / 2.0,
+    );
+    cairo.scale(scale, scale);
+    cairo.set_source_surface(&image, 0.0, 0.0)?;
+    cairo.source().set_filter(cairo::Filter::Good);
+    let painted = if value.inactive {
+        cairo.paint_with_alpha(PAUSED_APP_ALPHA)
+    } else {
+        cairo.paint()
+    };
+    cairo.restore()?;
+    painted?;
+    let radius = rect.width * 0.21;
+    let center = (rect.right() - radius, rect.bottom() - radius);
+    binding_icons::with_soft_shadow(cairo, radius / 10.0, |cairo| {
+        cairo.new_sub_path();
+        cairo.arc(center.0, center.1, radius, 0.0, 2.0 * PI);
+        cairo.set_source_rgba(0.07, 0.08, 0.11, 0.92);
+        cairo.fill()
+    })?;
+    let badge = if value.glyph == Glyph::Play {
+        BindingIcon::Play
+    } else {
+        BindingIcon::Pause
+    };
+    binding_icons::paint(
+        cairo,
+        badge,
+        center,
+        radius * 1.5,
+        (color.0, color.1, color.2, 1.0),
+    )
 }
 
 /// Text over the soft shadow binding icons and captions use.
@@ -977,6 +1039,100 @@ mod tests {
         // Other readings keep the existing shrink-then-ellipsize rule.
         let other = InfoValue::text(Glyph::Record, "A very long recording headline");
         assert_eq!(marquee_extent(&other, None), None);
+    }
+
+    fn red_app() -> crate::info::AppIcon {
+        let image = Pixbuf::new(Colorspace::Rgb, true, 8, 64, 64).unwrap();
+        image.fill(0xff0000ff);
+        crate::info::AppIcon::from_pixbuf(&image, Path::new("/fixture/red.png")).unwrap()
+    }
+
+    #[test]
+    fn an_application_icon_replaces_the_glyph_with_a_status_badge() {
+        let short = |glyph, inactive| InfoValue {
+            detail: "Miles Davis".into(),
+            inactive,
+            app_icon: Some(red_app()),
+            ..InfoValue::text(glyph, "So What")
+        };
+        let red = |p: [u8; 4]| p[0] > 230 && p[1] < 30 && p[2] < 30;
+        for (playing, paused, plan, image) in [
+            (
+                compose_info_image(&short(Glyph::Play, false), None).unwrap(),
+                compose_info_image(&short(Glyph::Pause, true), None).unwrap(),
+                key_plan(&short(Glyph::Play, false)),
+                compose_info_image(
+                    &InfoValue {
+                        app_icon: None,
+                        ..short(Glyph::Play, false)
+                    },
+                    None,
+                )
+                .unwrap(),
+            ),
+            (
+                compose_zone_image(&short(Glyph::Play, false), None, false, true).unwrap(),
+                compose_zone_image(&short(Glyph::Pause, true), None, false, true).unwrap(),
+                zone_plan(&short(Glyph::Play, false), false, true),
+                compose_zone_image(
+                    &InfoValue {
+                        app_icon: None,
+                        ..short(Glyph::Play, false)
+                    },
+                    None,
+                    false,
+                    true,
+                )
+                .unwrap(),
+            ),
+        ] {
+            let slot = plan.icon.unwrap();
+            // The icon fills its slot in full color; the top-left stays clear of the badge.
+            let inside = rgba(&playing, (slot.x + 6.0) as usize, (slot.y + 6.0) as usize);
+            assert!(red(inside) && inside[3] == 255, "{inside:?}");
+            // Paused dims the icon.
+            let dim = rgba(&paused, (slot.x + 6.0) as usize, (slot.y + 6.0) as usize);
+            assert!(red(dim) && dim[3] > 120 && dim[3] < 190, "{dim:?}");
+            // The badge sits at the slot's bottom-right: violet play, grey pause.
+            let corner = |image: &Pixbuf, color: Color| {
+                let mut count = 0;
+                for y in (slot.y + slot.height / 2.0) as usize..slot.bottom() as usize {
+                    for x in (slot.x + slot.width / 2.0) as usize..slot.right() as usize {
+                        let p = rgba(image, x, y);
+                        // Antialiased thin strokes: compare loosely.
+                        let close = [p[0], p[1], p[2]]
+                            .into_iter()
+                            .zip([color.0, color.1, color.2])
+                            .all(|(actual, wanted)| {
+                                (f64::from(actual) - wanted * 255.0).abs() < 30.0
+                            });
+                        count += usize::from(p[3] > 200 && close);
+                    }
+                }
+                count
+            };
+            assert!(corner(&playing, MEDIA) > 10, "play badge");
+            assert_eq!(corner(&paused, MEDIA), 0);
+            assert!(corner(&paused, GREY) > 10, "pause badge");
+            // Without an icon, the glyph is drawn as before.
+            assert!(inked(&image, MEDIA) > 100);
+            assert!(!red(rgba(
+                &image,
+                (slot.x + 6.0) as usize,
+                (slot.y + 6.0) as usize
+            )));
+        }
+        // Nothing playing never shows an application icon.
+        let idle = InfoValue {
+            app_icon: Some(red_app()),
+            ..crate::info::format_now_playing(None)
+        };
+        assert_eq!(
+            compose_info_image(&idle, None).unwrap().read_pixel_bytes(),
+            compose_info_image(&crate::info::format_now_playing(None), None)
+                .unwrap()
+                .read_pixel_bytes()
+        );
     }
 
     #[test]

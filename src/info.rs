@@ -16,6 +16,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod app_icon;
+pub use app_icon::{resolve as resolve_app_icon, AppIcon, AppIcons, IconDirs};
+
 const SETTINGS: &str = "info.json";
 const ELLIPSIS: &str = "\u{2026}";
 
@@ -171,6 +174,9 @@ pub struct InfoValue {
     pub detail: String,
     /// Greys the picture out, e.g. while muted or unavailable.
     pub inactive: bool,
+    /// Now playing: the playing application's icon, drawn instead of the
+    /// glyph with a play or pause badge. Other sources leave it `None`.
+    pub app_icon: Option<AppIcon>,
 }
 
 impl InfoValue {
@@ -181,6 +187,7 @@ impl InfoValue {
             headline: headline.to_owned(),
             detail: String::new(),
             inactive: false,
+            app_icon: None,
         }
     }
 
@@ -418,6 +425,7 @@ pub struct NowPlaying {
     /// Bus name -> the poll in which the player was last seen Playing.
     last_playing: BTreeMap<String, u64>,
     poll: u64,
+    icons: AppIcons,
 }
 
 impl NowPlaying {
@@ -446,10 +454,36 @@ impl NowPlaying {
             })
     }
 
-    /// The reading for one poll of the bus; `None` when the bus failed.
+    /// Resolve application icons in `dirs` instead of the user's.
+    pub fn with_icon_dirs(dirs: IconDirs) -> Self {
+        Self {
+            icons: AppIcons::with_dirs(dirs),
+            ..Self::default()
+        }
+    }
+
+    /// The reading for one poll of the bus; `None` when the bus failed. The
+    /// chosen player's icon comes from its `DesktopEntry`, else its
+    /// `Identity` as an entry name; nothing playing has none.
     pub fn value(&mut self, players: io::Result<Vec<PlayerState>>) -> Option<InfoValue> {
         let players = players.ok()?;
-        Some(format_now_playing(self.choose(&players)))
+        let player = self.choose(&players);
+        let mut value = format_now_playing(player);
+        if let Some(player) = player.filter(|_| value.glyph != Glyph::MediaIdle) {
+            // Entry lookups also try lower case ("Firefox" -> firefox).
+            let hint = player
+                .identity
+                .as_deref()
+                .map(|identity| identity.replace(' ', "-"));
+            value.app_icon = self.icons.lookup(
+                player
+                    .desktop_entry
+                    .as_deref()
+                    .into_iter()
+                    .chain(hint.as_deref()),
+            );
+        }
+        Some(value)
     }
 }
 
@@ -782,6 +816,67 @@ mod tests {
         assert_eq!(live.detail, "Main scene");
     }
 
+    /// A selector that never finds icons on the host.
+    fn quiet() -> NowPlaying {
+        NowPlaying::with_icon_dirs(IconDirs {
+            data: vec![],
+            themes: vec![],
+        })
+    }
+
+    #[test]
+    fn now_playing_carries_the_chosen_players_application_icon() {
+        let root = std::env::temp_dir().join(format!("sdeck-now-icon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let icons = root.join("icons/hicolor/48x48/apps");
+        fs::create_dir_all(&icons).unwrap();
+        fs::create_dir_all(root.join("applications")).unwrap();
+        let image = gtk::gdk_pixbuf::Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, true, 8, 48, 48)
+            .unwrap();
+        image.fill(0xff0000ff);
+        image.savev(icons.join("tune.png"), "png", &[]).unwrap();
+        fs::write(
+            root.join("applications/org.example.Tune.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Tune\nExec=true\nIcon=tune\n",
+        )
+        .unwrap();
+        let mut now = NowPlaying::with_icon_dirs(IconDirs {
+            data: vec![root.clone()],
+            themes: vec!["hicolor".into()],
+        });
+        let tune = PlayerState {
+            desktop_entry: Some("org.example.Tune".into()),
+            ..player("tune", PlaybackStatus::Playing, Some("A"))
+        };
+        let playing = now.value(Ok(vec![tune.clone()])).unwrap();
+        let icon = playing.app_icon.expect("the playing application's icon");
+        assert_eq!(icon.path(), icons.join("tune.png"));
+        let paused = PlayerState {
+            status: PlaybackStatus::Paused,
+            ..tune.clone()
+        };
+        assert!(now.value(Ok(vec![paused])).unwrap().app_icon.is_some());
+        // Identity is a hint when the player names no desktop entry.
+        let hinted = PlayerState {
+            desktop_entry: None,
+            identity: Some("org.example.Tune".into()),
+            ..tune.clone()
+        };
+        assert!(now.value(Ok(vec![hinted])).unwrap().app_icon.is_some());
+        // Nothing playing and unknown applications keep the glyph.
+        let stopped = PlayerState {
+            status: PlaybackStatus::Stopped,
+            ..tune.clone()
+        };
+        assert_eq!(now.value(Ok(vec![stopped])).unwrap().app_icon, None);
+        let unknown = PlayerState {
+            desktop_entry: Some("unknown".into()),
+            ..tune
+        };
+        assert_eq!(now.value(Ok(vec![unknown])).unwrap().app_icon, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn player(name: &str, status: PlaybackStatus, title: Option<&str>) -> PlayerState {
         PlayerState {
             bus_name: format!("org.mpris.MediaPlayer2.{name}"),
@@ -789,12 +884,13 @@ mod tests {
             title: title.map(str::to_owned),
             artist: Some(format!("{name} band")),
             identity: None,
+            desktop_entry: None,
         }
     }
 
     #[test]
     fn now_playing_shows_the_playing_title_and_artist() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         let players = [player(
             "mpv",
             PlaybackStatus::Playing,
@@ -809,7 +905,7 @@ mod tests {
 
     #[test]
     fn now_playing_paused_is_inactive_with_the_pause_glyph() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         let players = vec![player("mpv", PlaybackStatus::Paused, Some("So What"))];
         let value = now.value(Ok(players)).unwrap();
         assert_eq!(
@@ -820,7 +916,7 @@ mod tests {
 
     #[test]
     fn now_playing_stopped_or_no_player_is_nothing_playing() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         let nothing = now.value(Ok(vec![])).unwrap();
         assert_eq!(
             shown(&nothing),
@@ -833,7 +929,7 @@ mod tests {
 
     #[test]
     fn now_playing_bus_errors_are_the_normal_unavailable_value() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         assert_eq!(now.value(Err(io::Error::other("no session bus"))), None);
         let shown_value = now
             .value(Err(io::Error::other("no session bus")))
@@ -846,7 +942,7 @@ mod tests {
 
     #[test]
     fn now_playing_prefers_playing_then_the_most_recently_playing_paused_one() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         let (a, b, c) = ("alpha", "beta", "gamma");
         // Several Playing players: the first by bus name, whatever the order.
         let both = vec![
@@ -872,13 +968,13 @@ mod tests {
         let value = now.value(Ok(paused.clone())).unwrap();
         assert_eq!((value.glyph, value.headline.as_str()), (Glyph::Pause, "C"));
         // Without history, paused players that never played tie by bus name.
-        let mut fresh = NowPlaying::default();
+        let mut fresh = quiet();
         assert_eq!(fresh.value(Ok(paused)).unwrap().headline, "A");
     }
 
     #[test]
     fn now_playing_missing_metadata_falls_back_to_identity_then_unknown() {
-        let mut now = NowPlaying::default();
+        let mut now = quiet();
         let mut browser = player("firefox", PlaybackStatus::Playing, None);
         browser.artist = None;
         browser.identity = Some("Firefox".into());
