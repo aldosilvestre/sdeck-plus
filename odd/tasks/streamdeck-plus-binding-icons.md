@@ -24,6 +24,11 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T4 Preview dials and touch zones show the action icon next to/with the caption.
 - [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [x] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
+- [ ] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
+- [ ] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
+- [ ] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
+- [ ] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
+- [ ] T11 Docs + regenerated screenshots for T7-T10.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
