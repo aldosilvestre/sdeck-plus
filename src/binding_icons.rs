@@ -7,6 +7,7 @@
 //! window widgets, and the caller chooses the ink (white on keys, the theme's
 //! foreground in the window).
 
+use crate::button_text::{ButtonText, TextOrientation, VerticalAlignment};
 use crate::{
     desktop_actions::{DesktopAction, MediaCommand},
     device_control::DeviceAction,
@@ -15,7 +16,11 @@ use crate::{
     obs::ObsAction,
     organization::NavigationAction,
 };
-use gtk::cairo::{self, Context};
+use gtk::{
+    cairo::{self, Context},
+    gdk_pixbuf::{Colorspace, Pixbuf},
+    pango::{self, prelude::FontMapExt},
+};
 use std::f64::consts::{PI, TAU};
 
 #[cfg(test)]
@@ -291,6 +296,170 @@ pub fn paint_outlined(
     }
     cairo.set_source(&picture)?;
     cairo.paint()
+}
+
+/// Key and touch-section ink: the same near-white as live information.
+const INK: Ink = (0.94, 0.95, 0.98, 1.0);
+const KEY: i32 = 120;
+const ZONE_WIDTH: i32 = 200;
+const ZONE_HEIGHT: i32 = 100;
+
+/// Compose the 120x120 image of a key that has no artwork of its own: the
+/// binding's icon over black, with `caption` below it, or with the user's
+/// button text exactly where it was placed.
+///
+/// Returns `None` when the user's text leaves no free band for the icon
+/// (vertically centered or vertical text); such keys keep today's picture.
+/// Nothing is stored: callers derive this at render time.
+///
+/// # Errors
+/// Returns text validation, cairo or allocation failures.
+pub fn compose_key_image(
+    icon: BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+) -> Result<Option<Pixbuf>, String> {
+    let text = text.filter(|text| !text.text.is_empty());
+    // (icon center y, icon size, caption) for each free band.
+    let (center_y, size, caption) = match text {
+        None => (40.0, 46.0, Some(caption)),
+        Some(text) if text.orientation == TextOrientation::Vertical => return Ok(None),
+        Some(text) => match text.vertical_alignment {
+            VerticalAlignment::Center => return Ok(None),
+            VerticalAlignment::Bottom => (40.0, 46.0, None),
+            VerticalAlignment::Top => (78.0, 42.0, None),
+        },
+    };
+    let default = ButtonText::default();
+    let base = crate::image_output::compose_button_image(None, text.unwrap_or(&default))?;
+    let mut surface = rgb_surface(&base)?;
+    {
+        let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
+        paint_outlined(&cairo, icon, (60.0, center_y), size, INK)
+            .map_err(|error| error.to_string())?;
+        if let Some(caption) = caption.filter(|caption| !caption.is_empty()) {
+            let layout = caption_layout(caption, 14.0, KEY - 8, 2);
+            draw_caption(&cairo, &layout, (4.0, 72.0)).map_err(|error| error.to_string())?;
+        }
+    }
+    let data = surface.data().map_err(|error| error.to_string())?;
+    let mut rgb = Vec::with_capacity((KEY * KEY * 3) as usize);
+    for pixel in data.as_chunks::<4>().0 {
+        rgb.extend_from_slice(&u32::from_ne_bytes(*pixel).to_be_bytes()[1..]);
+    }
+    Ok(Some(Pixbuf::from_bytes(
+        &gtk::glib::Bytes::from_owned(rgb),
+        Colorspace::Rgb,
+        false,
+        8,
+        KEY,
+        KEY,
+        KEY * 3,
+    )))
+}
+
+/// Compose a transparent 200x100 touch-section foreground for a section
+/// without artwork: the icon with a one-line caption under it. It is drawn
+/// over the strip background exactly like section artwork.
+///
+/// # Errors
+/// Returns cairo or allocation failures.
+pub fn compose_zone_image(icon: BindingIcon, caption: &str) -> Result<Pixbuf, String> {
+    let canvas = vec![0; (ZONE_WIDTH * ZONE_HEIGHT * 4) as usize];
+    let mut surface = cairo::ImageSurface::create_for_data(
+        canvas,
+        cairo::Format::ARgb32,
+        ZONE_WIDTH,
+        ZONE_HEIGHT,
+        ZONE_WIDTH * 4,
+    )
+    .map_err(|error| error.to_string())?;
+    {
+        let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
+        paint_outlined(&cairo, icon, (100.0, 36.0), 40.0, INK)
+            .map_err(|error| error.to_string())?;
+        if !caption.is_empty() {
+            let layout = caption_layout(caption, 15.0, ZONE_WIDTH - 16, 1);
+            draw_caption(&cairo, &layout, (8.0, 64.0)).map_err(|error| error.to_string())?;
+        }
+    }
+    let data = surface.data().map_err(|error| error.to_string())?;
+    let mut rgba = Vec::with_capacity(data.len());
+    for pixel in data.as_chunks::<4>().0 {
+        let [alpha, red, green, blue] = u32::from_ne_bytes(*pixel).to_be_bytes();
+        // Cairo stores premultiplied channels; Pixbuf expects straight RGBA.
+        for channel in [red, green, blue] {
+            rgba.push(if alpha == 0 {
+                0
+            } else {
+                (u16::from(channel) * 255 / u16::from(alpha)).min(255) as u8
+            });
+        }
+        rgba.push(alpha);
+    }
+    Ok(Pixbuf::from_bytes(
+        &gtk::glib::Bytes::from_owned(rgba),
+        Colorspace::Rgb,
+        true,
+        8,
+        ZONE_WIDTH,
+        ZONE_HEIGHT,
+        ZONE_WIDTH * 4,
+    ))
+}
+
+/// An opaque RGB pixbuf as an RGB24 cairo surface.
+fn rgb_surface(image: &Pixbuf) -> Result<cairo::ImageSurface, String> {
+    let bytes = image.read_pixel_bytes();
+    let stride = usize::try_from(image.rowstride()).map_err(|error| error.to_string())?;
+    let channels = image.n_channels() as usize;
+    let (width, height) = (image.width(), image.height());
+    let mut canvas = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let offset = y * stride + x * channels;
+            let pixel = u32::from(bytes[offset]) << 16
+                | u32::from(bytes[offset + 1]) << 8
+                | u32::from(bytes[offset + 2]);
+            canvas.extend_from_slice(&pixel.to_ne_bytes());
+        }
+    }
+    cairo::ImageSurface::create_for_data(canvas, cairo::Format::Rgb24, width, height, width * 4)
+        .map_err(|error| error.to_string())
+}
+
+fn caption_layout(text: &str, size: f64, width: i32, lines: i32) -> pango::Layout {
+    // PangoCairo's default font map is per-thread; no display or GTK init is used.
+    let context = pangocairo::FontMap::default().create_context();
+    let layout = pango::Layout::new(&context);
+    let mut font = pango::FontDescription::new();
+    font.set_family("Sans");
+    font.set_weight(pango::Weight::Bold);
+    font.set_absolute_size(size * f64::from(pango::SCALE));
+    layout.set_font_description(Some(&font));
+    layout.set_text(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+    layout.set_width(width * pango::SCALE);
+    layout.set_alignment(pango::Alignment::Center);
+    layout.set_wrap(pango::WrapMode::WordChar);
+    layout.set_height(-lines);
+    layout.set_ellipsize(pango::EllipsizeMode::End);
+    layout
+}
+
+/// Caption text with the thin dark outline used by key text and live information.
+fn draw_caption(
+    cairo: &Context,
+    layout: &pango::Layout,
+    (x, y): (f64, f64),
+) -> Result<(), cairo::Error> {
+    cairo.move_to(x, y);
+    pangocairo::functions::layout_path(cairo, layout);
+    cairo.set_source_rgba(0.0, 0.0, 0.0, 0.9);
+    cairo.set_line_width(3.0);
+    cairo.set_line_join(cairo::LineJoin::Round);
+    cairo.stroke_preserve()?;
+    cairo.set_source_rgba(INK.0, INK.1, INK.2, INK.3);
+    cairo.fill()
 }
 
 fn rounded(cairo: &Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {

@@ -2966,13 +2966,22 @@ impl ArtworkUi {
         let target = ArtworkTarget::EncoderZone(zone);
         let background = self.info_background(layer, target);
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        let icon = value
+            .is_none()
+            .then(|| self.control_icon(layer, target))
+            .flatten();
         match sdeck_plus::image_output::compose_touchscreen_zone(
             zone,
             background.as_deref(),
             value,
             previous,
             next,
-        ) {
+        )
+        .and_then(|indicators| match &icon {
+            // The page indicators still paint last, over the binding icon.
+            Some(icon) => with_icon_under(icon, &indicators),
+            None => Ok(indicators),
+        }) {
             Ok(image) => {
                 if let Some((_, picture)) = self
                     .pictures
@@ -3100,6 +3109,7 @@ impl ArtworkUi {
                             *target,
                         ),
                         store.button_text_in_layer(&layer, *target).cloned(),
+                        self.control_icon(&layer, *target),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -3109,8 +3119,8 @@ impl ArtworkUi {
             )
         };
         let commands = self.with_info(&layer, commands);
-        for (picture, path, text) in paths {
-            set_button_picture(&picture, path, text.as_ref());
+        for (picture, path, text, icon) in paths {
+            set_button_picture(&picture, path, text.as_ref(), icon.as_ref());
         }
         self.paint_info_previews(&layer);
         self.paint_navigation_previews(&layer);
@@ -3120,6 +3130,34 @@ impl ArtworkUi {
             editor.load_context(false);
             editor.refresh_preview();
         }
+    }
+
+    /// The binding icon a key or touch section shows on `layer` when it has
+    /// no artwork of its own and no live information. Derived at render
+    /// time from the binding; it is never written into the artwork stores.
+    fn control_icon(&self, layer: &str, target: ArtworkTarget) -> Option<ControlIcon> {
+        let action = {
+            let layers = self.layers.borrow();
+            match target {
+                ArtworkTarget::Keypad(key) => layers.binding(layer, &Trigger::KeyPress(key)),
+                ArtworkTarget::EncoderZone(zone) => layers
+                    .binding(layer, &Trigger::ZoneTap(zone))
+                    .or_else(|| layers.binding(layer, &Trigger::ZonePress(zone))),
+                ArtworkTarget::TouchStripBackground => None,
+            }
+        }?;
+        let icon = BindingIcon::for_action(&action);
+        if !icon.shown_on_controls()
+            || self.info_background(layer, target).is_some()
+            || self.shows_info(layer, target)
+        {
+            return None;
+        }
+        Some(ControlIcon {
+            target,
+            icon,
+            caption: sdeck_plus::binding_editor::action_caption(&action),
+        })
     }
 
     /// Whether `target` shows live information on `layer`.
@@ -3152,9 +3190,10 @@ impl ArtworkUi {
                 store.button_text_in_layer(&layer, *target).cloned(),
             )
         };
+        let icon = self.control_icon(&layer, *target);
         for (picture_target, picture) in self.pictures.borrow().iter() {
             if picture_target == target {
-                set_button_picture(picture, path.clone(), text.as_ref());
+                set_button_picture(picture, path.clone(), text.as_ref(), icon.as_ref());
             }
         }
         if !matches!(target, ArtworkTarget::Keypad(_)) {
@@ -3189,11 +3228,75 @@ impl ArtworkUi {
     }
 }
 
+/// A binding icon derived for one key or touch section without artwork.
+#[derive(Clone, Debug, PartialEq)]
+struct ControlIcon {
+    target: ArtworkTarget,
+    icon: BindingIcon,
+    caption: String,
+}
+
+impl ControlIcon {
+    /// The key image or transparent touch-section foreground, or `None` when
+    /// user button text leaves no room for an icon.
+    fn compose(
+        &self,
+        text: Option<&sdeck_plus::button_text::ButtonText>,
+    ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
+        match self.target {
+            ArtworkTarget::Keypad(_) => {
+                sdeck_plus::binding_icons::compose_key_image(self.icon, &self.caption, text)
+            }
+            ArtworkTarget::EncoderZone(_) => {
+                sdeck_plus::binding_icons::compose_zone_image(self.icon, &self.caption).map(Some)
+            }
+            ArtworkTarget::TouchStripBackground => Ok(None),
+        }
+    }
+}
+
+/// Composite a touch section's foreground (transparent apart from its page
+/// indicators) over that section's binding icon.
+fn with_icon_under(
+    icon: &ControlIcon,
+    foreground: &gtk::gdk_pixbuf::Pixbuf,
+) -> Result<gtk::gdk_pixbuf::Pixbuf, String> {
+    let Some(base) = icon.compose(None)? else {
+        return Ok(foreground.clone());
+    };
+    foreground.composite(
+        &base,
+        0,
+        0,
+        base.width(),
+        base.height(),
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        gtk::gdk_pixbuf::InterpType::Nearest,
+        255,
+    );
+    Ok(base)
+}
+
 fn set_button_picture(
     picture: &Picture,
     path: Option<std::path::PathBuf>,
     text: Option<&sdeck_plus::button_text::ButtonText>,
+    icon: Option<&ControlIcon>,
 ) {
+    if path.is_none() {
+        match icon.map(|icon| icon.compose(text)).transpose() {
+            Ok(Some(Some(image))) => {
+                picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                picture.set_visible(true);
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("Could not compose binding icon preview: {error}"),
+        }
+    }
     match text {
         Some(text) => match sdeck_plus::image_output::compose_button_image(path.as_deref(), text) {
             Ok(image) => {

@@ -256,3 +256,82 @@ fn only_actions_with_a_purpose_are_shown_on_hardware() {
     assert!(!BindingIcon::for_action(&Action::None).shown_on_controls());
     assert!(BindingIcon::for_action(&Action::Command("x".into())).shown_on_controls());
 }
+
+fn bright(image: &gtk::gdk_pixbuf::Pixbuf, rows: std::ops::Range<i32>) -> usize {
+    let bytes = image.read_pixel_bytes();
+    let stride = image.rowstride() as usize;
+    let channels = image.n_channels() as usize;
+    let mut count = 0;
+    for y in rows {
+        for x in 0..image.width() {
+            let offset = y as usize * stride + x as usize * channels;
+            let alpha = if image.has_alpha() {
+                bytes[offset + 3]
+            } else {
+                255
+            };
+            if alpha > 200 && bytes[offset] > 200 && bytes[offset + 1] > 200 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn keys_without_text_show_the_icon_above_its_caption() {
+    let image = compose_key_image(BindingIcon::Command, "Run make", None)
+        .unwrap()
+        .expect("an icon key");
+    assert_eq!((image.width(), image.height()), (120, 120));
+    assert!(bright(&image, 14..64) > 80, "icon in the upper band");
+    assert!(bright(&image, 70..110) > 20, "caption in the lower band");
+    // Black around, like an empty key.
+    assert_eq!(bright(&image, 0..4), 0);
+}
+
+#[test]
+fn user_text_keeps_its_placement_and_the_icon_uses_the_free_band() {
+    use crate::button_text::{ButtonText, VerticalAlignment};
+    let text = ButtonText {
+        text: "Play".into(),
+        vertical_alignment: VerticalAlignment::Bottom,
+        ..ButtonText::default()
+    };
+    let plain = crate::image_output::compose_button_image(None, &text).unwrap();
+    let image = compose_key_image(BindingIcon::PlayPause, "Media PlayPause", Some(&text))
+        .unwrap()
+        .expect("room above bottom text");
+    assert!(bright(&image, 10..60) > 80);
+    // The user's text pixels are untouched.
+    let rows = 84..120;
+    let crop = |image: &gtk::gdk_pixbuf::Pixbuf| {
+        let bytes = image.read_pixel_bytes();
+        let stride = image.rowstride() as usize;
+        rows.clone()
+            .flat_map(|y| bytes[y * stride..y * stride + 360].to_vec())
+            .collect::<Vec<u8>>()
+    };
+    assert_eq!(crop(&image), crop(&plain));
+    let centered = ButtonText {
+        text: "Play".into(),
+        ..ButtonText::default()
+    };
+    assert!(
+        compose_key_image(BindingIcon::PlayPause, "x", Some(&centered))
+            .unwrap()
+            .is_none(),
+        "centered user text leaves no room, so the key stays as before"
+    );
+}
+
+#[test]
+fn touch_sections_show_the_icon_on_a_transparent_foreground() {
+    let image = compose_zone_image(BindingIcon::ObsScene, "OBS scene: Cam").unwrap();
+    assert_eq!((image.width(), image.height()), (200, 100));
+    assert!(image.has_alpha());
+    assert!(bright(&image, 10..60) > 60, "icon");
+    assert!(bright(&image, 62..92) > 20, "caption");
+    let bytes = image.read_pixel_bytes();
+    assert_eq!(bytes[3], 0, "corners stay transparent over the strip");
+}

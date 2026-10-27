@@ -298,6 +298,12 @@ pub fn dial_action(store: &LayerStore, layer: &str, number: u8) -> Option<Action
     .cloned()
 }
 
+/// The short caption a key or touch section without artwork shows under its
+/// binding icon: the same wording as the editor's summaries.
+pub fn action_caption(action: &Action) -> String {
+    action_summary(Some(action))
+}
+
 fn summary_event_label(event: EventKind) -> &'static str {
     match event {
         EventKind::ButtonPress | EventKind::EncoderPress => "Press",

@@ -183,3 +183,187 @@ fn assert_dial_icons() {
     assert!(!icons[1].is_visible());
     eprintln!("GTK dial icon assertions executed");
 }
+
+struct IconFixture {
+    root: std::path::PathBuf,
+    window: ApplicationWindow,
+    artwork: ArtworkUi,
+    hardware: mpsc::Receiver<ArtworkCommand>,
+    _widgets: MonitorWidgets,
+}
+
+impl Drop for IconFixture {
+    fn drop(&mut self) {
+        self.window.destroy();
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// Production widgets whose artwork output channel the test keeps.
+fn icon_fixture(
+    tag: &str,
+    setup: impl FnOnce(&mut LayerStore, &mut ArtworkStore, &std::path::Path),
+) -> Option<IconFixture> {
+    if !init_gtk_for_test() {
+        return None;
+    }
+    gtk::Settings::default()
+        .unwrap()
+        .set_gtk_enable_animations(false);
+    let (root, mut store, mut images, source) = artwork_fixture(tag);
+    setup(&mut store, &mut images, &source);
+    let layers = Rc::new(RefCell::new(store));
+    let (output, hardware) = mpsc::channel();
+    let artwork = ArtworkUi {
+        store: Rc::new(RefCell::new(Some(images))),
+        layers: layers.clone(),
+        pictures: Rc::new(RefCell::new(Vec::new())),
+        output,
+        last_layer: Rc::new(RefCell::new(None)),
+        chooser_owners: Rc::new(RefCell::new(Default::default())),
+        selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+        text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
+    };
+    let (commands, _requests) = mpsc::channel();
+    let window = ApplicationWindow::builder()
+        .default_width(DEFAULT_WIDTH)
+        .default_height(DEFAULT_HEIGHT)
+        .build();
+    install_style(&window);
+    let widgets = build_widgets(window.clone(), layers, artwork.clone(), commands);
+    window.set_child(Some(&widgets.root));
+    window.present();
+    wait_for_frame(&window);
+    artwork.refresh(true);
+    Some(IconFixture {
+        root,
+        window,
+        artwork,
+        hardware,
+        _widgets: widgets,
+    })
+}
+
+fn picture(fixture: &IconFixture, target: ArtworkTarget) -> Picture {
+    fixture
+        .artwork
+        .pictures
+        .borrow()
+        .iter()
+        .find(|(shown, _)| *shown == target)
+        .map(|(_, picture)| picture.clone())
+        .unwrap()
+}
+
+/// Near-white pixels of a picture's paintable in `rows`.
+fn bright_pixels(picture: &Picture, rows: std::ops::Range<usize>) -> usize {
+    let texture = picture
+        .paintable()
+        .and_downcast::<gtk::gdk::Texture>()
+        .expect("a texture");
+    let (width, height) = (texture.width() as usize, texture.height() as usize);
+    let mut pixels = vec![0; width * height * 4];
+    texture.download(&mut pixels, width * 4);
+    rows.flat_map(|y| (0..width).map(move |x| (y * width + x) * 4))
+        .filter(|offset| {
+            // Memory format is native-endian B8G8R8A8 premultiplied.
+            pixels[offset + 3] > 200 && pixels[*offset] > 200 && pixels[offset + 1] > 200
+        })
+        .count()
+}
+
+fn tree_snapshot(root: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.push((path.clone(), std::fs::read(&path).unwrap()));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn keys_and_touch_sections_without_artwork_show_their_action_icon() {
+    run_gtk_test(assert_preview_icons);
+}
+
+fn assert_preview_icons() {
+    let Some(fixture) = icon_fixture("preview-icons", |store, images, source| {
+        let command = Action::Command("make".into());
+        store
+            .bind("Base", Trigger::KeyPress(1), command.clone())
+            .unwrap();
+        store.bind("Base", Trigger::KeyPress(2), command).unwrap();
+        store
+            .bind("Base", Trigger::KeyPress(3), Action::None)
+            .unwrap();
+        store
+            .bind("Base", Trigger::ZoneTap(2), Action::Emit("lights".into()))
+            .unwrap();
+        // Key 1 keeps its user artwork.
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), source)
+            .unwrap();
+    }) else {
+        return;
+    };
+    let artwork_root = fixture.root.join("artwork");
+    let before = tree_snapshot(&artwork_root);
+
+    let key1 = picture(&fixture, ArtworkTarget::Keypad(1));
+    assert!(key1.file().is_some(), "user artwork is shown as before");
+    let key2 = picture(&fixture, ArtworkTarget::Keypad(2));
+    assert!(key2.is_visible(), "a key without artwork shows its icon");
+    assert!(bright_pixels(&key2, 14..64) > 60, "icon in the upper band");
+    assert!(bright_pixels(&key2, 70..112) > 10, "caption below the icon");
+    assert!(
+        !picture(&fixture, ArtworkTarget::Keypad(3)).is_visible(),
+        "None keeps the key empty"
+    );
+    assert!(
+        !picture(&fixture, ArtworkTarget::Keypad(4)).is_visible(),
+        "unassigned keys stay empty"
+    );
+    let zone = picture(&fixture, ArtworkTarget::EncoderZone(2));
+    assert!(zone.is_visible(), "a bound touch section shows its icon");
+    assert!(bright_pixels(&zone, 10..60) > 40);
+    assert!(!picture(&fixture, ArtworkTarget::EncoderZone(3)).is_visible());
+
+    // Rendering never writes into the artwork or button-text stores.
+    fixture.artwork.refresh(true);
+    assert_eq!(tree_snapshot(&artwork_root), before);
+    let store = fixture.artwork.store.borrow();
+    let store = store.as_ref().unwrap();
+    assert!(store
+        .assigned_path_in_layer("Base", ArtworkTarget::Keypad(2))
+        .is_none());
+    assert!(store
+        .button_text_in_layer("Base", ArtworkTarget::Keypad(2))
+        .is_none());
+    // On the device, the key with artwork keeps its plain artwork command.
+    let snapshot = fixture
+        .hardware
+        .try_iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::Replace(commands) => Some(commands),
+            _ => None,
+        })
+        .last()
+        .expect("a device snapshot");
+    assert!(snapshot.iter().any(|command| matches!(
+        command,
+        ArtworkCommand::Assign {
+            target: ArtworkTarget::Keypad(1),
+            ..
+        }
+    )));
+    eprintln!("GTK preview binding icon assertions executed");
+}

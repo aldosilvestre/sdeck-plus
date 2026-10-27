@@ -65,3 +65,19 @@ which now reuses it). Each preview knob shows that action's icon (20px,
 unchanged caption; hidden when unassigned or None; preview-only.
 RED: `binding_icon_tests::preview_dials_show_their_action_icon_with_the_caption`
 (no `dial_icons`), then GREEN. Touch-zone half pending with T2 rendering.
+
+### T2/T4b preview (delegated writer)
+Lib: `binding_icons::compose_key_image` (120x120: icon 46px at y40 + 14px bold
+2-line caption at y72 over black; with user text the icon takes the free band:
+Bottom text -> icon above, Top text -> icon below; Center/vertical text -> None,
+key unchanged) and `compose_zone_image` (200x100 transparent: icon 40px +
+one-line 15px caption). `binding_editor::action_caption` reuses the summary text.
+Window: `ArtworkUi::control_icon` derives the icon at render time for keys
+(KeyPress) and touch sections (ZoneTap, then ZonePress) only without own
+artwork and without live information; None/unassigned stay empty. Page
+indicators still paint over the icon. Stores are never written.
+RED: lib tests (no compose fns) and
+`binding_icon_tests::keys_and_touch_sections_without_artwork_show_their_action_icon`
+(key 2 picture hidden), then GREEN (artwork tree byte-identical after refresh).
+Device output pending: needs `src/event_api.rs` + `src/image_output.rs`
+(outside the authorized edit surface).
