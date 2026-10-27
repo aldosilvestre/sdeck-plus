@@ -191,7 +191,7 @@ pub fn action_from_fields(
         ActionKind::MoveToLayer => {
             let target = layer_destination.trim();
             if !store.layers().contains_key(target) {
-                return Err("destination layer does not exist".into());
+                return Err("destination profile or page does not exist".into());
             }
             Action::SwitchLayer(target.into())
         }
@@ -271,6 +271,132 @@ pub fn control_summary(
     lines.join("\n")
 }
 
+/// The one action a dial preview names: turning first (clockwise, then
+/// counterclockwise, then exact-tick overrides), else pressing. `None` when the
+/// dial has no binding on the layer's current touchscreen page.
+pub fn dial_legend(store: &LayerStore, layer: &str, number: u8) -> Option<String> {
+    dial_action(store, layer, number).map(|action| action_summary(Some(&action)))
+}
+
+/// The action a dial's caption describes: turn, then exact ticks, then press.
+pub fn dial_action(store: &LayerStore, layer: &str, number: u8) -> Option<Action> {
+    let bindings = &store
+        .binding_layer(layer, &Trigger::EncoderPress(number))?
+        .bindings;
+    [
+        Trigger::EncoderClockwise(number),
+        Trigger::EncoderCounterClockwise(number),
+    ]
+    .iter()
+    .find_map(|trigger| bindings.get(trigger))
+    .or_else(|| {
+        bindings.iter().find_map(|(trigger, action)| {
+            matches!(trigger, Trigger::Rotation(index, _) if *index == number).then_some(action)
+        })
+    })
+    .or_else(|| bindings.get(&Trigger::EncoderPress(number)))
+    .cloned()
+}
+
+/// The short caption a key or touch section without artwork shows under its
+/// binding icon: the same wording as the editor's summaries.
+pub fn action_caption(action: &Action) -> String {
+    action_summary(Some(action))
+}
+
+/// A whole-strip touch gesture shown as a badge above the preview strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripGesture {
+    SwipeLeft,
+    SwipeRight,
+    Tap,
+    Hold,
+}
+
+impl StripGesture {
+    pub const ALL: [Self; 4] = [Self::SwipeLeft, Self::SwipeRight, Self::Tap, Self::Hold];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SwipeLeft => "Swipe left",
+            Self::SwipeRight => "Swipe right",
+            Self::Tap => "Tap",
+            Self::Hold => "Hold",
+        }
+    }
+
+    /// The gesture's own glyph, drawn before its action's icon.
+    pub fn icon(self) -> crate::binding_icons::BindingIcon {
+        use crate::binding_icons::BindingIcon;
+        match self {
+            Self::SwipeLeft => BindingIcon::SwipeLeft,
+            Self::SwipeRight => BindingIcon::SwipeRight,
+            Self::Tap => BindingIcon::Tap,
+            Self::Hold => BindingIcon::Hold,
+        }
+    }
+
+    fn trigger(self) -> Trigger {
+        use crate::layers::SwipeDirection;
+        match self {
+            Self::SwipeLeft => Trigger::TouchSwipe(SwipeDirection::Left),
+            Self::SwipeRight => Trigger::TouchSwipe(SwipeDirection::Right),
+            Self::Tap => Trigger::TouchTap,
+            Self::Hold => Trigger::TouchPress,
+        }
+    }
+
+    /// What an unbound gesture does: horizontal swipes change touch page.
+    fn default_action(self) -> Option<Action> {
+        use crate::features::{FeatureAction, TouchscreenAction};
+        let page = match self {
+            Self::SwipeLeft => TouchscreenAction::NextPage,
+            Self::SwipeRight => TouchscreenAction::PreviousPage,
+            Self::Tap | Self::Hold => return None,
+        };
+        Some(Action::Feature(FeatureAction::Touchscreen(page)))
+    }
+}
+
+/// One strip gesture that does something on the current touch page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GestureBinding {
+    pub gesture: StripGesture,
+    pub icon: crate::binding_icons::BindingIcon,
+    pub summary: String,
+    /// The built-in swipe paging of an unbound swipe.
+    pub default: bool,
+}
+
+impl GestureBinding {
+    pub fn description(&self) -> String {
+        let default = if self.default { " (default)" } else { "" };
+        format!("{}{default}: {}", self.gesture.label(), self.summary)
+    }
+}
+
+/// Swipe left/right, tap and hold of the whole strip on `layer`'s touch page,
+/// in that order. Unbound swipes report their default paging; explicit
+/// `None` bindings and unassigned taps or holds are omitted.
+pub fn strip_gestures(store: &LayerStore, layer: &str) -> Vec<GestureBinding> {
+    use crate::binding_icons::BindingIcon;
+    StripGesture::ALL
+        .into_iter()
+        .filter_map(|gesture| {
+            let bound = store.binding(layer, &gesture.trigger());
+            let default = bound.is_none();
+            let action = bound.or_else(|| gesture.default_action())?;
+            let icon = BindingIcon::for_action(&action);
+            icon.shown_on_controls().then(|| GestureBinding {
+                gesture,
+                icon,
+                summary: action_summary(Some(&action)),
+                default,
+            })
+        })
+        .collect()
+}
+
 fn summary_event_label(event: EventKind) -> &'static str {
     match event {
         EventKind::ButtonPress | EventKind::EncoderPress => "Press",
@@ -290,7 +416,7 @@ fn action_summary(action: Option<&Action>) -> String {
     let text = match action {
         None => return "Unassigned".into(),
         Some(Action::None) => "None".into(),
-        Some(Action::SwitchLayer(target)) => format!("Layer {target}"),
+        Some(Action::SwitchLayer(target)) => format!("Go to {target}"),
         Some(Action::Command(command)) => format!("Run {command}"),
         Some(Action::KeyPress { key }) => format!("Shortcut {key}"),
         Some(Action::Launch { executable, .. }) => format!("Open {}", executable.display()),
@@ -375,7 +501,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             control_summary(&store, "Base", ControlKind::Encoder, 4),
-            "Press: Shortcut ENTER\nCW: Layer Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
+            "Press: Shortcut ENTER\nCW: Go to Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
         );
         store
             .bind(
@@ -439,7 +565,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             control_summary(&store, "Base", ControlKind::Encoder, 4),
-            "Press: Emit page-owned\nCW: Layer Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
+            "Press: Emit page-owned\nCW: Go to Studio\nCCW: Unassigned\nExact -2 ticks: Emit old"
         );
         store.create_touchscreen_page("Base").unwrap();
         assert_eq!(
@@ -685,6 +811,59 @@ mod tests {
             existing_action(&store, "Base", &Trigger::Rotation(1, 2)),
             Some(Action::Emit("legacy-exact".into()))
         );
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn strip_gestures_list_swipes_tap_and_hold_with_default_paging() {
+        use crate::binding_icons::BindingIcon;
+        use crate::layers::SwipeDirection;
+        let (path, mut store) = temp_store();
+        let gestures = strip_gestures(&store, "Base");
+        let shown: Vec<_> = gestures
+            .iter()
+            .map(|gesture| (gesture.gesture, gesture.icon, gesture.default))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (StripGesture::SwipeLeft, BindingIcon::NextPage, true),
+                (StripGesture::SwipeRight, BindingIcon::PreviousPage, true),
+            ]
+        );
+        store
+            .bind(
+                "Base",
+                Trigger::TouchSwipe(SwipeDirection::Left),
+                Action::None,
+            )
+            .unwrap();
+        store
+            .bind(
+                "Base",
+                Trigger::TouchSwipe(SwipeDirection::Right),
+                Action::Emit("lights".into()),
+            )
+            .unwrap();
+        store
+            .bind("Base", Trigger::TouchTap, Action::Command("ls".into()))
+            .unwrap();
+        store
+            .bind("Base", Trigger::TouchPress, Action::None)
+            .unwrap();
+        let gestures = strip_gestures(&store, "Base");
+        assert_eq!(
+            gestures
+                .iter()
+                .map(|gesture| (gesture.gesture, gesture.icon, gesture.default))
+                .collect::<Vec<_>>(),
+            [
+                (StripGesture::SwipeRight, BindingIcon::NamedEvent, false),
+                (StripGesture::Tap, BindingIcon::Command, false),
+            ],
+            "an explicit None hides the default and shows nothing"
+        );
+        assert_eq!(gestures[1].description(), "Tap: Run ls");
         let _ = fs::remove_dir_all(path);
     }
 }

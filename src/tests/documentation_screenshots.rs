@@ -141,6 +141,10 @@ fn capture_documentation_screenshots() {
     for profile in ["Base", "Studio", "OBS"] {
         for (index, (label, color)) in labels.iter().zip(colors).enumerate() {
             let key = u8::try_from(index + 1).unwrap();
+            // Keys 5 to 7 have no artwork: they show their binding icons.
+            if (5..=7).contains(&key) {
+                continue;
+            }
             let pixbuf =
                 gtk::gdk_pixbuf::Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, false, 8, 120, 120)
                     .unwrap();
@@ -161,7 +165,8 @@ fn capture_documentation_screenshots() {
                 )
                 .unwrap();
         }
-        for zone in 1..=4 {
+        // Sections 2 and 3 have no artwork either.
+        for zone in [1, 4] {
             images
                 .assign_in_layer(profile, ArtworkTarget::EncoderZone(zone), &source)
                 .unwrap();
@@ -174,6 +179,48 @@ fn capture_documentation_screenshots() {
                     modifiers: vec!["CTRL".into(), "ALT".into()],
                     key: "p".into(),
                 },
+            )
+            .unwrap();
+        for (key, action) in [
+            (
+                5,
+                Action::Feature(FeatureAction::Obs(ObsAction::ToggleRecording)),
+            ),
+            (
+                6,
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Website {
+                        url: "https://example.com".into(),
+                    },
+                )),
+            ),
+            (
+                7,
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(
+                        sdeck_plus::desktop_actions::MediaCommand::Next,
+                    ),
+                )),
+            ),
+        ] {
+            store.bind(profile, Trigger::KeyPress(key), action).unwrap();
+        }
+        store
+            .bind(
+                profile,
+                Trigger::ZoneTap(2),
+                Action::Feature(FeatureAction::Obs(ObsAction::Scene("Camera".into()))),
+            )
+            .unwrap();
+        store
+            .bind(
+                profile,
+                Trigger::ZoneTap(3),
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(
+                        sdeck_plus::desktop_actions::MediaCommand::Mute,
+                    ),
+                )),
             )
             .unwrap();
         store
@@ -240,6 +287,8 @@ fn capture_documentation_screenshots() {
     artwork.refresh(false);
 
     // When: drive the same native controls as configuration, never Test action.
+    // The setup above edits fields directly, so treat the editor as saved before navigating.
+    widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let capture = |name: &str| save(&directory, widgets.root.upcast_ref(), name);
     capture("main-window");
@@ -284,6 +333,7 @@ fn capture_documentation_screenshots() {
         )));
     widgets.binding_ui.feature_editor.wait_for_audio_outputs();
     capture("more-actions-audio-output");
+    widgets.binding_ui.mark_clean();
     widgets.encoder_labels[0]
         .ancestor(Button::static_type())
         .unwrap()
@@ -296,8 +346,11 @@ fn capture_documentation_screenshots() {
         &widgets.binding_ui.event_picker,
         "encoder-events",
     );
+    widgets.binding_ui.mark_clean();
     widgets
         .touch_status
+        .parent()
+        .unwrap()
         .next_sibling()
         .unwrap()
         .downcast::<gtk::Overlay>()
@@ -311,6 +364,7 @@ fn capture_documentation_screenshots() {
     widgets.root.vadjustment().set_value(0.0);
     capture("touch-strip");
 
+    widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let editor = &widgets._text_editor;
     wait_for_frame(&widgets.root);
@@ -500,7 +554,7 @@ fn capture_documentation_screenshots() {
     capture("live-information-settings");
 
     // Then: every documented artifact was rendered, with no dispatched action.
-    assert_eq!(widgets.status.text(), "SEARCHING");
+    assert_eq!(widgets.status.text(), "Not connected");
     assert!(commands.try_iter().all(|command| !matches!(
         command,
         LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_)

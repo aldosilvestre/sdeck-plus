@@ -1,3 +1,5 @@
+use sdeck_plus::{binding_icons::BindingIcon, features::FeatureAction, layers::Action};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Choice {
     ShortcutToggle,
@@ -43,13 +45,93 @@ pub(super) enum Choice {
 }
 
 impl Choice {
-    pub(super) fn icon(self) -> &'static str {
-        match self.category() {
-            0 => "preferences-system-symbolic",
-            1 => "audio-x-generic-symbolic",
-            2 => "folder-symbolic",
-            3 => "preferences-desktop-display-symbolic",
-            _ => "camera-video-symbolic",
+    /// The vocabulary icon of this action: by construction the same picture
+    /// keys, sections and dials show once it is saved.
+    pub(super) fn binding_icon(self) -> BindingIcon {
+        BindingIcon::for_action(&Action::Feature(self.example()))
+    }
+
+    /// The icon of one category row: System, Multimedia, Organization,
+    /// Device, OBS.
+    pub(super) fn category_icon(category: u32) -> BindingIcon {
+        match category {
+            0 => BindingIcon::Application,
+            1 => BindingIcon::PlayPause,
+            2 => BindingIcon::Folder,
+            3 => BindingIcon::Brightness,
+            4 => BindingIcon::ObsScene,
+            _ => BindingIcon::Generic,
+        }
+    }
+
+    /// A representative action of this choice; only its kind matters.
+    fn example(self) -> FeatureAction {
+        use sdeck_plus::{
+            desktop_actions::{DesktopAction as D, MediaCommand as M, ScrollDirection},
+            device_control::DeviceAction,
+            features::TouchscreenAction,
+            obs::ObsAction as O,
+            organization::NavigationAction as N,
+        };
+        let text = String::new;
+        match self {
+            Self::ShortcutToggle => FeatureAction::Desktop(D::ShortcutToggle {
+                first: text(),
+                second: text(),
+            }),
+            Self::Text => FeatureAction::Desktop(D::Text {
+                value: text(),
+                enter: false,
+            }),
+            Self::Open => FeatureAction::Desktop(D::Open { target: text() }),
+            Self::Website => FeatureAction::Desktop(D::Website { url: text() }),
+            Self::Close => FeatureAction::Desktop(D::CloseApplication { executable: text() }),
+            Self::Scroll => FeatureAction::Desktop(D::MouseScroll {
+                direction: ScrollDirection::Down,
+                ticks: 1,
+            }),
+            Self::PlayPause => FeatureAction::Desktop(D::Media(M::PlayPause)),
+            Self::Stop => FeatureAction::Desktop(D::Media(M::Stop)),
+            Self::Next => FeatureAction::Desktop(D::Media(M::Next)),
+            Self::Previous => FeatureAction::Desktop(D::Media(M::Previous)),
+            Self::VolumeUp => FeatureAction::Desktop(D::Media(M::VolumeUp)),
+            Self::VolumeDown => FeatureAction::Desktop(D::Media(M::VolumeDown)),
+            Self::Mute => FeatureAction::Desktop(D::Media(M::Mute)),
+            Self::SetAudioOutput => FeatureAction::Desktop(D::CycleAudioOutput),
+            Self::PlayAudio => FeatureAction::Desktop(D::PlayAudio {
+                path: Default::default(),
+            }),
+            Self::StopAudio => FeatureAction::Desktop(D::StopAudio),
+            Self::NextPage => FeatureAction::Navigation(N::NextPage),
+            Self::PreviousPage => FeatureAction::Navigation(N::PreviousPage),
+            Self::NextTouchscreenPage => FeatureAction::Touchscreen(TouchscreenAction::NextPage),
+            Self::PreviousTouchscreenPage => {
+                FeatureAction::Touchscreen(TouchscreenAction::PreviousPage)
+            }
+            Self::GoToPage => FeatureAction::Navigation(N::GoToPage(1)),
+            Self::OpenFolder => FeatureAction::Navigation(N::OpenFolder(text())),
+            Self::ParentFolder => FeatureAction::Navigation(N::ParentFolder),
+            Self::Timer => FeatureAction::Timer { seconds: 1 },
+            Self::CancelTimer => FeatureAction::CancelTimer,
+            Self::Brightness => FeatureAction::Device(DeviceAction::Brightness(100)),
+            Self::AdjustBrightness => FeatureAction::Device(DeviceAction::AdjustBrightness(10)),
+            Self::Sleep => FeatureAction::Device(DeviceAction::Sleep),
+            Self::Wake => FeatureAction::Device(DeviceAction::Wake),
+            Self::Scene => FeatureAction::Obs(O::Scene(text())),
+            Self::Recording => FeatureAction::Obs(O::ToggleRecording),
+            Self::Streaming => FeatureAction::Obs(O::ToggleStreaming),
+            Self::ObsMute => FeatureAction::Obs(O::ToggleMute(text())),
+            Self::Visibility => FeatureAction::Obs(O::SourceVisibility {
+                scene: text(),
+                source: text(),
+                visible: true,
+            }),
+            Self::StartRecording => FeatureAction::Obs(O::StartRecording),
+            Self::StopRecording => FeatureAction::Obs(O::StopRecording),
+            Self::PauseRecording => FeatureAction::Obs(O::PauseRecording),
+            Self::ResumeRecording => FeatureAction::Obs(O::ResumeRecording),
+            Self::StartStreaming => FeatureAction::Obs(O::StartStreaming),
+            Self::StopStreaming => FeatureAction::Obs(O::StopStreaming),
         }
     }
 

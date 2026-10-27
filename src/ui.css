@@ -131,10 +131,37 @@ button.icon-only { min-width: 20px; padding: 6px; }
 menubutton.icon-action { padding: 0; }
 menubutton.icon-action > button > box { border-spacing: 0; }
 .page-folder-menu { padding: 0; }
+/* Page navigation reads as one segmented control ahead of the breadcrumb. */
+.linked > button { border-radius: 0; }
+.linked > button:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.linked > button:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.linked > button:not(:first-child) { border-left-width: 0; }
+/* Secondary page edits and profile tools: frameless until hovered. */
+.page-edits button.flat, menubutton.icon-action > button.flat {
+    border-color: transparent;
+    background-color: transparent;
+}
+.page-edits button.flat:hover, menubutton.icon-action > button.flat:hover,
+menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
+.page-edits button.flat:disabled { background-color: transparent; }
 .field-help > button { min-height: 20px; padding: 0 4px; }
 .page-name-dialog button { margin: 0 6px 16px; }
 .page-name-dialog button:first-child { margin-left: 16px; }
 .page-name-dialog button:last-child { margin-right: 16px; }
+.confirm-dialog label { margin: 0 16px; font-size: 14px; color: @desk_muted; }
+.confirm-dialog label.title { margin: 16px 16px 4px; font-size: 16px; font-weight: 700; color: @desk_ink; }
+.confirm-dialog button label { margin: 0; font-size: inherit; color: inherit; }
+.confirm-dialog button { margin: 12px 4px 16px; min-height: 20px; padding: 4px 12px; }
+.confirm-dialog button:first-child { margin-left: 16px; }
+.confirm-dialog button:last-child { margin-right: 16px; }
+.confirm-dialog button.destructive-action {
+    color: @desk_error;
+    background-image: none;
+    background-color: alpha(@desk_error, 0.14);
+    border-color: alpha(@desk_error, 0.5);
+    font-weight: 600;
+}
+.confirm-dialog button.destructive-action:hover { background-color: alpha(@desk_error, 0.24); }
 .icon-action:disabled, .icon-action:disabled label, .icon-action:disabled image {
     color: @desk_muted;
     opacity: 1;
@@ -168,13 +195,22 @@ menubutton.icon-action > button > box { border-spacing: 0; }
     font-size: 13px;
     font-weight: 600;
 }
+/* Connection badge: semantic tone, tinted fill and a visible edge, always
+   with text so color is never the only signal. */
 .status-idle {
     color: @desk_warning;
-    background-color: alpha(@desk_warning, 0.12);
+    background-color: alpha(@desk_warning, 0.16);
+    border: 1px solid alpha(@desk_warning, 0.55);
 }
 .status-online {
     color: @desk_success;
-    background-color: alpha(@desk_success, 0.12);
+    background-color: alpha(@desk_success, 0.16);
+    border: 1px solid alpha(@desk_success, 0.55);
+}
+.status-error {
+    color: @desk_error;
+    background-color: alpha(@desk_error, 0.16);
+    border: 1px solid alpha(@desk_error, 0.55);
 }
 .feedback-error { color: @desk_error; }
 .destructive-action:not(:disabled) { color: @desk_error; }
@@ -217,8 +253,19 @@ menubutton.icon-action > button > box { border-spacing: 0; }
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
 .profile-tabs > header tab:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
-.appearance-heading { color: @desk_muted; font-size: 13px; font-weight: 600; }
-.appearance-section { margin-top: 0; }
+/* Inspector sections (Options, Appearance): small ink headings. */
+.inspector-heading { color: @desk_ink; font-size: 13px; font-weight: 700; }
+.appearance-section { margin-top: 4px; }
+/* Binding results read as content, not metadata; tones override the ink. */
+.binding-status { color: @desk_ink; font-size: 13px; font-weight: 600; }
+.feedback-warning { color: @desk_warning; }
+.modifier-toggles > button { min-height: 20px; padding: 4px 10px; }
+.modifier-toggles > button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
 .navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
 
@@ -282,7 +329,12 @@ menubutton.icon-action > button > box { border-spacing: 0; }
     outline-offset: -4px;
 }
 .key-surface .control-active { background: #174936; }
-.touch-display { color: #8fe7ca; font-size: 10px; padding: 0; }
+.touch-display { color: #b4f1da; font-size: 11px; font-weight: 600; padding: 0; }
+/* Preview-only caption naming each dial's assigned action. */
+.dial-legend { color: #d5dce5; font-size: 10px; font-weight: 600; }
+.dial-icon { color: #e1e6eb; }
+.gesture-badge { color: #e1e6eb; background: rgba(225, 230, 235, 0.14); border-radius: 8px; padding: 2px 5px; }
+.gesture-badge.default { color: #9aa5b1; background: rgba(225, 230, 235, 0.06); }
 .control-selectable:focus-visible {
     outline: 2px solid @desk_cyan;
     outline-offset: -2px;

@@ -51,6 +51,25 @@ impl Chord {
     pub fn key(&self) -> PhysicalKey {
         self.key
     }
+    /// Readable form such as `Ctrl + Alt + P`; modifiers use the usual Ctrl, Alt, Shift, Super order.
+    pub fn label(&self) -> String {
+        let mut parts: Vec<&str> = [
+            (Modifier::Control, "Ctrl"),
+            (Modifier::Alt, "Alt"),
+            (Modifier::Shift, "Shift"),
+            (Modifier::Super, "Super"),
+        ]
+        .into_iter()
+        .filter(|(modifier, _)| self.modifiers.contains(modifier))
+        .map(|(_, name)| name)
+        .collect();
+        parts.push(
+            KEYS.iter()
+                .find(|(_, code)| *code == self.key.0)
+                .map_or("?", |(name, _)| name),
+        );
+        parts.join(" + ")
+    }
 }
 
 // Linux evdev positions, intentionally independent of the active symbol layout.
@@ -936,6 +955,13 @@ mod tests {
         assert_eq!(parse_chord(&[], "NEXT").unwrap().key().code(), 109);
         assert_eq!(parse_chord(&[], "STOP").unwrap().key().code(), 128);
     }
+    #[test]
+    fn chord_label_uses_usual_modifier_order() {
+        let chord = parse_chord(&strings(&["SUPER", "SHIFT", "CTRL"]), "alt + d").unwrap();
+        assert_eq!(chord.label(), "Ctrl + Alt + Shift + Super + D");
+        assert_eq!(parse_chord(&[], "Enter").unwrap().label(), "ENTER");
+    }
+
     #[test]
     fn synchronized_sequence() {
         let chord = parse_chord(&strings(&["SUPER", "CTRL"]), "D").unwrap();

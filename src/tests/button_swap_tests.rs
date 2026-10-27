@@ -241,6 +241,9 @@ fn assert_dragging_keys_swaps_saved_actions_images_and_text() {
         .downcast::<gtk::Viewport>()
         .unwrap()
         .child()
+        .unwrap()
+        // The width clamp wraps the shell.
+        .first_child()
         .unwrap();
     let completed = Rc::new(Cell::new(false));
     let done = completed.clone();

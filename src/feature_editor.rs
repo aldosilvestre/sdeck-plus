@@ -1,6 +1,7 @@
 //! Native, typed fields for the extended action family.
 use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation, TextView};
 use sdeck_plus::{
+    binding_icons::BindingIcon,
     desktop_actions::{DesktopAction, MediaCommand, ScrollDirection},
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
@@ -46,7 +47,7 @@ pub(crate) struct EditorWidgets {
     second_label: Label,
     number_label: Label,
     description: Label,
-    action_icon: gtk::Image,
+    action_icon: gtk::DrawingArea,
     browse_file: gtk::Button,
     browse_folder: gtk::Button,
     generation: Cell<u64>,
@@ -97,8 +98,10 @@ impl FeatureEditor {
         pickers.append(&field("Action", &action).0);
         root.append(&pickers);
         let guidance = GtkBox::new(Orientation::Horizontal, 8);
-        let action_icon = gtk::Image::new();
-        action_icon.set_pixel_size(20);
+        crate::binding_icon::icon_dropdown(&category, Choice::category_icon);
+        let action_icon = crate::binding_icon::binding_icon(BindingIcon::Generic);
+        action_icon.set_content_width(20);
+        action_icon.set_content_height(20);
         action_icon.set_valign(gtk::Align::Start);
         let description = crate::ui::helper("");
         guidance.append(&action_icon);
@@ -178,6 +181,12 @@ impl FeatureEditor {
             picker: RefCell::new(None),
             audio_output,
         }));
+        let weak = Rc::downgrade(&editor.0);
+        crate::binding_icon::icon_dropdown(&editor.action, move |position| {
+            weak.upgrade()
+                .and_then(|editor| Self(editor).choices().nth(position as usize))
+                .map_or(BindingIcon::Generic, Choice::binding_icon)
+        });
         editor.refresh_choices();
         let weak = Rc::downgrade(&editor.0);
         editor.category.connect_selected_notify(move |_| {
@@ -217,6 +226,11 @@ impl FeatureEditor {
                         Choice::NextTouchscreenPage | Choice::PreviousTouchscreenPage
                     ))
         })
+    }
+
+    /// The icon of the selected feature action, if one is selected.
+    pub(crate) fn selected_icon(&self) -> Option<BindingIcon> {
+        self.choice().ok().map(Choice::binding_icon)
     }
 
     fn choice(&self) -> Result<Choice, String> {
@@ -331,7 +345,7 @@ impl FeatureEditor {
             .root()
             .set_visible(choice == Choice::SetAudioOutput);
         self.description.set_text(choice.description());
-        self.action_icon.set_icon_name(Some(choice.icon()));
+        crate::binding_icon::set_binding_icon(&self.action_icon, choice.binding_icon());
         self.first.set_placeholder_text(Some(match choice {
             Choice::ShortcutToggle => "CTRL+A",
             Choice::Open => "/home/user/Documents/report.pdf",
@@ -406,6 +420,51 @@ impl FeatureEditor {
             self.number_row.set_visible(true);
         }
         self.direction_row.set_visible(choice == Choice::Scroll);
+    }
+
+    /// Run `notify` with the selected action's icon whenever the selection
+    /// may have changed. The editor is held weakly.
+    pub(crate) fn connect_icon_changed(&self, notify: impl Fn(Option<BindingIcon>) + 'static) {
+        let weak = Rc::downgrade(&self.0);
+        let notify = Rc::new(notify);
+        self.connect_changed(move || {
+            if let Some(editor) = weak.upgrade() {
+                notify(Self(editor).selected_icon());
+            }
+        });
+    }
+
+    /// Run `notify` whenever the user (or code) changes any editable field.
+    pub(crate) fn connect_changed(&self, notify: impl Fn() + Clone + 'static) {
+        for entry in [&self.first, &self.second, &self.number] {
+            let notify = notify.clone();
+            entry.connect_changed(move |_| notify());
+        }
+        for dropdown in [&self.category, &self.action, &self.direction] {
+            let notify = notify.clone();
+            dropdown.connect_selected_notify(move |_| notify());
+        }
+        let text_notify = notify.clone();
+        self.text.buffer().connect_changed(move |_| text_notify());
+        self.flag.connect_toggled(move |_| notify());
+    }
+
+    /// Raw widget values, used to tell whether the editor differs from a saved state.
+    pub(crate) fn snapshot(&self) -> String {
+        let buffer = self.text.buffer();
+        [
+            self.category.selected().to_string(),
+            self.action.selected().to_string(),
+            self.first.text().to_string(),
+            self.second.text().to_string(),
+            buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string(),
+            self.number.text().to_string(),
+            self.direction.selected().to_string(),
+            self.flag.is_active().to_string(),
+        ]
+        .join("\u{1f}")
     }
 
     pub(crate) fn reset(&self) {

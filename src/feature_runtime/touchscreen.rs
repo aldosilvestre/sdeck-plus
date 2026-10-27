@@ -23,7 +23,7 @@ impl TouchscreenControls {
         let previous = crate::ui::icon_button("go-previous-symbolic", "Previous touchscreen page");
         let next = crate::ui::icon_button("go-next-symbolic", "Next touchscreen page");
         let create = crate::ui::icon_button("list-add-symbolic", "New touchscreen page");
-        let delete = crate::ui::icon_button("edit-delete-symbolic", "Delete touchscreen page");
+        let delete = crate::ui::icon_button("user-trash-symbolic", "Delete touchscreen page");
         root.append(&Label::new(Some("Touch page")));
         root.append(&picker);
         for button in [&previous, &next, &create, &delete] {
@@ -183,8 +183,9 @@ impl FeatureRuntime {
             .destroy_with_parent(true)
             .message_type(gtk::MessageType::Question)
             .text(format!("Delete touchscreen page {number}?"))
-            .secondary_text("This deletes the page's touch, dial and gesture bindings and artwork. Keypad pages are unchanged. It cannot be undone.")
+            .secondary_text("Its bindings and artwork are deleted. This cannot be undone.")
             .build();
+        super::pages::style_confirm_dialog(&dialog);
         dialog.add_button("Keep", gtk::ResponseType::Cancel);
         dialog
             .add_button("Delete page", gtk::ResponseType::Accept)

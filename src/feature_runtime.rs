@@ -283,7 +283,7 @@ impl FeatureRuntime {
         timer_status.set_visible(false);
         let page_controls = page_controls::PageControls::new();
         let organization_management = GtkBox::new(Orientation::Vertical, 12);
-        let legacy_picker = crate::labeled("Layer (organization unavailable)", &ui.layer_picker);
+        let legacy_picker = crate::labeled("Page (organization unavailable)", &ui.layer_picker);
         legacy_picker.set_visible(false);
         organization_management.append(&legacy_picker);
         let profile_tabs = gtk::Notebook::builder()
@@ -306,7 +306,7 @@ impl FeatureRuntime {
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
-        let profile_delete = crate::ui::button("edit-delete-symbolic", "Delete profile");
+        let profile_delete = crate::ui::button("user-trash-symbolic", "Delete profile");
         profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
         let fields = GtkBox::new(Orientation::Vertical, 8);
@@ -466,6 +466,11 @@ impl FeatureRuntime {
 
     pub(crate) fn controls(&self) -> &GtkBox {
         &self.page_controls.root
+    }
+
+    /// Linked previous/next/parent buttons that lead the page breadcrumb.
+    pub(crate) fn page_navigation(&self) -> &GtkBox {
+        &self.page_controls.navigation_group
     }
 
     #[cfg(test)]
@@ -770,6 +775,7 @@ impl FeatureRuntime {
             Err(error) => {
                 *self.organization.borrow_mut() = None;
                 self.page_controls.root.set_sensitive(false);
+                self.page_controls.navigation_group.set_sensitive(false);
                 self.page_controls.folders.set_sensitive(false);
                 self.organization_management.set_sensitive(false);
                 self.status.set_text(&format!("Organization writes disabled: {error}. Repair organization.json; original retained."));
@@ -921,7 +927,7 @@ impl FeatureRuntime {
             }
             None => {
                 self.indicator
-                    .set_text("Organization unavailable · layer bindings remain editable");
+                    .set_text("Organization unavailable · page bindings remain editable");
             }
         }
         self.refresh_profiles();
@@ -976,7 +982,7 @@ impl FeatureRuntime {
                     self.refresh_selection();
                     self.persist(self.layers.borrow().clone());
                 } else {
-                    self.report("Destination layer is unavailable.", true);
+                    self.report("Destination profile or page is unavailable.", true);
                 }
             }
             Action::Emit(name) => {

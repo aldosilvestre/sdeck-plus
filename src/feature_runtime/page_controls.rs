@@ -9,7 +9,10 @@ use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct PageControls {
+    /// Page management (folders, create, rename, delete), trailing the breadcrumb.
     pub(super) root: GtkBox,
+    /// Linked previous/next/parent group, leading the breadcrumb.
+    pub(super) navigation_group: GtkBox,
     navigation: [(Button, NavigationAction); 3],
     create: Button,
     rename: Button,
@@ -31,6 +34,9 @@ pub(super) struct PageControls {
 impl PageControls {
     pub(super) fn new() -> Self {
         let root = GtkBox::new(Orientation::Horizontal, 8);
+        let navigation_group = GtkBox::new(Orientation::Horizontal, 0);
+        navigation_group.add_css_class("linked");
+        navigation_group.add_css_class("page-navigation");
         let navigation = [
             (
                 ui::icon_button("go-previous-symbolic", "Previous"),
@@ -46,7 +52,7 @@ impl PageControls {
             ),
         ];
         for (button, _) in &navigation {
-            root.append(button);
+            navigation_group.append(button);
         }
         let folders = GtkBox::new(Orientation::Vertical, 16);
         let folder_context = ui::helper("Folders belong to the selected page.");
@@ -70,7 +76,7 @@ impl PageControls {
         link_folder.set_tooltip_text(Some(
             "Save this folder on the selected control and event without opening it",
         ));
-        let delete_folder = ui::button("edit-delete-symbolic", "Delete folder");
+        let delete_folder = ui::button("user-trash-symbolic", "Delete folder");
         delete_folder.add_css_class("destructive-action");
         for button in [&open_folder, &link_folder, &delete_folder] {
             actions.append(button);
@@ -80,6 +86,7 @@ impl PageControls {
         let folder_count = gtk::Label::new(Some("0"));
         let folder_button = GtkBox::new(Orientation::Horizontal, 8);
         folder_button.append(&gtk::Image::from_icon_name("folder-symbolic"));
+        folder_button.append(&gtk::Label::new(Some("Folders")));
         folder_button.append(&folder_count);
         let folder_menu = gtk::MenuButton::builder()
             .child(&folder_button)
@@ -91,14 +98,22 @@ impl PageControls {
         folder_menu.update_property(&[gtk::accessible::Property::Label("Page folders")]);
         root.append(&folder_menu);
         let create = ui::button("document-new-symbolic", "New page");
+        root.append(&create);
+        // Rename/delete are less frequent: lighter frameless icons, still named,
+        // and deletion still asks for confirmation.
         let rename = ui::icon_button("document-edit-symbolic", "Rename page");
-        let delete = ui::icon_button("edit-delete-symbolic", "Delete page");
+        let delete = ui::icon_button("user-trash-symbolic", "Delete page");
         delete.add_css_class("destructive-action");
-        for button in [&create, &rename, &delete] {
-            root.append(button);
+        let page_edits = GtkBox::new(Orientation::Horizontal, 2);
+        page_edits.add_css_class("page-edits");
+        for button in [&rename, &delete] {
+            button.add_css_class("flat");
+            page_edits.append(button);
         }
+        root.append(&page_edits);
         Self {
             root,
+            navigation_group,
             navigation,
             create,
             rename,

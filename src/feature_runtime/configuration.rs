@@ -133,6 +133,7 @@ impl FeatureRuntime {
         self.profile_memory.borrow_mut().clear();
         self.manual_profile.set(true);
         self.page_controls.root.set_sensitive(true);
+        self.page_controls.navigation_group.set_sensitive(true);
         self.page_controls.folders.set_sensitive(true);
         self.organization_management.set_sensitive(true);
         self.obs_valid.set(true);

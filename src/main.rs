@@ -3,6 +3,7 @@ use sdeck_plus::{
         action_from_fields, control_summary, events_for_control, existing_action,
         format_application_args, trigger_from_selection, ActionKind, ControlKind, EventKind,
     },
+    binding_icons::BindingIcon,
     layers::{Action, LayerStore, Trigger},
     local_artwork::{ArtworkStore, ArtworkTarget},
     protocol,
@@ -32,11 +33,27 @@ mod shortcut_reference;
 mod tray;
 mod tray_preference;
 mod ui;
+// Layout containers live beside ui.rs but are mounted here, because the
+// ui_showcase example includes ui.rs by path.
+#[path = "ui/binding_icon.rs"]
+mod binding_icon;
+#[path = "ui/clamp.rs"]
+mod clamp;
+#[path = "ui/scaled_bin.rs"]
+mod scaled_bin;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
 const DEFAULT_WIDTH: i32 = 1000;
 const DEFAULT_HEIGHT: i32 = 700;
+/// Largest presentation scale of the hardware preview when space allows.
+const PREVIEW_MAX_SCALE: f64 = 1.5;
+/// Width of each dial's assigned-action caption in the preview rail.
+const DIAL_LEGEND_WIDTH: i32 = 86;
+/// Action icon drawn on a preview knob face.
+const DIAL_ICON_SIZE: i32 = 20;
+/// Widest configuration shell (including its margins) before it centers.
+const SHELL_MAX_WIDTH: i32 = 1272;
 
 enum LayerCommand {
     Persist(LayerStore, Option<sdeck_plus::organization::Organization>),
@@ -434,9 +451,8 @@ fn build_widgets(
         );
     }
     let root = GtkBox::new(Orientation::Vertical, 16);
-    // Center the complete desk at its natural measure, not just the hardware
-    // row. GTK still shrinks it to the available width on narrow desktops.
-    root.set_halign(gtk::Align::Center);
+    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
+    // below), then centers; it still shrinks to narrow desktops.
     root.set_margin_top(16);
     root.set_margin_bottom(16);
     root.set_margin_start(16);
@@ -446,22 +462,22 @@ fn build_widgets(
 
     let header = GtkBox::new(Orientation::Horizontal, 12);
     let heading = GtkBox::new(Orientation::Vertical, 4);
-    let title = Label::new(Some("STREAM DECK +"));
+    let title = Label::new(Some("SDECK-PLUS"));
     title.add_css_class("title");
     title.set_xalign(0.0);
     heading.append(&title);
     header.append(&heading);
-    let status = Label::new(Some("SEARCHING"));
+    let status = Label::new(None);
     status.add_css_class("status");
-    status.add_css_class("status-idle");
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and action. More actions contains System, Multimedia, Organization, Device and OBS. Touchscreen pages belong to the profile: select the touch strip to add or choose a Touch page. Under Organization, assign Next touchscreen page to Swipe left and Previous touchscreen page to Swipe right on each touch page."),
+        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and an action. More actions adds System, Multimedia, Organization, Device and OBS."),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
+        ("view-grid-symbolic", "Touch strip pages", "Touchscreen pages belong to the profile. Select the touch strip to add or choose a Touch page. Swiping left or right changes page unless you bind those swipes to something else."),
     ] {
         let step = GtkBox::new(Orientation::Vertical, 8);
         step.append(&ui::section_heading(icon, title));
@@ -473,7 +489,8 @@ fn build_widgets(
     header.append(&help_menu);
     root.append(&header);
 
-    let connection_detail = Label::new(Some("Looking for USB device · VID 0FD9 / PID 0084"));
+    let connection_detail = Label::new(None);
+    show_connection_state(&status, &connection_detail, &ConnectionState::Searching);
     connection_detail.add_css_class("muted");
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -542,11 +559,11 @@ fn build_widgets(
     let event_model = gtk::StringList::new(&["Press"]);
     let event_picker = gtk::DropDown::new(Some(event_model.clone()), gtk::Expression::NONE);
     let action_model = gtk::StringList::new(&[
-        "Move to layer",
+        "Go to profile or page",
         "Run command",
         "Open application",
         "Shortcut",
-        "Emit legacy event",
+        "Send named event",
         "More actions",
         "Play sound",
         "None",
@@ -568,25 +585,23 @@ fn build_widgets(
     let args_view = TextView::new();
     args_view.set_monospace(true);
     args_view.set_size_request(-1, 48);
-    let super_mod = CheckButton::with_label("SUPER");
-    let shift_mod = CheckButton::with_label("SHIFT");
-    let ctrl_mod = CheckButton::with_label("CTRL");
-    let alt_mod = CheckButton::with_label("ALT");
+    let [ctrl_mod, alt_mod, shift_mod, super_mod] =
+        ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
     let binding_status = Label::new(Some("Select a physical control to inspect its binding."));
-    binding_status.add_css_class("muted");
+    binding_status.add_css_class("binding-status");
     binding_status.set_xalign(0.0);
     binding_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     binding_status.set_max_width_chars(32);
     binding_status.connect_label_notify(|label| label.set_tooltip_text(Some(&label.text())));
     let save_binding = ui::button("document-save-symbolic", "Save binding");
     save_binding.add_css_class("suggested-action");
-    let remove_binding = ui::button("edit-delete-symbolic", "Remove");
+    let remove_binding = ui::button("user-trash-symbolic", "Remove");
     remove_binding.set_tooltip_text(Some("Remove binding"));
     remove_binding.set_has_frame(false);
     remove_binding.add_css_class("destructive-action");
     let control_number_row = labeled("Number", &control_number_picker);
     let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
-    let text_row = labeled("Command / key / shortcut key / legacy event", &text_entry);
+    let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
     let application_row = labeled("Application executable", &application_entry);
     let args_scroller = gtk::ScrolledWindow::builder()
         .min_content_height(48)
@@ -598,14 +613,14 @@ fn build_widgets(
     args_view.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
         args_label.upcast_ref()
     ])]);
-    let modifier_buttons = gtk::Grid::builder()
-        .column_spacing(12)
-        .row_spacing(8)
-        .build();
-    modifier_buttons.attach(&super_mod, 0, 0, 1, 1);
-    modifier_buttons.attach(&shift_mod, 1, 0, 1, 1);
-    modifier_buttons.attach(&ctrl_mod, 0, 1, 1, 1);
-    modifier_buttons.attach(&alt_mod, 1, 1, 1, 1);
+    // One aligned, linked row of toggles instead of a ragged check grid.
+    let modifier_buttons = GtkBox::new(Orientation::Horizontal, 0);
+    modifier_buttons.add_css_class("linked");
+    modifier_buttons.add_css_class("modifier-toggles");
+    modifier_buttons.set_halign(gtk::Align::Start);
+    for toggle in [&ctrl_mod, &alt_mod, &shift_mod, &super_mod] {
+        modifier_buttons.append(toggle);
+    }
     let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
@@ -658,18 +673,27 @@ fn build_widgets(
     management.append(&profile_tasks);
     let management_scroll = ui::panel_body(&management);
     let management_popover = ui::popover("Profiles", &management_scroll);
-    let management_menu = ui::menu_button("folder-new-symbolic", "Organize", &management_popover);
+    let management_menu = ui::menu_button(
+        "preferences-system-symbolic",
+        "Organize",
+        &management_popover,
+    );
+    // Profile tools stay secondary to the profile tabs they sit beside.
+    management_menu.set_has_frame(false);
     layer_row.append(&management_menu);
     // Integration settings are global, not part of every action's form.
     let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
+    obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
     feature_runtime
         .profile_tabs()
         .set_action_widget(&layer_row, gtk::PackType::End);
-    let navigation_row = GtkBox::new(Orientation::Horizontal, 8);
+    // Navigation (linked arrows + breadcrumb) leads; page management trails.
+    let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
+    navigation_row.append(feature_runtime.page_navigation());
     navigation_row.append(&feature_runtime.indicator);
     navigation_row.append(feature_runtime.controls());
     layer_card.append(&navigation_row);
@@ -743,6 +767,13 @@ fn build_widgets(
         });
     settings_card.append(&action_fields);
     settings_card.append(&binding_ui.feature_editor.root);
+    let options_heading = inspector_heading("Options");
+    binding_ui
+        .return_toggle
+        .bind_property("visible", &options_heading, "visible")
+        .sync_create()
+        .build();
+    settings_card.append(&options_heading);
     settings_card.append(&binding_ui.return_toggle);
     settings_card.append(&binding_ui.return_row);
     settings_card.append(&binding_ui.info_toggle);
@@ -758,9 +789,11 @@ fn build_widgets(
     binding_buttons.append(&save_binding);
     binding_buttons.append(&test_action);
     binding_buttons.append(&remove_binding);
-    let binding_feedback = GtkBox::new(Orientation::Vertical, 12);
+    // The status line sits right under Save/Test/Remove so results stay visible.
+    let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
     binding_feedback.append(&binding_buttons);
     binding_feedback.append(&binding_ui.status);
+    binding_feedback.append(&binding_ui.undo_remove);
     settings_card.append(&binding_feedback);
     let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
@@ -769,10 +802,8 @@ fn build_widgets(
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
-    let appearance_heading = Label::new(Some("Appearance"));
-    appearance_heading.set_xalign(0.0);
+    let appearance_heading = inspector_heading("Appearance");
     appearance_heading.set_hexpand(true);
-    appearance_heading.add_css_class("appearance-heading");
     let appearance_tools = GtkBox::new(Orientation::Horizontal, 12);
     appearance_tools.append(&appearance_heading);
     appearance_tools.append(&text_editor.root);
@@ -948,6 +979,7 @@ fn build_widgets(
                     };
                     match snapshot {
                         Ok(snapshot) => {
+                            ui.mark_clean();
                             if runtime.save_binding(snapshot) {
                                 ui.status.set_text("Binding updated; saving to disk…");
                             } else {
@@ -979,6 +1011,18 @@ fn build_widgets(
         let artwork = artwork.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_trigger(&layers) {
             Ok((layer, trigger)) => {
+                let previous = {
+                    let store = layers.borrow();
+                    store
+                        .binding(&layer, &trigger)
+                        .map(|action| RemovedBinding {
+                            layer: layer.clone(),
+                            trigger: trigger.clone(),
+                            action,
+                            page_return: store.page_return(&layer, &trigger),
+                            info: store.info_source(&layer, &trigger),
+                        })
+                };
                 let snapshot = {
                     let mut store = layers.borrow_mut();
                     store
@@ -990,6 +1034,9 @@ fn build_widgets(
                         runtime.persist(snapshot);
                         ui.clear_action_fields();
                         ui.status.set_text("Binding removed.");
+                        ui.mark_clean();
+                        *ui.removed.borrow_mut() = previous;
+                        ui.undo_remove.set_visible(ui.removed.borrow().is_some());
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
@@ -1001,6 +1048,55 @@ fn build_widgets(
                 }
             }
             Err(error) => ui.error(&error),
+        });
+    }
+    {
+        let layers = layers.clone();
+        let runtime = feature_runtime.clone();
+        let ui = binding_ui.clone();
+        let artwork = artwork.clone();
+        let toast = toast.clone();
+        binding_ui.undo_remove.clone().connect_clicked(move |_| {
+            let Some(removed) = ui.removed.borrow_mut().take() else {
+                return;
+            };
+            ui.undo_remove.set_visible(false);
+            let snapshot = {
+                let mut store = layers.borrow_mut();
+                store
+                    .bind(
+                        &removed.layer,
+                        removed.trigger.clone(),
+                        removed.action.clone(),
+                    )
+                    .and_then(|_| {
+                        store.set_return(
+                            &removed.layer,
+                            &removed.trigger,
+                            removed.page_return.clone(),
+                        )
+                    })
+                    .and_then(|_| store.set_info(&removed.layer, &removed.trigger, removed.info))
+                    .map(|_| store.clone())
+            };
+            match snapshot {
+                Ok(snapshot) => {
+                    let saving = runtime.save_binding(snapshot);
+                    ui.load_selected_binding(&layers);
+                    ui.refresh_summaries(&layers);
+                    artwork.refresh(true);
+                    if saving {
+                        ui.status.set_text("Binding restored; saving to disk…");
+                    } else {
+                        ui.error("Could not save binding: saving worker is unavailable.");
+                    }
+                }
+                Err(error) => {
+                    let message = format!("Could not restore binding: {error}");
+                    ui.error(&message);
+                    toast.show(&message, true);
+                }
+            }
         });
     }
     let feedback = GtkBox::new(Orientation::Horizontal, 8);
@@ -1029,8 +1125,8 @@ fn build_widgets(
         .build();
     // Natural-width FlowBox keeps the fixed preview and readable inspector
     // together on wide desktops, while retaining GTK's native narrow wrapping.
-    body.set_halign(gtk::Align::Center);
-    body.set_valign(gtk::Align::Start);
+    // Spare height reaches the preview row, which scales the hardware into it.
+    body.set_vexpand(true);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
     sidebar.set_hexpand(true);
@@ -1038,14 +1134,11 @@ fn build_widgets(
     sidebar.add_css_class("settings-sidebar");
     let device_area = card();
     device_area.add_css_class("device-canvas");
-    device_area.set_halign(gtk::Align::Center);
-    device_area.set_valign(gtk::Align::Start);
     // Reference image coordinates scaled to a compact physical front. Fixed
     // geometry keeps loaded artwork and long live messages from resizing hardware.
     let chassis = gtk::Fixed::new();
     chassis.set_halign(gtk::Align::Center);
     chassis.set_valign(gtk::Align::Center);
-    chassis.set_vexpand(true);
     chassis.add_css_class("hardware-chassis");
     chassis.set_size_request(426, 414);
     device_area.append(&chassis);
@@ -1091,12 +1184,18 @@ fn build_widgets(
     bezel.add_css_class("hardware-bezel");
     bezel.set_size_request(374, 77);
     chassis.put(&bezel, 27.0, 177.0);
-    let touch_status = Label::new(Some("Waiting for touch input"));
+    let touch_status = Label::new(Some("Touch strip · waiting for input"));
     touch_status.add_css_class("touch-display");
     touch_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     touch_status.set_max_width_chars(32);
-    touch_status.set_size_request(328, 16);
-    bezel.put(&touch_status, 23.0, 3.0);
+    touch_status.set_hexpand(true);
+    touch_status.set_size_request(-1, 16);
+    // The live status and the strip's gesture badges share the header line.
+    let strip_header = GtkBox::new(Orientation::Horizontal, 6);
+    strip_header.set_size_request(328, 16);
+    strip_header.append(&touch_status);
+    strip_header.append(&binding_ui.gesture_badges);
+    bezel.put(&strip_header, 23.0, 3.0);
     let strip_button = Button::new();
     strip_button.add_css_class("control-selectable");
     strip_button.add_css_class("strip-surface");
@@ -1154,6 +1253,21 @@ fn build_widgets(
         label.set_visible(false);
         button.set_child(Some(&label));
         rail.put(&button, 28.0 + index as f64 * 91.0, 34.0);
+        // The assigned action, centered under the knob inside the rail. It is
+        // preview-only and never drawn on the physical device.
+        // The same action's icon on the knob face; clicks still reach the knob.
+        rail.put(
+            &binding_ui.dial_icons[index],
+            28.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0 + index as f64 * 91.0,
+            34.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0,
+        );
+        let legend = &binding_ui.dial_legends[index];
+        legend.set_size_request(DIAL_LEGEND_WIDTH, 16);
+        rail.put(
+            legend,
+            28.0 + 23.0 - f64::from(DIAL_LEGEND_WIDTH) / 2.0 + index as f64 * 91.0,
+            84.0,
+        );
         selectable_widgets.push(button.upcast());
         encoder_labels.push(label);
     }
@@ -1269,7 +1383,13 @@ fn build_widgets(
         );
     }
 
-    body.insert(&device_area, -1);
+    // The fixed hardware geometry is presented through one uniform scale, so
+    // spare width/height enlarges the whole preview without moving controls.
+    let preview = scaled_bin::ScaledBin::new(&device_area, PREVIEW_MAX_SCALE);
+    preview.set_hexpand(true);
+    preview.set_vexpand(true);
+    preview.add_css_class("device-preview");
+    body.insert(&preview, -1);
     sidebar.append(&settings_card);
     body.insert(&sidebar, -1);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
@@ -1286,7 +1406,7 @@ fn build_widgets(
     let viewport = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&root)
+        .child(&clamp::Clamp::new(&root, SHELL_MAX_WIDTH))
         .build();
     feature_runtime.attach_configuration_root(viewport.upcast_ref());
     MonitorWidgets {
@@ -1381,34 +1501,11 @@ fn start_event_updates(
                 } => {
                     feature_runtime.complete_key_swap(&layer, first, second, result);
                 }
-                MonitorEvent::Connection(state) => match state {
-                    ConnectionState::Searching => {
-                        status.set_text("SEARCHING");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text("Looking for USB device · VID 0FD9 / PID 0084");
-                    }
-                    ConnectionState::Connected => {
-                        status.set_text("CONNECTED");
-                        status.remove_css_class("status-idle");
-                        status.add_css_class("status-online");
-                        connection_detail
-                            .set_text("Stream Deck + connected · HID input and artwork active");
+                MonitorEvent::Connection(state) => {
+                    if show_connection_state(status, connection_detail, &state) {
                         artwork.refresh(true);
                     }
-                    ConnectionState::Unavailable(detail) => {
-                        status.set_text("UNAVAILABLE");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text(&detail);
-                    }
-                    ConnectionState::Disconnected(detail) => {
-                        status.set_text("DISCONNECTED");
-                        status.remove_css_class("status-online");
-                        status.add_css_class("status-idle");
-                        connection_detail.set_text(&detail);
-                    }
-                },
+                }
                 MonitorEvent::Input(event) => {
                     if let Some((identity, action, page_return)) = matching_binding(&layers, &event)
                     {
@@ -1541,10 +1638,10 @@ struct BindingUi {
     text_entry: Entry,
     application_entry: Entry,
     args_view: TextView,
-    super_mod: CheckButton,
-    shift_mod: CheckButton,
-    ctrl_mod: CheckButton,
-    alt_mod: CheckButton,
+    super_mod: gtk::ToggleButton,
+    shift_mod: gtk::ToggleButton,
+    ctrl_mod: gtk::ToggleButton,
+    alt_mod: gtk::ToggleButton,
     status: Label,
     control_number_row: GtkBox,
     layer_target_row: GtkBox,
@@ -1566,6 +1663,27 @@ struct BindingUi {
     info_location_row: GtkBox,
     // Same order as the physical selection widgets: eight buttons, touch, four encoders.
     summaries: Vec<Label>,
+    /// Short assigned-action captions drawn under the four preview dials.
+    dial_legends: Vec<Label>,
+    /// The caption's action icon, drawn on each preview knob (preview-only).
+    dial_icons: Vec<gtk::DrawingArea>,
+    /// Swipe, tap and hold badges in the preview strip's header line.
+    gesture_badges: GtkBox,
+    shortcut_preview: Label,
+    /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
+    baseline: std::rc::Rc<RefCell<Option<String>>>,
+    undo_remove: Button,
+    removed: Rc<RefCell<Option<RemovedBinding>>>,
+}
+
+/// What `Remove` deleted, kept so the feedback line can offer to bring it back.
+#[derive(Clone)]
+struct RemovedBinding {
+    layer: String,
+    trigger: Trigger,
+    action: Action,
+    page_return: Option<sdeck_plus::layers::PageReturn>,
+    info: Option<sdeck_plus::info::InfoSource>,
 }
 
 impl BindingUi {
@@ -1584,10 +1702,10 @@ impl BindingUi {
         text_entry: Entry,
         application_entry: Entry,
         args_view: TextView,
-        super_mod: CheckButton,
-        shift_mod: CheckButton,
-        ctrl_mod: CheckButton,
-        alt_mod: CheckButton,
+        super_mod: gtk::ToggleButton,
+        shift_mod: gtk::ToggleButton,
+        ctrl_mod: gtk::ToggleButton,
+        alt_mod: gtk::ToggleButton,
         status: Label,
         control_number_row: GtkBox,
         layer_target_row: GtkBox,
@@ -1596,6 +1714,18 @@ impl BindingUi {
         args_row: GtkBox,
         modifier_row: GtkBox,
     ) -> Self {
+        // The closed button names the chosen More action instead of "•••";
+        // menu rows keep one icon per action type.
+        let more_icon = Rc::new(Cell::new(BindingIcon::More));
+        let closed_more = more_icon.clone();
+        binding_icon::icon_dropdown_with(
+            &action_picker,
+            Rc::new(move |position| match position {
+                5 => closed_more.get(),
+                _ => BindingIcon::for_action_type(position),
+            }),
+            Rc::new(BindingIcon::for_action_type),
+        );
         status.connect_label_notify(ui::clear_feedback);
         let action_guidance = ui::helper("");
         shortcut_reference::connect(&action_guidance);
@@ -1662,7 +1792,16 @@ impl BindingUi {
         let refresh = refresh_info.clone();
         info_toggle.connect_toggled(move |_| refresh());
         info_source.connect_selected_notify(move |_| refresh_info());
-        Self {
+        let undo_remove = ui::button("edit-undo-symbolic", "Undo remove");
+        undo_remove.set_tooltip_text(Some("Restore the binding you just removed"));
+        undo_remove.set_halign(gtk::Align::Start);
+        undo_remove.set_visible(false);
+        let shortcut_preview = Label::new(None);
+        shortcut_preview.add_css_class("muted");
+        shortcut_preview.set_xalign(0.0);
+        shortcut_preview.set_visible(false);
+        modifier_row.append(&shortcut_preview);
+        let ui = Self {
             layer_picker,
             layer_model,
             control_picker,
@@ -1708,12 +1847,52 @@ impl BindingUi {
                     label.set_width_chars(10);
                     label.set_max_width_chars(12);
                     label.set_tooltip_text(Some(
-                        "Assignments in the selected layer. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
+                        "Assignments in the selected page. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
                     ));
                     label
                 })
                 .collect(),
-        }
+            dial_legends: (0..4)
+                .map(|_| {
+                    let label = Label::new(None);
+                    label.add_css_class("dial-legend");
+                    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    label.set_max_width_chars(12);
+                    label.set_visible(false);
+                    label
+                })
+                .collect(),
+            gesture_badges: {
+                let row = GtkBox::new(Orientation::Horizontal, 4);
+                row.add_css_class("gesture-badges");
+                row.set_valign(gtk::Align::Center);
+                row
+            },
+            dial_icons: (0..4)
+                .map(|_| {
+                    let icon = binding_icon::binding_icon(BindingIcon::Generic);
+                    icon.add_css_class("dial-icon");
+                    icon.set_size_request(DIAL_ICON_SIZE, DIAL_ICON_SIZE);
+                    icon.set_can_target(false);
+                    icon.set_visible(false);
+                    icon
+                })
+                .collect(),
+            shortcut_preview,
+            baseline: std::rc::Rc::new(RefCell::new(None)),
+            undo_remove,
+            removed: Rc::new(RefCell::new(None)),
+        };
+        ui.connect_dirty_tracking();
+        let picker = ui.action_picker.downgrade();
+        ui.feature_editor.connect_icon_changed(move |icon| {
+            let icon = icon.unwrap_or(BindingIcon::More);
+            more_icon.set(icon);
+            if let Some(picker) = picker.upgrade().filter(|picker| picker.selected() == 5) {
+                binding_icon::set_closed_icon(&picker, icon);
+            }
+        });
+        ui
     }
 
     fn error(&self, message: &str) {
@@ -1727,7 +1906,7 @@ impl BindingUi {
             let store = layers.borrow();
             let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
                 .unwrap_or_else(|| store.active().to_owned());
-            (0..13)
+            let summaries = (0..13)
                 .map(|index| {
                     let (control, number) = match index {
                         0..=7 => (ControlKind::Button, index + 1),
@@ -1736,11 +1915,52 @@ impl BindingUi {
                     };
                     control_summary(&store, &layer, control, number as u8)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let legends = (1..=4)
+                .map(|dial| {
+                    sdeck_plus::binding_editor::dial_action(&store, &layer, dial).map(|action| {
+                        (
+                            sdeck_plus::binding_editor::dial_legend(&store, &layer, dial)
+                                .unwrap_or_default(),
+                            BindingIcon::for_action(&action),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            let gestures = sdeck_plus::binding_editor::strip_gestures(&store, &layer);
+            (summaries, legends, gestures)
         };
+        let (texts, legends, gestures) = texts;
+        while let Some(child) = self.gesture_badges.first_child() {
+            self.gesture_badges.remove(&child);
+        }
+        for gesture in &gestures {
+            self.gesture_badges.append(&binding_icon::gesture_badge(
+                gesture.gesture.icon(),
+                gesture.icon,
+                &gesture.description(),
+                gesture.default,
+            ));
+        }
         for (label, text) in self.summaries.iter().zip(texts) {
             label.set_text(&text.replace('\n', " · "));
             label.set_tooltip_text(Some(&text));
+        }
+        for ((label, icon), legend) in self.dial_legends.iter().zip(&self.dial_icons).zip(legends) {
+            let text = legend.as_ref().map(|(text, _)| text.as_str());
+            label.set_text(text.unwrap_or_default());
+            label.set_tooltip_text(text);
+            label.set_visible(legend.is_some());
+            match legend
+                .map(|(_, icon)| icon)
+                .filter(|icon| icon.shown_on_controls())
+            {
+                Some(shown) => {
+                    binding_icon::set_binding_icon(icon, shown);
+                    icon.set_visible(true);
+                }
+                None => icon.set_visible(false),
+            }
         }
     }
 
@@ -1872,7 +2092,7 @@ impl BindingUi {
             ActionKind::RunCommand => "Run a shell command with /bin/sh. Saving does not run it.",
             ActionKind::OpenApplication => "Enter the executable path and one argument per line.",
             ActionKind::Shortcut => "Type a key or full chord. The checkboxes add modifiers.",
-            ActionKind::EmitLegacy => "Emit a named internal event for an existing legacy binding.",
+            ActionKind::EmitLegacy => "Send a named internal event. Mainly used by older bindings.",
             ActionKind::Extended => "",
         });
         if matches!(kind, ActionKind::Shortcut) {
@@ -1935,11 +2155,14 @@ impl BindingUi {
     }
 
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
+        self.undo_remove.set_visible(false);
+        *self.removed.borrow_mut() = None;
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
         let Ok((layer, trigger)) = self.selected_layer_and_trigger(layers) else {
             self.status.set_text("Select a valid control event.");
+            self.mark_clean();
             return;
         };
         let action = {
@@ -1964,6 +2187,109 @@ impl BindingUi {
             }
         }
         self.update_action_visibility();
+        self.mark_clean();
+    }
+
+    /// Snapshot of every editable field, compared with the last loaded or saved state.
+    fn fingerprint(&self) -> String {
+        let buffer = self.args_view.buffer();
+        [
+            self.action_picker.selected().to_string(),
+            self.layer_target_picker.selected().to_string(),
+            self.text_entry.text().to_string(),
+            self.application_entry.text().to_string(),
+            buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string(),
+            self.shortcut_modifiers().join("+"),
+            self.return_toggle.is_active().to_string(),
+            self.return_target.selected().to_string(),
+            self.return_seconds.text().to_string(),
+            self.info_toggle.is_active().to_string(),
+            self.info_source.selected().to_string(),
+            self.info_location.text().to_string(),
+            self.feature_editor.snapshot(),
+        ]
+        .join("\u{1f}")
+    }
+
+    /// Treat the current fields as saved: later edits are measured against them.
+    fn mark_clean(&self) {
+        *self.baseline.borrow_mut() = Some(self.fingerprint());
+    }
+
+    fn on_edited(&self) {
+        self.update_shortcut_preview();
+        if self.is_dirty() {
+            self.status.set_text("Unsaved changes.");
+            // Set after the text: any status change clears earlier feedback tones.
+            self.status.add_css_class("feedback-warning");
+        }
+    }
+
+    /// True when an editor field differs from the binding last loaded or saved.
+    fn is_dirty(&self) -> bool {
+        self.baseline
+            .borrow()
+            .as_ref()
+            .is_some_and(|saved| *saved != self.fingerprint())
+    }
+
+    fn update_shortcut_preview(&self) {
+        let text = match sdeck_plus::keyboard::parse_chord(
+            &self.shortcut_modifiers(),
+            &self.text_entry.text(),
+        ) {
+            Ok(chord) if self.action_kind() == ActionKind::Shortcut => {
+                format!("Presses {}", chord.label())
+            }
+            _ => String::new(),
+        };
+        self.shortcut_preview.set_text(&text);
+        self.shortcut_preview.set_visible(!text.is_empty());
+    }
+
+    fn connect_dirty_tracking(&self) {
+        let notify = {
+            let ui = self.clone();
+            move || ui.on_edited()
+        };
+        for entry in [
+            &self.text_entry,
+            &self.application_entry,
+            &self.return_seconds,
+            &self.info_location,
+        ] {
+            let notify = notify.clone();
+            entry.connect_changed(move |_| notify());
+        }
+        for picker in [
+            &self.action_picker,
+            &self.layer_target_picker,
+            &self.return_target,
+            &self.info_source,
+        ] {
+            let notify = notify.clone();
+            picker.connect_selected_notify(move |_| notify());
+        }
+        for toggle in [
+            &self.super_mod,
+            &self.shift_mod,
+            &self.ctrl_mod,
+            &self.alt_mod,
+        ] {
+            let notify = notify.clone();
+            toggle.connect_toggled(move |_| notify());
+        }
+        for check in [&self.return_toggle, &self.info_toggle] {
+            let notify = notify.clone();
+            check.connect_toggled(move |_| notify());
+        }
+        let args_notify = notify.clone();
+        self.args_view
+            .buffer()
+            .connect_changed(move |_| args_notify());
+        self.feature_editor.connect_changed(notify);
     }
 
     /// Selected control number; 0 means the whole touch strip.
@@ -1984,9 +2310,9 @@ impl BindingUi {
         layers: &RefCell<LayerStore>,
     ) -> Result<(String, Trigger), String> {
         let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
-            .ok_or_else(|| "Select a layer.".to_string())?;
+            .ok_or_else(|| "Select a profile or page.".to_string())?;
         if !layers.borrow().layers().contains_key(&layer) {
-            return Err("Selected layer no longer exists.".into());
+            return Err("Selected profile or page no longer exists.".into());
         }
         let number = self
             .control_number()
@@ -2217,6 +2543,21 @@ fn bound_layer_picker(picker: &gtk::DropDown) {
     picker.set_list_factory(Some(&factory));
 }
 
+/// A shortcut modifier as a named toggle; it joins a linked row in the editor.
+fn modifier_toggle(name: &str) -> gtk::ToggleButton {
+    let toggle = gtk::ToggleButton::with_label(name);
+    toggle.set_tooltip_text(Some(&format!("Hold {name} with the key")));
+    toggle
+}
+
+/// Small section heading inside the inspector (Options, Appearance).
+fn inspector_heading(text: &str) -> Label {
+    let heading = Label::new(Some(text));
+    heading.set_xalign(0.0);
+    heading.add_css_class("inspector-heading");
+    heading
+}
+
 fn labeled(label: &str, child: &impl IsA<gtk::Widget>) -> GtkBox {
     let row = GtkBox::new(Orientation::Vertical, 4);
     let label = Label::new(Some(label));
@@ -2301,7 +2642,8 @@ fn connect_control_selection(
     let ui = ui.clone();
     let layers = layers.clone();
     let heading = heading.clone();
-    button.connect_clicked(move |_| {
+    let guard = ui.clone();
+    let switch: Rc<dyn Fn()> = Rc::new(move || {
         if let Err(error) = ui.select_control(control, Some(number), false) {
             ui.status.set_text(&error);
             return;
@@ -2310,6 +2652,56 @@ fn connect_control_selection(
         heading.set_text(&control_heading(control, Some(number)));
         ui.load_selected_binding(&layers);
     });
+    button.connect_clicked(move |button| {
+        if guard.is_dirty() {
+            confirm_discard(button, switch.clone());
+        } else {
+            switch();
+        }
+    });
+}
+
+/// Selecting another control reloads the editor, so unsaved edits need a choice first.
+fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
+    let Some(parent) = anchor
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+    else {
+        proceed();
+        return;
+    };
+    let dialog = gtk::MessageDialog::builder()
+        .transient_for(&parent)
+        .modal(true)
+        .destroy_with_parent(true)
+        .message_type(gtk::MessageType::Question)
+        .text("Discard unsaved changes?")
+        .secondary_text(
+            "You edited this binding without saving it. Selecting another control discards those edits.",
+        )
+        .build();
+    dialog.add_css_class("confirm-dialog");
+    let mut child = dialog.message_area().first_child();
+    while let Some(widget) = child {
+        if let Some(label) = widget.downcast_ref::<Label>() {
+            label.set_justify(gtk::Justification::Center);
+        }
+        child = widget.next_sibling();
+    }
+    dialog.set_resizable(false);
+    dialog.set_default_size(360, -1);
+    dialog.add_button("Keep editing", gtk::ResponseType::Cancel);
+    dialog
+        .add_button("Discard changes", gtk::ResponseType::Accept)
+        .add_css_class("destructive-action");
+    dialog.set_default_response(gtk::ResponseType::Cancel);
+    dialog.connect_response(move |dialog, response| {
+        dialog.close();
+        if response == gtk::ResponseType::Accept {
+            proceed();
+        }
+    });
+    dialog.present();
 }
 
 fn event_label(event: EventKind) -> &'static str {
@@ -2580,7 +2972,57 @@ impl ArtworkUi {
                 other.push(self.touchscreen_zone_command(layer, zone));
             }
         }
-        other
+        self.with_icons(layer, other)
+    }
+
+    /// Replace the pictures of keys and touch sections without artwork by
+    /// their binding icon, exactly where the preview shows one. Keys keep
+    /// their position in the snapshot; sections go after the strip
+    /// background, and an indicated section's icon command carries its page
+    /// indicators instead of a separate indicator command.
+    fn with_icons(&self, layer: &str, mut commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
+        let strip_path = self.info_background(layer, ArtworkTarget::TouchStripBackground);
+        for target in (1..=8)
+            .map(ArtworkTarget::Keypad)
+            .chain((1..=4).map(ArtworkTarget::EncoderZone))
+        {
+            let Some(icon) = self.control_icon(layer, target) else {
+                continue;
+            };
+            let text = self
+                .store
+                .borrow()
+                .as_ref()
+                .and_then(|store| store.button_text_in_layer(layer, target).cloned());
+            if !sdeck_plus::binding_icons::key_has_room(text.as_ref()) {
+                continue;
+            }
+            let command = ArtworkCommand::ComposeIcon {
+                target,
+                icon: icon.icon,
+                caption: icon.caption,
+                text,
+                strip_path: matches!(target, ArtworkTarget::EncoderZone(_))
+                    .then(|| strip_path.clone())
+                    .flatten(),
+                previous: icon.previous,
+                next: icon.next,
+            };
+            let replaced = commands.iter().position(|existing| match existing {
+                ArtworkCommand::Assign { target: shown, .. }
+                | ArtworkCommand::Clear { target: shown } => *shown == target,
+                ArtworkCommand::ComposeButton { key, .. } => target == ArtworkTarget::Keypad(*key),
+                ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
+                    target == ArtworkTarget::EncoderZone(*zone)
+                }
+                _ => false,
+            });
+            match replaced {
+                Some(index) => commands[index] = command,
+                None => commands.push(command),
+            }
+        }
+        commands
     }
 
     /// Draw the same picture in the window's preview of `target`.
@@ -2623,13 +3065,22 @@ impl ArtworkUi {
         let target = ArtworkTarget::EncoderZone(zone);
         let background = self.info_background(layer, target);
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        let icon = value
+            .is_none()
+            .then(|| self.control_icon(layer, target))
+            .flatten();
         match sdeck_plus::image_output::compose_touchscreen_zone(
             zone,
             background.as_deref(),
             value,
             previous,
             next,
-        ) {
+        )
+        .and_then(|indicators| match &icon {
+            // The page indicators still paint last, over the binding icon.
+            Some(icon) => with_icon_under(icon, &indicators),
+            None => Ok(indicators),
+        }) {
             Ok(image) => {
                 if let Some((_, picture)) = self
                     .pictures
@@ -2757,6 +3208,7 @@ impl ArtworkUi {
                             *target,
                         ),
                         store.button_text_in_layer(&layer, *target).cloned(),
+                        self.control_icon(&layer, *target),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -2766,8 +3218,8 @@ impl ArtworkUi {
             )
         };
         let commands = self.with_info(&layer, commands);
-        for (picture, path, text) in paths {
-            set_button_picture(&picture, path, text.as_ref());
+        for (picture, path, text, icon) in paths {
+            set_button_picture(&picture, path, text.as_ref(), icon.as_ref());
         }
         self.paint_info_previews(&layer);
         self.paint_navigation_previews(&layer);
@@ -2777,6 +3229,37 @@ impl ArtworkUi {
             editor.load_context(false);
             editor.refresh_preview();
         }
+    }
+
+    /// The binding icon a key or touch section shows on `layer` when it has
+    /// no artwork of its own and no live information. Derived at render
+    /// time from the binding; it is never written into the artwork stores.
+    fn control_icon(&self, layer: &str, target: ArtworkTarget) -> Option<ControlIcon> {
+        let action = {
+            let layers = self.layers.borrow();
+            match target {
+                ArtworkTarget::Keypad(key) => layers.binding(layer, &Trigger::KeyPress(key)),
+                ArtworkTarget::EncoderZone(zone) => layers
+                    .binding(layer, &Trigger::ZoneTap(zone))
+                    .or_else(|| layers.binding(layer, &Trigger::ZonePress(zone))),
+                ArtworkTarget::TouchStripBackground => None,
+            }
+        }?;
+        let icon = BindingIcon::for_action(&action);
+        if !icon.shown_on_controls()
+            || self.info_background(layer, target).is_some()
+            || self.shows_info(layer, target)
+        {
+            return None;
+        }
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        Some(ControlIcon {
+            target,
+            icon,
+            caption: sdeck_plus::binding_editor::action_caption(&action),
+            previous: target == ArtworkTarget::EncoderZone(1) && previous,
+            next: target == ArtworkTarget::EncoderZone(4) && next,
+        })
     }
 
     /// Whether `target` shows live information on `layer`.
@@ -2809,9 +3292,10 @@ impl ArtworkUi {
                 store.button_text_in_layer(&layer, *target).cloned(),
             )
         };
+        let icon = self.control_icon(&layer, *target);
         for (picture_target, picture) in self.pictures.borrow().iter() {
             if picture_target == target {
-                set_button_picture(picture, path.clone(), text.as_ref());
+                set_button_picture(picture, path.clone(), text.as_ref(), icon.as_ref());
             }
         }
         if !matches!(target, ArtworkTarget::Keypad(_)) {
@@ -2846,11 +3330,82 @@ impl ArtworkUi {
     }
 }
 
+/// A binding icon derived for one key or touch section without artwork.
+#[derive(Clone, Debug, PartialEq)]
+struct ControlIcon {
+    target: ArtworkTarget,
+    icon: BindingIcon,
+    caption: String,
+    /// A page indicator paints at this section's outer left/right edge.
+    previous: bool,
+    next: bool,
+}
+
+impl ControlIcon {
+    /// The key image or transparent touch-section foreground, or `None` when
+    /// user button text leaves no room for an icon.
+    fn compose(
+        &self,
+        text: Option<&sdeck_plus::button_text::ButtonText>,
+    ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
+        match self.target {
+            ArtworkTarget::Keypad(_) => {
+                sdeck_plus::binding_icons::compose_key_image(self.icon, &self.caption, text)
+            }
+            ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
+                self.icon,
+                &self.caption,
+                self.previous,
+                self.next,
+            )
+            .map(Some),
+            ArtworkTarget::TouchStripBackground => Ok(None),
+        }
+    }
+}
+
+/// Composite a touch section's foreground (transparent apart from its page
+/// indicators) over that section's binding icon.
+fn with_icon_under(
+    icon: &ControlIcon,
+    foreground: &gtk::gdk_pixbuf::Pixbuf,
+) -> Result<gtk::gdk_pixbuf::Pixbuf, String> {
+    let Some(base) = icon.compose(None)? else {
+        return Ok(foreground.clone());
+    };
+    foreground.composite(
+        &base,
+        0,
+        0,
+        base.width(),
+        base.height(),
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        gtk::gdk_pixbuf::InterpType::Nearest,
+        255,
+    );
+    Ok(base)
+}
+
 fn set_button_picture(
     picture: &Picture,
     path: Option<std::path::PathBuf>,
     text: Option<&sdeck_plus::button_text::ButtonText>,
+    icon: Option<&ControlIcon>,
 ) {
+    if path.is_none() {
+        match icon.map(|icon| icon.compose(text)).transpose() {
+            Ok(Some(Some(image))) => {
+                picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                picture.set_visible(true);
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("Could not compose binding icon preview: {error}"),
+        }
+    }
     match text {
         Some(text) => match sdeck_plus::image_output::compose_button_image(path.as_deref(), text) {
             Ok(image) => {
@@ -2951,6 +3506,24 @@ fn add_artwork_controls(
     );
     let picker = gtk::DropDown::new(Some(targets), gtk::Expression::NONE);
     picker.add_css_class("artwork-target");
+    let layers = artwork.layers.clone();
+    binding_icon::target_dropdown(
+        &picker,
+        Rc::new(move |target| {
+            let layers = layers.borrow();
+            let layer = layers.active();
+            let action = match target {
+                ArtworkTarget::Keypad(key) => layers.binding(layer, &Trigger::KeyPress(key)),
+                ArtworkTarget::EncoderZone(zone) => layers
+                    .binding(layer, &Trigger::ZoneTap(zone))
+                    .or_else(|| layers.binding(layer, &Trigger::ZonePress(zone))),
+                ArtworkTarget::TouchStripBackground => None,
+            }?;
+            let icon = BindingIcon::for_action(&action);
+            icon.shown_on_controls()
+                .then(|| (icon, sdeck_plus::binding_editor::action_caption(&action)))
+        }),
+    );
     parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {
@@ -3106,6 +3679,57 @@ fn show_artwork_error(window: &ApplicationWindow, message: &str) {
         .build();
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.show();
+}
+
+/// Presents the device connection in plain language: a semantic badge plus a
+/// short next step. Technical identifiers and worker diagnostics stay in the
+/// tooltip. Returns whether the device is connected.
+fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState) -> bool {
+    const USB_ID: &str = "USB device VID 0FD9 / PID 0084";
+    let not_connected = "Stream Deck + not connected — plug it in";
+    let (badge, tone, text, hint) = match state {
+        ConnectionState::Searching => (
+            "Not connected",
+            "status-idle",
+            not_connected,
+            format!("Looking for the {USB_ID}"),
+        ),
+        // Discovery reports a missing device as unavailable on every retry.
+        ConnectionState::Unavailable(reason) if reason.starts_with("Device not found") => (
+            "Not connected",
+            "status-idle",
+            not_connected,
+            reason.clone(),
+        ),
+        ConnectionState::Unavailable(reason) => (
+            "Unavailable",
+            "status-error",
+            "Stream Deck + found but unavailable — hover for details",
+            format!("{reason}\n{USB_ID}"),
+        ),
+        ConnectionState::Disconnected(reason) => (
+            "Disconnected",
+            "status-idle",
+            "Stream Deck + disconnected — plug it back in",
+            format!("{reason}\n{USB_ID}"),
+        ),
+        ConnectionState::Connected => (
+            "Connected",
+            "status-online",
+            "Stream Deck + connected — keys, dials and touch strip are live",
+            format!("{USB_ID} · HID input and artwork active"),
+        ),
+    };
+    status.set_text(badge);
+    for class in ["status-idle", "status-online", "status-error"] {
+        status.remove_css_class(class);
+    }
+    status.add_css_class(tone);
+    detail.set_text(text);
+    for label in [status, detail] {
+        label.set_tooltip_text(Some(&hint));
+    }
+    matches!(state, ConnectionState::Connected)
 }
 
 fn set_pressed(widget: &gtk::Widget, pressed: bool) {
@@ -3296,6 +3920,7 @@ mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::Mutex;
+    mod binding_icon_tests;
     mod button_swap_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
@@ -3309,6 +3934,7 @@ mod tests {
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod touchscreen_tests;
+    mod ui_refresh_tests;
 
     include!("button_text_editor_tests.rs");
 
@@ -3363,11 +3989,11 @@ mod tests {
         let event_model = gtk::StringList::new(&["Press"]);
         let event_picker = gtk::DropDown::new(Some(event_model.clone()), gtk::Expression::NONE);
         let action_model = gtk::StringList::new(&[
-            "Move to layer",
+            "Go to profile or page",
             "Run command",
             "Open application",
             "Shortcut",
-            "Emit legacy event",
+            "Send named event",
             "More actions",
             "Play sound",
             "None",
@@ -3380,13 +4006,11 @@ mod tests {
         let text_entry = Entry::new();
         let application_entry = Entry::new();
         let args_view = TextView::new();
-        let super_mod = CheckButton::with_label("SUPER");
-        let shift_mod = CheckButton::with_label("SHIFT");
-        let ctrl_mod = CheckButton::with_label("CTRL");
-        let alt_mod = CheckButton::with_label("ALT");
+        let [ctrl_mod, alt_mod, shift_mod, super_mod] =
+            ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
         let control_number_row = labeled("Number", &control_number_picker);
-        let layer_target_row = labeled("Destination layer", &layer_target_picker);
-        let text_row = labeled("Command / key / shortcut key / legacy event", &text_entry);
+        let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
+        let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
         let application_row = labeled("Application executable", &application_entry);
         let args_scroller = gtk::ScrolledWindow::builder().child(&args_view).build();
         let args_row = labeled("Application arguments", &args_scroller);
@@ -3650,6 +4274,8 @@ mod tests {
         assert!(!ui.args_row.is_visible());
         assert!(!ui.modifier_row.is_visible());
         assert_legacy_keys_load_without_rewriting_and_save_as_shortcuts(&ui);
+        assert_unsaved_edits_are_flagged_and_shortcut_is_previewed(&ui);
+        assert_discard_prompt_guards_unsaved_edits();
         ui.control_picker.set_selected(2);
         ui.update_for_control(true);
         assert!(ui.control_number_row.is_visible());
@@ -4408,11 +5034,11 @@ mod tests {
         assert_eq!(
             labels,
             [
-                "Move to layer",
+                "Go to profile or page",
                 "Run command",
                 "Open application",
                 "Shortcut",
-                "Emit legacy event",
+                "Send named event",
                 "More actions",
                 "Play sound",
                 "None",
@@ -4440,6 +5066,64 @@ mod tests {
             assert_eq!(ui.modifier_row.is_visible(), index == 3);
             assert_eq!(ui.text_row.is_visible(), matches!(index, 1 | 3 | 4));
         }
+    }
+
+    fn assert_unsaved_edits_are_flagged_and_shortcut_is_previewed(ui: &BindingUi) {
+        let root = std::env::temp_dir().join(format!(
+            "streamdeck-dirty-editor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let layers = RefCell::new(LayerStore::open_at(&root).unwrap());
+        ui.layer_picker.set_selected(0);
+        ui.select_control(ControlKind::Button, Some(1), true)
+            .unwrap();
+        ui.load_selected_binding(&layers);
+        assert!(!ui.is_dirty(), "loading must leave the editor clean");
+        assert_ne!(ui.status.text(), "Unsaved changes.");
+        ui.action_picker.set_selected(3);
+        ui.text_entry.set_text("p");
+        ui.ctrl_mod.set_active(true);
+        assert_eq!(ui.status.text(), "Unsaved changes.");
+        assert_eq!(ui.shortcut_preview.text(), "Presses Ctrl + P");
+        // Saving treats the current fields as the new baseline.
+        ui.mark_clean();
+        ui.status.set_text("Binding updated; saving to disk…");
+        assert_eq!(ui.status.text(), "Binding updated; saving to disk…");
+        ui.text_entry.set_text("q");
+        assert_eq!(ui.status.text(), "Unsaved changes.");
+        // Reloading the control discards the edits and clears the flag.
+        ui.load_selected_binding(&layers);
+        assert_ne!(ui.status.text(), "Unsaved changes.");
+        ui.action_picker.set_selected(3);
+        ui.text_entry.set_text("not-a-key");
+        assert_eq!(ui.shortcut_preview.text(), "");
+        assert!(!ui.shortcut_preview.is_visible());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn assert_discard_prompt_guards_unsaved_edits() {
+        let window = gtk::Window::new();
+        let anchor = Button::new();
+        window.set_child(Some(&anchor));
+        let switched = Rc::new(Cell::new(0));
+        let proceed: Rc<dyn Fn()> = {
+            let switched = switched.clone();
+            Rc::new(move || switched.set(switched.get() + 1))
+        };
+        confirm_discard(&anchor, proceed.clone());
+        discard_dialog().response(ResponseType::Cancel);
+        assert_eq!(switched.get(), 0, "Keep editing must not switch controls");
+        confirm_discard(&anchor, proceed.clone());
+        discard_dialog().response(ResponseType::Accept);
+        assert_eq!(switched.get(), 1, "Discard changes must switch controls");
+        // With no window there is nobody to ask, so the switch just happens.
+        confirm_discard(&Button::new(), proceed);
+        assert_eq!(switched.get(), 2);
+        window.destroy();
     }
 
     fn assert_legacy_keys_load_without_rewriting_and_save_as_shortcuts(ui: &BindingUi) {
@@ -4628,6 +5312,9 @@ mod tests {
             .downcast::<gtk::Viewport>()
             .unwrap()
             .child()
+            .unwrap()
+            // The width clamp wraps the shell.
+            .first_child()
             .unwrap();
         let motion = shell.settings();
         let animations = motion.is_gtk_enable_animations();
@@ -4708,6 +5395,9 @@ mod tests {
             .downcast::<gtk::Viewport>()
             .unwrap()
             .child()
+            .unwrap()
+            // The width clamp wraps the shell.
+            .first_child()
             .unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
@@ -4989,12 +5679,14 @@ mod tests {
                     .unwrap()
                     .downcast::<Button>()
                     .unwrap();
+                ui.mark_clean();
                 button.emit_clicked();
                 assert_eq!(ui.control_picker.selected(), 2);
                 assert_eq!(ui.event_model.n_items(), 7);
             }
         }
         let button = key_button(&widgets.key_labels[7]);
+        ui.mark_clean();
         button.emit_clicked();
         assert_eq!(ui.control_number_picker.selected(), 7);
         assert_eq!(ui.text_entry.text(), command);
@@ -5094,6 +5786,8 @@ mod tests {
                     None,
                     widgets
                         .touch_status
+                        .parent()
+                        .unwrap()
                         .next_sibling()
                         .unwrap()
                         .downcast::<gtk::Overlay>()
@@ -5296,6 +5990,25 @@ mod tests {
             assert_eq!(action, expected);
             assert!(commands.try_recv().is_err());
         }
+
+        // Remove deletes the binding, and the feedback line can bring it back.
+        let removed_action = layers.borrow().binding(&layer, &trigger).unwrap();
+        find("Remove").emit_clicked();
+        while commands.try_recv().is_ok() {}
+        assert!(layers.borrow().binding(&layer, &trigger).is_none());
+        let undo = ui.undo_remove.clone();
+        assert!(undo.is_visible());
+        undo.emit_clicked();
+        assert_eq!(
+            layers.borrow().binding(&layer, &trigger),
+            Some(removed_action)
+        );
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            LayerCommand::SaveBinding(..)
+        ));
+        assert!(!undo.is_visible());
+        while commands.try_recv().is_ok() {}
 
         let original = layers.borrow().active().to_owned();
         let keys = layers.borrow().names();
@@ -5632,6 +6345,8 @@ mod tests {
             capture("encoder-clockwise-brightness");
             widgets
                 .touch_status
+                .parent()
+                .unwrap()
                 .next_sibling()
                 .unwrap()
                 .downcast::<gtk::Overlay>()
@@ -5858,6 +6573,8 @@ mod tests {
                     .tooltip_text()
                     .unwrap()
                     .contains(&format!("Encoder {}", index + 1)));
+                // The checks above poke the editor directly; treat it as saved.
+                widgets.binding_ui.mark_clean();
                 knob.emit_clicked();
                 assert!(knob.has_css_class("control-selected"));
                 label.set_text(&format!("DIAL {}\n3 ticks · +3", index + 1));
@@ -5895,16 +6612,16 @@ mod tests {
                 device_bounds.y()
             );
             assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 6);
-            assert_eq!(settings_bounds.y(), device_bounds.y());
-            assert_eq!(
-                device_bounds.height(),
-                428.0,
-                "preview keeps its natural height independently of editor"
+            assert!((settings_bounds.y() - device_bounds.y()).abs() <= 0.5);
+            let scale = preview_scale(widgets);
+            assert!(
+                (device_bounds.height() - 428.0 * scale).abs() <= 1.0,
+                "preview card scales uniformly, never stretches: {device_bounds:?} at {scale}"
             );
             let bounds = content.compute_bounds(&widgets.root).unwrap();
             assert_eq!(bounds.y(), 16.0);
             assert_eq!(bounds.height(), 668.0);
-            assert!((850.0..=968.0).contains(&bounds.width()));
+            assert_eq!(bounds.width(), 968.0, "shell uses the full window width");
             assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
             let mut buttons = Vec::new();
             collect_layout_buttons(content, &mut buttons);
@@ -6177,6 +6894,20 @@ mod tests {
             .or_else(|| button.tooltip_text())
     }
 
+    /// The discard prompt specifically, so a stray dialog from another test cannot answer it.
+    fn discard_dialog() -> gtk::MessageDialog {
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|window| window.downcast::<gtk::MessageDialog>().ok())
+            .find(|dialog| {
+                dialog.is_visible()
+                    && dialog.property::<Option<String>>("text").as_deref()
+                        == Some("Discard unsaved changes?")
+            })
+            .expect("unsaved edits must prompt before switching")
+    }
+
     fn current_dialog() -> gtk::Dialog {
         gtk::Window::toplevels()
             .snapshot()
@@ -6201,6 +6932,19 @@ mod tests {
             .unwrap()
             .parent()
             .unwrap()
+    }
+
+    /// Uniform presentation scale of the hardware preview, from the chassis bounds.
+    fn preview_scale(widgets: &MonitorWidgets) -> f32 {
+        let chassis = key_button(&widgets.key_labels[0]).parent().unwrap();
+        let preview = device_canvas(widgets)
+            .parent()
+            .unwrap()
+            .downcast::<scaled_bin::ScaledBin>()
+            .unwrap();
+        let bounds = chassis.compute_bounds(&preview).unwrap();
+        assert!((bounds.width() / 426.0 - preview.scale() as f32).abs() < 0.01);
+        bounds.width() / 426.0
     }
 
     fn key_button(label: &Label) -> Button {
@@ -6238,7 +6982,13 @@ mod tests {
                 .unwrap();
             let tabs = widgets.feature_runtime.profile_tabs();
             let tab_header = tabs.first_child().unwrap().compute_bounds(content).unwrap();
-            let body = device_canvas(widgets).parent().unwrap().parent().unwrap();
+            let body = device_canvas(widgets)
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap();
             let pagebar = body
                 .parent()
                 .unwrap()
@@ -6254,9 +7004,10 @@ mod tests {
                 );
             }
             if width == 1840 {
-                assert!(
-                    (850.0..=1150.0).contains(&shell.width()),
-                    "wide configuration shell must not span the viewport: {shell:?}"
+                assert_eq!(
+                    shell.width(),
+                    (SHELL_MAX_WIDTH - 32) as f32,
+                    "wide configuration shell stops at its maximum measure: {shell:?}"
                 );
                 assert!((shell.x() + shell.width() / 2.0 - width as f32 / 2.0).abs() <= 1.0);
                 assert!(
@@ -6266,21 +7017,30 @@ mod tests {
             } else if width == 640 {
                 assert_eq!(shell.width(), 608.0, "narrow shell uses available width");
             }
+            let scale = preview_scale(widgets);
+            assert!((1.0..=PREVIEW_MAX_SCALE as f32).contains(&scale));
             assert!(
-                device.width() <= 460.0,
-                "fixed preview must not become a wide empty cell: {device:?}"
+                (device.width() - 440.0 * scale).abs() <= 1.0
+                    && (device.height() - 428.0 * scale).abs() <= 1.0,
+                "preview scales uniformly instead of stretching: {device:?} at {scale}"
             );
-            assert_eq!(
-                device.height(),
-                428.0,
-                "preview must not grow to match the form"
-            );
+            let cell = device_canvas(widgets).parent().unwrap();
             assert!(
-                editor.width() <= 600.0,
+                cell.width() as f32 - device.width() <= 64.0
+                    || cell.height() as f32 - device.height() <= 64.0,
+                "preview must fill its region in one dimension: {device:?}, cell {}x{}",
+                cell.width(),
+                cell.height()
+            );
+            if width >= 1280 {
+                assert!(scale >= 1.25, "spare room enlarges the preview: {scale}");
+            }
+            assert!(
+                editor.width() <= 640.0,
                 "editor needs a bounded reading measure: {editor:?}"
             );
             if width >= 1000 {
-                assert_eq!(device.y(), editor.y());
+                assert!((device.y() - editor.y()).abs() <= 0.5);
                 assert!(editor.x() - device.x() - device.width() <= 32.0);
             } else {
                 assert!(editor.y() >= device.y() + device.height() + 15.0);
@@ -6417,7 +7177,11 @@ mod tests {
                 .compute_bounds(content)
                 .unwrap();
             if panel.has_css_class("device-canvas") {
-                assert_eq!((first.width(), first.height()), (426.0, 414.0));
+                let scale = preview_scale(widgets);
+                assert!(
+                    (first.width() - 426.0 * scale).abs() <= 1.0
+                        && (first.height() - 414.0 * scale).abs() <= 1.0
+                );
                 assert!(
                     (first.x() + first.width() / 2.0 - bounds.x() - bounds.width() / 2.0).abs()
                         <= 1.0,
@@ -6439,12 +7203,21 @@ mod tests {
                 "shared CSS top padding: {first:?}, {bounds:?}"
             );
         }
+        let cell = device.parent().unwrap().compute_bounds(content).unwrap();
         let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
-        if settings.y() == device.y() {
-            assert!((16.0..=48.0).contains(&(settings.x() - device.x() - device.width())));
+        if (settings.y() - device.y()).abs() <= 0.5 {
+            // A height-limited preview is centered in its column.
+            let slack = (cell.width() - device.width()) / 2.0;
+            assert!(
+                (settings.x() - device.x() - device.width() - slack - 16.0).abs() <= 1.0,
+                "column gap: {settings:?}, {device:?}, {cell:?}"
+            );
         } else {
-            assert!((settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0);
+            assert!(
+                (settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0,
+                "stacked regions keep a 16px gap: {settings:?}, {device:?}"
+            );
         }
         eprintln!("GTK sidebar geometry assertions executed");
     }
@@ -6482,14 +7255,27 @@ mod tests {
             .parent()
             .unwrap();
         let front = chassis.compute_bounds(content).unwrap();
-        assert_eq!((front.width(), front.height()), (426.0, 414.0));
+        // The preview may be scaled uniformly; hardware coordinates are unchanged.
+        let scale = front.width() / 426.0;
+        assert!((1.0..=PREVIEW_MAX_SCALE as f32).contains(&scale));
+        let close = |actual: f32, expected: f32| (actual - expected * scale).abs() <= 0.5;
+        assert!(
+            close(front.height(), 414.0),
+            "uniform preview scale: {front:?}"
+        );
         assert!((front.width() / front.height() - 774.0 / 752.0).abs() < 0.02);
         for column in 0..4 {
-            assert_eq!(key_bounds[column].width(), 60.0);
-            assert_eq!(key_bounds[column + 4].x(), key_bounds[column].x());
-            assert_eq!(key_bounds[column + 4].y() - key_bounds[column].y(), 67.0);
+            assert!(close(key_bounds[column].width(), 60.0));
+            assert!((key_bounds[column + 4].x() - key_bounds[column].x()).abs() <= 0.5);
+            assert!(close(
+                key_bounds[column + 4].y() - key_bounds[column].y(),
+                67.0
+            ));
             if column < 3 {
-                assert_eq!(key_bounds[column + 1].x() - key_bounds[column].x(), 91.0);
+                assert!(close(
+                    key_bounds[column + 1].x() - key_bounds[column].x(),
+                    91.0
+                ));
             }
         }
         let bezel = pictures
@@ -6510,21 +7296,25 @@ mod tests {
             "one continuous bezel surrounds the artwork strip"
         );
         let bezel_bounds = bezel.compute_bounds(content).unwrap();
-        assert_eq!((bezel_bounds.width(), bezel_bounds.height()), (374.0, 77.0));
+        assert!(close(bezel_bounds.width(), 374.0) && close(bezel_bounds.height(), 77.0));
         assert!(strip.x() > bezel_bounds.x() && strip.y() > bezel_bounds.y());
         assert!(strip.x() + strip.width() < bezel_bounds.x() + bezel_bounds.width());
         let rail = chassis.last_child().unwrap();
         assert!(rail.has_css_class("hardware-rail"));
-        let mut knob = rail.first_child();
-        for key in key_bounds.iter().take(4) {
-            let current = knob.unwrap();
+        // The rail also holds each dial's legend; check the knobs themselves.
+        let mut knobs = Vec::new();
+        let mut child = rail.first_child();
+        while let Some(current) = child {
+            if current.has_css_class("encoder") {
+                knobs.push(current.clone());
+            }
+            child = current.next_sibling();
+        }
+        assert_eq!(knobs.len(), 4);
+        for (key, current) in key_bounds.iter().take(4).zip(&knobs) {
             let bounds = current.compute_bounds(content).unwrap();
-            assert_eq!((bounds.width(), bounds.height()), (46.0, 46.0));
-            assert_eq!(
-                bounds.x() + bounds.width() / 2.0,
-                key.x() + key.width() / 2.0
-            );
-            knob = current.next_sibling();
+            assert!(close(bounds.width(), 46.0) && close(bounds.height(), 46.0));
+            assert!((bounds.x() + bounds.width() / 2.0 - key.x() - key.width() / 2.0).abs() <= 0.5);
         }
         for (target, picture) in pictures.iter() {
             let surface = picture.parent().unwrap();
@@ -6955,7 +7745,7 @@ mod tests {
             )
             .unwrap();
         ui.refresh_summaries(&layers);
-        assert_eq!(ui.summaries[0].text(), "Press: Layer Studio");
+        assert_eq!(ui.summaries[0].text(), "Press: Go to Studio");
         layers
             .borrow_mut()
             .bind(
@@ -7007,7 +7797,7 @@ mod tests {
         ui.layer_model.remove(index as u32);
         ui.layer_picker.set_selected(0);
         ui.refresh_summaries(&layers);
-        assert_eq!(ui.summaries[0].text(), "Press: Layer Studio");
+        assert_eq!(ui.summaries[0].text(), "Press: Go to Studio");
         assert!(remove_selected_layer(&layers, 0).is_none());
         // Removing a destination also removes inbound switches from Base.
         let studio = layer_index(&layers, "Studio");

@@ -191,17 +191,21 @@ impl FeatureRuntime {
                 else {
                     return;
                 };
-                (name, "Delete page", "This deletes the page, its folders, bindings and artwork. It cannot be undone.")
+                (
+                    name,
+                    "Delete page",
+                    "Its folders, bindings and artwork are deleted. This cannot be undone.",
+                )
             }
             Removal::Folder { name, .. } => (
                 name.clone(),
                 "Delete folder",
-                "This deletes this page's folder and its contents. Other pages' folders are kept.",
+                "Its contents are deleted. Other pages' folders are kept.",
             ),
             Removal::Profile(name) => (
                 name.clone(),
                 "Delete profile",
-                "This deletes the profile and all its pages, folders, bindings and artwork.",
+                "Everything in it is deleted. This cannot be undone.",
             ),
         };
         let dialog = gtk::MessageDialog::builder()
@@ -212,6 +216,7 @@ impl FeatureRuntime {
             .text(format!("Delete \"{name}\"?"))
             .secondary_text(detail)
             .build();
+        style_confirm_dialog(&dialog);
         dialog.add_button("Keep", ResponseType::Cancel);
         dialog
             .add_button(action, ResponseType::Accept)
@@ -250,4 +255,19 @@ impl FeatureRuntime {
         });
         dialog.present();
     }
+}
+
+/// Gives a destructive confirmation the app's compact, centred native style.
+/// Pair with a `destructive-action` button; colours come from the theme tokens.
+pub(super) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
+    dialog.add_css_class("confirm-dialog");
+    let mut child = dialog.message_area().first_child();
+    while let Some(widget) = child {
+        if let Some(label) = widget.downcast_ref::<Label>() {
+            label.set_justify(gtk::Justification::Center);
+        }
+        child = widget.next_sibling();
+    }
+    dialog.set_resizable(false);
+    dialog.set_default_size(360, -1);
 }

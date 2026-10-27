@@ -104,7 +104,7 @@ impl ButtonTextEditor {
         let panel = ui::popover("Button text", &content);
         // The native font dialog must not dismiss and reset this editing form.
         panel.set_autohide(false);
-        let open = ui::menu_button("insert-text-symbolic", "Add text", &panel);
+        let open = ui::menu_button("format-text-plaintext-symbolic", "Add text", &panel);
         open.set_halign(gtk::Align::Start);
         let root = GtkBox::new(Orientation::Vertical, 8);
         root.append(&open);
@@ -229,8 +229,10 @@ impl ButtonTextEditor {
         } else {
             "Edit text"
         };
-        self.open
-            .set_child(Some(&ui::icon_caption("insert-text-symbolic", caption)));
+        self.open.set_child(Some(&ui::icon_caption(
+            "format-text-plaintext-symbolic",
+            caption,
+        )));
         self.open.set_tooltip_text(Some(caption));
         self.open
             .update_property(&[gtk::accessible::Property::Label(caption)]);

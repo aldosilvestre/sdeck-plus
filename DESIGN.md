@@ -77,8 +77,9 @@ supporting ink `#536170`, primary action `#6746bb` (hover `#5939a9`, press
 `#4c2f95`), selected tab `#e8e1f6`, focus cue `#0e7183`, error `#c0243f`,
 success `#1b7f55`, warning `#9a6a00`. The graphite hardware is identical in both modes.
 
-Status badges pair semantic tones with visible text and low-alpha surfaces.
-Color alone never communicates state. Hardware uses a graphite chassis
+Status badges pair semantic tones with visible text, a low-alpha fill and a
+55%-alpha edge of the same token: warning for Not connected/Disconnected, error
+for Unavailable and success for Connected. Color alone never communicates state. Hardware uses a graphite chassis
 (`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
 (`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
 and neutral encoders (`#68737e` to `#343c44`). Subtle inset lighting gives the
@@ -91,7 +92,8 @@ dial turn, and a cyan `#67e8f9` wash over each touched strip zone for 300ms (the
 800px strip maps to four 200px zones; a flick lights every zone it crosses).
 Keyboard focus keeps its cyan outline. Task tabs use the selected-tab surface
 and weight 600; profile tabs add a fine violet inset edge. Inactive tabs are
-transparent with supporting ink; Appearance headings use supporting ink too.
+transparent with supporting ink. Inspector section headings (Options,
+Appearance) use primary ink at 13px/700.
 
 Interactive boundaries use their own neutral token rather than the quieter
 decorative card edge: at least 3:1 against input and editor surfaces in both
@@ -103,8 +105,11 @@ increase thumb contrast without changing native scrolling geometry.
 
 Use the system GTK font. App title: 20px/700. Inspector title: 18px/700.
 Section labels: 14px/600. Body, controls and field labels: 14px. Supporting
-metadata: 13px. Existing physical-device branding and the tiny touch display
-retain their material typography; neither carries configuration instructions.
+metadata: 13px. Binding status: 13px/600 primary ink. Existing physical-device
+branding keeps its material typography. The preview-only touch placeholder
+("Touch strip · waiting for input") is 11px/600 mint on black, and each preview
+dial's caption is 10px/600 pale graphite ink; neither carries configuration
+instructions or reaches the physical device.
 Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
 ## 4. Spacing and layout
@@ -123,8 +128,18 @@ device/editor region have 16px separation. The device and editor also have
 The editor uses 16px inner padding and 6px between related form groups, keeping
 the added return and information options within the default 1000x700 layout.
 Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
-Binding feedback stays with its action buttons at a 12px vertical gap,
-while the Appearance separator keeps action and artwork sections distinct.
+A small "Options" heading groups the page-return and live-information checks.
+Binding feedback sits directly under its action buttons at an 8px vertical gap
+in primary ink, while the Appearance separator, a 4px extra top margin and an
+ink "Appearance" heading keep action and artwork sections distinct.
+That status line reads "Unsaved changes." in the warning tone as soon as any
+editor field differs from the loaded or saved binding; loading, saving or
+removing resets it.
+Selecting another preview control while edits are unsaved asks first with the
+compact confirmation style (Keep editing is the default, Discard changes is
+destructive). Remove leaves an Undo remove button under that status line until
+another control is loaded; it re-saves the binding, its page return and its
+live information.
 The related controls inside Appearance use 4px gaps so expanded artwork and
 the taller shortcut/argument fields still fit the default client height.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
@@ -132,8 +147,11 @@ Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
 Executable and arguments are one related adaptive group: two columns with a
 16px gap when each can receive at least 180px, otherwise stacked with 12px
 separation. Shortcut input and modifiers use the same adaptive group; modifiers
-form a two-by-two grid with 12px columns and 8px rows instead of a cramped line.
-Commands and legacy events occupy a full-width field. Hidden fields also hide
+are one linked row of named toggle buttons ordered Ctrl, Alt, Shift, Super
+(4px/10px padding, checked state uses the selected-tab surface with a violet
+inset edge, tooltip "Hold X with the key"). A muted line under the row previews the chord
+once it parses (for example "Presses Ctrl + Alt + P") and stays hidden otherwise.
+Commands and named events occupy a full-width field. Hidden fields also hide
 their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.
@@ -145,24 +163,37 @@ heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its 120px preview remains unchanged.
 
-The fixed-size device chassis is centered within its natural-size preview card
-(440x428 including padding and border); that card never stretches to match a tall
-form. The inspector uses its content height, without an arbitrary minimum height.
+The fixed-geometry device chassis sits in its preview card (440x428 at 1x,
+including padding and border). The card is presented through `ScaledBin`
+(`src/ui/scaled_bin.rs`): one uniform transform between 1.0x and 1.5x that
+fits the card into its region's width and height, top-aligned and horizontally
+centered. Hardware coordinates, artwork targets and the card's minimum size
+never change, so scaling only uses spare room and never adds scrolling; the
+card never stretches non-uniformly to match a tall form. GTK applies the same
+transform to drawing and pointer picking, so selection, drag-and-drop and
+focus keep working. The inspector uses its content height, without an
+arbitrary minimum height.
 The complete configuration shell (header, profile toolbar, page navigation and
-body) is centered at its GTK natural content width on wide desktops. These bars
-share the shell's leading/trailing edges rather than spanning the viewport while
-the task occupies only its middle. The native FlowBox also retains its natural
-width, keeping the fixed preview beside a readable inspector instead of creating
-a large empty preview cell. Width is content-driven, not a fixed viewport request:
-the ordinary test forms measure roughly 860–875px, and longer forms can use more.
+body) fills the available width up to 1240px (1272px including margins), then
+centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
+share the shell's leading/trailing edges. The native FlowBox decides wrapping
+from natural widths, so the preview's natural width stays unscaled; spare
+width reaches both regions through horizontal expansion and spare height
+reaches the preview row through vertical expansion. At 1000x700 the preview
+is about 1.1x; at 1280x800 and wider it reaches at least 1.25x.
 At narrow widths the shell shrinks to the available width and the same native
 container stacks the regions; only vertical scrolling is needed at 640px.
-No custom layout manager or resize polling is used.
+These two size-only containers are the only custom layout; there is no resize
+polling.
 
-The profile tabs, profile organization menu and OBS menu form a compact toolbar.
-The organization popover contains only profile creation, application association
-and profile deletion. The page bar groups compact previous/next/parent icons,
-page-owned folders, then New page followed by pencil and red-trash icons.
+The profile tabs, profile organization menu and OBS menu form a compact toolbar;
+Organize and OBS are frameless (hover shows the surface) so they stay secondary
+to the tabs. The organization popover contains only profile creation, application
+association and profile deletion. The page bar separates navigation from
+management: a linked previous/next/parent segmented group leads the
+breadcrumb with a 12px gap, and page-owned folders and New page trail it,
+followed by frameless square pencil and red-trash icons (still named, with
+tooltips; deletion still confirms).
 The folder menu has no outer padding, preserving the page bar's 34px controls.
 Icon-only actions use square 34px hit areas and centered 16px symbolic icons;
 captioned actions use a 6px icon/text gap and the same control height. MenuButton
@@ -181,9 +212,57 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 
 - **Card:** neutral tonal separation, readable heading and inline feedback;
   subtle inset top light, no colored accent border.
-- **Icon action:** one GTK symbolic icon family, visible outcome label,
-  accessible name and tooltip. Save is the editor's only primary action.
-  Destructive actions use the native destructive style.
+- **Icon action:** one GTK symbolic icon family at 16px, visible outcome
+  label, accessible name and tooltip. Save is the editor's only primary action.
+  Destructive actions use the native destructive style, and every delete or
+  remove (binding, page, folder, touch page, profile) uses the same trash icon;
+  clearing text or artwork keeps the clear icon. Organize uses the manage
+  (tools) icon and button text uses the plain text icon.
+- **Binding icons:** one vocabulary (`src/binding_icons.rs`) maps every
+  action to a monochrome vector glyph on a 24-unit grid with 2-unit round
+  strokes: go to page, next/previous page, folder, parent folder, command,
+  application, shortcut, named event, play sound, media transport, volume,
+  mute, audio output, scroll, text, open file, website, close application,
+  shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
+  stream, microphone mute and visibility, plus `more` for More actions, `none`
+  (menus only) and a `generic` fallback. The caller supplies the ink, so the
+  same picture serves the window (theme foreground, 16px, decorative with the
+  label carrying the name) and the device (near-white `#f0f2fa` with a dark
+  outline). The Action menu shows the icon before each row name and keeps the
+  check mark on the selected row. Each preview dial draws its caption's icon
+  (20px, pale `#e1e6eb`) on the knob face; it never takes clicks and never
+  reaches the device. A key with no artwork of its own and no live information
+  shows the icon (50px) with the action summary in up to two 14px bold lines
+  below it, on black. A touch section with no artwork shows a translucent
+  graphite tile (rounded 12px, 80% alpha, fine light edge) over the strip, so
+  strip artwork shows through and around it, with a 58px icon on the left and
+  up to two 17px bold caption lines beside it; a section that carries a page
+  indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
+  placement: top text puts the icon below it, bottom text above it, and
+  centered or vertical text leaves the key as before. Icons are derived when
+  drawing, never stored, and never replace artwork; None and unassigned
+  controls stay empty; page indicators still paint last. Preview and hardware
+  use identical pixels.
+- **Strip gestures:** the preview strip's header line (beside the touch
+  status, above the sections) carries compact badges for swipe left, swipe
+  right, tap and hold, in that order: the gesture glyph (`swipe-left`,
+  `swipe-right`, `tap`, `hold`) then the action icon, 11px on a pale pill.
+  Unbound swipes show their default touch paging dimmed; explicit None and
+  unassigned tap or hold show nothing. Each badge's tooltip and accessible
+  name read like "Swipe left (default): Next touchscreen page". The badges are
+  preview-only: on the device, the edge chevrons already show swipe paging and
+  badges would cover section content.
+- **More actions:** each feature action's icon comes from the same mapping as
+  saved controls (derived from a representative action). Category rows use
+  System `application`, Multimedia `play-pause`, Organization `folder`, Device
+  `brightness` and OBS `obs-scene`; Action rows, the guidance line (20px) and
+  the closed Action button show the chosen action's icon, while the Action
+  menu row keeps `more`.
+- **Artwork targets:** every row of the Artwork target menu starts with a
+  26x22 mini map of the eight keys over the four strip sections, outlined at
+  half ink with its target filled (the whole strip row for the background),
+  and menu rows end with the target's assigned action icon (key press; section
+  tap, then hold), refreshed whenever the menu opens.
 - **Labeled field:** associated, visible label; expected-format placeholder;
   contextual explanation. Conditional fields hide their labels with the input.
 - **Binding editor:** preserve existing action indices 0 through 4 and
