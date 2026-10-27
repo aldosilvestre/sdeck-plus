@@ -285,7 +285,15 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   pause icon and the same text in grey; no player or a stopped one shows a
   grey `media-idle` icon over a white "Nothing playing" caption; a failing
   session bus shows the usual grey `--`. A playing player wins (the first by
-  bus name), then the paused one that played last. A key stacks icon (32-44px, shrinks first), a 24px bold
+  bus name), then the paused one that played last. A Now playing title
+  shrinks no lower than 75% of the value size (18px on keys, 19px on
+  sections); a playing title that still does not fit scrolls right to left at
+  that size, clipped to its text column (never into the icon or chevron room):
+  1.5 s still, then 30 px/s, a 28px gap before it repeats, looping seamlessly.
+  A paused title stays still and ellipsized; the artist line never scrolls.
+  The device and the preview draw the same frames from a monotonic clock, at
+  about 10 fps and only while a title scrolls; unchanged frames are not
+  resent and frames are never stored as artwork. A key stacks icon (32-44px, shrinks first), a 24px bold
   value, an 8px bar and 14px detail lines, centered inside a 4px margin;
   detail lines that do not fit are left out, so nothing is cut at the edge. A
   touch section draws the binding section tile (15% alpha; 10% over the

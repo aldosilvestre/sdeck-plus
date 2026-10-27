@@ -62,6 +62,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   while paused, and a struck-through note with "Nothing playing" when no
   player plays. A playing player wins, then the paused one that played last;
   players are only read, never controlled.
+- **Scrolling Now playing titles.** A playing title too long for its key or
+  touch section scrolls right to left at a readable size (1.5 s pause, then
+  30 px/s, looping) instead of shrinking, on the device and in the preview;
+  paused titles stay still and ellipsized.
 - **Rename page folders** in place from **Page folders** (Enter saves, Escape
   cancels). Layer keys, the folder's pages and nested folders are kept, and the
   owning page's links to the folder follow the new name.

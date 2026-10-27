@@ -34,6 +34,8 @@ MPRIS over the D-Bus session bus for media actions (src/desktop_actions/mpris.rs
 - [x] N2 Worker + UI: polled/refreshed on the info worker, selectable in the live information settings, rendered with new binding-vocabulary glyphs (play, pause, idle media); GTK/render tests.
 - [x] N3 DESIGN.md, docs/index.html (live information), README features bullet, CHANGELOG.md, regenerated screenshots; manual check with `dbus-run-session` + mpv if available.
 
+- [x] N4 Marquee for long Now playing titles (keys and sections, device and preview); tests; docs.
+
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
 
@@ -100,5 +102,30 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
 - Checks: fmt ok; clippy -D warnings ok; headless suite ok (lib 343, bin 64 no-display,
   integration 2); display bin 64/64; examples build; git diff --check clean.
 
+### N4
+- Route: delegated direct (same writer; info_render, image_output, event_api, main.rs, tests).
+- Rule (`info_render::headline_layout`): Now playing titles shrink to at most 75% of the
+  headline size (key 24 -> 18px, section 26 -> 19px). A playing title that still overflows
+  scrolls at that floor, clipped to its text column; paused titles ellipsize at the floor.
+  Other sources keep the old shrink-to-60%-then-ellipsize rule.
+- `marquee_offset(text, column, elapsed)`: 1.5 s still, 30 px/s, 28 px gap, seamless loop;
+  `marquee_extent(value, section)` measures once; `*_at(.., elapsed)` variants in
+  info_render/image_output; phase zero = the static first frame (old entry points).
+- Device: `event_api::marquee::Marquees` on the HID owner thread follows every sent command
+  (strip and snapshots reset sections/all), sends due frames between input reads (100 ms
+  minimum per title, whole-pixel offset must change, at most 2 frames per pass), reports
+  only failures, and is per connection. Measured cost: ~11-13 ms render+encode and 5 (key) /
+  6 (section) 1024-byte reports per frame, hence the 2-frames-per-pass cap.
+- Preview: `InfoState` (derefs to the readings map) holds `PreviewMarquee`; one 100 ms
+  `glib::timeout_add_local` runs only while a title scrolls, redraws only moved titles, and
+  stops when none scrolls or their picture has no root.
+- Tests: marquee_offset, fit decision, frames at two phases differ only inside the text
+  rect, ticker start/stop/rate/strip/snapshot, HID sender (dedup, failure stops), GTK
+  preview (moves on tick, pause stops the real timer, detached preview stops it).
+- RED/GREEN: implementation written before its tests (no RED observed); GREEN lib 349,
+  display bin 64/64. Manual: mpv titled "Bohemian Rhapsody (Remastered 2011)" -> extent
+  (343, 112), frames at 0 s and 3 s differ; paused/idle static.
+- Screenshots: regenerated; only noise differences (short sample title), all restored.
+
 ## Next step
-Review the feature branch (RDD unavailable); push/PR are the user's decision.
+N5.
