@@ -365,22 +365,33 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   labeled, with guidance that testing executes and saving only persists.
 - **Button text:** the configuration inspector contains one keypad-only
   Add text / Edit text button. Both states open the same anchored popup,
-  prefilled with the selected key's saved settings. The editor fields and
+  prefilled with the selected key's saved settings. A muted context line under
+  the title names what is edited, "Key N on “<view>”", where the view is the
+  page indicator's label (profile / folders / page). The editor fields and
   enlarged preview appear only in the popup. A compact two-column body keeps
   the entire 120px live preview next to the form, with no popup scrolling at
   640x480 or larger. Only a long multiline text input may scroll internally.
-  Use a native font chooser button, a 6–120px size spinner and linked, grouped
-  toggle buttons for horizontal/vertical orientation and separate
-  left/center/right and top/center/bottom alignment. Alignment choices use
-  16px monochrome line icons, like word-processor alignment tools, instead of
-  button captions. Horizontal icons line up text edges; vertical icons position
-  text between top and bottom guides. They inherit the control's theme color
-  and retain tooltips, distinct accessible names and native grouped selection.
+  Use a native font chooser button, a 6–120px size spinner, and one row with
+  a linked pair of orientation icon toggles (upright and clockwise-rotated
+  "Ab", named Horizontal and Vertical) beside a 3x3 Position grid of grouped
+  toggles (one active; Top left .. Bottom right, each a key outline with a
+  dot where the text sits). Grid cells map row to vertical and column to
+  horizontal alignment, inherit the control's theme color, are reachable with
+  Tab and arrow keys, and keep tooltips and distinct accessible names.
   Vertical text
   rotates the layout 90 degrees clockwise. White glyphs with a thin black
-  outline sit above the existing background image. An enlarged 120px preview
-  and the physical key preview share the device compositor. Save text is
-  explicit; removing text preserves the background, and clearing the background
+  outline sit above the key's background. The enlarged 120px preview and the
+  physical key preview show the key as the device does: its artwork, else its
+  binding icon tile when the text leaves the icon a band, else the neutral
+  black key; the derived picture is never stored. When the Pango ink extents
+  exceed the 116px text area, a warning-toned "Text does not fit; try a
+  smaller size" sits under the preview; it is informational. Save text is
+  explicit and enabled only for a valid, nonblank value that differs from the
+  saved one (Ctrl+Enter saves; plain Enter inserts a line); its tooltip says
+  why it is disabled. A muted "Unsaved changes" hint under the preview tracks
+  the draft; it never sits in the button row, so it cannot widen the popup.
+  Remove text is shown only for a key with saved text. Removing text
+  preserves the background, and clearing the background
   preserves text. Closing without saving discards the draft preview. Changing
   key or profile closes the popup and reloads that context. Editor chrome
   continues to use the GTK system font and existing spacing/field primitives.

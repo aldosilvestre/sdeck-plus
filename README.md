@@ -217,10 +217,11 @@ keypad page; it does not select a touch page.
 
 ![Touch strip selected in the editor](docs/screenshots/touch-strip.png)
 
-**Button text.** **Add text** opens the text editor: font, size, orientation
-and alignment, with a live preview of the key composition. Word-like icons select
-left, center or right and top, center or bottom. Hover for a tooltip; the controls
-also retain distinct accessible names and keyboard focus.
+**Button text.** **Add text** opens the text editor for the selected key
+(the popup names it, for example "Key 1 on “Base / Page 1”"): font, size, a
+pair of orientation icons and a 3x3 position grid, with a live preview of the
+key as the device will show it. Hover for a tooltip; the controls also retain
+distinct accessible names and keyboard focus.
 
 ![Button text editor with a live preview](docs/screenshots/button-text-editor.png)
 
@@ -370,19 +371,29 @@ Saved artwork and profiles are preserved. On the next launch, brightness is rest
 ### Button text
 
 Select a key and click **Add text** in its configuration panel. Once text is
-saved, **Edit text** reopens the same popup with the saved settings.
+saved, **Edit text** reopens the same popup with the saved settings. A line
+under the popup title names the key and the page being edited, for example
+"Key 3 on “Everyday / Page 1”".
 Choose an installed font, a size from 6 to 120 pixels, horizontal or vertical
-orientation, and separate horizontal and vertical alignment. Vertical rotates
-the whole text 90 degrees clockwise; new lines are supported. Text is white
-with a black outline and is drawn over the background image, or over black
-when no image is assigned. Oversized text is clipped to the key.
+orientation (the upright and rotated "Ab" icons), and a position from the 3x3
+grid (top left through bottom right). Vertical rotates the whole text 90
+degrees clockwise; new lines are supported. Text is white with a black outline.
 
-The enlarged preview and the key preview show the same composition sent to
-the device. **Save text** applies and persists the settings for that key in the
-active profile/page and closes the popup. Closing without saving discards
-draft changes. **Remove text** keeps the
-background image; clearing the background keeps the text. Text settings are
-restored when reopening the application or switching profiles/pages.
+The enlarged preview shows the key exactly as the device will: the text over
+the key's background image, or, for a key without an image, over its action
+icon when the text leaves room for it (text at the top or bottom), otherwise
+over black. When the text is larger than the key at the chosen size, a warning
+under the preview says it does not fit; you can still save it, and the device
+clips it to the key.
+
+**Save text** (or **Ctrl+Enter**; plain Enter adds a new line) applies and
+persists the settings for that key in the active profile/page and closes the
+popup. It is available only when the text is not blank and differs from what is
+saved; "Unsaved changes" appears under the preview while it does. Closing
+without saving discards draft changes. **Remove text** appears only for a key
+with saved text; it keeps the background image, and clearing the background
+keeps the text. Text settings are restored when reopening the application or
+switching profiles/pages.
 
 ### Background images
 

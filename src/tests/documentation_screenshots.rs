@@ -373,7 +373,13 @@ fn capture_documentation_screenshots() {
     wait_for_frame(&widgets.root);
     assert_reachable(&editor.open, &widgets.root);
     wait_for_frame(&widgets.root);
-    menu(&directory, &editor.open, "button-text-editor");
+    // Show an edited draft: Save enabled, the unsaved hint and a grid choice.
+    editor.panel.set_autohide(false);
+    editor.open.popup();
+    editor.input.buffer().set_text("Play\nNow");
+    editor.position[7].set_active(true);
+    save(&directory, editor.panel.upcast_ref(), "button-text-editor");
+    editor.open.popdown();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&widgets.root);
     assert_reachable(&widgets.target_picker, &widgets.root);

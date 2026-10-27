@@ -23,7 +23,7 @@ there is no keyboard shortcut to save.
 ## Tasks
 - [x] T1 Context and state: header context "Key N on “<page>”"; Save insensitive when unchanged or invalid; Remove only when the key has saved text; Ctrl+Enter saves; unsaved-changes hint; GTK tests.
 - [x] T2 Layout: single 3x3 "Position" grid replacing the two alignment rows; orientation as compact icon toggles; preview drawn on the key's real background (artwork or binding icon tile) with an overflow warning when the text does not fit; fit tests still pass. GTK tests.
-- [ ] T3 DESIGN.md, README.md, CHANGELOG.md, regenerated button-text-editor screenshot.
+- [x] T3 DESIGN.md, README.md, CHANGELOG.md, regenerated button-text-editor screenshot.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -87,5 +87,24 @@ bin suite 63/63; git diff --check ok. Commit: see git log
 (`feat(button-text): position grid, icon orientation and real key preview`).
 Engram mirror pending.
 
+### T3
+Route: delegated direct (writer). Layout polish commit first
+(`style(button-text): align the text popup fields in one grid`): Font/Size and
+Orientation/Position share one gtk::Grid so Position sits under Size; the
+context line gets 4px before the form. Then DESIGN.md (button text contract:
+context line, orientation pair + Position grid, real key background, overflow
+warning, Save/Remove/unsaved/Ctrl+Enter rules), README.md (overview blurb and
+Button text section), CHANGELOG.md (Changed). The documentation generator now
+opens the popup on an edited draft ("Play\nNow", Bottom center) so Save is
+enabled and the unsaved hint shows. Regenerated docs/screenshots; only
+button-text-editor.png (462x490) changed visually (AE ~23k); the other five
+regenerated PNGs differed by ~90-600 pixels of noise (temp-path pid in
+import-configuration) and were restored.
+Test-first exception: passive docs/screenshots; checked by reading the PNG and
+the light/dark QA captures. Checks: fmt ok; clippy -D warnings ok; headless
+333 lib + 63 bin + 2 ok; display bin suite 63/63; `STREAMDECK_TEXT_QA_DIR`
+fit path ok; git diff --check ok. Commit: see git log (`docs: describe the
+button text popup ...`). Engram mirror pending.
+
 ## Next step
-T3.
+Human review; push/PR remain the user's decision.

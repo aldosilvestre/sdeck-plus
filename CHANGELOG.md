@@ -8,6 +8,14 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Button text popup.** A line under the title names the edited key and page
+  ("Key 3 on “Everyday / Page 1”"). One 3x3 Position grid replaces the two
+  alignment rows, and orientation is a linked pair of icon toggles. The
+  preview draws the text on the key's real background: its artwork, else its
+  action icon tile, else the neutral key. Save text is enabled only for valid
+  changes, Remove text appears only for saved text, an "Unsaved changes" hint
+  tracks the draft, Ctrl+Enter saves, and a warning appears when the text does
+  not fit the key (saving is still allowed).
 - **Page folders popover.** Folders are listed as rows with Open, Link to
   control, Rename and Delete icon actions (tooltips and accessible names
   include the folder name) instead of a dropdown with captioned buttons. The
