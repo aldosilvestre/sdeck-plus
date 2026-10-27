@@ -374,7 +374,7 @@ pub fn prepare_icon_jpeg(
             }
         }
         ArtworkTarget::EncoderZone(zone) => {
-            let overlay = crate::binding_icons::compose_zone_image(icon, caption)?;
+            let overlay = crate::binding_icons::compose_zone_image(icon, caption, previous, next)?;
             let indicators = compose_touchscreen_zone(zone, None, None, previous, next)?;
             indicators.composite(
                 &overlay,

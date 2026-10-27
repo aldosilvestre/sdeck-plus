@@ -373,13 +373,23 @@ pub fn compose_key_image(
     )))
 }
 
-/// Compose a transparent 200x100 touch-section foreground for a section
-/// without artwork: the icon with a one-line caption under it. It is drawn
-/// over the strip background exactly like section artwork.
+/// Compose a 200x100 touch-section foreground for a section without artwork:
+/// a translucent graphite tile with rounded corners (the strip background
+/// shows through it and around it), a large icon on the left and up to two
+/// caption lines beside it. It is drawn over the strip like section artwork.
+/// `previous`/`next` reserve the outer edge where a page indicator paints.
 ///
 /// # Errors
 /// Returns cairo or allocation failures.
-pub fn compose_zone_image(icon: BindingIcon, caption: &str) -> Result<Pixbuf, String> {
+pub fn compose_zone_image(
+    icon: BindingIcon,
+    caption: &str,
+    previous: bool,
+    next: bool,
+) -> Result<Pixbuf, String> {
+    // Page indicators occupy about 32px at the section's outer edge.
+    let left = if previous { 30.0 } else { 0.0 };
+    let right = if next { 30 } else { 0 };
     let canvas = vec![0; (ZONE_WIDTH * ZONE_HEIGHT * 4) as usize];
     let mut surface = cairo::ImageSurface::create_for_data(
         canvas,
@@ -391,11 +401,18 @@ pub fn compose_zone_image(icon: BindingIcon, caption: &str) -> Result<Pixbuf, St
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        paint_outlined(&cairo, icon, (100.0, 35.0), 52.0, INK)
+        draw_zone_tile(&cairo).map_err(|error| error.to_string())?;
+        let size = if previous || next { 50.0 } else { 58.0 };
+        paint_outlined(&cairo, icon, (left + 10.0 + size / 2.0, 50.0), size, INK)
             .map_err(|error| error.to_string())?;
         if !caption.is_empty() {
-            let layout = caption_layout(caption, 18.0, ZONE_WIDTH - 16, 1);
-            draw_caption(&cairo, &layout, (8.0, 68.0)).map_err(|error| error.to_string())?;
+            let x = left + size + 22.0;
+            let width = ZONE_WIDTH - right - 8 - x as i32;
+            let layout = caption_layout(caption, 17.0, width, 2);
+            layout.set_alignment(pango::Alignment::Left);
+            let (_, height) = layout.pixel_size();
+            let top = (f64::from(ZONE_HEIGHT) - f64::from(height)) / 2.0;
+            draw_caption(&cairo, &layout, (x, top)).map_err(|error| error.to_string())?;
         }
     }
     let data = surface.data().map_err(|error| error.to_string())?;
@@ -421,6 +438,20 @@ pub fn compose_zone_image(icon: BindingIcon, caption: &str) -> Result<Pixbuf, St
         ZONE_HEIGHT,
         ZONE_WIDTH * 4,
     ))
+}
+
+/// The section tile: graphite like the hardware rail, translucent so strip
+/// artwork stays visible, with a fine light edge.
+fn draw_zone_tile(cairo: &Context) -> Result<(), cairo::Error> {
+    rounded(cairo, 3.5, 4.5, 193.0, 91.0, 12.0);
+    let fill = cairo::LinearGradient::new(0.0, 4.0, 0.0, 96.0);
+    fill.add_color_stop_rgba(0.0, 0.20, 0.23, 0.27, 0.80);
+    fill.add_color_stop_rgba(1.0, 0.11, 0.13, 0.16, 0.80);
+    cairo.set_source(&fill)?;
+    cairo.fill_preserve()?;
+    cairo.set_source_rgba(1.0, 1.0, 1.0, 0.16);
+    cairo.set_line_width(1.0);
+    cairo.stroke()
 }
 
 /// An opaque RGB pixbuf as an RGB24 cairo surface.

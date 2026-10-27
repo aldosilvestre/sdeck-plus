@@ -24,7 +24,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T4 Preview dials and touch zones show the action icon next to/with the caption.
 - [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [x] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
-- [ ] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
+- [x] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
 - [ ] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
 - [ ] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
 - [ ] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
@@ -136,3 +136,15 @@ regenerated with the documented command.
 ## Next step
 Human review of `feat/binding-icons`; push/PR remain the user's decision.
 Optional real-hardware check: `cargo run --offline --example verify_streamdeck -- --device-controls`.
+
+### T7 (delegated writer)
+`compose_zone_image(icon, caption, previous, next)`: translucent graphite tile
+(rounded 12px, 80% alpha gradient like the rail, 16% white edge) so strip
+artwork shows through and around it; 58px icon on the left with up to two
+17px bold caption lines beside it, vertically centered. Sections with an
+edge page indicator reserve 30px at that edge (icon 50px) so the chevron keeps
+its room; chevrons still paint last. Same composer for preview and the device
+worker (`prepare_icon_jpeg` over the strip crop, or black).
+RED: `touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile` (no tile)
+and `edge_page_indicators_keep_their_room_beside_the_section_icon` (signature),
+then GREEN. Checks: clippy ok, display bin suite only the known failure.

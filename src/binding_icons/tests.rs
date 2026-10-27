@@ -326,12 +326,56 @@ fn user_text_keeps_its_placement_and_the_icon_uses_the_free_band() {
 }
 
 #[test]
-fn touch_sections_show_the_icon_on_a_transparent_foreground() {
-    let image = compose_zone_image(BindingIcon::ObsScene, "OBS scene: Cam").unwrap();
+fn touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile() {
+    let image =
+        compose_zone_image(BindingIcon::ObsScene, "OBS scene: Camera", false, false).unwrap();
     assert_eq!((image.width(), image.height()), (200, 100));
     assert!(image.has_alpha());
-    assert!(bright(&image, 10..60) > 60, "icon");
-    assert!(bright(&image, 62..92) > 20, "caption");
     let bytes = image.read_pixel_bytes();
-    assert_eq!(bytes[3], 0, "corners stay transparent over the strip");
+    let stride = image.rowstride() as usize;
+    let pixel = |x: usize, y: usize| &bytes[y * stride + x * 4..y * stride + x * 4 + 4];
+    let bright_in = |columns: std::ops::Range<usize>| {
+        (12..88)
+            .flat_map(|y| columns.clone().map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = pixel(x, y);
+                p[3] > 200 && p[0] > 200 && p[1] > 200
+            })
+            .count()
+    };
+    assert!(bright_in(6..78) > 250, "a large icon on the left");
+    assert!(bright_in(84..194) > 60, "the caption to its right");
+    // A translucent graphite tile, not transparent and not black, with
+    // rounded transparent corners so the strip shows around it.
+    let tile = pixel(80, 92);
+    assert!(tile[3] > 60 && tile[3] < 255, "translucent tile: {tile:?}");
+    assert!(tile[0] > 20, "graphite, not black: {tile:?}");
+    assert_eq!(pixel(0, 0)[3], 0);
+    assert_eq!(pixel(199, 99)[3], 0);
+}
+
+#[test]
+fn edge_page_indicators_keep_their_room_beside_the_section_icon() {
+    let bright_columns = |image: &gtk::gdk_pixbuf::Pixbuf, columns: std::ops::Range<usize>| {
+        let bytes = image.read_pixel_bytes();
+        let stride = image.rowstride() as usize;
+        (30..70)
+            .flat_map(|y| columns.clone().map(move |x| y * stride + x * 4))
+            .filter(|&o| bytes[o + 3] > 200 && bytes[o] > 200 && bytes[o + 1] > 200)
+            .count()
+    };
+    let plain = compose_zone_image(BindingIcon::NextPage, "Next page", false, false).unwrap();
+    let previous = compose_zone_image(BindingIcon::NextPage, "Next page", true, false).unwrap();
+    let next = compose_zone_image(BindingIcon::Mute, "Media Mute Mute Mute", false, true).unwrap();
+    assert!(bright_columns(&plain, 0..34) > 0 || bright_columns(&plain, 34..80) > 0);
+    assert_eq!(
+        bright_columns(&previous, 0..32),
+        0,
+        "left chevron area stays clear"
+    );
+    assert_eq!(
+        bright_columns(&next, 168..200),
+        0,
+        "right chevron area stays clear"
+    );
 }

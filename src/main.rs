@@ -2936,7 +2936,6 @@ impl ArtworkUi {
     /// background, and an indicated section's icon command carries its page
     /// indicators instead of a separate indicator command.
     fn with_icons(&self, layer: &str, mut commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
-        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
         let strip_path = self.info_background(layer, ArtworkTarget::TouchStripBackground);
         for target in (1..=8)
             .map(ArtworkTarget::Keypad)
@@ -2961,8 +2960,8 @@ impl ArtworkUi {
                 strip_path: matches!(target, ArtworkTarget::EncoderZone(_))
                     .then(|| strip_path.clone())
                     .flatten(),
-                previous: target == ArtworkTarget::EncoderZone(1) && previous,
-                next: target == ArtworkTarget::EncoderZone(4) && next,
+                previous: icon.previous,
+                next: icon.next,
             };
             let replaced = commands.iter().position(|existing| match existing {
                 ArtworkCommand::Assign { target: shown, .. }
@@ -3208,10 +3207,13 @@ impl ArtworkUi {
         {
             return None;
         }
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
         Some(ControlIcon {
             target,
             icon,
             caption: sdeck_plus::binding_editor::action_caption(&action),
+            previous: target == ArtworkTarget::EncoderZone(1) && previous,
+            next: target == ArtworkTarget::EncoderZone(4) && next,
         })
     }
 
@@ -3289,6 +3291,9 @@ struct ControlIcon {
     target: ArtworkTarget,
     icon: BindingIcon,
     caption: String,
+    /// A page indicator paints at this section's outer left/right edge.
+    previous: bool,
+    next: bool,
 }
 
 impl ControlIcon {
@@ -3302,9 +3307,13 @@ impl ControlIcon {
             ArtworkTarget::Keypad(_) => {
                 sdeck_plus::binding_icons::compose_key_image(self.icon, &self.caption, text)
             }
-            ArtworkTarget::EncoderZone(_) => {
-                sdeck_plus::binding_icons::compose_zone_image(self.icon, &self.caption).map(Some)
-            }
+            ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
+                self.icon,
+                &self.caption,
+                self.previous,
+                self.next,
+            )
+            .map(Some),
             ArtworkTarget::TouchStripBackground => Ok(None),
         }
     }
