@@ -429,3 +429,113 @@ fn assert_icon_action_consistency() {
     );
     eprintln!("GTK icon action consistency assertions executed");
 }
+
+#[test]
+fn device_snapshot_draws_binding_icons_only_where_the_preview_does() {
+    run_gtk_test(assert_device_icons);
+}
+
+fn assert_device_icons() {
+    let Some(fixture) = icon_fixture("device-icons", |store, images, source| {
+        let command = Action::Command("make".into());
+        store
+            .bind("Base", Trigger::KeyPress(1), command.clone())
+            .unwrap();
+        store
+            .bind("Base", Trigger::KeyPress(2), command.clone())
+            .unwrap();
+        store
+            .bind("Base", Trigger::KeyPress(3), Action::None)
+            .unwrap();
+        store.bind("Base", Trigger::KeyPress(5), command).unwrap();
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), source)
+            .unwrap();
+        // Centered user text leaves no room: key 5 keeps its text picture.
+        images
+            .set_button_text_in_layer(
+                "Base",
+                ArtworkTarget::Keypad(5),
+                sdeck_plus::button_text::ButtonText {
+                    text: "Build".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // A second touch page puts a "previous" indicator on section 1.
+        let organization = sdeck_plus::organization::Organization::in_memory(store);
+        store.initialize_touchscreens(&organization, images).unwrap();
+        store.create_touchscreen_page("Base").unwrap();
+        store
+            .bind("Base", Trigger::ZoneTap(1), Action::Emit("lights".into()))
+            .unwrap();
+        store
+            .bind("Base", Trigger::ZonePress(2), Action::Command("ls".into()))
+            .unwrap();
+    }) else {
+        return;
+    };
+    let snapshot = fixture
+        .hardware
+        .try_iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::Replace(commands) => Some(commands),
+            _ => None,
+        })
+        .last()
+        .expect("a device snapshot");
+    let icons: Vec<(ArtworkTarget, BindingIcon, bool)> = snapshot
+        .iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::ComposeIcon {
+                target,
+                icon,
+                previous,
+                ..
+            } => Some((*target, *icon, *previous)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        icons,
+        [
+            (ArtworkTarget::Keypad(2), BindingIcon::Command, false),
+            (ArtworkTarget::EncoderZone(1), BindingIcon::NamedEvent, true),
+            (ArtworkTarget::EncoderZone(2), BindingIcon::Command, false),
+        ]
+    );
+    assert!(snapshot
+        .iter()
+        .any(|command| matches!(command, ArtworkCommand::ComposeButton { key: 5, .. })));
+    // Indicated section 1 is drawn once, by its icon command.
+    assert!(!snapshot.iter().any(|command| matches!(
+        command,
+        ArtworkCommand::ComposeTouchscreenZone { zone: 1, .. }
+    )));
+    // The worker turns each command into a device JPEG without touching disk.
+    for command in snapshot {
+        if let ArtworkCommand::ComposeIcon {
+            target,
+            icon,
+            caption,
+            text,
+            strip_path,
+            previous,
+            next,
+        } = command
+        {
+            let jpeg = sdeck_plus::image_output::prepare_icon_jpeg(
+                target,
+                icon,
+                &caption,
+                text.as_ref(),
+                strip_path.as_deref(),
+                previous,
+                next,
+            )
+            .unwrap();
+            assert_eq!(&jpeg[..2], &[0xff, 0xd8]);
+        }
+    }
+    eprintln!("GTK device binding icon assertions executed");
+}

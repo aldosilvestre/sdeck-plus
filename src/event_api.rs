@@ -106,6 +106,19 @@ pub enum ArtworkCommand {
         previous: bool,
         next: bool,
     },
+    /// A key or touch section without artwork of its own showing its
+    /// binding's icon, derived at render time and never stored. Touch
+    /// sections draw over the strip crop with page indicators last.
+    ComposeIcon {
+        target: ArtworkTarget,
+        icon: crate::binding_icons::BindingIcon,
+        caption: String,
+        /// The key's user button text, kept exactly where it was placed.
+        text: Option<crate::button_text::ButtonText>,
+        strip_path: Option<PathBuf>,
+        previous: bool,
+        next: bool,
+    },
     /// A live information picture replaces a key or touch-zone image.
     ComposeInfo {
         target: ArtworkTarget,
@@ -300,6 +313,26 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
                 strip_path.as_deref(),
             )?,
         ),
+        ArtworkCommand::ComposeIcon {
+            target,
+            icon,
+            caption,
+            text,
+            strip_path,
+            previous,
+            next,
+        } => (
+            target,
+            image_output::prepare_icon_jpeg(
+                target,
+                icon,
+                &caption,
+                text.as_ref(),
+                strip_path.as_deref(),
+                previous,
+                next,
+            )?,
+        ),
         ArtworkCommand::Replace(_) => unreachable!("snapshots contain target commands"),
     };
     image_output::encode_reports(target, &jpeg)
@@ -322,7 +355,8 @@ fn process_artwork(
         let target = match &command {
             ArtworkCommand::Assign { target, .. }
             | ArtworkCommand::Clear { target }
-            | ArtworkCommand::ComposeInfo { target, .. } => *target,
+            | ArtworkCommand::ComposeInfo { target, .. }
+            | ArtworkCommand::ComposeIcon { target, .. } => *target,
             ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
             ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
                 ArtworkTarget::EncoderZone(*zone)

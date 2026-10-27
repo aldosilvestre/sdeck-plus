@@ -2927,7 +2927,58 @@ impl ArtworkUi {
                 other.push(self.touchscreen_zone_command(layer, zone));
             }
         }
-        other
+        self.with_icons(layer, other)
+    }
+
+    /// Replace the pictures of keys and touch sections without artwork by
+    /// their binding icon, exactly where the preview shows one. Keys keep
+    /// their position in the snapshot; sections go after the strip
+    /// background, and an indicated section's icon command carries its page
+    /// indicators instead of a separate indicator command.
+    fn with_icons(&self, layer: &str, mut commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
+        let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
+        let strip_path = self.info_background(layer, ArtworkTarget::TouchStripBackground);
+        for target in (1..=8)
+            .map(ArtworkTarget::Keypad)
+            .chain((1..=4).map(ArtworkTarget::EncoderZone))
+        {
+            let Some(icon) = self.control_icon(layer, target) else {
+                continue;
+            };
+            let text = self
+                .store
+                .borrow()
+                .as_ref()
+                .and_then(|store| store.button_text_in_layer(layer, target).cloned());
+            if !sdeck_plus::binding_icons::key_has_room(text.as_ref()) {
+                continue;
+            }
+            let command = ArtworkCommand::ComposeIcon {
+                target,
+                icon: icon.icon,
+                caption: icon.caption,
+                text,
+                strip_path: matches!(target, ArtworkTarget::EncoderZone(_))
+                    .then(|| strip_path.clone())
+                    .flatten(),
+                previous: target == ArtworkTarget::EncoderZone(1) && previous,
+                next: target == ArtworkTarget::EncoderZone(4) && next,
+            };
+            let replaced = commands.iter().position(|existing| match existing {
+                ArtworkCommand::Assign { target: shown, .. }
+                | ArtworkCommand::Clear { target: shown } => *shown == target,
+                ArtworkCommand::ComposeButton { key, .. } => target == ArtworkTarget::Keypad(*key),
+                ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
+                    target == ArtworkTarget::EncoderZone(*zone)
+                }
+                _ => false,
+            });
+            match replaced {
+                Some(index) => commands[index] = command,
+                None => commands.push(command),
+            }
+        }
+        commands
     }
 
     /// Draw the same picture in the window's preview of `target`.

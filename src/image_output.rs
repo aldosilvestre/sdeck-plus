@@ -352,6 +352,79 @@ pub fn prepare_touchscreen_zone_jpeg(
     encode_jpeg(&overlay)
 }
 
+/// Encode a binding icon picture for a key or touch section that has no
+/// artwork of its own. Keys keep the user's button text where it was placed;
+/// touch sections draw over their strip crop with page indicators painted last.
+/// Everything is composed in memory on the caller's (worker) thread.
+pub fn prepare_icon_jpeg(
+    target: ArtworkTarget,
+    icon: crate::binding_icons::BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+    strip_background: Option<&Path>,
+    previous: bool,
+    next: bool,
+) -> Result<Vec<u8>, String> {
+    match target {
+        ArtworkTarget::Keypad(_) => {
+            match crate::binding_icons::compose_key_image(icon, caption, text)? {
+                Some(image) => encode_jpeg(&image),
+                // No free band beside the user's text: the plain text picture.
+                None => prepare_button_jpeg(None, text.unwrap_or(&ButtonText::default())),
+            }
+        }
+        ArtworkTarget::EncoderZone(zone) => {
+            let overlay = crate::binding_icons::compose_zone_image(icon, caption)?;
+            let indicators = compose_touchscreen_zone(zone, None, None, previous, next)?;
+            indicators.composite(
+                &overlay,
+                0,
+                0,
+                200,
+                100,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                InterpType::Nearest,
+                255,
+            );
+            let section = match strip_background {
+                Some(strip) => {
+                    let strip = prepare_background(
+                        dimensions(ArtworkTarget::TouchStripBackground)?,
+                        strip,
+                    )?;
+                    strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100)
+                }
+                None => {
+                    let black = Pixbuf::new(Colorspace::Rgb, false, 8, 200, 100)
+                        .ok_or("could not allocate touchscreen section")?;
+                    black.fill(0x000000ff);
+                    black
+                }
+            };
+            overlay.composite(
+                &section,
+                0,
+                0,
+                200,
+                100,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                InterpType::Nearest,
+                255,
+            );
+            encode_jpeg(&section)
+        }
+        ArtworkTarget::TouchStripBackground => {
+            Err("binding icons cannot replace the touch strip background".into())
+        }
+    }
+}
+
 /// Encode a live information picture as a device-ready JPEG for a key or touch
 /// section, drawn over `background` (the target's own artwork) when there is one.
 pub fn prepare_info_jpeg(

@@ -304,6 +304,18 @@ const KEY: i32 = 120;
 const ZONE_WIDTH: i32 = 200;
 const ZONE_HEIGHT: i32 = 100;
 
+/// Whether a key with this user text has a free band for its binding icon:
+/// no text, or horizontal text aligned to the top or bottom.
+pub fn key_has_room(text: Option<&ButtonText>) -> bool {
+    match text.filter(|text| !text.text.is_empty()) {
+        None => true,
+        Some(text) => {
+            text.orientation == TextOrientation::Horizontal
+                && text.vertical_alignment != VerticalAlignment::Center
+        }
+    }
+}
+
 /// Compose the 120x120 image of a key that has no artwork of its own: the
 /// binding's icon over black, with `caption` below it, or with the user's
 /// button text exactly where it was placed.
@@ -319,6 +331,9 @@ pub fn compose_key_image(
     caption: &str,
     text: Option<&ButtonText>,
 ) -> Result<Option<Pixbuf>, String> {
+    if !key_has_room(text) {
+        return Ok(None);
+    }
     let text = text.filter(|text| !text.text.is_empty());
     // (icon center y, icon size, caption) for each free band.
     let (center_y, size, caption) = match text {

@@ -19,9 +19,9 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 
 ## Tasks
 - [x] T1 Icon vocabulary: one action -> icon mapping (Action, DesktopAction, FeatureAction incl. OBS) with a fallback.
-- [ ] T2 Key icons: keys without artwork render icon + label (preview and device).
+- [x] T2 Key icons: keys without artwork render icon + label (preview and device).
 - [x] T3 Action type menu shows an icon per action type.
-- [ ] T4 Preview dials and touch zones show the action icon next to/with the caption.
+- [x] T4 Preview dials and touch zones show the action icon next to/with the caption.
 - [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [ ] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
 
@@ -95,11 +95,16 @@ RED: `binding_icon_tests::icon_actions_share_one_size_and_one_delete_icon`
 (profile delete used edit-delete), then GREEN. Checks: fmt ok, clippy ok,
 display bin suite 48/49 (only the known base failure).
 
-## Next step
-Blocked on edit surface: physical-device output of key and touch-section icons
-needs `src/event_api.rs` (one new `ArtworkCommand` variant carrying target,
-icon, caption, optional user text, strip path and page indicators) and
-`src/image_output.rs` (JPEG preparation over the strip crop with indicators
-last, reusing the private `encode_jpeg`/`prepare_background`). Then T2/T4
-device wiring in `desired_artwork_commands_for_owners`/`with_info`, then T6
-(DESIGN/README/CHANGELOG, a screenshot fixture key without artwork, regenerate).
+### T2/T4 device (delegated writer, surfaces extended by the user)
+`ArtworkCommand::ComposeIcon { target, icon, caption, text, strip_path,
+previous, next }` (event_api.rs) and `image_output::prepare_icon_jpeg`: keys use
+`compose_key_image` (falls back to the plain text picture), sections compose
+icon + page indicators over the strip crop (black without a strip), all in
+memory on the HID worker. `ArtworkUi::with_icons` (main.rs) substitutes these
+commands exactly where the preview draws an icon (`control_icon` +
+`binding_icons::key_has_room`); an indicated section's icon command carries
+its indicators instead of a separate `ComposeTouchscreenZone`.
+RED: `binding_icon_tests::device_snapshot_draws_binding_icons_only_where_the_preview_does`
+failed to compile (no `ComposeIcon`/`prepare_icon_jpeg`), then GREEN.
+Checks: fmt ok, clippy ok, lib 314/314, display bin suite 49/50 (only the known
+base failure, same panic as base).
