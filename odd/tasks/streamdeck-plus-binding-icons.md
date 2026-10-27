@@ -20,7 +20,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 ## Tasks
 - [x] T1 Icon vocabulary: one action -> icon mapping (Action, DesktopAction, FeatureAction incl. OBS) with a fallback.
 - [ ] T2 Key icons: keys without artwork render icon + label (preview and device).
-- [ ] T3 Action type menu shows an icon per action type.
+- [x] T3 Action type menu shows an icon per action type.
 - [ ] T4 Preview dials and touch zones show the action icon next to/with the caption.
 - [ ] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [ ] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
@@ -46,3 +46,14 @@ picture serves the device JPEGs and GTK widgets. 37 icons incl. `generic`
 fallback and `none` (menu only, never drawn on controls).
 RED: `binding_icons::tests` failed to compile (no `BindingIcon`/`paint`); GREEN 4/4.
 Contact sheet inspected at 48px and 16px.
+
+### T3 (delegated writer)
+`src/ui/binding_icon.rs` (bin-only, mounted like clamp/scaled_bin because
+examples include `ui.rs` directly): `binding_icon` DrawingArea (16px, theme
+foreground via the style context, presentation role, `binding-icon` class,
+widget name = icon id) and `icon_dropdown` factories. The Action dropdown shows
+the icon in the closed button and in each menu row; menu rows replicate GTK's
+`object-select-symbolic` check mark on the selected row. Labels unchanged.
+RED: `binding_icon_tests::action_menu_rows_show_an_icon_name_and_check_mark`
+(no icon widgets), then GREEN. Checks: fmt ok, clippy ok, display bin suite
+45/46 (only the known base failure).

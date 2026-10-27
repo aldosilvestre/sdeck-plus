@@ -34,6 +34,8 @@ mod tray_preference;
 mod ui;
 // Layout containers live beside ui.rs but are mounted here, because the
 // ui_showcase example includes ui.rs by path.
+#[path = "ui/binding_icon.rs"]
+mod binding_icon;
 #[path = "ui/clamp.rs"]
 mod clamp;
 #[path = "ui/scaled_bin.rs"]
@@ -1689,6 +1691,10 @@ impl BindingUi {
         args_row: GtkBox,
         modifier_row: GtkBox,
     ) -> Self {
+        binding_icon::icon_dropdown(
+            &action_picker,
+            sdeck_plus::binding_icons::BindingIcon::for_action_type,
+        );
         status.connect_label_notify(ui::clear_feedback);
         let action_guidance = ui::helper("");
         shortcut_reference::connect(&action_guidance);
@@ -3647,6 +3653,7 @@ mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::Mutex;
+    mod binding_icon_tests;
     mod button_swap_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;

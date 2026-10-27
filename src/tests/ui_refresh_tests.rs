@@ -2,11 +2,11 @@
 use super::*;
 use sdeck_plus::features::FeatureAction;
 
-struct Fixture {
+pub(super) struct Fixture {
     root: std::path::PathBuf,
-    window: ApplicationWindow,
-    widgets: MonitorWidgets,
-    layers: Rc<RefCell<LayerStore>>,
+    pub(super) window: ApplicationWindow,
+    pub(super) widgets: MonitorWidgets,
+    pub(super) layers: Rc<RefCell<LayerStore>>,
 }
 
 impl Drop for Fixture {
@@ -17,7 +17,7 @@ impl Drop for Fixture {
 }
 
 /// Production widgets at the default size, with an optional binding setup.
-fn fixture(tag: &str, setup: impl FnOnce(&mut LayerStore)) -> Option<Fixture> {
+pub(super) fn fixture(tag: &str, setup: impl FnOnce(&mut LayerStore)) -> Option<Fixture> {
     if !init_gtk_for_test() {
         assert!(
             std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),
