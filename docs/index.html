@@ -162,11 +162,27 @@
   .install h3 { margin: 0 0 0.4rem; }
   .install ul { color: var(--muted); padding-left: 1.2rem; }
 
+  .subhead { font-size: 1.3rem; margin: 2.5rem 0 1rem; }
+  .subhead:first-of-type { margin-top: 0; }
+  .docs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; align-items: start; }
+  .docs > * { min-width: 0; }
+  .docs .card.wide { grid-column: 1 / -1; }
+  .card h4 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+  .card p + p, .card p + ul, .card ul + p, .card p + ol, .card ol + p, .card pre + p, .card table + p { margin-top: 0.6rem; }
+  .card ul, .card ol { color: var(--muted); font-size: 0.95rem; padding-left: 1.2rem; margin: 0.6rem 0 0; }
+  .card li + li { margin-top: 0.25rem; }
+  .card code { overflow-wrap: anywhere; }
+  .card pre { margin: 0.6rem 0 0; }
+  .card pre code { overflow-wrap: normal; }
+  .card .actions-table { margin-top: 0.6rem; }
+  .card .actions-table th { width: auto; }
+  .card .actions-table th, .card .actions-table td { padding: 0.5rem 0.7rem; }
+
   footer { padding: 2.5rem 0; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
   footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
 
   @media (max-width: 880px) {
-    .hero .wrap, .feature, .install { grid-template-columns: 1fr; }
+    .hero .wrap, .feature, .install, .docs { grid-template-columns: 1fr; }
     .feature:nth-child(even) .feature-text { order: 0; }
     .highlights { grid-template-columns: 1fr 1fr; }
     nav.links a.optional { display: none; }
@@ -186,7 +202,9 @@
     <nav class="links">
       <a href="#features">Features</a>
       <a class="optional" href="#actions">Actions</a>
+      <a class="optional" href="#configuration">Configuration</a>
       <a href="#install">Install</a>
+      <a class="optional" href="#development">Development</a>
       <a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a>
     </nav>
   </div>
@@ -322,11 +340,11 @@
         <div class="feature-text">
           <h3>Button text</h3>
           <p>Draw text on any key with an installed font, a size from 6 to 120 px, horizontal or vertical orientation
-             and independent alignment. Word-like icon buttons select left, center, right, top, middle and bottom,
-             with tooltips and keyboard focus. The preview matches what is sent to the device.</p>
+             and a position on a 3x3 grid, with tooltips and keyboard focus. The popup names the key and page being edited,
+             and its preview shows the key exactly as the device will.</p>
         </div>
         <img class="shot" src="screenshots/button-text-editor.png" width="538" height="472" loading="lazy"
-             alt="Button text editor with six alignment icons and a live preview">
+             alt="Button text editor with a position grid and a live preview of the key">
       </div>
 
       <div class="feature">
@@ -419,14 +437,303 @@
       <table class="actions-table">
         <tr><th>System</th><td>Alternate two shortcuts, paste Unicode text with optional Enter, open files, folders or websites, close a process, scroll the mouse wheel</td></tr>
         <tr><th>Multimedia</th><td>Play/pause, stop, next/previous track, PipeWire volume up/down and mute, fixed or rotating audio output, play a local audio file, stop soundboard playback</td></tr>
-        <tr><th>Organization</th><td>Next, previous or specific page, enter a child folder, return to the parent</td></tr>
+        <tr><th>Organization</th><td>Next, previous or specific keypad page, enter a child folder, return to the parent; touch controls also offer next and previous touchscreen page</td></tr>
         <tr><th>Device</th><td>Absolute or relative brightness, sleep and wake, timers with countdown</td></tr>
         <tr><th>OBS</th><td>Select a scene, toggle recording or streaming, toggle input mute, show/hide a source</td></tr>
       </table>
     </div>
   </section>
 
-  <section id="install">
+  <section id="configuration">
+    <div class="wrap">
+      <h2>Configuration</h2>
+      <p class="section-lead">How each part of the application behaves, where it stores its data and what it needs from the system.
+        Saving or inspecting a binding never executes it; only <strong>Test action</strong> or input from the device does.
+        The app never installs packages, changes permissions or edits OBS configuration.</p>
+
+      <h3 class="subhead">Getting around</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Main window and connection status</h4>
+          <p>The header says in plain words whether the Stream Deck + is connected (for example "Stream Deck + not connected — plug it in")
+             next to a colored <strong>Not connected</strong>, <strong>Unavailable</strong>, <strong>Disconnected</strong> or <strong>Connected</strong> badge;
+             hover it for the USB IDs (VID <code>0x0FD9</code>, PID <code>0x0084</code>) and technical details.</p>
+          <p>If the device is absent, inaccessible or disconnected, the window stays open, reports the state and retries detection.
+             Touch gestures use Elgato's 800 × 100 logical-pixel space and are reported after the interaction completes,
+             not as separate contact start and release events. Each dial in the preview shows the action it is assigned to.</p>
+        </div>
+        <div class="card">
+          <h4>Configure an action</h4>
+          <ol>
+            <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
+            <li>Pick an event valid for that control: key press; dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes.</li>
+            <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
+            <li><strong>Save binding</strong> creates or updates the control event; <strong>Remove binding</strong> clears it.</li>
+          </ol>
+          <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
+             Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
+        </div>
+        <div class="card">
+          <h4>Assignment summaries</h4>
+          <p>Hover a control to see its assignments on the selected keypad page or touchscreen page, including <strong>Unassigned</strong> events:
+             dials list <strong>Press</strong>, <strong>CW</strong> and <strong>CCW</strong>; the strip lists tap, hold, flick and directional swipes.
+             Legacy exact-tick rotation overrides appear separately. Long text is shortened; select the event to see every saved field.
+             Summaries refresh after saving or removing bindings, changing layers and <strong>Go to profile or page</strong> actions.</p>
+        </div>
+        <div class="card">
+          <h4>Selection, live input and swapping keys</h4>
+          <p>The control being edited has a thick violet ring. A pressed key or dial gets a green outline and brightens while held,
+             a dial turn flashes amber, and a touch tap, hold or flick lights the touched zone in cyan, drawn over any artwork.</p>
+          <p>Drag a key onto another key in the preview to exchange their action, background image and text styling on the current page.
+             An empty key exchanges its empty configuration too. The exchange is saved automatically and never runs either action;
+             other pages, dials, touch zones and unsaved editor drafts are unchanged. Dropping on the same key or cancelling changes nothing.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">Controls and actions</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Action types</h4>
+          <p>The <strong>Action</strong> menu offers layer and page switching, shell commands, launching applications, keyboard shortcuts,
+             named events, the categorized <strong>More actions</strong>, <strong>Play sound</strong> and <strong>None</strong>.
+             Untouched buttons, including those on new profiles and pages, start with <strong>None</strong>: it keeps a saved binding that does nothing,
+             can still show artwork, text or live information, and never schedules a page return.</p>
+          <p><strong>Test action</strong> runs the selected action immediately and can affect the desktop, the device or OBS; test only what you intend to perform.</p>
+        </div>
+        <div class="card">
+          <h4>Dials and device brightness</h4>
+          <p>The four dials have independent press, clockwise and counterclockwise bindings, for example volume up and down on rotation and mute on press,
+             or relative brightness on another dial. Mouse-wheel directions are vertical or horizontal.</p>
+          <p>Device brightness is the Stream Deck's display, not the monitor backlight. Sleep sets brightness to zero and wake restores the remembered level;
+             before an explicit absolute level, relative and wake actions assume 100% because the device cannot report its brightness.
+             Legacy exact-tick rotation bindings remain supported and take priority over directional ones.</p>
+        </div>
+        <div class="card">
+          <h4>Sounds and audio output</h4>
+          <p>Choose <strong>Play sound</strong>, then <strong>Choose file...</strong> or enter a path. WAV, MP3, FLAC, OGG, M4A/AAC, Opus and other formats decoded by
+             <code>mpv</code> work. Playback replaces the app's previous sound; <strong>More actions &gt; Multimedia &gt; Stop audio file</strong> stops only app-owned playback,
+             not other media players.</p>
+          <p><strong>Change audio output</strong> switches the default PipeWire output with <code>wpctl</code>; <strong>Refresh</strong> discovers new outputs with <code>pw-dump</code>.
+             Bindings store the stable device name, so reconnecting does not select a different device; a disconnected saved device reports an error when used.
+             <strong>Rotate</strong> advances from the system's current output to the next connected one on each press, wrapping after the last.
+             Volume uses the default output in 5% steps, capped at 100%. Media transport uses the session's MPRIS player.</p>
+        </div>
+        <div class="card">
+          <h4>Text, files, websites and processes</h4>
+          <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
+             and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+             Closing an application targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
+        </div>
+        <div class="card">
+          <h4>Commands and application launch</h4>
+          <p>Applications are launched with distinct process arguments; no shell evaluates them. In the argument box, an empty box means zero arguments
+             and <code>\empty</code> on its own line means one empty argument. Backslash, newline, carriage return and tab are written as
+             <code>\\</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>, so leading and trailing spaces are preserved.</p>
+          <p>Only the <strong>Command</strong> action runs <code>/bin/sh -c</code> with the configured string. External actions run one at a time on a background worker,
+             and failures appear in the window without blocking it.</p>
+        </div>
+        <div class="card">
+          <h4>Return to a page afterwards</h4>
+          <p>A non-None binding can return to a page after a delay: tick <strong>Return to a page afterwards</strong>, pick the destination
+             (listed with its profile and folder, such as <code>Base</code> or <code>Studio / Page 2</code>) and a delay of 1–86400 seconds.
+             Pressing the key again restarts the wait and <strong>Device &gt; Cancel timer</strong> cancels it. Saving never starts the wait.</p>
+        </div>
+        <div class="card wide">
+          <h4>Physical keyboard actions and <code>/dev/uinput</code></h4>
+          <p><strong>Shortcut</strong> uses a Linux uinput virtual keyboard, not compositor dispatch, shell commands or text typing. Without modifiers it sends one key down/up;
+             with modifiers it holds them around the main key and releases them in reverse order (<code>CTRL + D</code>, <code>SUPER + RETURN</code>).
+             Modifiers are never kept held between actions; failed sends attempt release cleanup. <strong>Key names and aliases</strong> opens a reference of every accepted name,
+             without saving or running the draft.</p>
+          <ul>
+            <li>Chord text and modifier toggles are merged in CTRL, SHIFT, ALT, SUPER order. Names are case-insensitive; <code>Control</code> = <code>CTRL</code>,
+                <code>Win</code>/<code>Windows</code>/<code>Meta</code> = <code>SUPER</code>, <code>Return</code> = <code>Enter</code>. Uppercase letters do not add Shift.</li>
+            <li>Supported keys: ASCII letters and digits, F1–F24, Enter, Tab, Escape, Space, navigation, named punctuation, keypad and media keys. Unknown names,
+                empty segments, several main keys or modifier-only chords are rejected.</li>
+            <li>Media names: <code>XF86AudioLowerVolume</code>, <code>XF86AudioRaiseVolume</code>, <code>XF86AudioMute</code>, <code>XF86AudioMicMute</code> (<code>mute_mic</code>),
+                <code>XF86AudioPlay</code> (<code>play</code>), <code>XF86AudioPause</code> (<code>media_pause</code>), <code>play_pause</code>, <code>XF86AudioNext</code> (<code>next_track</code>),
+                <code>XF86AudioPrev</code> (<code>previous</code>), <code>XF86AudioStop</code>, <code>XF86AudioRecord</code>, <code>XF86AudioRewind</code>, <code>XF86AudioForward</code>,
+                <code>XF86Eject</code>, <code>XF86MonBrightnessUp</code>/<code>Down</code> and <code>XF86KbdBrightnessUp</code>/<code>Down</code>/<code>XF86KbdLightOnOff</code>.
+                <code>PAUSE</code>, <code>NEXT</code> and <code>STOP</code> keep their keyboard meanings; desktop bindings decide what media keys do.</li>
+            <li>Names identify physical key positions; the active keyboard layout decides the resulting symbols.</li>
+            <li>Saved legacy <strong>Press key</strong> actions keep working and show as a Shortcut without modifiers; they are rewritten only when you save them again.
+                Unsupported legacy names stay visible and report an error when run.</li>
+            <li>One persistent virtual keyboard is opened on first use, after a 200 ms discovery grace period. It needs kernel uinput support and effective access to
+                <code>/dev/uinput</code>; failures are reported with no fallback, privilege escalation, module loading or permission change.
+                Ask an administrator for narrowly scoped access if needed. Mouse-wheel actions need the same access.</li>
+          </ul>
+        </div>
+        <div class="card wide">
+          <h4>Live information on keys and dials</h4>
+          <p>Under the action of a key or dial, tick <strong>Show live information</strong> and choose volume (crossed out while muted), audio output device,
+             Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load) or OBS state (recording, streaming and scene).
+             On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
+             beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
+             window preview matches the device.</p>
+          <p>Each touch section can show information for its Tap or Hold binding. A dial's section shows its press binding first, then its turns, then a tap or hold on
+             that section. Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through <code>curl</code> with a city or
+             <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">Touch strip and touchscreen pages</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Sections and gestures</h4>
+          <p>The strip has four sections, one above each dial. Choose <strong>Touch</strong>, then control <strong>1</strong> to <strong>4</strong>, and give each section its own
+             <strong>Tap</strong> and <strong>Hold</strong> binding. <strong>Any</strong> keeps the older whole-strip bindings, which still handle taps no section claims.
+             Flick and swipes always apply to the whole strip.</p>
+          <p>Touch bindings, section information, strip and section images and every dial binding belong to the profile's selected touchscreen page,
+             not to keypad pages or folders: changing a keypad page or opening a folder keeps the touch page.</p>
+        </div>
+        <div class="card">
+          <h4>Touchscreen pages and swipes</h4>
+          <p>Select a dial, the strip or a section to show <strong>Touch page</strong>. Browse with its selector and arrows, add a blank page with <strong>+</strong>,
+             or delete the selected one with the trash button after confirming (keypad pages are unchanged; a profile keeps at least one). Each profile remembers its
+             selection across restarts and holds up to 64 touch pages.</p>
+          <p>Swiping left shows the next touch page and right the previous one while those gestures have no binding of their own; a Flick binding also takes precedence.
+             Swipe up and down have no default. <strong>More actions &gt; Organization &gt; Next/Previous touchscreen page</strong> is offered only for touch controls and does not wrap.
+             Edge chevrons on the device and preview show available directions. Delayed returns still target keypad pages.</p>
+        </div>
+        <div class="card wide">
+          <h4>Touchscreen data and upgrades</h4>
+          <p>Existing configurations migrate automatically: each distinct touch and dial configuration in a profile becomes a touchscreen page, equal ones share a page,
+             and actions, None bindings, delayed returns, information and image references are preserved. Upgraded version-1 touch pages keep their edits and receive a copy
+             of the dials from their profile's main keypad page; legacy records are retained and migration is not repeated. The upgraded <code>touchscreen.json</code>
+             is version 2, which older app versions cannot read.</p>
+          <p>Invalid touchscreen configuration blocks saving instead of replacing the file. <code>layers.conf</code> and <code>touchscreen.json</code> are staged together;
+             if the final replacement fails the previous layer file is restored, and a synced recovery journal lets startup restore or keep the pair after an interrupted save.
+             Unreadable recovery state is reported, never silently replaced.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">Profiles, pages and folders</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Profiles and application switching</h4>
+          <p>Profiles are tabs, with <strong>Base</strong> always available and undeletable. <strong>Organize &gt; New profile</strong> creates one
+             (<strong>Create profile</strong> stays disabled until the name is new). <strong>Organize &gt; Edit profile</strong> sets an optional window class or executable
+             name such as <code>kitty</code>, <code>firefox</code> or <code>obs</code>; <strong>Save changes</strong> is enabled only when the rule changed. Base cannot require an application.</p>
+          <p>Detection uses Hyprland IPC focus events, not process polling. A matching application selects its profile; unmatched or unavailable focus returns to Base;
+             focusing the configuration window keeps the last external context. A manual tab choice lasts until the next external focus change. Selecting a profile never
+             launches its application. Every start opens on Base's first page.</p>
+        </div>
+        <div class="card">
+          <h4>Pages</h4>
+          <p><strong>New page</strong> asks for a name first. The pencil renames the current page (<strong>Save name</strong> or Enter): names must be non-blank, without control
+             characters and at most 64 UTF-8 bytes; surrounding spaces are trimmed. The trash button deletes the page with its folders, bindings and artwork after confirming.
+             Previous, next and parent arrows sit before the page name. Navigation stays within the current profile and folder, and switching tabs restores that
+             profile's last page for the session.</p>
+        </div>
+        <div class="card wide">
+          <h4>Page folders</h4>
+          <p>The folder icon in the page bar opens <strong>Page folders</strong>. Type a name in <strong>New folder name</strong> and press Enter; blank, duplicate and invalid names are explained
+             while typing. Each row offers <strong>Open</strong>, <strong>Link to control</strong> (saves navigation to the folder on the selected control and event without opening it),
+             <strong>Rename</strong> (Enter saves, Escape cancels; linked controls follow the new name) and <strong>Delete</strong> (removes only this page's folder and its links).
+             <strong>Parent</strong> returns to the exact owning page.</p>
+          <p><code>organization.json</code> stores this hierarchy (version 2, with stable page-owner keys). Version-1 folders attach to their former parent's first surviving page;
+             flat layers load as independent profiles; legacy <code>brightness-v1</code> and <code>scroll-v1</code> records load as typed actions.
+             Invalid metadata is kept untouched and disables organization writes until repaired.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">Appearance</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Button text</h4>
+          <p>Select a key and click <strong>Add text</strong> (<strong>Edit text</strong> once saved). The popup names the key and page, for example "Key 3 on “Everyday / Page 1”".
+             Choose an installed font, a size from 6 to 120 px, horizontal or vertical orientation (vertical rotates the text 90° clockwise) and a position on a 3x3 grid.
+             Text is white with a black outline and may span several lines.</p>
+          <p>The preview shows the key as the device will: over its image, over its action icon when the text leaves room, or over black, with a warning when the text does not fit
+             (the device clips it). <strong>Save text</strong> or <strong>Ctrl+Enter</strong> saves; it is enabled only for non-blank changes, flagged by "Unsaved changes".
+             Closing discards the draft. <strong>Remove text</strong> keeps the background image, and clearing the image keeps the text.</p>
+        </div>
+        <div class="card">
+          <h4>Window layout and themes</h4>
+          <p>The window opens at 1000 × 700 with the device preview on the left and the editor on the right; long forms and smaller windows scroll vertically. The desk uses
+             the window width up to 1240 px and centers beyond it; the preview grows up to 1.5 times, and at 640 px the preview and editor stack without horizontal scrolling.
+             Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
+             Transitions follow GTK's animation setting. The full layout contract is in
+             <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
+        </div>
+        <div class="card wide">
+          <h4>Background images</h4>
+          <p>Pick a target in <strong>Artwork target (active layer)</strong>, then <strong>Image…</strong> or <strong>×</strong> (Clear artwork). There are thirteen targets: eight keys,
+             the touch-strip background and four touch zones. Clicking a key or zone selects its target; clicking a dial selects only its binding. PNG, GIF and any format
+             supported by the installed GdkPixbuf loaders work; GIFs are sent as a still image because the hardware upload format is JPEG.
+             Images are center-cropped and sent as 120 × 120 (keys), 800 × 100 (strip) or 200 × 100 (zone) JPEGs; the strip background and zones are layered.</p>
+          <p>Images are copied into the data directory, so originals can be moved or deleted. Artwork is independent per layer: switching layers replaces the device's
+             whole image state (unassigned keys turn black) and the same state is replayed after reconnecting. Clearing a key sends a black image; clearing strip artwork
+             rebuilds the strip from what remains. A file chooser saves to the target and layer captured when it opened. A failed import keeps the current assignment,
+             storage failures disable artwork writes instead of saving an empty fallback, and upload failures appear in the connection status.</p>
+        </div>
+        <div class="card wide">
+          <h4>Binding icons</h4>
+          <p>Every action has a two-tone icon used in the <strong>Action</strong> and <strong>More actions</strong> menus, on the preview dials, and on keys and touch sections without
+             their own artwork, both in the preview and on the device. Each family has its own color: media violet, audio cyan, OBS red, apps and system amber, websites blue,
+             pages and folders white. Badges above the preview strip list what swipes, tap and hold do (dimmed while an unbound swipe keeps its default page change).
+             Your artwork always wins, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
+             Icons are never saved into your artwork or text.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">OBS Studio</h3>
+      <div class="docs">
+        <div class="card wide">
+          <h4>Connect to OBS</h4>
+          <p>In OBS, enable the built-in WebSocket server under <strong>Tools &gt; WebSocket Server Settings</strong>. In sdeck-plus, click <strong>OBS</strong> in the profile bar, enter
+             the local endpoint (normally <code>ws://127.0.0.1:4455</code>) and password, save and test. The test queries scenes and recording/streaming state and never starts an
+             output. Scene, source and input names must match OBS.</p>
+          <p>Only loopback endpoints are accepted. Requests run on a worker with bounded waits, and authentication, connection and request errors appear in the window.
+             Credentials are stored in owner-only <code>obs.json</code>, not in bindings, and are masked in the editor and diagnostics.
+             The app does not enable the OBS server or change its configuration.</p>
+        </div>
+      </div>
+
+      <h3 class="subhead">Data, tray and lifecycle</h3>
+      <div class="docs">
+        <div class="card">
+          <h4>Data location and files</h4>
+          <p>Configuration lives in <code>$XDG_DATA_HOME/sdeck-plus</code>, or <code>$HOME/.local/share/sdeck-plus</code> when it is unset (normally
+             <code>~/.local/share/sdeck-plus</code>): <code>layers.conf</code> (keypad layers and bindings), <code>touchscreen.json</code>, <code>organization.json</code>,
+             <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>.</p>
+          <p>An unreadable or unsupported <code>layers.conf</code> leaves configuration unavailable with writes disabled; repair it and restart. In a readable file, invalid, conflicting
+             or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.</p>
+        </div>
+        <div class="card">
+          <h4>Backup and restore</h4>
+          <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, artwork filenames, button text,
+             live information, page returns, local sound files and OBS settings, including credentials. Format version 2 stores images as <code>{"path":"assets/filename.png"}</code>
+             without image data. Executables, commands, document paths, autostart and tray preferences stay local references.</p>
+          <p>Before importing, the named images must exist in the destination's <code>assets</code> directory; missing or invalid images cancel the import. Import validates the file, asks
+             for confirmation, keeps the previous configuration in a sibling backup directory whose path it shows, and refreshes the device. It never runs a saved action.
+             Older exports with embedded images are still accepted.</p>
+        </div>
+        <div class="card">
+          <h4>System tray and login startup</h4>
+          <p>Closing the window hides it; the device, bindings, artwork, timers and app-owned playback stay active until <strong>Quit</strong>. Either click on the tray icon opens
+             <strong>Open configuration</strong>, <strong>Start at login</strong>, <strong>Start in tray</strong> (on by default; saved in <code>tray.json</code>), <strong>About</strong> and <strong>Quit</strong>.
+             A tray supporting StatusNotifierItem is required.</p>
+          <p>Autostart writes <code>$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop</code> (or <code>~/.config/autostart/</code>) and starts the current executable with
+             <code>--background</code>; disable and re-enable it after moving the executable. Run <code>cargo run -- --background</code> for a quiet manual start.
+             Repeated launches reuse the running instance. If the session bus is unreachable, closing the window exits instead of hiding.</p>
+        </div>
+        <div class="card">
+          <h4>Quitting and reconnecting</h4>
+          <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black, stops the action worker and app-owned playback,
+             cancels timers and releases the device; a blocked driver call can delay exiting. Independently opened applications stay open.
+             On the next launch brightness returns to 100% and saved artwork is replayed. While running, unplugging and reconnecting retries automatically.</p>
+        </div>
+        <div class="card wide">
+          <h4>Upgrading from the previous name</h4>
+          <p>The application, package and executable are named <strong>sdeck-plus</strong>, with the data directory <code>sdeck-plus</code> and autostart entry
+             <code>sdeck-plus.desktop</code>; the application ID stays the same so launches reuse one instance. Files are not migrated automatically: quit the old application,
+             move its data directory to the new path to keep profiles, artwork and OBS settings, then disable the old autostart entry and re-enable <strong>Start at login</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" class="alt">
     <div class="wrap">
       <h2>Install</h2>
       <p class="section-lead">Builds from source with Cargo and installs for the current user only. It never installs system packages or changes device permissions.</p>
@@ -439,19 +746,98 @@ cd sdeck-plus
 ./install.sh</code></pre>
           <p>Or run it directly from the checkout:</p>
 <pre><code>cargo run</code></pre>
-          <p>Remove it with <code>./install.sh --uninstall</code>; your profiles and artwork are kept.</p>
+          <p>The installer builds the release binary with <code>Cargo.lock</code> and installs <code>~/.local/bin/sdeck-plus</code>, the launcher
+             <code>~/.local/share/applications/dev.streamdeck.EventMonitor.desktop</code>, the icon
+             <code>~/.local/share/icons/hicolor/scalable/apps/sdeck-plus.svg</code> and the license in <code>~/.local/share/doc/sdeck-plus/</code>.
+             <code>PREFIX</code> overrides the executable prefix, an absolute <code>XDG_DATA_HOME</code> the data directory, and <code>CARGO_TARGET_DIR</code> the build output.
+             It runs from any directory, refuses to run as root, does not enable autostart or launch the app, and re-running it updates the files
+             (<code>./install.sh --help</code> for usage).</p>
+          <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable, a <strong>Start at login</strong> entry pointing elsewhere,
+             missing optional tools, and a connected device your user cannot open (printing the udev rule an administrator can install, without running it).</p>
+          <p>Remove it with <code>./install.sh --uninstall</code>, using the same <code>PREFIX</code> and <code>XDG_DATA_HOME</code>. Configuration, profiles, artwork and any
+             <strong>Start at login</strong> entry are kept, and a running instance is not stopped.</p>
         </div>
         <div>
           <h3>Requirements</h3>
           <ul>
-            <li>Rust stable toolchain and Cargo</li>
-            <li>GTK 4.8 or newer and a C toolchain</li>
+            <li>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code> and <code>glib-compile-resources</code></li>
+            <li>GTK 4.8 or newer and libudev development files</li>
             <li>A StatusNotifierItem tray (for example, Omarchy's)</li>
             <li>Stream Deck + over USB, with permission to open its HID node</li>
-            <li>Optional, per action: <code>xdg-utils</code>, <code>wireplumber</code>, <code>wl-clipboard</code>, <code>procps-ng</code>, <code>mpv</code></li>
+            <li>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
+                <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), an MPRIS player (media transport)</li>
             <li>Keyboard and mouse-wheel actions need <code>/dev/uinput</code> access</li>
           </ul>
-          <p>See the <a href="https://github.com/aldosilvestre/sdeck-plus#readme">README</a> for the full documentation.</p>
+          <p>If opening the device is denied, use your distribution's supported mechanism, for example an administrator-installed udev rule scoped to this VID/PID with
+             <code>TAG+="uaccess"</code>, then reconnect the device. Missing tools or access are reported; the app never installs packages or changes permissions.</p>
+          <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="development">
+    <div class="wrap">
+      <h2>Development</h2>
+      <p class="section-lead">Checks and tools for working on sdeck-plus from a checkout. Build requirements are listed under <a href="#install">Install</a>.</p>
+      <div class="docs">
+        <div class="card wide">
+          <h4>Checks</h4>
+<pre><code>cargo fmt --all -- --check
+env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=x11 cargo test --offline
+cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
+          <p>The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
+             its GTK main thread, for example:</p>
+<pre><code>GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::button_text_alignment_icons_update_preview_and_save \
+  -- --exact --nocapture --test-threads=1</code></pre>
+          <p>The serialized layout test checks the thirteen artwork paths and every action at 1000 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
+             reachability at 640 × 480. These checks do not replace real file-chooser, accessibility or device verification.</p>
+        </div>
+        <div class="card wide">
+          <h4>Documentation screenshots</h4>
+          <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
+             change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window):</p>
+<pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
+  cargo test --offline --bin sdeck-plus \
+  tests::documentation_screenshots::regenerate_documentation_screenshots_when_explicitly_requested \
+  -- --exact --nocapture --test-threads=1</code></pre>
+        </div>
+        <div class="card wide">
+          <h4>Opt-in real-device checks</h4>
+          <p>Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
+             brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture.</p>
+<pre><code>cargo run --offline --example verify_streamdeck -- --device-controls
+cargo run --offline --example verify_streamdeck -- --input
+cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
+cargo run --offline --example verify_desktop
+dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav</code></pre>
+          <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
+             through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
+             silent audio file and the <code>mpv-mpris</code> plugin.</p>
+        </div>
+        <div class="card wide">
+          <h4>In-process event API</h4>
+          <p><code>src/event_api.rs</code> defines the typed <code>MonitorEvent</code> boundary: <code>Connection(ConnectionState)</code>, <code>Input(protocol::Event)</code> for decoded
+             HID input and <code>ArtworkResult</code> for upload results; consumers ignore the <code>Heartbeat</code> probe. <code>start_hid_monitor</code> returns an owned
+             <code>HidController</code> with an artwork sender, explicit cancellation and idempotent joined cleanup, and runs initialization, retries, timed reads and serialized
+             image writes on one thread. Only the newest pending artwork snapshot is applied, and GTK polls results with a short GLib timer.
+             Internal events use the <code>MonitorEvent::AppEvent</code> channel. There is no TCP, HTTP or WebSocket listener.</p>
+          <p>The protocol decoder validates the report ID and declared little-endian payload length before decoding input.</p>
+        </div>
+        <div class="card wide">
+          <h4>Code organization</h4>
+          <table class="actions-table">
+            <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
+            <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
+            <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>
+            <tr><th><code>src/info.rs</code>, <code>src/info_render.rs</code></th><td>Live readings and the key/section compositor</td></tr>
+            <tr><th><code>src/desktop_actions/audio_output.rs</code></th><td>Fixed and rotating PipeWire output selection</td></tr>
+            <tr><th><code>src/tray.rs</code>, <code>src/autostart.rs</code></th><td>Tray menu, About dialog, login startup entry</td></tr>
+            <tr><th><code>src/ui.rs</code>, <code>DESIGN.md</code></th><td>Shared controls and panels; layout and accessibility contract</td></tr>
+          </table>
+          <p>Keep device work off the GTK thread; closing the window must not stop bindings, polling or timers, and shutdown owns cleanup. GTK checks keep a single owning
+             test thread. Run the checks above after changing code or tests.</p>
         </div>
       </div>
     </div>

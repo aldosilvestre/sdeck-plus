@@ -8,6 +8,12 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **README simplified.** The README now covers only what sdeck-plus is, why
+  it exists, its key features, installation and one main-window screenshot.
+  Configuration, behavior details and development material (checks,
+  screenshot regeneration, real-device checks, event API, code organization)
+  moved to new Configuration and Development sections of the website, whose
+  Install section now lists every requirement and installer option.
 - **Button text popup.** A line under the title names the edited key and page
   ("Key 3 on “Everyday / Page 1”"). One 3x3 Position grid replaces the two
   alignment rows, and orientation is a linked pair of icon toggles. The
