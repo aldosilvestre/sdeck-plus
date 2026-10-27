@@ -427,6 +427,20 @@ fn assert_icon_action_consistency() {
         Some("preferences-system-symbolic"),
         "profile organization is not a new-folder action"
     );
+    let text = descendants::<gtk::MenuButton>(root)
+        .into_iter()
+        .find(|button| {
+            matches!(
+                button.tooltip_text().as_deref(),
+                Some("Add text" | "Edit text")
+            )
+        })
+        .expect("button text editor");
+    assert_eq!(
+        image_names(text.upcast_ref()).first().map(String::as_str),
+        Some("format-text-plaintext-symbolic"),
+        "button text reads as text"
+    );
     eprintln!("GTK icon action consistency assertions executed");
 }
 
@@ -464,7 +478,9 @@ fn assert_device_icons() {
             .unwrap();
         // A second touch page puts a "previous" indicator on section 1.
         let organization = sdeck_plus::organization::Organization::in_memory(store);
-        store.initialize_touchscreens(&organization, images).unwrap();
+        store
+            .initialize_touchscreens(&organization, images)
+            .unwrap();
         store.create_touchscreen_page("Base").unwrap();
         store
             .bind("Base", Trigger::ZoneTap(1), Action::Emit("lights".into()))

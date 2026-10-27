@@ -108,3 +108,9 @@ RED: `binding_icon_tests::device_snapshot_draws_binding_icons_only_where_the_pre
 failed to compile (no `ComposeIcon`/`prepare_icon_jpeg`), then GREEN.
 Checks: fmt ok, clippy ok, lib 314/314, display bin suite 49/50 (only the known
 base failure, same panic as base).
+
+### T5 follow-up (delegated writer)
+Add/Edit text now uses `format-text-plaintext-symbolic` (a plain "A") instead
+of `insert-text-symbolic`, in `button_text_editor.rs` (surface granted).
+RED: the extended `icon_actions_share_one_size_and_one_delete_icon` saw
+`insert-text-symbolic`, then GREEN. clippy ok.
