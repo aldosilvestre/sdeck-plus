@@ -121,7 +121,7 @@ fn compose(
                 // Over artwork the tile is lighter so the artwork stays visible.
                 let alpha = if background.is_some() { 0.55 } else { 0.80 };
                 crate::binding_icons::draw_zone_tile(&cairo, alpha)
-                    .and_then(|()| draw_zone(&cairo, value, &zone_plan(value, previous, next)))
+                    .and_then(|()| draw_parts(&cairo, value, &zone_plan(value, previous, next)))
             }
             None => draw(&cairo, value),
         }
@@ -177,15 +177,6 @@ fn accent(value: &InfoValue) -> Color {
         Glyph::Thermometer => load(GREEN),
         Glyph::Record | Glyph::Live => RED,
         Glyph::ObsIdle => GREY,
-    }
-}
-
-/// Long headlines such as `REC LIVE` shrink instead of being ellipsized.
-fn fit(size: f64, headline: &str, limit: usize) -> f64 {
-    if headline.chars().count() > limit {
-        size * 0.65
-    } else {
-        size
     }
 }
 
@@ -273,60 +264,7 @@ fn draw_text(
 }
 
 fn draw(cairo: &Context, value: &InfoValue) -> Result<(), cairo::Error> {
-    let color = accent(value);
-    let has_bar = value.level.is_some();
-    let has_glyph = value.glyph != Glyph::None;
-    if has_glyph {
-        draw_icon(
-            cairo,
-            value,
-            (60.0, if has_bar { 34.0 } else { 32.0 }),
-            1.0,
-            color,
-        )?;
-    }
-    if let Some(level) = value.level {
-        draw_bar(cairo, level, color, (16.0, 70.0, 88.0, 12.0))?;
-    }
-
-    let headline_size = match (has_bar, has_glyph) {
-        (true, _) => 20.0,
-        (false, true) => 24.0,
-        (false, false) => 38.0,
-    };
-    let detail_size = if has_glyph { 13.0 } else { 18.0 };
-    let mut layouts = Vec::new();
-    if !value.headline.is_empty() {
-        layouts.push(make_layout(
-            &value.headline,
-            fit(headline_size, &value.headline, 6),
-            true,
-            112,
-            pango::Alignment::Center,
-        ));
-    }
-    layouts.extend(
-        value
-            .detail
-            .lines()
-            .map(|line| make_layout(line, detail_size, false, 112, pango::Alignment::Center)),
-    );
-    let heights: Vec<f64> = layouts
-        .iter()
-        .map(|layout| f64::from(layout.pixel_size().1))
-        .collect();
-    let total: f64 = heights.iter().sum();
-    let mut y = match (has_bar, has_glyph) {
-        (true, _) => 88.0,
-        (false, true) => 64.0,
-        (false, false) => (f64::from(SIZE) - total) / 2.0,
-    };
-    let fill = if value.inactive { GREY } else { WHITE };
-    for (layout, height) in layouts.iter().zip(heights) {
-        draw_text(cairo, layout, (4.0, y), fill)?;
-        y += height;
-    }
-    Ok(())
+    draw_parts(cairo, value, &key_plan(value))
 }
 
 /// The section tile shared with binding icons (`binding_icons::draw_zone_tile`).
@@ -377,6 +315,16 @@ struct Plan {
 impl Plan {
     fn texts(&self) -> impl Iterator<Item = &Text> {
         self.headline.iter().chain(&self.details)
+    }
+
+    /// Move the text and bar down by `dy`.
+    fn shift(&mut self, dy: f64) {
+        for text in self.headline.iter_mut().chain(&mut self.details) {
+            text.rect.y += dy;
+        }
+        if let Some(bar) = &mut self.bar {
+            bar.y += dy;
+        }
     }
 
     #[cfg(test)]
@@ -518,7 +466,72 @@ fn zone_plan(value: &InfoValue, previous: bool, next: bool) -> Plan {
     }
 }
 
-fn draw_zone(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cairo::Error> {
+/// Square key layout: icon, value, bar and detail stacked and centered, all
+/// inside the key. The icon gives up size first; detail lines that still do
+/// not fit are left out, so nothing is cut at the bottom edge.
+fn key_plan(value: &InfoValue) -> Plan {
+    const TOP: f64 = 4.0;
+    const BOTTOM: f64 = SIZE as f64 - 4.0;
+    const MIN_ICON: f64 = 32.0;
+    const MAX_ICON: f64 = 44.0;
+    let column = (4.0, f64::from(SIZE) - 8.0);
+    if value.glyph == Glyph::None {
+        let (headline, bar, details) = text_column(
+            value,
+            column,
+            (TOP, BOTTOM),
+            (36.0, 16.0, 10.0),
+            pango::Alignment::Center,
+        );
+        return Plan {
+            icon: None,
+            headline,
+            bar,
+            details,
+        };
+    }
+    let (headline, bar, details) = text_column(
+        value,
+        column,
+        (TOP + MIN_ICON + GAP, BOTTOM),
+        (24.0, 14.0, 8.0),
+        pango::Alignment::Center,
+    );
+    let mut plan = Plan {
+        icon: None,
+        headline,
+        bar,
+        details,
+    };
+    let first = plan
+        .texts()
+        .map(|text| text.rect.y)
+        .chain(plan.bar.map(|bar| bar.y));
+    let last = plan
+        .texts()
+        .map(|text| text.rect.bottom())
+        .chain(plan.bar.map(|bar| bar.bottom()));
+    let (first, last) = (first.fold(f64::MAX, f64::min), last.fold(0.0, f64::max));
+    let used = if last > first {
+        last - first + GAP
+    } else {
+        0.0
+    };
+    let size = (BOTTOM - TOP - used).clamp(MIN_ICON, MAX_ICON);
+    let top = TOP + (BOTTOM - TOP - size - used) / 2.0;
+    plan.icon = Some(Rect {
+        x: f64::from(SIZE) / 2.0 - size / 2.0,
+        y: top,
+        width: size,
+        height: size,
+    });
+    if used > 0.0 {
+        plan.shift(top + size + GAP - first);
+    }
+    plan
+}
+
+fn draw_parts(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cairo::Error> {
     let color = accent(value);
     if let Some(icon) = plan.icon {
         draw_icon(
@@ -803,26 +816,43 @@ mod tests {
         parse_volume(text).unwrap()
     }
 
+    /// A point a quarter and three quarters along the key's bar.
+    fn bar_points(value: &InfoValue) -> ((usize, usize), (usize, usize)) {
+        let bar = key_plan(value).bar.unwrap();
+        let y = (bar.y + bar.height / 2.0) as usize;
+        let at = |share: f64| (bar.x + bar.width * share) as usize;
+        ((at(0.25), y), (at(0.75), y))
+    }
+
     #[test]
     fn bar_fill_follows_the_level_over_a_translucent_track() {
-        let half = compose_info_image(&volume("Volume: 0.50"), None).unwrap();
-        assert!(near(pixel(&half, 30, 76), CYAN), "filled part");
-        assert!(near(pixel(&half, 90, 76), (0.0, 0.0, 0.0)), "empty part");
+        let value = volume("Volume: 0.50");
+        let ((low, y), (high, _)) = bar_points(&value);
+        let half = compose_info_image(&value, None).unwrap();
+        assert!(near(pixel(&half, low, y), CYAN), "filled part");
+        assert!(near(pixel(&half, high, y), (0.0, 0.0, 0.0)), "empty part");
         let empty = compose_info_image(&volume("Volume: 0.00"), None).unwrap();
-        assert!(near(pixel(&empty, 30, 76), (0.0, 0.0, 0.0)));
+        assert!(near(pixel(&empty, low, y), (0.0, 0.0, 0.0)));
         let full = compose_info_image(&volume("Volume: 1.00"), None).unwrap();
-        assert!(near(pixel(&full, 90, 76), CYAN));
+        assert!(near(pixel(&full, high, y), CYAN));
     }
 
     #[test]
     fn muted_speaker_gets_a_red_cross_and_a_grey_bar() {
-        let muted = compose_info_image(&volume("Volume: 0.50 [MUTED]"), None).unwrap();
-        let [red, green, _] = pixel(&muted, 74, 34);
+        let value = volume("Volume: 0.50 [MUTED]");
+        let muted = compose_info_image(&value, None).unwrap();
+        let icon = key_plan(&value).icon.unwrap();
+        let cross = (
+            (icon.x + icon.width * (0.5 + 14.0 / 48.0)) as usize,
+            (icon.y + icon.height / 2.0) as usize,
+        );
+        let [red, green, _] = pixel(&muted, cross.0, cross.1);
         assert!(
             red > 200 && green < 150,
             "cross centre is red: {red},{green}"
         );
-        assert!(near(pixel(&muted, 30, 76), GREY));
+        let ((low, y), _) = bar_points(&value);
+        assert!(near(pixel(&muted, low, y), GREY));
         let on = compose_info_image(&volume("Volume: 0.50"), None).unwrap();
         assert_ne!(muted.read_pixel_bytes(), on.read_pixel_bytes());
     }
@@ -850,7 +880,8 @@ mod tests {
         let corner = 2 * blank.rowstride() as usize + 2 * 4 + 3;
         assert_eq!(bytes[corner], 0, "no opaque rectangle behind the binding");
         // The empty part of the bar is translucent: it darkens, not replaces, the artwork.
-        let track = pixel(&over_artwork, 90, 76);
+        let (_, (high, y)) = bar_points(&value);
+        let track = pixel(&over_artwork, high, y);
         assert!(track[2] > 60 && track[2] < 120, "{track:?}");
         let translucent = Pixbuf::new(Colorspace::Rgb, true, 8, 120, 120).unwrap();
         translucent.fill(0x1e5ac880);
@@ -946,6 +977,50 @@ mod tests {
                     !(alpha > 200 && red > 200 && green > 200),
                     "chevron room stays clear at {x},{y}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn key_parts_are_fully_visible_and_readable_at_preview_size() {
+        let size_of = |text: &Text| {
+            f64::from(text.layout.font_description().unwrap().size()) / f64::from(pango::SCALE)
+        };
+        for value in samples() {
+            let plan = key_plan(&value);
+            assert_eq!(plan.headline.is_some(), !value.headline.is_empty());
+            assert_eq!(plan.bar.is_some(), value.level.is_some());
+            assert_eq!(plan.icon.is_some(), value.glyph != Glyph::None);
+            if value.detail.lines().count() == 1 {
+                // "CPU", "Memory", "Temperature": the caption is never cut off.
+                assert_eq!(plan.details.len(), 1, "{value:?} keeps its caption");
+            }
+            for rect in plan.rects() {
+                assert!(
+                    rect.x >= 2.0
+                        && rect.right() <= 118.0
+                        && rect.y >= 2.0
+                        && rect.bottom() <= 118.0,
+                    "{value:?}: {rect:?} is clipped by the key"
+                );
+            }
+            let mut previous_bottom = 0.0;
+            for rect in plan.icon.iter().chain(plan.texts().map(|text| &text.rect)) {
+                assert!(rect.y >= previous_bottom, "{value:?}: parts overlap");
+                previous_bottom = rect.bottom();
+            }
+            for text in plan.texts() {
+                assert!(f64::from(text.layout.pixel_size().0) <= text.rect.width + 0.5);
+            }
+            // About half size in the window preview: still legible there.
+            if let Some(headline) = &plan.headline {
+                assert!(size_of(headline) >= 18.0, "{value:?}: headline too small");
+            }
+            for detail in &plan.details {
+                assert!(size_of(detail) >= 13.0, "{value:?}: caption too small");
+            }
+            if let Some(icon) = plan.icon {
+                assert!(icon.width >= 30.0, "{value:?}: icon too small");
             }
         }
     }

@@ -20,7 +20,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 
 ## Tasks
 - [x] L1 Touch-section live info uses the same translucent tile/layout language as binding-icon sections (no bare transparent area); chevron room kept.
-- [ ] L2 Key live info: captions fully visible (no clipping), icon/value/bar/caption spacing rebalanced.
+- [x] L2 Key live info: captions fully visible (no clipping), icon/value/bar/caption spacing rebalanced.
 - [ ] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
 - [ ] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
 - [ ] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
@@ -51,4 +51,16 @@ RED: `touch_sections_show_live_information_on_the_section_tile`,
 2-arg signature), then GREEN. `image_output` indicator test now samples the
 artwork at y=2 (y=5 is under the tile edge; artwork still visible around it).
 Checks: fmt ok; clippy ok; headless `cargo test --offline` ok (319+53+2);
-display bin suite 52/53 (only the known F1 failure).
+display bin suite 52/53 (only the known F1 failure). Commit 8093ae8.
+
+### L2 (delegated writer, route: delegated direct)
+`key_plan`: icon (32-44px, shrinks first), value (24px bold, fitted), bar
+(8px) and detail (14px, lines that do not fit are left out) stacked and
+centered inside 4..116px; clock (no icon) uses 36/16px. Shared
+`text_column`/`draw_parts` with the section plan; `fit()` removed.
+RED: `key_parts_are_fully_visible_and_readable_at_preview_size` (no
+`key_plan`), then GREEN. Older pixel tests now read bar/icon positions from
+the plan instead of fixed coordinates. Contact sheet inspected: CPU, Memory,
+Temperature, Volume captions fully visible.
+Checks: fmt ok; clippy ok; headless ok (320+53+2); display bin suite 52/53
+(only the known F1 failure).
