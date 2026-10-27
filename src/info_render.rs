@@ -35,15 +35,30 @@ const GREY: Color = (0.45, 0.50, 0.62);
 /// # Errors
 /// Returns background decoding, cairo or surface allocation failures.
 pub fn compose_info_image(value: &InfoValue, background: Option<&Path>) -> Result<Pixbuf, String> {
-    compose(value, SIZE, SIZE, background)
+    compose(value, SIZE, SIZE, background, None)
 }
 
-/// Compose one 200x100 touch-strip section the same way.
+/// Compose one 200x100 touch-strip section: the section's own artwork (or
+/// transparency, so the strip shows) under the translucent section tile that
+/// binding icons use, with the icon on the left and the value, bar and detail
+/// beside it. `previous`/`next` keep the outer edge free for the page
+/// indicator that paints over the section afterwards.
 ///
 /// # Errors
 /// Returns background decoding, cairo or surface allocation failures.
-pub fn compose_zone_image(value: &InfoValue, background: Option<&Path>) -> Result<Pixbuf, String> {
-    compose(value, ZONE_WIDTH, ZONE_HEIGHT, background)
+pub fn compose_zone_image(
+    value: &InfoValue,
+    background: Option<&Path>,
+    previous: bool,
+    next: bool,
+) -> Result<Pixbuf, String> {
+    compose(
+        value,
+        ZONE_WIDTH,
+        ZONE_HEIGHT,
+        background,
+        Some((previous, next)),
+    )
 }
 
 /// Native-endian premultiplied ARGB pixels: the artwork, or transparent.
@@ -88,6 +103,7 @@ fn compose(
     width: i32,
     height: i32,
     background: Option<&Path>,
+    section: Option<(bool, bool)>,
 ) -> Result<Pixbuf, String> {
     let canvas = backdrop(width, height, background)?;
     let mut surface = cairo::ImageSurface::create_for_data(
@@ -100,10 +116,14 @@ fn compose(
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        if width > height {
-            draw_zone(&cairo, value)
-        } else {
-            draw(&cairo, value)
+        match section {
+            Some((previous, next)) => {
+                // Over artwork the tile is lighter so the artwork stays visible.
+                let alpha = if background.is_some() { 0.55 } else { 0.80 };
+                crate::binding_icons::draw_zone_tile(&cairo, alpha)
+                    .and_then(|()| draw_zone(&cairo, value, &zone_plan(value, previous, next)))
+            }
+            None => draw(&cairo, value),
         }
         .map_err(|error| error.to_string())?;
     }
@@ -309,51 +329,217 @@ fn draw(cairo: &Context, value: &InfoValue) -> Result<(), cairo::Error> {
     Ok(())
 }
 
-/// Wide layout: icon on the left; value, bar and detail stacked on the right.
-fn draw_zone(cairo: &Context, value: &InfoValue) -> Result<(), cairo::Error> {
-    let color = accent(value);
-    let has_glyph = value.glyph != Glyph::None;
-    if has_glyph {
-        draw_icon(cairo, value, (46.0, 50.0), 1.15, color)?;
+/// The section tile shared with binding icons (`binding_icons::draw_zone_tile`).
+const SECTION_TILE: Rect = Rect {
+    x: 3.5,
+    y: 4.5,
+    width: 193.0,
+    height: 91.0,
+};
+/// Room kept at a section's outer edge for a page indicator chevron.
+const CHEVRON_ROOM: f64 = 30.0;
+/// Vertical space between stacked parts.
+const GAP: f64 = 3.0;
+
+/// A part's box in image pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Rect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl Rect {
+    fn right(&self) -> f64 {
+        self.x + self.width
     }
-    let (left, width, alignment) = if has_glyph {
-        (92.0, 100, pango::Alignment::Left)
+
+    fn bottom(&self) -> f64 {
+        self.y + self.height
+    }
+}
+
+/// One line of text and the box it is drawn in.
+struct Text {
+    layout: pango::Layout,
+    rect: Rect,
+}
+
+/// Where every part of a live information picture goes.
+struct Plan {
+    icon: Option<Rect>,
+    headline: Option<Text>,
+    bar: Option<Rect>,
+    details: Vec<Text>,
+}
+
+impl Plan {
+    fn texts(&self) -> impl Iterator<Item = &Text> {
+        self.headline.iter().chain(&self.details)
+    }
+
+    #[cfg(test)]
+    fn rects(&self) -> Vec<Rect> {
+        self.icon
+            .iter()
+            .chain(&self.bar)
+            .copied()
+            .chain(self.texts().map(|text| text.rect))
+            .collect()
+    }
+}
+
+/// A one-line layout no wider than `width`: a long headline first shrinks
+/// (down to 60%), then ellipsizes; it never wraps mid-word.
+fn fitted_layout(
+    text: &str,
+    size: f64,
+    bold: bool,
+    width: f64,
+    alignment: pango::Alignment,
+) -> pango::Layout {
+    let natural = make_layout(text, size, bold, -1, alignment);
+    let natural_width = f64::from(natural.pixel_size().0);
+    let size = if natural_width > width {
+        (size * width / natural_width).max(size * 0.6).floor()
     } else {
-        (0.0, ZONE_WIDTH, pango::Alignment::Center)
+        size
     };
-    let headline_size = if has_glyph { 28.0 } else { 46.0 };
-    let detail_size = if has_glyph { 14.0 } else { 20.0 };
-    let headline = (!value.headline.is_empty()).then(|| {
-        let size = fit(
-            headline_size,
-            &value.headline,
-            if has_glyph { 5 } else { 8 },
-        );
-        make_layout(&value.headline, size, true, width, alignment)
-    });
-    let details: Vec<_> = value
-        .detail
-        .lines()
-        .map(|line| make_layout(line, detail_size, false, width, alignment))
-        .collect();
+    make_layout(text, size, bold, width.floor() as i32, alignment)
+}
+
+/// Stack the value, bar and detail lines in one column, vertically centered
+/// in `top..bottom`; detail lines that do not fit are left out.
+fn text_column(
+    value: &InfoValue,
+    (x, width): (f64, f64),
+    (top, bottom): (f64, f64),
+    (headline_size, detail_size, bar_height): (f64, f64, f64),
+    alignment: pango::Alignment,
+) -> (Option<Text>, Option<Rect>, Vec<Text>) {
     let height_of = |layout: &pango::Layout| f64::from(layout.pixel_size().1);
-    let bar_space = if value.level.is_some() { 22.0 } else { 0.0 };
-    let total = headline.iter().map(height_of).sum::<f64>()
-        + bar_space
-        + details.iter().map(height_of).sum::<f64>();
-    let mut y = (f64::from(ZONE_HEIGHT) - total) / 2.0;
+    let headline = (!value.headline.is_empty())
+        .then(|| fitted_layout(&value.headline, headline_size, true, width, alignment));
+    let mut used = headline.as_ref().map_or(0.0, height_of);
+    if value.level.is_some() {
+        used += if headline.is_some() { GAP } else { 0.0 } + bar_height;
+    }
+    let mut details = Vec::new();
+    for line in value.detail.lines().filter(|line| !line.is_empty()) {
+        let layout = fitted_layout(line, detail_size, false, width, alignment);
+        let extra = height_of(&layout) + if used > 0.0 { GAP } else { 0.0 };
+        if used + extra > bottom - top {
+            break;
+        }
+        used += extra;
+        details.push(layout);
+    }
+    let mut y = top + ((bottom - top - used) / 2.0).max(0.0);
+    let mut place = |height: f64| {
+        let rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        y += height + GAP;
+        rect
+    };
+    let headline = headline.map(|layout| Text {
+        rect: place(height_of(&layout)),
+        layout,
+    });
+    let bar = value.level.map(|_| {
+        let rect = place(bar_height);
+        let inset = if alignment == pango::Alignment::Center {
+            // A centered bar keeps a margin on both sides.
+            8.0
+        } else {
+            1.0
+        };
+        Rect {
+            x: rect.x + inset,
+            width: (rect.width - 2.0 * inset).min(110.0),
+            ..rect
+        }
+    });
+    let details = details
+        .into_iter()
+        .map(|layout| Text {
+            rect: place(height_of(&layout)),
+            layout,
+        })
+        .collect();
+    (headline, bar, details)
+}
+
+/// Wide layout on the section tile: icon on the left; value, bar and detail
+/// stacked beside it. Without an icon the text is centered on the tile.
+fn zone_plan(value: &InfoValue, previous: bool, next: bool) -> Plan {
+    let left = SECTION_TILE.x + if previous { CHEVRON_ROOM } else { 0.0 } + 6.0;
+    let right = SECTION_TILE.right() - if next { CHEVRON_ROOM } else { 0.0 } - 6.0;
+    let vertical = (SECTION_TILE.y + 5.0, SECTION_TILE.bottom() - 5.0);
+    if value.glyph == Glyph::None {
+        let (headline, bar, details) = text_column(
+            value,
+            (left, right - left),
+            vertical,
+            (40.0, 16.0, 10.0),
+            pango::Alignment::Center,
+        );
+        return Plan {
+            icon: None,
+            headline,
+            bar,
+            details,
+        };
+    }
+    let size = if previous || next { 44.0 } else { 52.0 };
+    let icon = Rect {
+        x: left + 2.0,
+        y: f64::from(ZONE_HEIGHT) / 2.0 - size / 2.0,
+        width: size,
+        height: size,
+    };
+    let x = icon.right() + 10.0;
+    let (headline, bar, details) = text_column(
+        value,
+        (x, right - x),
+        vertical,
+        (26.0, 13.0, 8.0),
+        pango::Alignment::Left,
+    );
+    Plan {
+        icon: Some(icon),
+        headline,
+        bar,
+        details,
+    }
+}
+
+fn draw_zone(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cairo::Error> {
+    let color = accent(value);
+    if let Some(icon) = plan.icon {
+        draw_icon(
+            cairo,
+            value,
+            (icon.x + icon.width / 2.0, icon.y + icon.height / 2.0),
+            icon.width / 48.0,
+            color,
+        )?;
+    }
     let fill = if value.inactive { GREY } else { WHITE };
-    if let Some(layout) = &headline {
-        draw_text(cairo, layout, (left, y), fill)?;
-        y += height_of(layout);
+    if let Some(bar) = plan.bar {
+        draw_bar(
+            cairo,
+            value.level.unwrap_or(0),
+            color,
+            (bar.x, bar.y, bar.width, bar.height),
+        )?;
     }
-    if let Some(level) = value.level {
-        draw_bar(cairo, level, color, (left + 4.0, y + 5.0, 92.0, 12.0))?;
-        y += bar_space;
-    }
-    for layout in &details {
-        draw_text(cairo, layout, (left, y), fill)?;
-        y += height_of(layout);
+    for text in plan.texts() {
+        draw_text(cairo, &text.layout, (text.rect.x, text.rect.y), fill)?;
     }
     Ok(())
 }
@@ -679,13 +865,98 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    fn rgba(image: &Pixbuf, x: usize, y: usize) -> [u8; 4] {
+        let bytes = image.read_pixel_bytes();
+        let at = y * usize::try_from(image.rowstride()).unwrap() + x * 4;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    fn samples() -> Vec<InfoValue> {
+        let detailed = |glyph, level, headline: &str, detail: &str| InfoValue {
+            glyph,
+            level,
+            detail: detail.into(),
+            ..InfoValue::text(glyph, headline)
+        };
+        vec![
+            detailed(Glyph::Sun, None, "22\u{b0}C", "Clear"),
+            detailed(Glyph::Chip, Some(38), "38%", "CPU"),
+            detailed(Glyph::Memory, Some(41), "6.4 GiB", "Memory"),
+            detailed(Glyph::Thermometer, Some(47), "47\u{b0}C", "Temperature"),
+            detailed(Glyph::Speaker, Some(42), "42%", "Volume"),
+            detailed(
+                Glyph::Speaker,
+                None,
+                "Speakers",
+                "Family 17h/19h\nHD Audio\nController\u{2026}",
+            ),
+            detailed(Glyph::None, None, "10:24", "Fri 16 Oct"),
+            detailed(Glyph::Record, None, "REC LIVE", "Main scene"),
+            detailed(Glyph::Rain, None, "--", "set a location"),
+        ]
+    }
+
+    #[test]
+    fn touch_sections_show_live_information_on_the_section_tile() {
+        let weather = &samples()[0];
+        let image = compose_zone_image(weather, None, false, false).unwrap();
+        // The same translucent graphite tile as binding-icon sections: not
+        // transparent and not black, with transparent rounded corners.
+        let tile = rgba(&image, 100, 92);
+        assert!(tile[3] > 60 && tile[3] < 255, "translucent tile: {tile:?}");
+        assert!(tile[0] > 20, "graphite, not black: {tile:?}");
+        assert_eq!(rgba(&image, 0, 0)[3], 0);
+        assert_eq!(rgba(&image, 199, 99)[3], 0);
+    }
+
+    #[test]
+    fn section_parts_stay_on_the_tile_and_out_of_the_chevron_room() {
+        for value in samples() {
+            for (previous, next) in [(false, false), (true, false), (false, true), (true, true)] {
+                let plan = zone_plan(&value, previous, next);
+                let left = SECTION_TILE.x + if previous { CHEVRON_ROOM } else { 0.0 };
+                let right = SECTION_TILE.right() - if next { CHEVRON_ROOM } else { 0.0 };
+                assert_eq!(plan.headline.is_some(), !value.headline.is_empty());
+                assert_eq!(plan.bar.is_some(), value.level.is_some());
+                for rect in plan.rects() {
+                    assert!(
+                        rect.x >= left
+                            && rect.right() <= right
+                            && rect.y >= SECTION_TILE.y
+                            && rect.bottom() <= SECTION_TILE.bottom(),
+                        "{value:?} ({previous}, {next}): {rect:?} leaves the tile"
+                    );
+                }
+                for text in plan.texts() {
+                    assert!(
+                        f64::from(text.layout.pixel_size().0) <= text.rect.width + 0.5,
+                        "{value:?}: text wider than its column"
+                    );
+                }
+                if let (Some(icon), Some(headline)) = (plan.icon, &plan.headline) {
+                    assert!(icon.right() < headline.rect.x, "icon left of the value");
+                }
+            }
+        }
+        let indicated = compose_zone_image(&samples()[1], None, true, true).unwrap();
+        for y in 30..70 {
+            for x in (0..32).chain(168..200) {
+                let [red, green, _, alpha] = rgba(&indicated, x, y);
+                assert!(
+                    !(alpha > 200 && red > 200 && green > 200),
+                    "chevron room stays clear at {x},{y}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn every_glyph_and_source_renders_a_key_and_a_section() {
         for source in InfoSource::ALL {
             for value in [source.placeholder(), source.unavailable()] {
                 let key = compose_info_image(&value, None).unwrap();
                 assert_eq!((key.width(), key.height()), (120, 120));
-                let section = compose_zone_image(&value, None).unwrap();
+                let section = compose_zone_image(&value, None, false, false).unwrap();
                 assert_eq!((section.width(), section.height()), (200, 100));
                 for image in [&key, &section] {
                     assert!(image.has_alpha());

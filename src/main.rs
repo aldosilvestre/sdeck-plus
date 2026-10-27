@@ -3039,9 +3039,12 @@ impl ArtworkUi {
             ArtworkTarget::Keypad(_) => {
                 sdeck_plus::info_render::compose_info_image(value, background.as_deref())
             }
-            ArtworkTarget::EncoderZone(_) => {
-                sdeck_plus::info_render::compose_zone_image(value, background.as_deref())
-            }
+            ArtworkTarget::EncoderZone(_) => sdeck_plus::info_render::compose_zone_image(
+                value,
+                background.as_deref(),
+                false,
+                false,
+            ),
             ArtworkTarget::TouchStripBackground => return,
         };
         match image {

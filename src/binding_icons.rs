@@ -483,7 +483,7 @@ pub fn compose_zone_image(
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        draw_zone_tile(&cairo).map_err(|error| error.to_string())?;
+        draw_zone_tile(&cairo, 0.80).map_err(|error| error.to_string())?;
         let size = if previous || next { 50.0 } else { 58.0 };
         paint_outlined(&cairo, icon, (left + 10.0 + size / 2.0, 50.0), size, INK)
             .map_err(|error| error.to_string())?;
@@ -522,13 +522,14 @@ pub fn compose_zone_image(
     ))
 }
 
-/// The section tile: graphite like the hardware rail, translucent so strip
-/// artwork stays visible, with a fine light edge.
-fn draw_zone_tile(cairo: &Context) -> Result<(), cairo::Error> {
+/// The section tile: graphite like the hardware rail, translucent (`alpha`)
+/// so strip or section artwork stays visible, with a fine light edge. Binding
+/// icons and live information share it.
+pub(crate) fn draw_zone_tile(cairo: &Context, alpha: f64) -> Result<(), cairo::Error> {
     rounded(cairo, 3.5, 4.5, 193.0, 91.0, 12.0);
     let fill = cairo::LinearGradient::new(0.0, 4.0, 0.0, 96.0);
-    fill.add_color_stop_rgba(0.0, 0.20, 0.23, 0.27, 0.80);
-    fill.add_color_stop_rgba(1.0, 0.11, 0.13, 0.16, 0.80);
+    fill.add_color_stop_rgba(0.0, 0.20, 0.23, 0.27, alpha);
+    fill.add_color_stop_rgba(1.0, 0.11, 0.13, 0.16, alpha);
     cairo.set_source(&fill)?;
     cairo.fill_preserve()?;
     cairo.set_source_rgba(1.0, 1.0, 1.0, 0.16);
