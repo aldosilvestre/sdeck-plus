@@ -56,6 +56,12 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Now playing live information.** Keys, dials and touch sections can show
+  the media playing in any MPRIS player: a violet play icon with the title
+  (or the player's name) and artist, the same greyed out with a pause icon
+  while paused, and a struck-through note with "Nothing playing" when no
+  player plays. A playing player wins, then the paused one that played last;
+  players are only read, never controlled.
 - **Rename page folders** in place from **Page folders** (Enter saves, Escape
   cancels). Layer keys, the folder's pages and nested folders are kept, and the
   owning page's links to the folder follow the new name.

@@ -275,11 +275,17 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 - **Live information:** readings use the same vocabulary (`for_glyph`): sun =
   `brightness`, muted speaker = `mute` (grey speaker, red cross), headphones =
   `audio-output`, recording = `record`, live = `stream`, OBS idle =
-  `obs-scene`, plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
+  `obs-scene`, now playing = `play`, `pause` or `media-idle` (a struck-through
+  note), plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
   `storm`, `fog`, `cpu`, `memory` and `temperature`, duotone and shadowed
   like key icons and inked in the reading's accent color (cyan audio, amber sun/storm, violet
   load, green temperature turning amber/red, grey when inactive). Time and
-  date has no icon. A key stacks icon (32-44px, shrinks first), a 24px bold
+  date has no icon. Now playing reads MPRIS players: playing shows a violet
+  play icon, the title as value and the artist as detail; paused shows the
+  pause icon and the same text in grey; no player or a stopped one shows a
+  grey `media-idle` icon over a white "Nothing playing" caption; a failing
+  session bus shows the usual grey `--`. A playing player wins (the first by
+  bus name), then the paused one that played last. A key stacks icon (32-44px, shrinks first), a 24px bold
   value, an 8px bar and 14px detail lines, centered inside a 4px margin;
   detail lines that do not fit are left out, so nothing is cut at the edge. A
   touch section draws the binding section tile (15% alpha; 10% over the
@@ -325,7 +331,8 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   a solid background of its own. Icons and text carry the soft drop shadow
   for legibility and the bar a translucent track. Icon colors
   follow the palette: cyan audio, amber light, violet load that turns amber at
-  70 and red at 85, grey when inactive, red for the muted cross and recording.
+  70 and red at 85, media violet while playing, grey when inactive, paused or
+  idle, red for the muted cross and recording.
   Readings come from a worker thread, never the GTK thread.
 - **Action guidance:** explain the selected action and expected values beside
   its fields. Native file/folder/audio pickers populate absolute paths. A

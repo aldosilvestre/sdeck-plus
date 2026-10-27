@@ -323,14 +323,14 @@
       <div class="feature">
         <div class="feature-text">
           <h3>Live information</h3>
-          <p>Show volume, output device, brightness, time and date, weather, CPU, memory, temperature or OBS state.
+          <p>Show volume, output device, brightness, time and date, weather, CPU, memory, temperature, OBS state or the media now playing.
              Readings update on keys and eligible dial or touch-section bindings, over their own artwork.
              <strong>None</strong> can show information without running an action.</p>
           <p>Weather accepts a city or coordinates and needs an internet connection. The readings below are demonstration values.</p>
         </div>
         <div class="pair">
           <img class="shot" src="screenshots/live-information.png" width="1000" height="950" loading="lazy"
-               alt="Clock, CPU, memory, temperature, volume and touch-section information over assigned artwork">
+               alt="Clock, CPU, memory, temperature, volume and touch-section information, including a playing track, over assigned artwork">
           <img class="shot" src="screenshots/live-information-settings.png" width="1000" height="950" loading="lazy"
                alt="Weather information selected with a city field in the binding editor">
         </div>
@@ -565,13 +565,16 @@
         <div class="card wide">
           <h4>Live information on keys and dials</h4>
           <p>Under the action of a key or dial, tick <strong>Show live information</strong> and choose volume (crossed out while muted), audio output device,
-             Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load) or OBS state (recording, streaming and scene).
+             Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load), OBS state (recording, streaming and scene)
+             or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
              On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
              beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
              window preview matches the device.</p>
           <p>Each touch section can show information for its Tap or Hold binding. A dial's section shows its press binding first, then its turns, then a tap or hold on
              that section. Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through <code>curl</code> with a city or
-             <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.</p>
+             <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.
+             Now playing reads MPRIS players on the session bus every second without controlling them: a playing player wins, then the paused one that played
+             last; it shows <code>--</code> when the session bus is unavailable.</p>
         </div>
       </div>
 

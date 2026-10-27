@@ -32,7 +32,8 @@ permissions on its own.
   focused application (Hyprland), plus touchscreen pages navigated by swiping.
 - **Artwork, button text and action icons** on keys, the touch strip and its zones.
 - **Live information:** volume, audio output, time, weather, CPU, memory,
-  temperature, device brightness and OBS state, updated on the device.
+  temperature, device brightness, OBS state and now playing, updated on the
+  device.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume
   control, audio-output switching, sounds, brightness, timers and page returns.
 - **OBS Studio:** switch scenes, toggle recording and streaming, mute inputs and

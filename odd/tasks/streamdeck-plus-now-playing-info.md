@@ -32,7 +32,7 @@ MPRIS over the D-Bus session bus for media actions (src/desktop_actions/mpris.rs
 ## Tasks
 - [x] N1 Core: `InfoSource::NowPlaying` (id, label, glyphs), MPRIS reader with a testable bus abstraction, player selection and value formatting; lib tests (playing, paused, stopped, none, multiple players, missing metadata, bus error).
 - [x] N2 Worker + UI: polled/refreshed on the info worker, selectable in the live information settings, rendered with new binding-vocabulary glyphs (play, pause, idle media); GTK/render tests.
-- [ ] N3 DESIGN.md, docs/index.html (live information), README features bullet, CHANGELOG.md, regenerated screenshots; manual check with `dbus-run-session` + mpv if available.
+- [x] N3 DESIGN.md, docs/index.html (live information), README features bullet, CHANGELOG.md, regenerated screenshots; manual check with `dbus-run-session` + mpv if available.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -84,5 +84,21 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   titles are covered by the dedicated ellipsis assertion. GREEN: lib 343/343, display bin 64/64.
 - Checks: fmt ok, clippy -D warnings ok, headless suite ok.
 
+### N3
+- Route: delegated direct (same writer; docs + screenshot generator).
+- Docs: DESIGN.md (live information icon list, the three states and selection, palette),
+  docs/index.html (Live information feature + Configuration card), README Features bullet,
+  CHANGELOG Unreleased/Added.
+- Screenshots: the generator binds touch section 4 to Now playing ("So What" / "Miles
+  Davis", play glyph). Changed visually and committed: live-information.png,
+  live-information-settings.png. Restored as noise: application-profile-tab.png and
+  live-input-feedback.png (dial knob shading, ~90 px), import-configuration.png (temp path).
+- Manual check (bounded, `dbus-run-session` + mpv-mpris on a generated silent WAV, via a
+  temporary uncommitted test calling `read_players()`): Playing -> play/"Silent Test";
+  after MPRIS Pause -> pause, inactive; after mpv exits -> media-idle "Nothing playing".
+  mpv registers `org.mpris.MediaPlayer2.mpv.instance-<id>`.
+- Checks: fmt ok; clippy -D warnings ok; headless suite ok (lib 343, bin 64 no-display,
+  integration 2); display bin 64/64; examples build; git diff --check clean.
+
 ## Next step
-N3.
+Review the feature branch (RDD unavailable); push/PR are the user's decision.
