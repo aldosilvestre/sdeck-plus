@@ -117,7 +117,11 @@ fn compose(
         match section {
             Some((previous, next)) => {
                 // Over artwork the tile is lighter so the artwork stays visible.
-                let alpha = if background.is_some() { 0.55 } else { 0.80 };
+                let alpha = if background.is_some() {
+                    crate::binding_icons::ZONE_TILE_ARTWORK_ALPHA
+                } else {
+                    crate::binding_icons::ZONE_TILE_ALPHA
+                };
                 crate::binding_icons::draw_zone_tile(&cairo, alpha)
                     .and_then(|()| draw_parts(&cairo, value, &zone_plan(value, previous, next)))
             }

@@ -541,7 +541,7 @@ pub fn compose_zone_image(
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        draw_zone_tile(&cairo, 0.80).map_err(|error| error.to_string())?;
+        draw_zone_tile(&cairo, ZONE_TILE_ALPHA).map_err(|error| error.to_string())?;
         let size = if previous || next { 50.0 } else { 58.0 };
         paint_outlined(&cairo, icon, (left + 10.0 + size / 2.0, 50.0), size, INK)
             .map_err(|error| error.to_string())?;
@@ -579,6 +579,11 @@ pub fn compose_zone_image(
         ZONE_WIDTH * 4,
     ))
 }
+
+/// Section tile opacity over the plain strip.
+pub(crate) const ZONE_TILE_ALPHA: f64 = 0.35;
+/// Section tile opacity over the section's own artwork, so it stays visible.
+pub(crate) const ZONE_TILE_ARTWORK_ALPHA: f64 = 0.25;
 
 /// The section tile: graphite like the hardware rail, translucent (`alpha`)
 /// so strip or section artwork stays visible, with a fine light edge. Binding

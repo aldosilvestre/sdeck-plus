@@ -234,7 +234,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   reaches the device. A key with no artwork of its own and no live information
   shows the icon (50px) with the action summary in up to two 14px bold lines
   below it, on black. A touch section with no artwork shows a translucent
-  graphite tile (rounded 12px, 80% alpha, fine light edge) over the strip, so
+  graphite tile (rounded 12px, 35% alpha, fine light edge) over the strip, so
   strip artwork shows through and around it, with a 58px icon on the left and
   up to two 17px bold caption lines beside it; a section that carries a page
   indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
@@ -255,7 +255,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   date has no icon. A key stacks icon (32-44px, shrinks first), a 24px bold
   value, an 8px bar and 14px detail lines, centered inside a 4px margin;
   detail lines that do not fit are left out, so nothing is cut at the edge. A
-  touch section draws the binding section tile (80% alpha; 55% over the
+  touch section draws the binding section tile (35% alpha; 25% over the
   section's own artwork) with a 52px icon on the left and a 26px value, bar
   and up to two 13px detail lines beside it; an indicated edge keeps 30px and
   a 44px icon. Long values shrink to fit, then ellipsize.

@@ -124,3 +124,13 @@ Final checks: fmt ok; clippy ok; headless `cargo test --offline` ok
 ## Next step
 Human review of `feat/live-info-icons`; push/PR remain the user's decision.
 Optional real-hardware check: `cargo run --offline --example verify_streamdeck -- --device-controls`.
+
+### L4 (inline, user feedback: "placa más transparente")
+Section tile opacity lowered and shared as `binding_icons::ZONE_TILE_ALPHA`
+(0.35, was 0.80) and `ZONE_TILE_ARTWORK_ALPHA` (0.25 over section artwork, was
+0.55) for binding-icon and live-information sections; icons keep their dark
+outline for legibility. Pure visual tweak, no meaningful RED; existing tile
+test (translucent, not transparent, not black) still holds.
+Checks: fmt ok; clippy ok; lib 323 ok; display bin suite 53/53; screenshots
+regenerated. Note: the installed ~/.local/bin/sdeck-plus predates all UI work
+(17:58); reinstall with ./install.sh to see changes outside `cargo run`.
