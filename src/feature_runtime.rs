@@ -468,6 +468,11 @@ impl FeatureRuntime {
         &self.page_controls.root
     }
 
+    /// Linked previous/next/parent buttons that lead the page breadcrumb.
+    pub(crate) fn page_navigation(&self) -> &GtkBox {
+        &self.page_controls.navigation_group
+    }
+
     #[cfg(test)]
     pub(crate) fn folder_menu(&self) -> &gtk::MenuButton {
         &self.page_controls.folder_menu
@@ -770,6 +775,7 @@ impl FeatureRuntime {
             Err(error) => {
                 *self.organization.borrow_mut() = None;
                 self.page_controls.root.set_sensitive(false);
+                self.page_controls.navigation_group.set_sensitive(false);
                 self.page_controls.folders.set_sensitive(false);
                 self.organization_management.set_sensitive(false);
                 self.status.set_text(&format!("Organization writes disabled: {error}. Repair organization.json; original retained."));

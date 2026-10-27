@@ -131,6 +131,19 @@ button.icon-only { min-width: 20px; padding: 6px; }
 menubutton.icon-action { padding: 0; }
 menubutton.icon-action > button > box { border-spacing: 0; }
 .page-folder-menu { padding: 0; }
+/* Page navigation reads as one segmented control ahead of the breadcrumb. */
+.linked > button { border-radius: 0; }
+.linked > button:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.linked > button:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.linked > button:not(:first-child) { border-left-width: 0; }
+/* Secondary page edits and profile tools: frameless until hovered. */
+.page-edits button.flat, menubutton.icon-action > button.flat {
+    border-color: transparent;
+    background-color: transparent;
+}
+.page-edits button.flat:hover, menubutton.icon-action > button.flat:hover,
+menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
+.page-edits button.flat:disabled { background-color: transparent; }
 .field-help > button { min-height: 20px; padding: 0 4px; }
 .page-name-dialog button { margin: 0 6px 16px; }
 .page-name-dialog button:first-child { margin-left: 16px; }

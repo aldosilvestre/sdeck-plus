@@ -20,7 +20,7 @@ modifier grid, loose option checkboxes, low-visibility status line).
 
 ## Tasks
 - [x] T1 Layout uses available width/height: preview + inspector scale, no dead band.
-- [ ] T2 Toolbar hierarchy: navigation vs management groups; destructive/secondary actions lighter.
+- [x] T2 Toolbar hierarchy: navigation vs management groups; destructive/secondary actions lighter.
 - [ ] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
 - [ ] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
 - [ ] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
@@ -52,4 +52,13 @@ sizes are unchanged, so the 1000x700 no-scroll contract still holds (minimum
 height-for-width 658). Geometry tests now assert proportional geometry, full-width
 shell, uniform scale and >=1.25x at 1280+. RED not observed first (layout asserts
 were updated with the implementation). Checks: fmt ok, clippy ok, headless suite
-ok, display bin suite 40/41 (only the known base failure).
+ok, display bin suite 40/41 (only the known base failure). Commit 80cb115.
+
+### T2 (delegated writer)
+Page bar: linked previous/next/parent group leads the breadcrumb; Folders and
+New page trail it; Rename/Delete page are frameless square icon buttons with
+tooltips and accessible names (delete keeps destructive styling + confirmation).
+Organize/OBS beside the profile tabs are frameless. RED observed first:
+`ui_refresh_tests::page_toolbar_separates_navigation_from_page_management`
+failed ("navigation is one linked group"), then GREEN. Checks: fmt ok, clippy ok,
+headless ok, display bin suite 41/42 (only the known base failure).

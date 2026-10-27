@@ -669,17 +669,22 @@ fn build_widgets(
     let management_scroll = ui::panel_body(&management);
     let management_popover = ui::popover("Profiles", &management_scroll);
     let management_menu = ui::menu_button("folder-new-symbolic", "Organize", &management_popover);
+    // Profile tools stay secondary to the profile tabs they sit beside.
+    management_menu.set_has_frame(false);
     layer_row.append(&management_menu);
     // Integration settings are global, not part of every action's form.
     let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
+    obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
     feature_runtime
         .profile_tabs()
         .set_action_widget(&layer_row, gtk::PackType::End);
-    let navigation_row = GtkBox::new(Orientation::Horizontal, 8);
+    // Navigation (linked arrows + breadcrumb) leads; page management trails.
+    let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
+    navigation_row.append(feature_runtime.page_navigation());
     navigation_row.append(&feature_runtime.indicator);
     navigation_row.append(feature_runtime.controls());
     layer_card.append(&navigation_row);
@@ -3571,6 +3576,7 @@ mod tests {
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod touchscreen_tests;
+    mod ui_refresh_tests;
 
     include!("button_text_editor_tests.rs");
 
