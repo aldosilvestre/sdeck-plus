@@ -108,6 +108,8 @@ fn capture_documentation_screenshots() {
     let directory = std::path::PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
     gtk::init().expect("documentation capture requires a native GTK display");
+    // Bundled action icons resolve through the app resource path, as at startup.
+    crate::app_icon::register().unwrap();
     let settings = gtk::Settings::default().unwrap();
     let original_theme = settings.gtk_theme_name();
     let original_dark = settings.is_gtk_application_prefer_dark_theme();
@@ -123,10 +125,11 @@ fn capture_documentation_screenshots() {
     let mut organization = sdeck_plus::organization::Organization::in_memory(&store);
     organization.set_profile_application("OBS", "obs").unwrap();
     organization.rename_page(&store, "Everyday").unwrap();
-    organization
-        .create_folder(&mut store, "Studio tools")
-        .unwrap();
-    store.select("Base");
+    // A few page folders so the Page folders popover shows a real list.
+    for folder in ["Studio tools", "Audio mix", "Lighting"] {
+        organization.create_folder(&mut store, folder).unwrap();
+        store.select("Base");
+    }
     organization
         .create_named_page(&mut store, "Production")
         .unwrap();
@@ -370,7 +373,13 @@ fn capture_documentation_screenshots() {
     wait_for_frame(&widgets.root);
     assert_reachable(&editor.open, &widgets.root);
     wait_for_frame(&widgets.root);
-    menu(&directory, &editor.open, "button-text-editor");
+    // Show an edited draft: Save enabled, the unsaved hint and a grid choice.
+    editor.panel.set_autohide(false);
+    editor.open.popup();
+    editor.input.buffer().set_text("Play\nNow");
+    editor.position[7].set_active(true);
+    save(&directory, editor.panel.upcast_ref(), "button-text-editor");
+    editor.open.popdown();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&widgets.root);
     assert_reachable(&widgets.target_picker, &widgets.root);

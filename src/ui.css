@@ -144,6 +144,38 @@ menubutton.icon-action > button > box { border-spacing: 0; }
 .page-edits button.flat:hover, menubutton.icon-action > button.flat:hover,
 menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .page-edits button.flat:disabled { background-color: transparent; }
+/* Page folders popover: linked create row and a boxed folder list whose rows
+   carry frameless trailing actions. */
+.folder-create > entry {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.folder-create > button { min-width: 22px; padding: 6px 10px; }
+.folder-list {
+    background-color: @desk_field;
+    border: 1px solid @desk_edge;
+    border-radius: 10px;
+}
+.folder-list > row.folder-row {
+    padding: 4px 6px 4px 12px;
+    min-height: 40px;
+    border-bottom: 1px solid @desk_edge;
+}
+.folder-list > row.folder-row:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.folder-list > row.folder-row:last-child {
+    border-bottom: none;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+.folder-list > row.folder-row:hover { background-color: @desk_hover; }
+.folder-list > row.folder-row:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.folder-row-icon { color: @desk_violet; }
+.folder-name { font-weight: 600; }
+.folder-row-actions button.flat { border-color: transparent; background-color: transparent; }
+.folder-row-actions button.flat:hover { background-color: alpha(@desk_ink, 0.08); }
+.folder-row-actions button.flat:disabled { background-color: transparent; }
+.folder-empty { padding: 20px 0 12px; }
+.folder-empty image { color: @desk_muted; opacity: 0.6; }
 .field-help > button { min-height: 20px; padding: 0 4px; }
 .page-name-dialog button { margin: 0 6px 16px; }
 .page-name-dialog button:first-child { margin-left: 16px; }
@@ -268,6 +300,21 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
+.button-text-choices button { min-width: 28px; }
+.button-text-position button {
+    min-width: 24px;
+    min-height: 18px;
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+.button-text-position button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
+.button-text-context { font-size: 0.9em; margin-bottom: 4px; }
+.button-text-unsaved { font-size: 0.9em; }
+.button-text-overflow { font-size: 0.9em; }
 
 .hardware-chassis {
     background: linear-gradient(135deg, #414951, #272d34);

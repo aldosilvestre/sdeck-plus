@@ -1,9 +1,10 @@
 use super::{
+    folder_panel::FolderPanel,
     pages::{PageEdit, Removal},
     FeatureRuntime,
 };
 use crate::ui;
-use gtk::{prelude::*, Box as GtkBox, Button, Entry, Orientation};
+use gtk::{prelude::*, Box as GtkBox, Button, Orientation};
 use sdeck_plus::organization::{NavigationAction, Organization};
 use std::{cell::RefCell, rc::Rc};
 
@@ -19,15 +20,8 @@ pub(super) struct PageControls {
     pub(super) delete: Button,
     pub(super) folders: GtkBox,
     pub(super) folder_menu: gtk::MenuButton,
-    pub(super) folder_name: Entry,
+    pub(super) folder_panel: FolderPanel,
     folder_count: gtk::Label,
-    folder_context: gtk::Label,
-    folder_model: gtk::StringList,
-    pub(super) folder_picker: gtk::DropDown,
-    create_folder: Button,
-    open_folder: Button,
-    link_folder: Button,
-    delete_folder: Button,
     owner: Rc<RefCell<Option<String>>>,
 }
 
@@ -54,35 +48,9 @@ impl PageControls {
         for (button, _) in &navigation {
             navigation_group.append(button);
         }
-        let folders = GtkBox::new(Orientation::Vertical, 16);
-        let folder_context = ui::helper("Folders belong to the selected page.");
-        folders.append(&folder_context);
-        let folder_name = Entry::builder()
-            .placeholder_text("New folder name")
-            .width_chars(16)
-            .hexpand(true)
-            .build();
-        folders.append(&crate::labeled("New folder name", &folder_name));
-        let create_folder = ui::button("folder-new-symbolic", "New folder");
-        folders.append(&create_folder);
-        folders.append(&gtk::Separator::new(Orientation::Horizontal));
-        let folder_model = gtk::StringList::new(&[]);
-        let folder_picker = gtk::DropDown::new(Some(folder_model.clone()), gtk::Expression::NONE);
-        folder_picker.set_hexpand(true);
-        folders.append(&crate::labeled("Folders on this page", &folder_picker));
-        let actions = GtkBox::new(Orientation::Horizontal, 8);
-        let open_folder = ui::button("folder-open-symbolic", "Open folder");
-        let link_folder = ui::button("insert-link-symbolic", "Link to control");
-        link_folder.set_tooltip_text(Some(
-            "Save this folder on the selected control and event without opening it",
-        ));
-        let delete_folder = ui::button("user-trash-symbolic", "Delete folder");
-        delete_folder.add_css_class("destructive-action");
-        for button in [&open_folder, &link_folder, &delete_folder] {
-            actions.append(button);
-        }
-        folders.append(&actions);
-        let panel = ui::popover("Page folders", &ui::panel_body(&folders));
+        let folder_panel = FolderPanel::new();
+        let folders = folder_panel.root.clone();
+        let panel = ui::popover("Page folders", &folders);
         let folder_count = gtk::Label::new(Some("0"));
         let folder_button = GtkBox::new(Orientation::Horizontal, 8);
         folder_button.append(&gtk::Image::from_icon_name("folder-symbolic"));
@@ -120,15 +88,8 @@ impl PageControls {
             delete,
             folders,
             folder_menu,
-            folder_name,
+            folder_panel,
             folder_count,
-            folder_context,
-            folder_model,
-            folder_picker,
-            create_folder,
-            open_folder,
-            link_folder,
-            delete_folder,
             owner: Rc::new(RefCell::new(None)),
         }
     }
@@ -151,29 +112,8 @@ impl PageControls {
             callback.confirm_removal(Removal::Page(key));
         });
         let callback = runtime.clone();
-        self.create_folder
-            .connect_clicked(move |_| callback.create_folder());
-        let callback = runtime.clone();
-        self.folder_name
-            .connect_activate(move |_| callback.create_folder());
-        let callback = runtime.clone();
-        self.open_folder.connect_clicked(move |_| {
-            if let Some(name) = callback.selected_folder() {
-                callback.page_controls.folder_menu.popdown();
-                callback.navigate(&NavigationAction::OpenFolder(name));
-            }
-        });
-        let callback = runtime.clone();
-        self.link_folder
-            .connect_clicked(move |_| callback.link_folder());
-        let callback = runtime.clone();
-        self.delete_folder.connect_clicked(move |_| {
-            if let Some(name) = callback.selected_folder() {
-                let page = callback.layers.borrow().active().to_owned();
-                callback.page_controls.folder_menu.popdown();
-                callback.confirm_removal(Removal::Folder { page, name });
-            }
-        });
+        self.folder_panel
+            .set_handler(Rc::new(move |command| callback.folder_command(command)));
     }
 
     pub(super) fn refresh(
@@ -183,38 +123,18 @@ impl PageControls {
         artwork_available: bool,
     ) {
         let info = organization.current(layers);
-        let changed = self.owner.borrow().as_deref() != Some(layers.active());
-        if changed {
-            self.folder_name.set_text("");
+        if self.owner.borrow().as_deref() != Some(layers.active()) {
+            self.folder_panel.reset_input();
             *self.owner.borrow_mut() = Some(layers.active().to_owned());
         }
-        self.folder_context.set_text(&format!(
-            "Folders belong to \"{}\". Link saves navigation on the selected control.",
-            info.page_name
-        ));
-        let selected = self
-            .folder_picker
-            .selected_item()
-            .and_then(|item| item.downcast::<gtk::StringObject>().ok())
-            .map(|item| item.string().to_string());
         let names = organization.folders(layers);
         self.folder_count.set_text(&names.len().to_string());
         let caption = format!("Page folders ({})", names.len());
         self.folder_menu.set_tooltip_text(Some(&caption));
         self.folder_menu
             .update_property(&[gtk::accessible::Property::Label(&caption)]);
-        crate::replace_string_list(&self.folder_model, &names);
-        if !changed {
-            if let Some(selected) = selected {
-                crate::select_string(&self.folder_model, &self.folder_picker, &selected);
-            }
-        }
-        let available = !names.is_empty();
-        self.folder_picker.set_sensitive(available);
-        self.open_folder.set_sensitive(available);
-        self.link_folder.set_sensitive(available);
-        self.delete_folder
-            .set_sensitive(available && artwork_available);
+        self.folder_panel
+            .refresh(&info.page_name, &names, artwork_available);
         self.delete.set_sensitive(
             layers.active() != sdeck_plus::layers::DEFAULT_LAYER && artwork_available,
         );

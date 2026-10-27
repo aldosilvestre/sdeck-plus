@@ -137,13 +137,15 @@ fn assert_touchscreen_page_indicators() {
     );
     let original_keys = keys(&initial);
     widgets.binding_ui.control_picker.set_selected(2);
-    let create = widgets
-        .feature_runtime
-        .touchscreen_controls()
-        .last_child()
-        .unwrap()
-        .downcast::<Button>()
-        .unwrap();
+    // Find "New touchscreen page" by its name: the Delete button now follows it.
+    let create = std::iter::successors(
+        widgets.feature_runtime.touchscreen_controls().first_child(),
+        |child| child.next_sibling(),
+    )
+    .find(|child| child.tooltip_text().as_deref() == Some("New touchscreen page"))
+    .unwrap()
+    .downcast::<Button>()
+    .unwrap();
     create.emit_clicked();
     let middle = layers
         .borrow()

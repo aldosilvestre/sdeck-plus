@@ -75,16 +75,15 @@ pub(super) fn capture_page_workflow(
     name.set_text("QA folder");
     menu.popup();
     save("new-folder", panel.upcast_ref());
+    // Creating keeps the owning page selected and the popover open.
     button("New folder").emit_clicked();
-    button("Parent").emit_clicked();
     save("folder-count", widgets.root.upcast_ref());
-    menu.popup();
     save("owned-folders", panel.upcast_ref());
-    button("Link to control").emit_clicked();
+    folder_button(widgets, "Link folder QA folder to control").emit_clicked();
     save("linked-folder", panel.upcast_ref());
     menu.popdown();
     panel.set_autohide(autohide);
-    button("Delete folder").emit_clicked();
+    folder_button(widgets, "Delete folder QA folder").emit_clicked();
     let dialog = current_dialog();
     save("delete-folder", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);
@@ -109,7 +108,6 @@ pub(super) fn capture_page_workflow(
     dialog.response(ResponseType::Accept);
     name.set_text("QA child");
     button("New folder").emit_clicked();
-    button("Parent").emit_clicked();
     button("Delete profile").emit_clicked();
     let dialog = current_dialog();
     save("delete-profile", dialog.upcast_ref());

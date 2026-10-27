@@ -270,7 +270,11 @@ fn bright(image: &gtk::gdk_pixbuf::Pixbuf, rows: std::ops::Range<i32>) -> usize 
             } else {
                 255
             };
-            if alpha > 200 && bytes[offset] > 200 && bytes[offset + 1] > 200 {
+            // Lit in any accent color (icons) or white (captions).
+            let lit = bytes[offset..offset + 3]
+                .iter()
+                .any(|channel| *channel > 180);
+            if alpha > 200 && lit {
                 count += 1;
             }
         }
@@ -339,7 +343,7 @@ fn touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile() {
             .flat_map(|y| columns.clone().map(move |x| (x, y)))
             .filter(|&(x, y)| {
                 let p = pixel(x, y);
-                p[3] > 200 && p[0] > 200 && p[1] > 200
+                p[3] > 200 && p[..3].iter().any(|channel| *channel > 180)
             })
             .count()
     };
@@ -348,7 +352,7 @@ fn touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile() {
     // A translucent graphite tile, not transparent and not black, with
     // rounded transparent corners so the strip shows around it.
     let tile = pixel(80, 92);
-    assert!(tile[3] > 60 && tile[3] < 255, "translucent tile: {tile:?}");
+    assert!(tile[3] > 8 && tile[3] < 60, "see-through tile: {tile:?}");
     assert!(tile[0] > 20, "graphite, not black: {tile:?}");
     assert_eq!(pixel(0, 0)[3], 0);
     assert_eq!(pixel(199, 99)[3], 0);
@@ -361,7 +365,7 @@ fn edge_page_indicators_keep_their_room_beside_the_section_icon() {
         let stride = image.rowstride() as usize;
         (30..70)
             .flat_map(|y| columns.clone().map(move |x| y * stride + x * 4))
-            .filter(|&o| bytes[o + 3] > 200 && bytes[o] > 200 && bytes[o + 1] > 200)
+            .filter(|&o| bytes[o + 3] > 200 && bytes[o..o + 3].iter().any(|c| *c > 180))
             .count()
     };
     let plain = compose_zone_image(BindingIcon::NextPage, "Next page", false, false).unwrap();
@@ -410,4 +414,355 @@ fn target_markers_fill_exactly_their_control_on_a_mini_map() {
         "target-strip"
     );
     assert_eq!(target_marker_id(ArtworkTarget::Keypad(5)), "target-key-5");
+}
+
+#[test]
+fn live_information_glyphs_come_from_the_binding_vocabulary() {
+    use crate::info::Glyph;
+    // Shared meanings reuse the binding icon; the rest are new vocabulary icons.
+    for (glyph, icon) in [
+        (Glyph::None, None),
+        (Glyph::Sun, Some(BindingIcon::Brightness)),
+        (Glyph::SpeakerMuted, Some(BindingIcon::Mute)),
+        (Glyph::Headphones, Some(BindingIcon::AudioOutput)),
+        (Glyph::Record, Some(BindingIcon::Record)),
+        (Glyph::Live, Some(BindingIcon::Stream)),
+        (Glyph::ObsIdle, Some(BindingIcon::ObsScene)),
+        (Glyph::Speaker, Some(BindingIcon::Volume)),
+        (Glyph::Cloud, Some(BindingIcon::Cloud)),
+        (Glyph::PartlyCloudy, Some(BindingIcon::PartlyCloudy)),
+        (Glyph::Rain, Some(BindingIcon::Rain)),
+        (Glyph::Snow, Some(BindingIcon::Snow)),
+        (Glyph::Storm, Some(BindingIcon::Storm)),
+        (Glyph::Fog, Some(BindingIcon::Fog)),
+        (Glyph::Chip, Some(BindingIcon::Cpu)),
+        (Glyph::Memory, Some(BindingIcon::Memory)),
+        (Glyph::Thermometer, Some(BindingIcon::Temperature)),
+    ] {
+        assert_eq!(BindingIcon::for_glyph(glyph), icon, "{glyph:?}");
+        if let Some(icon) = icon {
+            assert!(BindingIcon::ALL.contains(&icon), "{icon:?} is in ALL");
+        }
+    }
+}
+
+#[test]
+fn long_captions_wrap_between_words_and_ellipsize_instead_of_breaking_words() {
+    let input = "Website https://example.com/a/very/long/path and more words beyond";
+    let words: Vec<&str> = input.split_whitespace().collect();
+    for (size, width, lines) in [(14.0, 112, 2), (17.0, 100, 2), (17.0, 60, 1)] {
+        let shown = caption_lines(input, size, width, lines);
+        assert!(!shown.is_empty() && shown.len() <= lines);
+        // Every line holds whole words, in order; nothing is cut mid-word.
+        let joined: Vec<&str> = shown.iter().flat_map(|line| line.split(' ')).collect();
+        assert_eq!(joined, words[..joined.len()], "{shown:?}");
+        let layout = caption_layout(input, size, width, lines as i32);
+        assert_eq!(
+            layout.line_count() as usize,
+            shown.len(),
+            "no extra wrapping"
+        );
+        assert!(
+            layout.pixel_size().0 <= width,
+            "too wide lines are ellipsized"
+        );
+    }
+    // Words that fit stay whole on the first line.
+    assert_eq!(caption_lines("Media Next", 14.0, 112, 2), ["Media Next"]);
+    assert_eq!(
+        caption_lines("OBS scene: Camera", 17.0, 100, 2),
+        ["OBS scene:", "Camera"]
+    );
+}
+
+fn tile_alpha(alpha: f64, x: usize, y: usize) -> u8 {
+    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 200, 100).unwrap();
+    {
+        let context = cairo::Context::new(&surface).unwrap();
+        draw_zone_tile(&context, alpha).unwrap();
+    }
+    let stride = surface.stride() as usize;
+    let data = surface.data().unwrap();
+    let offset = y * stride + x * 4;
+    (u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap()) >> 24) as u8
+}
+
+#[test]
+fn section_tiles_are_clearly_see_through() {
+    // About 0.15 over the plain strip and 0.10 over section artwork, fading
+    // softly downwards; never zero, so the section still reads as a tile.
+    for (alpha, most) in [(ZONE_TILE_ALPHA, 46), (ZONE_TILE_ARTWORK_ALPHA, 31)] {
+        for y in [12, 50, 88] {
+            let shown = tile_alpha(alpha, 100, y);
+            assert!(shown > 5 && shown <= most, "{alpha} at y={y}: {shown}");
+        }
+        assert!(
+            tile_alpha(alpha, 100, 88) < tile_alpha(alpha, 100, 12),
+            "the fill fades towards the bottom"
+        );
+    }
+    const { assert!(ZONE_TILE_ARTWORK_ALPHA < ZONE_TILE_ALPHA) };
+    // The fine light edge stays subtle.
+    assert!(tile_alpha(ZONE_TILE_ALPHA, 100, 4) < 50);
+}
+
+fn alphas(icon: BindingIcon) -> Vec<u8> {
+    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 48, 48).unwrap();
+    {
+        let context = cairo::Context::new(&surface).unwrap();
+        paint(&context, icon, (24.0, 24.0), 48.0, (1.0, 1.0, 1.0, 1.0)).unwrap();
+    }
+    let data = surface.data().unwrap();
+    data.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| (u32::from_ne_bytes(*pixel) >> 24) as u8)
+        .collect()
+}
+
+#[test]
+fn every_icon_is_a_duotone_of_a_soft_fill_under_a_crisp_stroke() {
+    // The soft layer is SOFT_ALPHA of the ink (89/255 for a white ink).
+    let soft = (SOFT_ALPHA * 255.0).round() as u8;
+    for icon in BindingIcon::ALL {
+        let alphas = alphas(icon);
+        let soft_layer = alphas.iter().filter(|a| a.abs_diff(soft) <= 2).count();
+        let primary = alphas.iter().filter(|a| **a > 230).count();
+        assert!(soft_layer > 40, "{}: soft layer {soft_layer}", icon.id());
+        assert!(primary > 40, "{}: primary layer {primary}", icon.id());
+    }
+}
+
+#[test]
+fn hardware_icons_sit_on_a_soft_drop_shadow_not_a_hard_outline() {
+    let draw = |shadowed: bool| {
+        let mut surface = cairo::ImageSurface::create(cairo::Format::Rgb24, 64, 64).unwrap();
+        {
+            let context = cairo::Context::new(&surface).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+            let white = (1.0, 1.0, 1.0, 1.0);
+            if shadowed {
+                paint_outlined(&context, BindingIcon::Record, (32.0, 32.0), 40.0, white)
+            } else {
+                paint(&context, BindingIcon::Record, (32.0, 32.0), 40.0, white)
+            }
+            .unwrap();
+        }
+        let data = surface.data().unwrap();
+        data.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| (u32::from_ne_bytes(*pixel) & 0xff) as u8)
+            .collect::<Vec<u8>>()
+    };
+    // Over plain white the glyph itself is invisible; what darkens is shadow.
+    let (shadowed, plain) = (draw(true), draw(false));
+    assert!(plain.iter().all(|value| *value == 255));
+    let dark = shadowed.iter().filter(|value| **value < 60).count();
+    let soft = shadowed
+        .iter()
+        .filter(|value| (90..235).contains(*value))
+        .count();
+    assert!(soft > 150, "a visible halo: {soft}");
+    assert!(soft > dark * 2, "fades softly ({soft} soft, {dark} dark)");
+    // It drops slightly downwards.
+    let darkness = |rows: std::ops::Range<usize>| -> u32 {
+        rows.flat_map(|y| (0..64).map(move |x| y * 64 + x))
+            .map(|offset| u32::from(255 - shadowed[offset]))
+            .sum()
+    };
+    assert!(darkness(32..64) > darkness(0..32));
+}
+
+#[test]
+fn hardware_accents_follow_the_icon_family() {
+    use IconCategory as C;
+    for (icon, category) in [
+        (BindingIcon::PlayPause, C::Media),
+        (BindingIcon::NextTrack, C::Media),
+        (BindingIcon::PlaySound, C::Media),
+        (BindingIcon::VolumeUp, C::Audio),
+        (BindingIcon::Mute, C::Audio),
+        (BindingIcon::AudioOutput, C::Audio),
+        (BindingIcon::Record, C::Obs),
+        (BindingIcon::Stream, C::Obs),
+        (BindingIcon::ObsScene, C::Obs),
+        (BindingIcon::NextPage, C::Navigation),
+        (BindingIcon::Folder, C::Navigation),
+        (BindingIcon::GoToPage, C::Navigation),
+        (BindingIcon::Command, C::System),
+        (BindingIcon::Application, C::System),
+        (BindingIcon::Brightness, C::System),
+        (BindingIcon::Website, C::Web),
+        (BindingIcon::Rain, C::Weather),
+        (BindingIcon::Cpu, C::Monitor),
+    ] {
+        assert_eq!(icon.category(), category, "{}", icon.id());
+        assert_eq!(icon.accent(), category.accent());
+    }
+    // Navigation stays neutral white; the families are told apart by hue.
+    let (r, g, b, _) = C::Navigation.accent();
+    assert!(r > 0.9 && g > 0.9 && b > 0.9);
+    let accents: Vec<_> = [C::Media, C::Audio, C::Obs, C::System, C::Web]
+        .iter()
+        .map(|c| c.accent())
+        .collect();
+    for (index, a) in accents.iter().enumerate() {
+        for b in &accents[index + 1..] {
+            let distance = (a.0 - b.0).abs() + (a.1 - b.1).abs() + (a.2 - b.2).abs();
+            assert!(distance > 0.25, "{a:?} vs {b:?}");
+        }
+    }
+    // Keys carry the accent: a red record icon, a white page icon.
+    let reddish = |icon: BindingIcon| {
+        let image = compose_key_image(icon, "", None).unwrap().unwrap();
+        let bytes = image.read_pixel_bytes();
+        bytes
+            .chunks(3)
+            .filter(|p| p[0] > 200 && u16::from(p[1]) + 70 < u16::from(p[0]))
+            .count()
+    };
+    assert!(reddish(BindingIcon::Record) > 100);
+    assert_eq!(reddish(BindingIcon::NextPage), 0);
+}
+
+/// Opt-in visual review: `STREAMDECK_ICON_SHEET=/path/sheet.png` writes every
+/// icon as a dark key, a colored key, a key over light artwork and a section
+/// over strip artwork at device size, then key and section at preview size
+/// and the themed menu icon on dark and light rows. Unset, nothing is written.
+#[test]
+fn icon_contact_sheet_when_explicitly_requested() {
+    let Some(path) = std::env::var_os("STREAMDECK_ICON_SHEET") else {
+        return;
+    };
+    const GROUP: f64 = 860.0;
+    const ROW: f64 = 128.0;
+    let per_row = 2;
+    let rows = BindingIcon::ALL.len().div_ceil(per_row);
+    let (width, height) = (
+        GROUP as i32 * per_row as i32,
+        (rows as f64 * ROW) as i32 + 8,
+    );
+    let sheet = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).unwrap();
+    let cairo = cairo::Context::new(&sheet).unwrap();
+    cairo.set_source_rgb(0.08, 0.10, 0.12);
+    cairo.paint().unwrap();
+    let place = |image: &gtk::gdk_pixbuf::Pixbuf, x: f64, y: f64, scale: f64| {
+        let surface = pixbuf_surface(image);
+        cairo.save().unwrap();
+        cairo.translate(x, y);
+        cairo.scale(scale, scale);
+        cairo.set_source_surface(&surface, 0.0, 0.0).unwrap();
+        cairo.source().set_filter(cairo::Filter::Good);
+        cairo.paint().unwrap();
+        cairo.restore().unwrap();
+    };
+    let backdrop = |x: f64, y: f64, w: f64, h: f64, stops: &[(f64, f64, f64)]| {
+        let fill = cairo::LinearGradient::new(x, y, x + w, y + h);
+        for (index, (r, g, b)) in stops.iter().enumerate() {
+            fill.add_color_stop_rgb(index as f64 / (stops.len() - 1) as f64, *r, *g, *b);
+        }
+        cairo.rectangle(x, y, w, h);
+        cairo.set_source(&fill).unwrap();
+        cairo.fill().unwrap();
+    };
+    let colored = [(0.20, 0.25, 0.62), (0.42, 0.17, 0.56)];
+    let light = [(0.99, 0.93, 0.75), (0.80, 0.90, 0.98), (1.0, 1.0, 1.0)];
+    let strip = [(0.95, 0.55, 0.25), (0.80, 0.30, 0.55), (0.20, 0.65, 0.70)];
+    for (index, icon) in BindingIcon::ALL.into_iter().enumerate() {
+        let x = (index % per_row) as f64 * GROUP + 8.0;
+        let y = (index / per_row) as f64 * ROW + 8.0;
+        let caption = icon.id().replace('-', " ");
+        let key = compose_key_image(icon, &caption, None).unwrap().unwrap();
+        place(&key, x, y, 1.0);
+        for (column, stops) in [(1.0, &colored[..]), (2.0, &light[..])] {
+            let left = x + column * 124.0;
+            backdrop(left, y, 120.0, 120.0, stops);
+            // The clip keeps the shadow's groups key-sized.
+            cairo.save().unwrap();
+            cairo.rectangle(left, y, 120.0, 120.0);
+            cairo.clip();
+            paint_outlined(&cairo, icon, (left + 60.0, y + 39.0), 50.0, icon.accent()).unwrap();
+            let layout = caption_layout(&caption, 14.0, KEY - 8, 2);
+            draw_caption(&cairo, &layout, (left + 4.0, y + 72.0)).unwrap();
+            cairo.restore().unwrap();
+        }
+        let zone = compose_zone_image(icon, &caption, false, index % 3 == 0).unwrap();
+        backdrop(x + 372.0, y + 10.0, 200.0, 100.0, &strip);
+        place(&zone, x + 372.0, y + 10.0, 1.0);
+        place(&key, x + 580.0, y + 30.0, 0.5);
+        cairo.rectangle(x + 646.0, y + 35.0, 100.0, 50.0);
+        cairo.set_source_rgb(0.0, 0.0, 0.0);
+        cairo.fill().unwrap();
+        place(&zone, x + 646.0, y + 35.0, 0.5);
+        for (row, background, ink) in [
+            (0.0, (0.13, 0.15, 0.18), (0.95, 0.96, 0.97, 1.0)),
+            (1.0, (0.96, 0.97, 0.98), (0.13, 0.15, 0.18, 1.0)),
+        ] {
+            let top = y + 22.0 + row * 40.0;
+            cairo.rectangle(x + 754.0, top, 88.0, 36.0);
+            cairo.set_source_rgb(background.0, background.1, background.2);
+            cairo.fill().unwrap();
+            paint(&cairo, icon, (x + 772.0, top + 18.0), 16.0, ink).unwrap();
+            paint(&cairo, icon, (x + 812.0, top + 18.0), 24.0, ink).unwrap();
+        }
+    }
+    drop(cairo);
+    let path = std::path::PathBuf::from(path);
+    surface_pixbuf(sheet).savev(&path, "png", &[]).unwrap();
+    // Readable crops of eight rows each, next to the sheet.
+    let image = gtk::gdk_pixbuf::Pixbuf::from_file(&path).unwrap();
+    for (part, first) in (0..rows).step_by(8).enumerate() {
+        let top = (first as f64 * ROW) as i32;
+        let tall = ((8.0 * ROW) as i32 + 8).min(height - top);
+        let crop = image.new_subpixbuf(0, top, width, tall);
+        let name = format!("{}-part{}.png", path.with_extension("").display(), part + 1);
+        crop.savev(name, "png", &[]).unwrap();
+    }
+}
+
+fn pixbuf_surface(image: &gtk::gdk_pixbuf::Pixbuf) -> cairo::ImageSurface {
+    let (width, height) = (image.width(), image.height());
+    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).unwrap();
+    let stride = surface.stride() as usize;
+    let bytes = image.read_pixel_bytes();
+    let (source, channels) = (image.rowstride() as usize, image.n_channels() as usize);
+    {
+        let mut data = surface.data().unwrap();
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let p = &bytes[y * source + x * channels..];
+                let alpha = if channels == 4 { u32::from(p[3]) } else { 255 };
+                let pre = |c: u8| u32::from(c) * alpha / 255;
+                let pixel = alpha << 24 | pre(p[0]) << 16 | pre(p[1]) << 8 | pre(p[2]);
+                data[y * stride + x * 4..y * stride + x * 4 + 4]
+                    .copy_from_slice(&pixel.to_ne_bytes());
+            }
+        }
+    }
+    surface
+}
+
+fn surface_pixbuf(mut surface: cairo::ImageSurface) -> gtk::gdk_pixbuf::Pixbuf {
+    let (width, height) = (surface.width(), surface.height());
+    let stride = surface.stride() as usize;
+    let data = surface.data().unwrap();
+    let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let offset = y * stride + x * 4;
+            let pixel = u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap());
+            rgb.extend_from_slice(&pixel.to_be_bytes()[1..]);
+        }
+    }
+    gtk::gdk_pixbuf::Pixbuf::from_bytes(
+        &gtk::glib::Bytes::from_owned(rgb),
+        gtk::gdk_pixbuf::Colorspace::Rgb,
+        false,
+        8,
+        width,
+        height,
+        width * 3,
+    )
 }

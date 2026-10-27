@@ -20,18 +20,25 @@ pub(crate) fn binding_icon(icon: BindingIcon) -> gtk::DrawingArea {
     area
 }
 
+/// Dial icons sit on the device preview, so they use the hardware accent of
+/// the icon's family (as keys and touch sections do); every other icon uses
+/// the theme foreground.
 pub(crate) fn set_binding_icon(area: &gtk::DrawingArea, icon: BindingIcon) {
     area.set_widget_name(icon.id());
     area.set_draw_func(move |area, cairo, width, height| {
         // GTK 4.8 has no Widget::color(); the style context gives the same ink.
         #[allow(deprecated)]
         let color = area.style_context().color();
-        let ink = (
-            f64::from(color.red()),
-            f64::from(color.green()),
-            f64::from(color.blue()),
-            f64::from(color.alpha()),
-        );
+        let ink = if area.has_css_class("dial-icon") {
+            icon.accent()
+        } else {
+            (
+                f64::from(color.red()),
+                f64::from(color.green()),
+                f64::from(color.blue()),
+                f64::from(color.alpha()),
+            )
+        };
         let size = f64::from(width.min(height));
         let center = (f64::from(width) / 2.0, f64::from(height) / 2.0);
         if let Err(error) = binding_icons::paint(cairo, icon, center, size, ink) {

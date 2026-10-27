@@ -8,6 +8,37 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **README simplified.** The README now covers only what sdeck-plus is, why
+  it exists, its key features, installation and one main-window screenshot.
+  Configuration, behavior details and development material (checks,
+  screenshot regeneration, real-device checks, event API, code organization)
+  moved to new Configuration and Development sections of the website, whose
+  Install section now lists every requirement and installer option.
+- **Button text popup.** A line under the title names the edited key and page
+  ("Key 3 on “Everyday / Page 1”"). One 3x3 Position grid replaces the two
+  alignment rows, and orientation is a linked pair of icon toggles. The
+  preview draws the text on the key's real background: its artwork, else its
+  action icon tile, else the neutral key. Save text is enabled only for valid
+  changes, Remove text appears only for saved text, an "Unsaved changes" hint
+  tracks the draft, Ctrl+Enter saves, and a warning appears when the text does
+  not fit the key (saving is still allowed).
+- **Page folders popover.** Folders are listed as rows with Open, Link to
+  control, Rename and Delete icon actions (tooltips and accessible names
+  include the folder name) instead of a dropdown with captioned buttons. The
+  create row validates as you type (duplicate and invalid names are explained,
+  blank names disable the add button), Enter creates, and creating keeps the
+  popover open on the owning page. A page without folders shows an empty
+  state.
+
+- **Modern binding icons.** Every icon is redrawn as a duotone (a soft fill
+  under a crisp round stroke) with clearer shapes for weak glyphs (toggle
+  switch, beamed notes, folder with a front edge, hold progress ring, tap
+  burst, snowflakes, sparkle fallback). Keys, touch sections and preview dials
+  color icons by family (media violet, audio cyan, OBS red, system amber, web
+  blue, navigation white) and replace the hard dark outline of icons and
+  captions with a soft drop shadow. Menus keep the theme color.
+- **See-through touch section tiles.** The section tile drops to 15% (10%
+  over section artwork) and fades towards the bottom, with a subtler edge.
 - The app always starts on the Base profile's first page instead of restoring the
   page that was active when it last closed.
 - **Main window refresh.** The window fills its width (up to 1240px) and the
@@ -25,6 +56,18 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Rename page folders** in place from **Page folders** (Enter saves, Escape
+  cancels). Layer keys, the folder's pages and nested folders are kept, and the
+  owning page's links to the folder follow the new name.
+
+- **Live information matches binding icons.** Live touch sections sit on the
+  same translucent section tile as binding icons, with the icon on the left and
+  value, bar and caption beside it, keeping room for page chevrons. Live
+  readings draw their icons from the binding icon vocabulary (new volume,
+  weather, CPU, memory and temperature icons), and key captions such as CPU,
+  Memory and Temperature are no longer clipped.
+- Automatic captions for website actions show only the URL host, and long
+  captions wrap between words with an ellipsis instead of breaking mid-word.
 - **Binding icons.** One icon vocabulary covers every action, including media,
   audio, mouse, text, page and touchscreen navigation and OBS. The Action menu
   shows an icon per type, preview dials show their action's icon on the knob,

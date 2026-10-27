@@ -250,7 +250,12 @@ pub fn compose_touchscreen_zone(
 ) -> Result<Pixbuf, String> {
     let size = dimensions(ArtworkTarget::EncoderZone(zone))?;
     let image = if let Some(value) = value {
-        crate::info_render::compose_zone_image(value, background)?
+        crate::info_render::compose_zone_image(
+            value,
+            background,
+            zone == 1 && previous,
+            zone == 4 && next,
+        )?
     } else if let Some(background) = background {
         resize_background(size, background)?
     } else {
@@ -439,7 +444,7 @@ pub fn prepare_info_jpeg(
             encode_jpeg(&crate::info_render::compose_info_image(value, background)?)
         }
         ArtworkTarget::EncoderZone(zone) => {
-            let overlay = crate::info_render::compose_zone_image(value, background)?;
+            let overlay = crate::info_render::compose_zone_image(value, background, false, false)?;
             if let Some(strip) = strip_background {
                 let strip =
                     prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
@@ -604,7 +609,8 @@ mod tests {
                 let image =
                     compose_touchscreen_zone(zone, Some(&own), Some(&value), true, true).unwrap();
                 assert_eq!(pixel(&image, x, 50), [255, 255, 255]);
-                assert_eq!(pixel(&image, 100, 5), [0, 0, 255]);
+                // The artwork stays visible around the section tile.
+                assert_eq!(pixel(&image, 100, 2), [0, 0, 255]);
                 let jpeg = prepare_touchscreen_zone_jpeg(
                     zone,
                     Some(&own),
@@ -616,9 +622,9 @@ mod tests {
                 .unwrap();
                 let device = Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap();
                 assert!(pixel(&device, x, 50).iter().all(|channel| *channel > 215));
-                for (actual, expected) in pixel(&device, 100, 5)
+                for (actual, expected) in pixel(&device, 100, 2)
                     .into_iter()
-                    .zip(pixel(&image, 100, 5))
+                    .zip(pixel(&image, 100, 2))
                 {
                     assert!(actual.abs_diff(expected) < 15);
                 }

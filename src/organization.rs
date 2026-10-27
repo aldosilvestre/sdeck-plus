@@ -20,6 +20,8 @@ mod failure_tests;
 #[cfg(test)]
 mod folder_link_tests;
 #[cfg(test)]
+mod folder_rename_tests;
+#[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]
 mod tests;

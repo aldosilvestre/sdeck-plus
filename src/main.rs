@@ -799,6 +799,7 @@ fn build_widgets(
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
     *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
+    text_editor.follow_page_label(&feature_runtime.indicator);
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
@@ -3039,9 +3040,12 @@ impl ArtworkUi {
             ArtworkTarget::Keypad(_) => {
                 sdeck_plus::info_render::compose_info_image(value, background.as_deref())
             }
-            ArtworkTarget::EncoderZone(_) => {
-                sdeck_plus::info_render::compose_zone_image(value, background.as_deref())
-            }
+            ArtworkTarget::EncoderZone(_) => sdeck_plus::info_render::compose_zone_image(
+                value,
+                background.as_deref(),
+                false,
+                false,
+            ),
             ArtworkTarget::TouchStripBackground => return,
         };
         match image {
@@ -3260,6 +3264,29 @@ impl ArtworkUi {
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(4) && next,
         })
+    }
+
+    /// The 120x120 key picture for `text` as the key shows it: over its own
+    /// artwork, else over its binding icon tile (when the text leaves room for
+    /// the icon), else on the neutral black key. Also returns whether the key
+    /// shows anything. Derived when drawing; nothing is stored.
+    fn key_text_image(
+        &self,
+        layer: &str,
+        target: ArtworkTarget,
+        text: &sdeck_plus::button_text::ButtonText,
+    ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
+        let path = self.info_background(layer, target);
+        if path.is_none() {
+            if let Some(icon) = self.control_icon(layer, target) {
+                if let Some(image) = icon.compose(Some(text))? {
+                    return Ok((image, true));
+                }
+            }
+        }
+        let shown = path.is_some() || !text.text.is_empty();
+        let image = sdeck_plus::image_output::compose_button_image(path.as_deref(), text)?;
+        Ok((image, shown))
     }
 
     /// Whether `target` shows live information on `layer`.
@@ -3922,9 +3949,11 @@ mod tests {
     use std::sync::Mutex;
     mod binding_icon_tests;
     mod button_swap_tests;
+    mod button_text_popup_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
     mod documentation_screenshots;
+    mod folder_panel_tests;
     mod live_info_tests;
     mod multimedia_action_tests;
     mod page_return_tests;
@@ -6073,12 +6102,20 @@ mod tests {
         let folder_panel = widgets.feature_runtime.folder_menu().popover().unwrap();
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
         collect_entries(folder_panel.upcast_ref(), &mut entries);
-        entries
+        let folder_name = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New folder name"))
-            .unwrap()
-            .set_text("Studio");
+            .unwrap();
+        folder_name.set_text("Studio");
         find("New folder").emit_clicked();
+        assert_eq!(
+            layers.borrow().active(),
+            active,
+            "creating keeps the owning page selected"
+        );
+        assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
+        assert_eq!(folder_name.text(), "", "a created name is cleared");
+        folder_button(widgets, "Open folder Studio").emit_clicked();
         let folder_key = layers.borrow().active().to_owned();
         assert_ne!(folder_key, active);
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
@@ -6099,7 +6136,7 @@ mod tests {
         assert_eq!(layers.borrow().active(), active);
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
         while commands.try_recv().is_ok() {}
-        find("Link to control").emit_clicked();
+        folder_button(widgets, "Link folder Studio to control").emit_clicked();
         let LayerCommand::SaveBinding(snapshot, Some(_)) = commands.try_recv().unwrap() else {
             panic!("linking must save without entering the folder");
         };
@@ -6112,17 +6149,17 @@ mod tests {
             )))
         );
         assert!(commands.try_recv().is_err());
-        find("Open folder").emit_clicked();
+        folder_button(widgets, "Open folder Studio").emit_clicked();
         assert_eq!(layers.borrow().active(), folder_key);
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 0);
         find("Parent").emit_clicked();
         while commands.try_recv().is_ok() {}
-        find("Delete folder").emit_clicked();
+        folder_button(widgets, "Delete folder Studio").emit_clicked();
         current_dialog().response(ResponseType::Cancel);
         assert!(layers.borrow().layers().contains_key(&folder_key));
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
         assert!(commands.try_recv().is_err());
-        find("Delete folder").emit_clicked();
+        folder_button(widgets, "Delete folder Studio").emit_clicked();
         current_dialog().response(ResponseType::Accept);
         assert!(!layers.borrow().layers().contains_key(&folder_key));
         assert_eq!(layers.borrow().active(), active);
@@ -6253,6 +6290,28 @@ mod tests {
         widgets.feature_runtime.cancel_timer();
         assert!(!widgets.feature_runtime.timer_active());
         eprintln!("GTK feature integration: all typed roundtrips, save/reload, explicit Test dispatch, organization controls, timer completion/cancel/hide");
+    }
+
+    /// A "Page folders" row action, looked up fresh because rows rebuild
+    /// whenever the selected page's folders change.
+    fn folder_button(widgets: &MonitorWidgets, caption: &str) -> Button {
+        fn collect(widget: &gtk::Widget, buttons: &mut Vec<Button>) {
+            if let Some(button) = widget.downcast_ref::<Button>() {
+                buttons.push(button.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                child = current.next_sibling();
+                collect(&current, buttons);
+            }
+        }
+        let panel = widgets.feature_runtime.folder_menu().popover().unwrap();
+        let mut buttons = Vec::new();
+        collect(panel.upcast_ref(), &mut buttons);
+        buttons
+            .into_iter()
+            .find(|button| button.tooltip_text().as_deref() == Some(caption))
+            .unwrap_or_else(|| panic!("folder action {caption:?} is listed"))
     }
 
     fn collect_entries(widget: &gtk::Widget, entries: &mut Vec<Entry>) {
@@ -7377,9 +7436,6 @@ mod tests {
                         | "Delete page"
                         | "Save changes"
                         | "New folder"
-                        | "Open folder"
-                        | "Link to control"
-                        | "Delete folder"
                         | "Save settings"
                         | "Test connection"
                 )
