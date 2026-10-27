@@ -441,3 +441,32 @@ fn live_information_glyphs_come_from_the_binding_vocabulary() {
         }
     }
 }
+
+#[test]
+fn long_captions_wrap_between_words_and_ellipsize_instead_of_breaking_words() {
+    let input = "Website https://example.com/a/very/long/path and more words beyond";
+    let words: Vec<&str> = input.split_whitespace().collect();
+    for (size, width, lines) in [(14.0, 112, 2), (17.0, 100, 2), (17.0, 60, 1)] {
+        let shown = caption_lines(input, size, width, lines);
+        assert!(!shown.is_empty() && shown.len() <= lines);
+        // Every line holds whole words, in order; nothing is cut mid-word.
+        let joined: Vec<&str> = shown.iter().flat_map(|line| line.split(' ')).collect();
+        assert_eq!(joined, words[..joined.len()], "{shown:?}");
+        let layout = caption_layout(input, size, width, lines as i32);
+        assert_eq!(
+            layout.line_count() as usize,
+            shown.len(),
+            "no extra wrapping"
+        );
+        assert!(
+            layout.pixel_size().0 <= width,
+            "too wide lines are ellipsized"
+        );
+    }
+    // Words that fit stay whole on the first line.
+    assert_eq!(caption_lines("Media Next", 14.0, 112, 2), ["Media Next"]);
+    assert_eq!(
+        caption_lines("OBS scene: Camera", 17.0, 100, 2),
+        ["OBS scene:", "Camera"]
+    );
+}

@@ -23,7 +23,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 - [x] L2 Key live info: captions fully visible (no clipping), icon/value/bar/caption spacing rebalanced.
 - [x] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
 - [x] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
-- [ ] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
+- [x] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
 - [ ] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
 
 ## Route
@@ -93,3 +93,19 @@ locator changed: the button is found by its tooltip/accessible name. No
 assertion was removed or relaxed.
 RED: failed at touchscreen_tests.rs:177 (`[]` vs `[(4, false, true)]`); GREEN.
 Checks: clippy ok; display bin suite 53/53.
+Commit 5cad887.
+
+### F2 (delegated writer, route: delegated direct)
+`binding_editor::action_caption` shows only the host for Website actions
+(`url_host`: http/https, drops user info, port, path, query, fragment; IPv6
+brackets kept; anything else keeps the summary). `action_summary` (inspector,
+tooltips) is unchanged; user button text is never touched (captions are only
+derived for keys/sections without artwork). `binding_icons::caption_lines`
+wraps automatic captions between whole words (as many as fit per line, the
+rest on the last line) and Pango ellipsizes a line that is still too wide,
+instead of `WordChar` breaking mid-word. Keys and sections, preview and device
+share `compose_key_image`/`compose_zone_image`, so all four paths change.
+RED: `website_captions_show_only_the_url_host`,
+`long_captions_wrap_between_words_and_ellipsize_instead_of_breaking_words`
+(missing `url_host`/`caption_lines`), then GREEN.
+Checks: clippy ok; headless ok (323+53+2); display bin suite 53/53.

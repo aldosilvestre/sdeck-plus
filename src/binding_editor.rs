@@ -301,7 +301,33 @@ pub fn dial_action(store: &LayerStore, layer: &str, number: u8) -> Option<Action
 /// The short caption a key or touch section without artwork shows under its
 /// binding icon: the same wording as the editor's summaries.
 pub fn action_caption(action: &Action) -> String {
+    use crate::desktop_actions::DesktopAction;
+    use crate::features::FeatureAction;
+    // A website key or section shows only where it goes; the icon says what.
+    if let Action::Feature(FeatureAction::Desktop(DesktopAction::Website { url })) = action {
+        if let Some(host) = url_host(url) {
+            return host;
+        }
+    }
     action_summary(Some(action))
+}
+
+/// The host of an `http(s)://` URL, without user info, port or path.
+pub fn url_host(url: &str) -> Option<String> {
+    let (scheme, rest) = url.trim().split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = if host_port.starts_with('[') {
+        &host_port[..=host_port.find(']')?]
+    } else {
+        host_port.split(':').next()?
+    };
+    (!host.is_empty() && !host.contains(char::is_whitespace)).then(|| host.to_owned())
 }
 
 /// A whole-strip touch gesture shown as a badge above the preview strip.
@@ -448,6 +474,37 @@ mod tests {
     use crate::layers::{Action, LayerStore, Trigger};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn website_captions_show_only_the_url_host() {
+        use crate::desktop_actions::DesktopAction;
+        use crate::features::FeatureAction;
+        let website = |url: &str| {
+            Action::Feature(FeatureAction::Desktop(DesktopAction::Website {
+                url: url.into(),
+            }))
+        };
+        for (url, caption) in [
+            ("https://example.com", "example.com"),
+            ("https://example.com/docs/page?q=1#top", "example.com"),
+            (
+                "http://user:secret@www.example.org:8080/a",
+                "www.example.org",
+            ),
+            ("HTTPS://Example.COM/", "Example.COM"),
+            ("https://[::1]:8443/x", "[::1]"),
+        ] {
+            assert_eq!(action_caption(&website(url)), caption, "{url}");
+        }
+        // Without a recognizable host the summary is kept.
+        assert_eq!(action_caption(&website("not a url")), "Website not a url");
+        // The summary itself (inspector, tooltips) is unchanged.
+        assert_eq!(
+            action_summary(Some(&website("https://example.com"))),
+            "Website https://example.com"
+        );
+        assert_eq!(url_host("mailto:someone@example.com"), None);
+    }
 
     static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
 

@@ -615,7 +615,7 @@ fn rgb_surface(image: &Pixbuf) -> Result<cairo::ImageSurface, String> {
         .map_err(|error| error.to_string())
 }
 
-fn caption_layout(text: &str, size: f64, width: i32, lines: i32) -> pango::Layout {
+fn caption_font(size: f64) -> pango::Layout {
     // PangoCairo's default font map is per-thread; no display or GTK init is used.
     let context = pangocairo::FontMap::default().create_context();
     let layout = pango::Layout::new(&context);
@@ -624,11 +624,47 @@ fn caption_layout(text: &str, size: f64, width: i32, lines: i32) -> pango::Layou
     font.set_weight(pango::Weight::Bold);
     font.set_absolute_size(size * f64::from(pango::SCALE));
     layout.set_font_description(Some(&font));
-    layout.set_text(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+    layout
+}
+
+/// Split an automatic caption into at most `lines` lines between words: each
+/// line takes as many whole words as fit `width`; the last line takes the
+/// rest. A line that is still too wide is ellipsized when drawn, so a word is
+/// never broken in the middle.
+fn caption_lines(text: &str, size: f64, width: i32, lines: usize) -> Vec<String> {
+    let measure = caption_font(size);
+    let fits = |line: &str| {
+        measure.set_text(line);
+        measure.pixel_size().0 <= width
+    };
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut result = Vec::new();
+    let mut next = 0;
+    while next < words.len() && result.len() < lines {
+        let last = result.len() + 1 == lines;
+        let mut line = words[next].to_owned();
+        next += 1;
+        while next < words.len() {
+            let candidate = format!("{line} {}", words[next]);
+            if !last && !fits(&candidate) {
+                break;
+            }
+            line = candidate;
+            next += 1;
+        }
+        result.push(line);
+    }
+    result
+}
+
+fn caption_layout(text: &str, size: f64, width: i32, lines: i32) -> pango::Layout {
+    let layout = caption_font(size);
+    let lines = caption_lines(text, size, width, usize::try_from(lines).unwrap_or(1));
+    layout.set_text(&lines.join("\n"));
     layout.set_width(width * pango::SCALE);
     layout.set_alignment(pango::Alignment::Center);
-    layout.set_wrap(pango::WrapMode::WordChar);
-    layout.set_height(-lines);
+    // One line per paragraph: too-wide lines end in an ellipsis.
+    layout.set_height(-1);
     layout.set_ellipsize(pango::EllipsizeMode::End);
     layout
 }
