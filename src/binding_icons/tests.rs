@@ -411,3 +411,33 @@ fn target_markers_fill_exactly_their_control_on_a_mini_map() {
     );
     assert_eq!(target_marker_id(ArtworkTarget::Keypad(5)), "target-key-5");
 }
+
+#[test]
+fn live_information_glyphs_come_from_the_binding_vocabulary() {
+    use crate::info::Glyph;
+    // Shared meanings reuse the binding icon; the rest are new vocabulary icons.
+    for (glyph, icon) in [
+        (Glyph::None, None),
+        (Glyph::Sun, Some(BindingIcon::Brightness)),
+        (Glyph::SpeakerMuted, Some(BindingIcon::Mute)),
+        (Glyph::Headphones, Some(BindingIcon::AudioOutput)),
+        (Glyph::Record, Some(BindingIcon::Record)),
+        (Glyph::Live, Some(BindingIcon::Stream)),
+        (Glyph::ObsIdle, Some(BindingIcon::ObsScene)),
+        (Glyph::Speaker, Some(BindingIcon::Volume)),
+        (Glyph::Cloud, Some(BindingIcon::Cloud)),
+        (Glyph::PartlyCloudy, Some(BindingIcon::PartlyCloudy)),
+        (Glyph::Rain, Some(BindingIcon::Rain)),
+        (Glyph::Snow, Some(BindingIcon::Snow)),
+        (Glyph::Storm, Some(BindingIcon::Storm)),
+        (Glyph::Fog, Some(BindingIcon::Fog)),
+        (Glyph::Chip, Some(BindingIcon::Cpu)),
+        (Glyph::Memory, Some(BindingIcon::Memory)),
+        (Glyph::Thermometer, Some(BindingIcon::Temperature)),
+    ] {
+        assert_eq!(BindingIcon::for_glyph(glyph), icon, "{glyph:?}");
+        if let Some(icon) = icon {
+            assert!(BindingIcon::ALL.contains(&icon), "{icon:?} is in ALL");
+        }
+    }
+}

@@ -1,6 +1,7 @@
 //! Draws a live information value (icon, bar and text) as a 120x120 key image.
 
 use crate::{
+    binding_icons::{self, BindingIcon},
     image_output::{resize_background, ImageDimensions},
     info::{Glyph, InfoValue},
 };
@@ -9,10 +10,7 @@ use gtk::{
     gdk_pixbuf::{Colorspace, Pixbuf},
     pango::{self, prelude::FontMapExt},
 };
-use std::{
-    f64::consts::{PI, TAU},
-    path::Path,
-};
+use std::{f64::consts::PI, path::Path};
 
 type Color = (f64, f64, f64);
 
@@ -219,31 +217,36 @@ fn make_layout(
     layout
 }
 
-/// The icon, outlined in dark so it reads over any artwork.
+/// The reading's icon from the binding icon vocabulary, in its accent color
+/// with the vocabulary's dark outline so it reads over any artwork. A muted
+/// speaker keeps a grey speaker with a red cross.
 fn draw_icon(
     cairo: &Context,
     value: &InfoValue,
-    (x, y): (f64, f64),
-    scale: f64,
+    rect: Rect,
     color: Color,
 ) -> Result<(), cairo::Error> {
-    cairo.push_group();
-    cairo.save()?;
-    cairo.translate(x, y);
-    cairo.scale(scale, scale);
-    draw_glyph(cairo, value.glyph, color, value.inactive)?;
-    cairo.restore()?;
-    let icon = cairo.pop_group()?;
-    for index in 0..12 {
-        let angle = f64::from(index) * TAU / 12.0;
+    let Some(icon) = BindingIcon::for_glyph(value.glyph) else {
+        return Ok(());
+    };
+    let center = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    let ink = |color: Color| (color.0, color.1, color.2, 1.0);
+    binding_icons::paint_outlined(cairo, icon, center, rect.width, ink(color))?;
+    if value.glyph == Glyph::SpeakerMuted {
+        // The cross sits right of the speaker (x > 2 on the 24-unit grid).
         cairo.save()?;
-        cairo.translate(angle.cos() * 2.2, angle.sin() * 2.2);
-        cairo.set_source_rgba(0.0, 0.0, 0.0, 0.85);
-        cairo.mask(&icon)?;
+        cairo.rectangle(
+            center.0 + rect.width * 2.0 / 24.0,
+            rect.y,
+            rect.width,
+            rect.height,
+        );
+        cairo.clip();
+        let result = binding_icons::paint(cairo, icon, center, rect.width, ink(RED));
         cairo.restore()?;
+        result?;
     }
-    cairo.set_source(&icon)?;
-    cairo.paint()
+    Ok(())
 }
 
 /// Text with the same thin dark outline the key text editor uses.
@@ -534,13 +537,7 @@ fn key_plan(value: &InfoValue) -> Plan {
 fn draw_parts(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cairo::Error> {
     let color = accent(value);
     if let Some(icon) = plan.icon {
-        draw_icon(
-            cairo,
-            value,
-            (icon.x + icon.width / 2.0, icon.y + icon.height / 2.0),
-            icon.width / 48.0,
-            color,
-        )?;
+        draw_icon(cairo, value, icon, color)?;
     }
     let fill = if value.inactive { GREY } else { WHITE };
     if let Some(bar) = plan.bar {
@@ -578,217 +575,6 @@ fn draw_bar(
         cairo.rectangle(x, y, width * f64::from(level.min(100)) / 100.0, height);
         cairo.fill()?;
         cairo.restore()?;
-    }
-    Ok(())
-}
-
-fn cloud(cairo: &Context) -> Result<(), cairo::Error> {
-    cairo.new_path();
-    cairo.arc(-11.0, 4.0, 9.0, 0.0, TAU);
-    cairo.new_sub_path();
-    cairo.arc(0.0, -5.0, 13.0, 0.0, TAU);
-    cairo.new_sub_path();
-    cairo.arc(13.0, 3.0, 10.0, 0.0, TAU);
-    cairo.rectangle(-11.0, 4.0, 24.0, 9.0);
-    cairo.fill()
-}
-
-fn rays(cairo: &Context, inner: f64, outer: f64, count: u32) -> Result<(), cairo::Error> {
-    for index in 0..count {
-        let angle = f64::from(index) * TAU / f64::from(count);
-        cairo.move_to(angle.cos() * inner, angle.sin() * inner);
-        cairo.line_to(angle.cos() * outer, angle.sin() * outer);
-    }
-    cairo.stroke()
-}
-
-fn draw_glyph(
-    cairo: &Context,
-    glyph: Glyph,
-    color: Color,
-    inactive: bool,
-) -> Result<(), cairo::Error> {
-    cairo.set_line_cap(cairo::LineCap::Round);
-    cairo.set_line_join(cairo::LineJoin::Round);
-    set(cairo, color);
-    match glyph {
-        Glyph::None => {}
-        Glyph::Speaker | Glyph::SpeakerMuted => {
-            cairo.translate(-6.0, 0.0);
-            cairo.move_to(-22.0, -9.0);
-            cairo.line_to(-10.0, -9.0);
-            cairo.line_to(4.0, -21.0);
-            cairo.line_to(4.0, 21.0);
-            cairo.line_to(-10.0, 9.0);
-            cairo.line_to(-22.0, 9.0);
-            cairo.close_path();
-            cairo.fill()?;
-            cairo.set_line_width(4.0);
-            if glyph == Glyph::SpeakerMuted {
-                set(cairo, RED);
-                cairo.move_to(12.0, -10.0);
-                cairo.line_to(28.0, 10.0);
-                cairo.move_to(28.0, -10.0);
-                cairo.line_to(12.0, 10.0);
-                cairo.stroke()?;
-            } else {
-                for radius in [11.0, 19.0] {
-                    cairo.new_path();
-                    cairo.arc(4.0, 0.0, radius, -0.75, 0.75);
-                    cairo.stroke()?;
-                }
-            }
-        }
-        Glyph::Headphones => {
-            cairo.set_line_width(5.0);
-            cairo.new_path();
-            cairo.arc(0.0, 2.0, 19.0, PI, TAU);
-            cairo.stroke()?;
-            rounded(cairo, -26.0, 2.0, 11.0, 20.0, 4.0);
-            cairo.fill()?;
-            rounded(cairo, 15.0, 2.0, 11.0, 20.0, 4.0);
-            cairo.fill()?;
-        }
-        Glyph::Sun => {
-            cairo.new_path();
-            cairo.arc(0.0, 0.0, 11.0, 0.0, TAU);
-            cairo.fill()?;
-            cairo.set_line_width(3.5);
-            rays(cairo, 16.0, 23.0, 8)?;
-        }
-        Glyph::Cloud => {
-            cairo.translate(-1.0, 2.0);
-            cloud(cairo)?;
-        }
-        Glyph::PartlyCloudy => {
-            cairo.save()?;
-            cairo.translate(-9.0, -9.0);
-            cairo.new_path();
-            cairo.arc(0.0, 0.0, 9.0, 0.0, TAU);
-            cairo.fill()?;
-            cairo.set_line_width(3.0);
-            rays(cairo, 13.0, 18.0, 8)?;
-            cairo.restore()?;
-            cairo.translate(4.0, 8.0);
-            cairo.scale(0.8, 0.8);
-            set(cairo, if inactive { GREY } else { CLOUD });
-            cloud(cairo)?;
-        }
-        Glyph::Rain | Glyph::Snow | Glyph::Storm | Glyph::Fog => {
-            cairo.save()?;
-            cairo.translate(0.0, -8.0);
-            set(cairo, if inactive { GREY } else { CLOUD });
-            cloud(cairo)?;
-            cairo.restore()?;
-            cairo.set_line_width(3.5);
-            match glyph {
-                Glyph::Rain => {
-                    set(cairo, color);
-                    for x in [-10.0, 0.0, 10.0] {
-                        cairo.move_to(x, 10.0);
-                        cairo.line_to(x - 3.0, 21.0);
-                    }
-                    cairo.stroke()?;
-                }
-                Glyph::Snow => {
-                    set(cairo, color);
-                    for (x, y) in [(-9.0, 13.0), (0.0, 20.0), (9.0, 13.0)] {
-                        cairo.new_path();
-                        cairo.arc(x, y, 2.8, 0.0, TAU);
-                        cairo.fill()?;
-                    }
-                }
-                Glyph::Storm => {
-                    set(cairo, color);
-                    cairo.move_to(3.0, 5.0);
-                    cairo.line_to(-6.0, 16.0);
-                    cairo.line_to(0.0, 16.0);
-                    cairo.line_to(-4.0, 26.0);
-                    cairo.line_to(8.0, 12.0);
-                    cairo.line_to(2.0, 12.0);
-                    cairo.line_to(6.0, 5.0);
-                    cairo.close_path();
-                    cairo.fill()?;
-                }
-                _ => {
-                    set(cairo, GREY);
-                    for y in [12.0, 20.0] {
-                        cairo.move_to(-16.0, y);
-                        cairo.line_to(16.0, y);
-                    }
-                    cairo.stroke()?;
-                }
-            }
-        }
-        Glyph::Chip => {
-            cairo.set_line_width(4.0);
-            rounded(cairo, -14.0, -14.0, 28.0, 28.0, 5.0);
-            cairo.stroke()?;
-            rounded(cairo, -6.0, -6.0, 12.0, 12.0, 2.0);
-            cairo.fill()?;
-            cairo.set_line_width(3.0);
-            for p in [-8.0, 0.0, 8.0] {
-                cairo.move_to(p, -14.0);
-                cairo.line_to(p, -22.0);
-                cairo.move_to(p, 14.0);
-                cairo.line_to(p, 22.0);
-                cairo.move_to(-14.0, p);
-                cairo.line_to(-22.0, p);
-                cairo.move_to(14.0, p);
-                cairo.line_to(22.0, p);
-            }
-            cairo.stroke()?;
-        }
-        Glyph::Memory => {
-            cairo.set_line_width(4.0);
-            rounded(cairo, -24.0, -12.0, 48.0, 22.0, 4.0);
-            cairo.stroke()?;
-            for x in [-18.0, -8.0, 2.0, 12.0] {
-                cairo.rectangle(x, -6.0, 7.0, 10.0);
-            }
-            cairo.fill()?;
-            cairo.set_line_width(3.0);
-            for x in [-16.0, -8.0, 0.0, 8.0, 16.0] {
-                cairo.move_to(x, 10.0);
-                cairo.line_to(x, 17.0);
-            }
-            cairo.stroke()?;
-        }
-        Glyph::Thermometer => {
-            cairo.set_line_width(4.0);
-            rounded(cairo, -5.0, -24.0, 10.0, 34.0, 5.0);
-            cairo.stroke()?;
-            cairo.new_path();
-            cairo.arc(0.0, 16.0, 10.0, 0.0, TAU);
-            cairo.fill()?;
-            cairo.rectangle(-2.0, -8.0, 4.0, 24.0);
-            cairo.fill()?;
-        }
-        Glyph::Record => {
-            cairo.new_path();
-            cairo.arc(0.0, 0.0, 17.0, 0.0, TAU);
-            cairo.fill()?;
-        }
-        Glyph::Live => {
-            cairo.new_path();
-            cairo.arc(0.0, 0.0, 7.0, 0.0, TAU);
-            cairo.fill()?;
-            cairo.set_line_width(4.0);
-            for radius in [15.0, 23.0] {
-                cairo.new_path();
-                cairo.arc(0.0, 0.0, radius, -0.7, 0.7);
-                cairo.stroke()?;
-                cairo.new_path();
-                cairo.arc(0.0, 0.0, radius, PI - 0.7, PI + 0.7);
-                cairo.stroke()?;
-            }
-        }
-        Glyph::ObsIdle => {
-            cairo.set_line_width(4.0);
-            cairo.new_path();
-            cairo.arc(0.0, 0.0, 16.0, 0.0, TAU);
-            cairo.stroke()?;
-        }
     }
     Ok(())
 }
@@ -843,7 +629,7 @@ mod tests {
         let muted = compose_info_image(&value, None).unwrap();
         let icon = key_plan(&value).icon.unwrap();
         let cross = (
-            (icon.x + icon.width * (0.5 + 14.0 / 48.0)) as usize,
+            (icon.x + icon.width * (0.5 + 7.5 / 24.0)) as usize,
             (icon.y + icon.height / 2.0) as usize,
         );
         let [red, green, _] = pixel(&muted, cross.0, cross.1);

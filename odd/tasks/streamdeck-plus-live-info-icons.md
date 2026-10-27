@@ -21,7 +21,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 ## Tasks
 - [x] L1 Touch-section live info uses the same translucent tile/layout language as binding-icon sections (no bare transparent area); chevron room kept.
 - [x] L2 Key live info: captions fully visible (no clipping), icon/value/bar/caption spacing rebalanced.
-- [ ] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
+- [x] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
 - [ ] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
 - [ ] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
 - [ ] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
@@ -63,4 +63,19 @@ RED: `key_parts_are_fully_visible_and_readable_at_preview_size` (no
 the plan instead of fixed coordinates. Contact sheet inspected: CPU, Memory,
 Temperature, Volume captions fully visible.
 Checks: fmt ok; clippy ok; headless ok (320+53+2); display bin suite 52/53
+(only the known F1 failure). Commit 9085f1a.
+
+### L3 (delegated writer, route: delegated direct)
+`BindingIcon::for_glyph` maps every live glyph into the binding vocabulary:
+reused Brightness (sun), Mute (muted speaker), AudioOutput (headphones),
+Record, Stream (live), ObsScene (OBS idle); new vocabulary icons Volume,
+Cloud, PartlyCloudy, Rain, Snow, Storm, Fog, Cpu, Memory, Temperature (24-unit
+grid, 2-unit round stroke, in `ALL`, so the unique-id/visible-ink test covers
+them). `info_render` paints them with `paint_outlined` in the info accent
+color (grey when inactive; a muted speaker keeps a red cross via a clipped
+second pass) and its own `draw_glyph` set is removed. Clock stays text-only
+(no glyph by design: the time is the picture).
+RED: `live_information_glyphs_come_from_the_binding_vocabulary` (no variants /
+`for_glyph`), then GREEN. Contact sheet inspected at key and section size.
+Checks: fmt ok; clippy ok; headless ok (321+53+2); display bin suite 52/53
 (only the known F1 failure).

@@ -71,6 +71,17 @@ pub enum BindingIcon {
     SwipeRight,
     Tap,
     Hold,
+    /// Live information readings (keys and sections showing a value).
+    Volume,
+    Cloud,
+    PartlyCloudy,
+    Rain,
+    Snow,
+    Storm,
+    Fog,
+    Cpu,
+    Memory,
+    Temperature,
     /// The "More actions" family as a whole.
     More,
     /// Fallback for anything without a dedicated picture.
@@ -78,7 +89,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 51] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -118,9 +129,46 @@ impl BindingIcon {
         Self::SwipeRight,
         Self::Tap,
         Self::Hold,
+        Self::Volume,
+        Self::Cloud,
+        Self::PartlyCloudy,
+        Self::Rain,
+        Self::Snow,
+        Self::Storm,
+        Self::Fog,
+        Self::Cpu,
+        Self::Memory,
+        Self::Temperature,
         Self::More,
         Self::Generic,
     ];
+
+    /// The picture of a live information reading: the binding icon with the
+    /// same meaning where one exists (sun = brightness, muted speaker = mute,
+    /// headphones = audio output, OBS states), otherwise a vocabulary icon
+    /// drawn for live information. A plain clock or text reading has none.
+    pub fn for_glyph(glyph: crate::info::Glyph) -> Option<Self> {
+        use crate::info::Glyph;
+        Some(match glyph {
+            Glyph::None => return None,
+            Glyph::Speaker => Self::Volume,
+            Glyph::SpeakerMuted => Self::Mute,
+            Glyph::Headphones => Self::AudioOutput,
+            Glyph::Sun => Self::Brightness,
+            Glyph::Cloud => Self::Cloud,
+            Glyph::PartlyCloudy => Self::PartlyCloudy,
+            Glyph::Rain => Self::Rain,
+            Glyph::Snow => Self::Snow,
+            Glyph::Storm => Self::Storm,
+            Glyph::Fog => Self::Fog,
+            Glyph::Chip => Self::Cpu,
+            Glyph::Memory => Self::Memory,
+            Glyph::Thermometer => Self::Temperature,
+            Glyph::Record => Self::Record,
+            Glyph::Live => Self::Stream,
+            Glyph::ObsIdle => Self::ObsScene,
+        })
+    }
 
     /// The picture for a saved binding.
     pub fn for_action(action: &Action) -> Self {
@@ -251,6 +299,16 @@ impl BindingIcon {
             Self::SwipeRight => "swipe-right",
             Self::Tap => "tap",
             Self::Hold => "hold",
+            Self::Volume => "volume",
+            Self::Cloud => "cloud",
+            Self::PartlyCloudy => "partly-cloudy",
+            Self::Rain => "rain",
+            Self::Snow => "snow",
+            Self::Storm => "storm",
+            Self::Fog => "fog",
+            Self::Cpu => "cpu",
+            Self::Memory => "memory",
+            Self::Temperature => "temperature",
             Self::More => "more",
             Self::Generic => "generic",
         }
@@ -649,6 +707,27 @@ fn stopwatch(cairo: &Context) -> Result<(), cairo::Error> {
     cairo.stroke()
 }
 
+/// A cloud outline about 20 units wide, its flat base at y = 6.
+fn cloud(cairo: &Context) {
+    cairo.new_sub_path();
+    cairo.move_to(-6.5, 6.0);
+    cairo.line_to(7.0, 6.0);
+    cairo.arc_negative(7.0, 1.5, 4.5, PI / 2.0, -PI / 2.0);
+    cairo.arc_negative(1.0, -2.0, 6.0, -0.165, -PI + 0.35);
+    cairo.arc_negative(-6.5, 1.5, 4.5, -PI / 2.0, -3.0 * PI / 2.0);
+    cairo.close_path();
+}
+
+/// A smaller cloud raised to leave room for weather below it.
+fn raised_cloud(cairo: &Context) -> Result<(), cairo::Error> {
+    cairo.save()?;
+    cairo.translate(0.0, -4.0);
+    cairo.scale(0.85, 0.85);
+    cloud(cairo);
+    cairo.restore()?;
+    cairo.stroke()
+}
+
 fn glyph(cairo: &Context, icon: BindingIcon) -> Result<(), cairo::Error> {
     match icon {
         BindingIcon::NoAction => {
@@ -938,6 +1017,116 @@ fn glyph(cairo: &Context, icon: BindingIcon) -> Result<(), cairo::Error> {
             cairo.new_sub_path();
             cairo.arc(0.0, 0.0, 9.5, 0.0, TAU);
             cairo.stroke()
+        }
+        BindingIcon::Volume => {
+            speaker(cairo)?;
+            for (radius, reach) in [(5.0, 0.8), (9.5, 0.85)] {
+                cairo.new_sub_path();
+                cairo.arc(1.0, 0.0, radius, -reach, reach);
+            }
+            cairo.stroke()
+        }
+        BindingIcon::Cloud => {
+            cairo.translate(0.0, 1.0);
+            cloud(cairo);
+            cairo.stroke()
+        }
+        BindingIcon::PartlyCloudy => {
+            // The sun behind the cloud: the cloud's area is cleared first.
+            cairo.push_group();
+            cairo.arc(-4.5, -4.5, 3.5, 0.0, TAU);
+            for index in 0..6 {
+                let angle = PI * 0.55 + f64::from(index) * PI * 0.29;
+                polyline(
+                    cairo,
+                    &[
+                        (-4.5 + angle.cos() * 6.0, -4.5 + angle.sin() * 6.0),
+                        (-4.5 + angle.cos() * 8.0, -4.5 + angle.sin() * 8.0),
+                    ],
+                );
+            }
+            cairo.stroke()?;
+            cairo.save()?;
+            cairo.translate(2.0, 3.0);
+            cairo.scale(0.8, 0.8);
+            cloud(cairo);
+            cairo.restore()?;
+            cairo.set_operator(cairo::Operator::Clear);
+            cairo.fill_preserve()?;
+            cairo.set_operator(cairo::Operator::Over);
+            cairo.stroke()?;
+            cairo.pop_group_to_source()?;
+            cairo.paint()
+        }
+        BindingIcon::Rain => {
+            raised_cloud(cairo)?;
+            for x in [-4.0, 0.0, 4.0] {
+                polyline(cairo, &[(x + 0.5, 6.5), (x - 1.5, 10.5)]);
+            }
+            cairo.stroke()
+        }
+        BindingIcon::Snow => {
+            raised_cloud(cairo)?;
+            for (x, y) in [(-4.5, 8.0), (0.0, 10.5), (4.5, 8.0)] {
+                dot(cairo, x, y, 1.4)?;
+            }
+            Ok(())
+        }
+        BindingIcon::Storm => {
+            raised_cloud(cairo)?;
+            polygon(
+                cairo,
+                &[
+                    (1.5, 3.0),
+                    (-3.0, 8.0),
+                    (0.0, 8.0),
+                    (-1.5, 11.5),
+                    (4.0, 6.0),
+                    (1.0, 6.0),
+                    (3.0, 3.0),
+                ],
+            )
+        }
+        BindingIcon::Fog => {
+            raised_cloud(cairo)?;
+            polyline(cairo, &[(-8.0, 7.0), (8.0, 7.0)]);
+            polyline(cairo, &[(-5.5, 10.5), (5.5, 10.5)]);
+            cairo.stroke()
+        }
+        BindingIcon::Cpu => {
+            rounded(cairo, -7.0, -7.0, 14.0, 14.0, 2.0);
+            for p in [-3.5, 0.0, 3.5] {
+                polyline(cairo, &[(p, -7.0), (p, -10.5)]);
+                polyline(cairo, &[(p, 7.0), (p, 10.5)]);
+                polyline(cairo, &[(-7.0, p), (-10.5, p)]);
+                polyline(cairo, &[(7.0, p), (10.5, p)]);
+            }
+            cairo.stroke()?;
+            cairo.rectangle(-2.5, -2.5, 5.0, 5.0);
+            cairo.fill()
+        }
+        BindingIcon::Memory => {
+            rounded(cairo, -11.0, -6.5, 22.0, 11.0, 1.5);
+            for x in [-7.0, -3.5, 0.0, 3.5, 7.0] {
+                polyline(cairo, &[(x, 4.5), (x, 8.0)]);
+            }
+            cairo.stroke()?;
+            for x in [-7.5, -1.5, 4.5] {
+                cairo.rectangle(x, -3.0, 3.0, 4.0);
+            }
+            cairo.fill()
+        }
+        BindingIcon::Temperature => {
+            // A tube opening into a bulb, with the mercury inside.
+            cairo.move_to(-2.5, 2.4);
+            cairo.line_to(-2.5, -8.0);
+            cairo.arc(0.0, -8.0, 2.5, PI, TAU);
+            cairo.line_to(2.5, 2.4);
+            cairo.arc(0.0, 6.0, 4.38, -0.964, PI + 0.964);
+            cairo.close_path();
+            polyline(cairo, &[(0.0, 6.0), (0.0, -4.0)]);
+            cairo.stroke()?;
+            dot(cairo, 0.0, 6.0, 2.2)
         }
         BindingIcon::More => {
             for x in [-7.5, 0.0, 7.5] {
