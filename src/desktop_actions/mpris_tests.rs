@@ -242,3 +242,224 @@ fn pipewire_controls_do_not_call_the_mpris_bus() {
         assert!(bus.calls.is_empty());
     }
 }
+
+/// Answers the read-only calls the Now playing reader makes.
+#[derive(Default)]
+struct StatusBus {
+    names: Vec<String>,
+    /// Bus name -> (PlaybackStatus, Metadata) as the player reports them.
+    players: BTreeMap<String, (String, glib::Variant)>,
+    /// Bus name -> (Identity, DesktopEntry) on the root interface.
+    roots: BTreeMap<String, (String, String)>,
+    calls: Vec<Call>,
+    fail: Option<(&'static str, &'static str)>,
+}
+
+impl Bus for StatusBus {
+    fn call(
+        &mut self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        method: &str,
+        parameters: Option<&glib::Variant>,
+        timeout_ms: i32,
+    ) -> io::Result<glib::Variant> {
+        self.calls.push(Call {
+            destination: destination.into(),
+            path: path.into(),
+            interface: interface.into(),
+            method: method.into(),
+            parameters: parameters.cloned(),
+            timeout_ms,
+        });
+        if let Some((failing, at)) = self.fail {
+            if failing == method && (at.is_empty() || destination.ends_with(at)) {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "bus call timed out",
+                ));
+            }
+        }
+        match method {
+            "ListNames" => Ok((self.names.clone(),).to_variant()),
+            "GetAll"
+                if parameters.and_then(|value| value.get::<(String,)>())
+                    == Some((ROOT_INTERFACE.into(),)) =>
+            {
+                let (identity, entry) = self
+                    .roots
+                    .get(destination)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no root"))?;
+                let mut properties = std::collections::HashMap::new();
+                properties.insert("Identity".to_owned(), identity.to_variant());
+                properties.insert("DesktopEntry".to_owned(), entry.to_variant());
+                Ok((properties,).to_variant())
+            }
+            "GetAll" => {
+                assert_eq!(
+                    parameters.and_then(|value| value.get::<(String,)>()),
+                    Some((PLAYER_INTERFACE.into(),))
+                );
+                let (status, metadata) = self
+                    .players
+                    .get(destination)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "player vanished"))?;
+                let mut properties = std::collections::HashMap::new();
+                properties.insert("PlaybackStatus".to_owned(), status.to_variant());
+                properties.insert("Metadata".to_owned(), metadata.clone());
+                Ok((properties,).to_variant())
+            }
+            _ => panic!("the status reader must not call {method}"),
+        }
+    }
+}
+
+fn metadata(title: Option<&str>, artist: Option<glib::Variant>) -> glib::Variant {
+    let mut fields = std::collections::HashMap::new();
+    if let Some(title) = title {
+        fields.insert("xesam:title".to_owned(), title.to_variant());
+    }
+    if let Some(artist) = artist {
+        fields.insert("xesam:artist".to_owned(), artist);
+    }
+    fields.to_variant()
+}
+
+fn status_fixture(players: &[(&str, &str, glib::Variant)]) -> StatusBus {
+    let players: BTreeMap<_, _> = players
+        .iter()
+        .map(|(suffix, status, metadata)| {
+            (
+                format!("{SERVICE_PREFIX}{suffix}"),
+                ((*status).to_owned(), metadata.clone()),
+            )
+        })
+        .collect();
+    StatusBus {
+        names: players
+            .keys()
+            .rev()
+            .cloned()
+            .chain(["org.freedesktop.Notifications".to_owned()])
+            .collect(),
+        players,
+        ..StatusBus::default()
+    }
+}
+
+#[test]
+fn status_reader_reports_every_player_sorted_with_title_and_artists() {
+    // Given two players in reversed discovery order and an unrelated service.
+    let artists = vec!["Queen".to_owned(), "David Bowie".to_owned()].to_variant();
+    let mut bus = status_fixture(&[
+        (
+            "zeta",
+            "Paused",
+            metadata(Some("Under Pressure"), Some(artists)),
+        ),
+        (
+            "alpha",
+            "Playing",
+            metadata(Some("Song"), Some("Solo".to_variant())),
+        ),
+    ]);
+    // When the reader runs.
+    let players = read_players_on(&mut bus).unwrap();
+    // Then players come sorted by bus name, artists joined, nothing controlled.
+    assert_eq!(
+        players,
+        vec![
+            PlayerState {
+                bus_name: format!("{SERVICE_PREFIX}alpha"),
+                status: PlaybackStatus::Playing,
+                title: Some("Song".into()),
+                artist: Some("Solo".into()),
+                identity: None,
+                desktop_entry: None,
+            },
+            PlayerState {
+                bus_name: format!("{SERVICE_PREFIX}zeta"),
+                status: PlaybackStatus::Paused,
+                title: Some("Under Pressure".into()),
+                artist: Some("Queen, David Bowie".into()),
+                identity: None,
+                desktop_entry: None,
+            },
+        ]
+    );
+    assert!(bus
+        .calls
+        .iter()
+        .all(|call| ["ListNames", "GetAll"].contains(&call.method.as_str())));
+    let read = &bus.calls[1];
+    assert_eq!(read.path, PLAYER_PATH);
+    assert_eq!(read.interface, "org.freedesktop.DBus.Properties");
+    assert!(bus
+        .calls
+        .iter()
+        .all(|call| call.timeout_ms == READ_TIMEOUT_MS));
+}
+
+#[test]
+fn status_reader_reads_identity_and_desktop_entry_from_the_root_interface() {
+    // Given a stopped player and a playing one without usable metadata.
+    let mut bus = status_fixture(&[
+        ("browser", "Playing", metadata(Some("  "), None)),
+        ("idle", "Stopped", metadata(None, None)),
+    ]);
+    bus.roots.insert(
+        format!("{SERVICE_PREFIX}browser"),
+        ("Firefox".into(), "firefox".into()),
+    );
+    // When the reader runs.
+    let players = read_players_on(&mut bus).unwrap();
+    // Then blank titles are missing; Identity and DesktopEntry come in one call.
+    assert_eq!(players[0].title, None);
+    assert_eq!(players[0].artist, None);
+    assert_eq!(players[0].identity.as_deref(), Some("Firefox"));
+    assert_eq!(players[0].desktop_entry.as_deref(), Some("firefox"));
+    assert_eq!(players[1].status, PlaybackStatus::Stopped);
+    assert_eq!(players[1].identity, None, "a missing root is not an error");
+    assert_eq!(players[1].desktop_entry, None);
+    // Two bounded reads per player: its Player and its root properties.
+    let reads: Vec<_> = bus
+        .calls
+        .iter()
+        .filter(|call| call.destination.ends_with("browser"))
+        .map(|call| {
+            call.parameters
+                .as_ref()
+                .unwrap()
+                .get::<(String,)>()
+                .unwrap()
+                .0
+        })
+        .collect();
+    assert_eq!(reads, [PLAYER_INTERFACE, ROOT_INTERFACE]);
+}
+
+#[test]
+fn status_reader_skips_broken_players_but_reports_bus_failures() {
+    // Given one player that fails, one with an unknown status and one healthy.
+    let mut bus = status_fixture(&[
+        ("broken", "Playing", metadata(Some("x"), None)),
+        ("odd", "Buffering", metadata(Some("y"), None)),
+        ("ok", "Paused", metadata(Some("z"), None)),
+    ]);
+    bus.fail = Some(("GetAll", "broken"));
+    // When the reader runs, a misbehaving player does not hide the others.
+    let players = read_players_on(&mut bus).unwrap();
+    assert_eq!(players.len(), 1);
+    assert_eq!(players[0].title.as_deref(), Some("z"));
+    // And no player at all is an empty, successful reading.
+    let mut empty = StatusBus::default();
+    assert_eq!(read_players_on(&mut empty).unwrap(), vec![]);
+    // But a failing bus is an error, not "nothing playing".
+    let mut down = status_fixture(&[("ok", "Playing", metadata(Some("z"), None))]);
+    down.fail = Some(("ListNames", ""));
+    assert_eq!(
+        read_players_on(&mut down).unwrap_err().kind(),
+        io::ErrorKind::TimedOut
+    );
+}

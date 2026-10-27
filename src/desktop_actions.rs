@@ -16,6 +16,8 @@ mod mpris;
 #[path = "desktop_actions/native.rs"]
 mod native;
 
+pub use mpris::{read_players, PlaybackStatus, PlayerState};
+
 use crate::{
     keyboard::{parse_chord, Chord},
     layers::KeyboardSender,

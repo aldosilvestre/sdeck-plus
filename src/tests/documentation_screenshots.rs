@@ -506,6 +506,16 @@ fn capture_documentation_screenshots() {
                 Some(sdeck_plus::info::InfoSource::Weather),
             )
             .unwrap();
+        layers
+            .bind("Base", Trigger::ZoneTap(4), Action::None)
+            .unwrap();
+        layers
+            .set_info(
+                "Base",
+                &Trigger::ZoneTap(4),
+                Some(sdeck_plus::info::InfoSource::NowPlaying),
+            )
+            .unwrap();
     }
     // Deterministic readings use the production renderer, not the host's data.
     for (source, headline, detail, level) in [
@@ -541,14 +551,20 @@ fn capture_documentation_screenshots() {
             None,
         ),
         (sdeck_plus::info::InfoSource::Weather, "22°C", "Clear", None),
+        (
+            sdeck_plus::info::InfoSource::NowPlaying,
+            "So What",
+            "Miles Davis",
+            None,
+        ),
     ] {
         artwork.update_info(
             source,
             sdeck_plus::info::InfoValue {
-                glyph: if source == sdeck_plus::info::InfoSource::Weather {
-                    sdeck_plus::info::Glyph::Sun
-                } else {
-                    source.glyph()
+                glyph: match source {
+                    sdeck_plus::info::InfoSource::Weather => sdeck_plus::info::Glyph::Sun,
+                    sdeck_plus::info::InfoSource::NowPlaying => sdeck_plus::info::Glyph::Play,
+                    _ => source.glyph(),
                 },
                 detail: detail.into(),
                 level,

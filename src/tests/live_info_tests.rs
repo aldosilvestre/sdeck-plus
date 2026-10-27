@@ -286,3 +286,216 @@ fn assert_live_information_is_saved_drawn_on_keys_and_zones_and_updated_in_place
     window.destroy();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn now_playing_is_selectable_and_draws_its_three_states_on_keys_and_sections() {
+    run_gtk_test(assert_now_playing_is_selectable_and_draws_its_three_states);
+}
+
+fn assert_now_playing_is_selectable_and_draws_its_three_states() {
+    if !init_gtk_for_test() {
+        assert!(
+            std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none(),
+            "GTK initialization failed despite an advertised display"
+        );
+        return;
+    }
+    let (root, store, images, _) = artwork_fixture("now-playing");
+    let layers = Rc::new(RefCell::new(store));
+    let (output, hardware) = mpsc::channel();
+    let artwork = ArtworkUi {
+        store: Rc::new(RefCell::new(Some(images))),
+        layers: layers.clone(),
+        pictures: Rc::new(RefCell::new(Vec::new())),
+        output,
+        last_layer: Rc::new(RefCell::new(None)),
+        chooser_owners: Rc::new(RefCell::new(Default::default())),
+        selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+        text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+        info: Rc::default(),
+    };
+    let (commands, requests) = mpsc::channel();
+    let window = ApplicationWindow::builder()
+        .default_width(1000)
+        .default_height(700)
+        .build();
+    install_style(&window);
+    let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), commands);
+    let stage = gtk::Fixed::new();
+    widgets.root.set_size_request(1000, 700);
+    stage.put(&widgets.root, 0.0, 0.0);
+    window.set_child(Some(&stage));
+    window.present();
+    wait_for_frame(&window);
+    let preview = |target: ArtworkTarget| {
+        let pictures = artwork.pictures.borrow();
+        let (_, picture) = pictures.iter().find(|(shown, _)| *shown == target).unwrap();
+        picture
+            .paintable()
+            .filter(|_| picture.get_visible())
+            .map(|paintable| (paintable.intrinsic_width(), paintable.intrinsic_height()))
+    };
+    let mut buttons = Vec::new();
+    collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+    let save = buttons
+        .iter()
+        .find(|button| button_caption(button).as_deref() == Some("Save binding"))
+        .unwrap()
+        .clone();
+
+    // The settings list offers "Now playing" by its label.
+    let ui = &widgets.binding_ui;
+    let model = ui
+        .info_source
+        .model()
+        .unwrap()
+        .downcast::<gtk::StringList>()
+        .unwrap();
+    let offered = (0..model.n_items())
+        .position(|index| model.string(index).as_deref() == Some("Now playing"))
+        .expect("Now playing is offered");
+    assert_eq!(
+        InfoSource::ALL[offered],
+        InfoSource::NowPlaying,
+        "labels follow the source order"
+    );
+
+    let choose = |select: &dyn Fn()| {
+        select();
+        ui.action_picker.set_selected(1);
+        ui.text_entry.set_text("true");
+        ui.info_toggle.set_active(true);
+        ui.info_source.set_selected(u32::try_from(offered).unwrap());
+        while hardware.try_recv().is_ok() {}
+        save.emit_clicked();
+    };
+    choose(&|| key_button(&widgets.key_labels[1]).emit_clicked());
+    let LayerCommand::SaveBinding(snapshot, _) = requests.try_recv().unwrap() else {
+        panic!("save must persist the binding");
+    };
+    assert_eq!(
+        snapshot.info_source("Base", &Trigger::KeyPress(2)),
+        Some(InfoSource::NowPlaying)
+    );
+    while requests.try_recv().is_ok() {}
+    choose(&|| {
+        ui.select_control(ControlKind::Touch, Some(2), true)
+            .unwrap();
+        ui.load_selected_binding(&layers);
+    });
+    while requests.try_recv().is_ok() {}
+    assert_eq!(
+        layers.borrow().zone_info_source("Base", 2),
+        Some(InfoSource::NowPlaying)
+    );
+    assert_eq!(preview(ArtworkTarget::Keypad(2)), Some((120, 120)));
+    assert_eq!(preview(ArtworkTarget::EncoderZone(2)), Some((200, 100)));
+
+    // Playing, paused and nothing playing each redraw the key and the section.
+    let playing = InfoValue {
+        detail: "Miles Davis".into(),
+        ..InfoValue::text(Glyph::Play, "So What")
+    };
+    let paused = InfoValue {
+        glyph: Glyph::Pause,
+        inactive: true,
+        ..playing.clone()
+    };
+    let idle = sdeck_plus::info::format_now_playing(None);
+    for value in [playing, paused, idle] {
+        while hardware.try_recv().is_ok() {}
+        artwork.update_info(InfoSource::NowPlaying, value.clone());
+        let mut drawn = info_pictures(&hardware);
+        drawn.sort_by_key(|(target, _)| format!("{target:?}"));
+        assert_eq!(
+            drawn,
+            [
+                (ArtworkTarget::EncoderZone(2), value.clone()),
+                (ArtworkTarget::Keypad(2), value.clone()),
+            ]
+        );
+        assert_eq!(preview(ArtworkTarget::Keypad(2)), Some((120, 120)));
+        assert_eq!(preview(ArtworkTarget::EncoderZone(2)), Some((200, 100)));
+    }
+    assert!(
+        artwork.info.borrow().marquee.timer.is_none(),
+        "short titles never start the preview timer"
+    );
+
+    // A long playing title scrolls in the preview, at a phase from the clock.
+    let pixels = |target: ArtworkTarget| {
+        let pictures = artwork.pictures.borrow();
+        let (_, picture) = pictures.iter().find(|(shown, _)| *shown == target).unwrap();
+        let texture = picture
+            .paintable()
+            .unwrap()
+            .downcast::<gtk::gdk::Texture>()
+            .unwrap();
+        let mut bytes = vec![0; texture.width() as usize * texture.height() as usize * 4];
+        texture.download(&mut bytes, texture.width() as usize * 4);
+        bytes
+    };
+    let long = InfoValue {
+        detail: "Queen".into(),
+        ..InfoValue::text(Glyph::Play, "Bohemian Rhapsody (Remastered 2011)")
+    };
+    while hardware.try_recv().is_ok() {}
+    artwork.update_info(InfoSource::NowPlaying, long.clone());
+    assert_eq!(
+        info_pictures(&hardware).len(),
+        2,
+        "the device gets the reading once; its own worker scrolls it"
+    );
+    assert_eq!(artwork.info.borrow().marquee.running.len(), 2);
+    assert!(artwork.info.borrow().marquee.timer.is_some());
+    let (key, section) = (
+        pixels(ArtworkTarget::Keypad(2)),
+        pixels(ArtworkTarget::EncoderZone(2)),
+    );
+    let later = std::time::Instant::now() + Duration::from_secs(3);
+    assert!(matches!(
+        artwork.tick_preview_marquee(later),
+        glib::ControlFlow::Continue
+    ));
+    assert_ne!(key, pixels(ArtworkTarget::Keypad(2)), "the key title moved");
+    assert_ne!(
+        section,
+        pixels(ArtworkTarget::EncoderZone(2)),
+        "the section title moved"
+    );
+    let moved = pixels(ArtworkTarget::Keypad(2));
+    artwork.tick_preview_marquee(later);
+    assert_eq!(
+        moved,
+        pixels(ArtworkTarget::Keypad(2)),
+        "no redraw in place"
+    );
+
+    // Paused: static again, and the real timer removes itself.
+    artwork.update_info(
+        InfoSource::NowPlaying,
+        InfoValue {
+            glyph: Glyph::Pause,
+            inactive: true,
+            ..long.clone()
+        },
+    );
+    assert!(artwork.info.borrow().marquee.running.is_empty());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while artwork.info.borrow().marquee.timer.is_some() && std::time::Instant::now() < deadline {
+        glib::MainContext::default().iteration(true);
+    }
+    assert!(artwork.info.borrow().marquee.timer.is_none());
+
+    // Scrolling again, then the preview leaves its window: the timer stops.
+    artwork.update_info(InfoSource::NowPlaying, long.clone());
+    assert!(artwork.info.borrow().marquee.timer.is_some());
+    window.set_child(None::<&gtk::Widget>);
+    assert!(matches!(
+        artwork.tick_preview_marquee(later),
+        glib::ControlFlow::Break
+    ));
+    assert!(artwork.info.borrow().marquee.running.is_empty());
+    window.destroy();
+    std::fs::remove_dir_all(root).unwrap();
+}
