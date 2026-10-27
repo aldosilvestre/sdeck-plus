@@ -306,7 +306,7 @@ impl FeatureRuntime {
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
-        let profile_delete = crate::ui::button("edit-delete-symbolic", "Delete profile");
+        let profile_delete = crate::ui::button("user-trash-symbolic", "Delete profile");
         profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
         let fields = GtkBox::new(Orientation::Vertical, 8);

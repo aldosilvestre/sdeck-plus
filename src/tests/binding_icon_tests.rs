@@ -367,3 +367,65 @@ fn assert_preview_icons() {
     )));
     eprintln!("GTK preview binding icon assertions executed");
 }
+
+#[test]
+fn icon_actions_share_one_size_and_one_delete_icon() {
+    run_gtk_test(assert_icon_action_consistency);
+}
+
+fn image_names(widget: &gtk::Widget) -> Vec<String> {
+    descendants::<gtk::Image>(widget)
+        .into_iter()
+        .filter_map(|image| image.icon_name().map(|name| name.to_string()))
+        .collect()
+}
+
+fn assert_icon_action_consistency() {
+    let Some(fixture) = fixture("icon-actions", |_| {}) else {
+        return;
+    };
+    let root = fixture.widgets.root.upcast_ref::<gtk::Widget>();
+    let mut deletes = Vec::new();
+    for button in descendants::<Button>(root) {
+        if !button.has_css_class("icon-action") {
+            continue;
+        }
+        let caption = button.tooltip_text().unwrap_or_default().to_string();
+        assert!(!caption.is_empty(), "icon actions keep a tooltip");
+        for image in descendants::<gtk::Image>(button.upcast_ref()) {
+            assert_eq!(image.pixel_size(), 16, "{caption}: 16px icon");
+            let name = image.icon_name().unwrap_or_default();
+            assert!(name.ends_with("-symbolic"), "{caption}: {name}");
+        }
+        if caption.starts_with("Delete") || caption == "Remove binding" {
+            deletes.push((caption, image_names(button.upcast_ref())));
+        }
+    }
+    for caption in [
+        "Remove binding",
+        "Delete page",
+        "Delete folder",
+        "Delete touchscreen page",
+        "Delete the selected profile",
+    ] {
+        assert!(
+            deletes.iter().any(|(shown, _)| shown.starts_with(caption)),
+            "{caption} is an icon action: {deletes:?}"
+        );
+    }
+    for (caption, names) in &deletes {
+        assert_eq!(names, &["user-trash-symbolic"], "{caption}");
+    }
+    let organize = descendants::<gtk::MenuButton>(root)
+        .into_iter()
+        .find(|button| button.tooltip_text().as_deref() == Some("Organize"))
+        .expect("Organize menu");
+    assert_eq!(
+        image_names(organize.upcast_ref())
+            .first()
+            .map(String::as_str),
+        Some("preferences-system-symbolic"),
+        "profile organization is not a new-folder action"
+    );
+    eprintln!("GTK icon action consistency assertions executed");
+}

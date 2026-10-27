@@ -76,7 +76,7 @@ impl PageControls {
         link_folder.set_tooltip_text(Some(
             "Save this folder on the selected control and event without opening it",
         ));
-        let delete_folder = ui::button("edit-delete-symbolic", "Delete folder");
+        let delete_folder = ui::button("user-trash-symbolic", "Delete folder");
         delete_folder.add_css_class("destructive-action");
         for button in [&open_folder, &link_folder, &delete_folder] {
             actions.append(button);
@@ -102,7 +102,7 @@ impl PageControls {
         // Rename/delete are less frequent: lighter frameless icons, still named,
         // and deletion still asks for confirmation.
         let rename = ui::icon_button("document-edit-symbolic", "Rename page");
-        let delete = ui::icon_button("edit-delete-symbolic", "Delete page");
+        let delete = ui::icon_button("user-trash-symbolic", "Delete page");
         delete.add_css_class("destructive-action");
         let page_edits = GtkBox::new(Orientation::Horizontal, 2);
         page_edits.add_css_class("page-edits");

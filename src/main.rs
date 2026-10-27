@@ -595,7 +595,7 @@ fn build_widgets(
     binding_status.connect_label_notify(|label| label.set_tooltip_text(Some(&label.text())));
     let save_binding = ui::button("document-save-symbolic", "Save binding");
     save_binding.add_css_class("suggested-action");
-    let remove_binding = ui::button("edit-delete-symbolic", "Remove");
+    let remove_binding = ui::button("user-trash-symbolic", "Remove");
     remove_binding.set_tooltip_text(Some("Remove binding"));
     remove_binding.set_has_frame(false);
     remove_binding.add_css_class("destructive-action");
@@ -673,7 +673,11 @@ fn build_widgets(
     management.append(&profile_tasks);
     let management_scroll = ui::panel_body(&management);
     let management_popover = ui::popover("Profiles", &management_scroll);
-    let management_menu = ui::menu_button("folder-new-symbolic", "Organize", &management_popover);
+    let management_menu = ui::menu_button(
+        "preferences-system-symbolic",
+        "Organize",
+        &management_popover,
+    );
     // Profile tools stay secondary to the profile tabs they sit beside.
     management_menu.set_has_frame(false);
     layer_row.append(&management_menu);

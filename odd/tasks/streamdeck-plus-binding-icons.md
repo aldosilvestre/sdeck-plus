@@ -22,7 +22,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [ ] T2 Key icons: keys without artwork render icon + label (preview and device).
 - [x] T3 Action type menu shows an icon per action type.
 - [ ] T4 Preview dials and touch zones show the action icon next to/with the caption.
-- [ ] T5 UI button icons reviewed and unified (inspector, page bar, header).
+- [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
 - [ ] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
 
 ## Route
@@ -81,3 +81,16 @@ RED: lib tests (no compose fns) and
 (key 2 picture hidden), then GREEN (artwork tree byte-identical after refresh).
 Device output pending: needs `src/event_api.rs` + `src/image_output.rs`
 (outside the authorized edit surface).
+
+### T5 (delegated writer)
+Every delete/remove icon action (Remove binding, Delete page, Delete folder,
+Delete touchscreen page, Delete profile) now uses `user-trash-symbolic` (was
+`edit-delete-symbolic`, which Adwaita draws as a circled cross, same as Clear);
+Organize uses `preferences-system-symbolic` instead of the misleading
+`folder-new-symbolic`. Save/Test/Folders/New page/Rename/OBS/Menu already
+matched (16px symbolic, tooltip, accessible name) and are unchanged.
+Not changed: Edit text's `insert-text-symbolic` lives in
+`button_text_editor.rs`, outside the authorized edit surface.
+RED: `binding_icon_tests::icon_actions_share_one_size_and_one_delete_icon`
+(profile delete used edit-delete), then GREEN. Checks: fmt ok, clippy ok,
+display bin suite 48/49 (only the known base failure).

@@ -23,7 +23,7 @@ impl TouchscreenControls {
         let previous = crate::ui::icon_button("go-previous-symbolic", "Previous touchscreen page");
         let next = crate::ui::icon_button("go-next-symbolic", "Next touchscreen page");
         let create = crate::ui::icon_button("list-add-symbolic", "New touchscreen page");
-        let delete = crate::ui::icon_button("edit-delete-symbolic", "Delete touchscreen page");
+        let delete = crate::ui::icon_button("user-trash-symbolic", "Delete touchscreen page");
         root.append(&Label::new(Some("Touch page")));
         root.append(&picker);
         for button in [&previous, &next, &create, &delete] {
