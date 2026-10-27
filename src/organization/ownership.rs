@@ -93,6 +93,71 @@ impl Organization {
         Ok(())
     }
 
+    /// Rename the selected page's direct child folder `old` to `new`.
+    ///
+    /// Layer keys stay unchanged (like `rename_page`). The folder's pages, the
+    /// folder path of every descendant and the owner page's `OpenFolder(old)`
+    /// bindings move to the new name. Renaming to the same name is a no-op.
+    ///
+    /// # Errors
+    /// Invalid names, unknown local folders and names already used by another
+    /// folder of the selected page leave both stores unchanged.
+    pub fn rename_folder(
+        &mut self,
+        layers: &mut LayerStore,
+        old: &str,
+        new: &str,
+    ) -> io::Result<()> {
+        action::validate_folder(new)?;
+        let owner = layers.active().to_owned();
+        let children: Vec<_> = self
+            .views
+            .iter()
+            .filter(|(key, view)| {
+                layers.layers().contains_key(*key)
+                    && view.parent_page.as_deref() == Some(owner.as_str())
+                    && view.folder.last().is_some_and(|folder| folder == old)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        let Some(depth) = children.first().map(|key| self.views[key].folder.len() - 1) else {
+            return Err(invalid("unknown local folder"));
+        };
+        if old == new {
+            return Ok(());
+        }
+        if self.folders(layers).iter().any(|folder| folder == new) {
+            return Err(invalid("folder already exists"));
+        }
+        // Stage both stores so any error leaves them untouched.
+        let mut views = self.views.clone();
+        for key in self.descendants(children) {
+            if let Some(segment) = views
+                .get_mut(&key)
+                .and_then(|view| view.folder.get_mut(depth))
+                .filter(|segment| *segment == old)
+            {
+                new.clone_into(segment);
+            }
+        }
+        super::storage::validate(&views)?;
+        let mut updated = layers.clone();
+        let links: Vec<_> = layers.layers().get(&owner)
+            .ok_or_else(|| invalid("unknown owning page"))?.bindings.iter()
+            .filter(|(_, action)| matches!(action,
+                Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(folder))) if folder == old)
+            ).map(|(trigger, _)| trigger.clone()).collect();
+        for trigger in links {
+            let action = Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(
+                new.to_owned(),
+            )));
+            updated.bind_configuration(&owner, trigger, action)?;
+        }
+        *layers = updated;
+        self.views = views;
+        Ok(())
+    }
+
     /// Remove all pages and folders belonging to a profile.
     ///
     /// # Errors
