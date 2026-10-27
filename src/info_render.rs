@@ -26,6 +26,8 @@ const VIOLET: Color = (0.65, 0.55, 0.98);
 const BLUE: Color = (0.40, 0.65, 0.98);
 const CLOUD: Color = (0.69, 0.75, 0.88);
 const GREY: Color = (0.45, 0.50, 0.62);
+/// The media family accent of binding icons.
+const MEDIA: Color = (0.73, 0.64, 0.96);
 
 /// Compose one physical key image: the live picture drawn directly over the
 /// key's own artwork (transparent without one), with no background of its own.
@@ -178,7 +180,8 @@ fn accent(value: &InfoValue) -> Color {
         Glyph::Chip | Glyph::Memory => load(VIOLET),
         Glyph::Thermometer => load(GREEN),
         Glyph::Record | Glyph::Live => RED,
-        Glyph::ObsIdle => GREY,
+        Glyph::ObsIdle | Glyph::MediaIdle => GREY,
+        Glyph::Play | Glyph::Pause => MEDIA,
     }
 }
 

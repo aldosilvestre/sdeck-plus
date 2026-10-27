@@ -167,6 +167,9 @@ impl BindingIcon {
             Glyph::Record => Self::Record,
             Glyph::Live => Self::Stream,
             Glyph::ObsIdle => Self::ObsScene,
+            Glyph::Play => Self::PlayPause,
+            Glyph::Pause => Self::Pause,
+            Glyph::MediaIdle => Self::PlaySound,
         })
     }
 

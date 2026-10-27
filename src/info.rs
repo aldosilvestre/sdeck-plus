@@ -1,6 +1,10 @@
 //! Live information drawn over a key: sources, parsers and the reader thread.
 
-use crate::{event_api::MonitorEvent, obs};
+use crate::{
+    desktop_actions::{self, PlaybackStatus, PlayerState},
+    event_api::MonitorEvent,
+    obs,
+};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -26,10 +30,11 @@ pub enum InfoSource {
     Memory,
     Temperature,
     Obs,
+    NowPlaying,
 }
 
 impl InfoSource {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Volume,
         Self::AudioDevice,
         Self::Brightness,
@@ -39,6 +44,7 @@ impl InfoSource {
         Self::Memory,
         Self::Temperature,
         Self::Obs,
+        Self::NowPlaying,
     ];
 
     pub fn id(self) -> &'static str {
@@ -52,6 +58,7 @@ impl InfoSource {
             Self::Memory => "memory",
             Self::Temperature => "temperature",
             Self::Obs => "obs",
+            Self::NowPlaying => "now-playing",
         }
     }
 
@@ -70,6 +77,7 @@ impl InfoSource {
             Self::Memory => "Memory usage",
             Self::Temperature => "System temperature",
             Self::Obs => "OBS status",
+            Self::NowPlaying => "Now playing",
         }
     }
 
@@ -84,6 +92,7 @@ impl InfoSource {
             Self::Memory => Glyph::Memory,
             Self::Temperature => Glyph::Thermometer,
             Self::Obs => Glyph::ObsIdle,
+            Self::NowPlaying => Glyph::MediaIdle,
         }
     }
 
@@ -102,7 +111,7 @@ impl InfoSource {
 
     fn interval(self) -> Duration {
         Duration::from_secs(match self {
-            Self::Volume => 1,
+            Self::Volume | Self::NowPlaying => 1,
             Self::Cpu => 2,
             Self::AudioDevice => 3,
             Self::Clock | Self::Memory | Self::Temperature | Self::Obs => 5,
@@ -142,6 +151,12 @@ pub enum Glyph {
     Record,
     Live,
     ObsIdle,
+    /// Media playing.
+    Play,
+    /// Media paused.
+    Pause,
+    /// No media playing.
+    MediaIdle,
 }
 
 /// One reading: an icon, an optional 0-100 bar and up to two text parts.
@@ -393,6 +408,74 @@ pub fn format_obs(status: &obs::ObsStatus) -> InfoValue {
     }
 }
 
+/// Chooses the MPRIS player the Now playing source shows: a Playing player
+/// wins (the first by bus name when several play); otherwise the Paused player
+/// that was seen playing most recently (the first by bus name among players
+/// never seen playing); otherwise none. Stopped players count as nothing
+/// playing. It remembers only players still on the bus.
+#[derive(Debug, Default)]
+pub struct NowPlaying {
+    /// Bus name -> the poll in which the player was last seen Playing.
+    last_playing: BTreeMap<String, u64>,
+    poll: u64,
+}
+
+impl NowPlaying {
+    pub fn choose<'a>(&mut self, players: &'a [PlayerState]) -> Option<&'a PlayerState> {
+        self.poll += 1;
+        self.last_playing
+            .retain(|name, _| players.iter().any(|player| player.bus_name == *name));
+        for player in players {
+            if player.status == PlaybackStatus::Playing {
+                self.last_playing.insert(player.bus_name.clone(), self.poll);
+            }
+        }
+        let with = |status| players.iter().filter(move |player| player.status == status);
+        with(PlaybackStatus::Playing)
+            .min_by(|a, b| a.bus_name.cmp(&b.bus_name))
+            .or_else(|| {
+                with(PlaybackStatus::Paused).max_by_key(|player| {
+                    (
+                        self.last_playing
+                            .get(&player.bus_name)
+                            .copied()
+                            .unwrap_or(0),
+                        std::cmp::Reverse(&player.bus_name),
+                    )
+                })
+            })
+    }
+
+    /// The reading for one poll of the bus; `None` when the bus failed.
+    pub fn value(&mut self, players: io::Result<Vec<PlayerState>>) -> Option<InfoValue> {
+        let players = players.ok()?;
+        Some(format_now_playing(self.choose(&players)))
+    }
+}
+
+/// Playing: play glyph, title and artist. Paused: the same with the pause
+/// glyph, greyed out. No player: an idle glyph and "Nothing playing".
+pub fn format_now_playing(player: Option<&PlayerState>) -> InfoValue {
+    let Some(player) = player.filter(|player| player.status != PlaybackStatus::Stopped) else {
+        return InfoValue {
+            detail: wrap_words("Nothing playing", 14, 2),
+            inactive: true,
+            ..InfoValue::text(Glyph::MediaIdle, "")
+        };
+    };
+    let paused = player.status == PlaybackStatus::Paused;
+    let headline = player
+        .title
+        .as_deref()
+        .or(player.identity.as_deref())
+        .unwrap_or("Unknown title");
+    InfoValue {
+        detail: wrap_words(player.artist.as_deref().unwrap_or(""), 14, 2),
+        inactive: paused,
+        ..InfoValue::text(if paused { Glyph::Pause } else { Glyph::Play }, headline)
+    }
+}
+
 pub fn load_location(root: &Path) -> Option<String> {
     let text = fs::read_to_string(root.join(SETTINGS)).ok()?;
     let value: Value = serde_json::from_str(&text).ok()?;
@@ -445,6 +528,7 @@ pub struct InfoReader {
     root: PathBuf,
     cpu: Option<(u64, u64)>,
     geocoded: Option<(String, (f64, f64))>,
+    now_playing: NowPlaying,
 }
 
 impl InfoReader {
@@ -453,6 +537,7 @@ impl InfoReader {
             root: root.into(),
             cpu: None,
             geocoded: None,
+            now_playing: NowPlaying::default(),
         }
     }
 
@@ -494,6 +579,7 @@ impl InfoReader {
                     .ok()
                     .map(|status| format_obs(&status))
             }
+            InfoSource::NowPlaying => self.now_playing.value(desktop_actions::read_players()),
         }
     }
 
@@ -696,6 +782,119 @@ mod tests {
         assert_eq!(live.detail, "Main scene");
     }
 
+    fn player(name: &str, status: PlaybackStatus, title: Option<&str>) -> PlayerState {
+        PlayerState {
+            bus_name: format!("org.mpris.MediaPlayer2.{name}"),
+            status,
+            title: title.map(str::to_owned),
+            artist: Some(format!("{name} band")),
+            identity: None,
+        }
+    }
+
+    #[test]
+    fn now_playing_shows_the_playing_title_and_artist() {
+        let mut now = NowPlaying::default();
+        let players = [player(
+            "mpv",
+            PlaybackStatus::Playing,
+            Some("Blue in Green"),
+        )];
+        let value = now.value(Ok(players.to_vec())).unwrap();
+        assert_eq!(
+            shown(&value),
+            (Glyph::Play, None, "Blue in Green", "mpv band", false)
+        );
+    }
+
+    #[test]
+    fn now_playing_paused_is_inactive_with_the_pause_glyph() {
+        let mut now = NowPlaying::default();
+        let players = vec![player("mpv", PlaybackStatus::Paused, Some("So What"))];
+        let value = now.value(Ok(players)).unwrap();
+        assert_eq!(
+            shown(&value),
+            (Glyph::Pause, None, "So What", "mpv band", true)
+        );
+    }
+
+    #[test]
+    fn now_playing_stopped_or_no_player_is_nothing_playing() {
+        let mut now = NowPlaying::default();
+        let nothing = now.value(Ok(vec![])).unwrap();
+        assert_eq!(
+            shown(&nothing),
+            (Glyph::MediaIdle, None, "", "Nothing\nplaying", true)
+        );
+        let stopped = vec![player("mpv", PlaybackStatus::Stopped, Some("Gone"))];
+        assert_eq!(now.value(Ok(stopped)).unwrap(), nothing);
+        assert_eq!(InfoSource::NowPlaying.glyph(), Glyph::MediaIdle);
+    }
+
+    #[test]
+    fn now_playing_bus_errors_are_the_normal_unavailable_value() {
+        let mut now = NowPlaying::default();
+        assert_eq!(now.value(Err(io::Error::other("no session bus"))), None);
+        let shown_value = now
+            .value(Err(io::Error::other("no session bus")))
+            .unwrap_or_else(|| InfoSource::NowPlaying.unavailable());
+        assert_eq!(
+            shown(&shown_value),
+            (Glyph::MediaIdle, None, "--", "", true)
+        );
+    }
+
+    #[test]
+    fn now_playing_prefers_playing_then_the_most_recently_playing_paused_one() {
+        let mut now = NowPlaying::default();
+        let (a, b, c) = ("alpha", "beta", "gamma");
+        // Several Playing players: the first by bus name, whatever the order.
+        let both = vec![
+            player(c, PlaybackStatus::Playing, Some("C")),
+            player(a, PlaybackStatus::Paused, Some("A")),
+            player(b, PlaybackStatus::Playing, Some("B")),
+        ];
+        assert_eq!(now.value(Ok(both)).unwrap().headline, "B");
+        // Then gamma plays alone; beta pauses.
+        let gamma = vec![
+            player(a, PlaybackStatus::Paused, Some("A")),
+            player(b, PlaybackStatus::Paused, Some("B")),
+            player(c, PlaybackStatus::Playing, Some("C")),
+        ];
+        assert_eq!(now.value(Ok(gamma)).unwrap().headline, "C");
+        // Everyone paused: the one seen playing most recently (gamma) wins,
+        // not the first by name.
+        let paused = vec![
+            player(a, PlaybackStatus::Paused, Some("A")),
+            player(b, PlaybackStatus::Paused, Some("B")),
+            player(c, PlaybackStatus::Paused, Some("C")),
+        ];
+        let value = now.value(Ok(paused.clone())).unwrap();
+        assert_eq!((value.glyph, value.headline.as_str()), (Glyph::Pause, "C"));
+        // Without history, paused players that never played tie by bus name.
+        let mut fresh = NowPlaying::default();
+        assert_eq!(fresh.value(Ok(paused)).unwrap().headline, "A");
+    }
+
+    #[test]
+    fn now_playing_missing_metadata_falls_back_to_identity_then_unknown() {
+        let mut now = NowPlaying::default();
+        let mut browser = player("firefox", PlaybackStatus::Playing, None);
+        browser.artist = None;
+        browser.identity = Some("Firefox".into());
+        let value = now.value(Ok(vec![browser.clone()])).unwrap();
+        assert_eq!(shown(&value), (Glyph::Play, None, "Firefox", "", false));
+        browser.identity = None;
+        let value = now.value(Ok(vec![browser])).unwrap();
+        assert_eq!(value.headline, "Unknown title");
+        let long = PlayerState {
+            artist: Some("The Very Long Named Orchestra of Somewhere".into()),
+            ..player("mpv", PlaybackStatus::Playing, Some("A"))
+        };
+        let value = now.value(Ok(vec![long])).unwrap();
+        assert_eq!(value.detail, "The Very Long\nNamed\u{2026}");
+    }
+
     #[test]
     fn source_ids_round_trip_and_location_is_validated() {
         for source in InfoSource::ALL {
@@ -703,6 +902,12 @@ mod tests {
             assert!(source.unavailable().inactive);
         }
         assert_eq!(InfoSource::from_id("nope"), None);
+        assert_eq!(
+            InfoSource::from_id("now-playing"),
+            Some(InfoSource::NowPlaying)
+        );
+        assert_eq!(InfoSource::NowPlaying.label(), "Now playing");
+        assert!(InfoSource::NowPlaying.is_polled());
         let root = std::env::temp_dir().join(format!("sdeck-info-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         assert_eq!(load_location(&root), None);
