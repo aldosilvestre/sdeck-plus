@@ -275,6 +275,11 @@ pub fn control_summary(
 /// counterclockwise, then exact-tick overrides), else pressing. `None` when the
 /// dial has no binding on the layer's current touchscreen page.
 pub fn dial_legend(store: &LayerStore, layer: &str, number: u8) -> Option<String> {
+    dial_action(store, layer, number).map(|action| action_summary(Some(&action)))
+}
+
+/// The action a dial's caption describes: turn, then exact ticks, then press.
+pub fn dial_action(store: &LayerStore, layer: &str, number: u8) -> Option<Action> {
     let bindings = &store
         .binding_layer(layer, &Trigger::EncoderPress(number))?
         .bindings;
@@ -290,7 +295,7 @@ pub fn dial_legend(store: &LayerStore, layer: &str, number: u8) -> Option<String
         })
     })
     .or_else(|| bindings.get(&Trigger::EncoderPress(number)))
-    .map(|action| action_summary(Some(action)))
+    .cloned()
 }
 
 fn summary_event_label(event: EventKind) -> &'static str {

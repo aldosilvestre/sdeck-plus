@@ -3,6 +3,7 @@ use sdeck_plus::{
         action_from_fields, control_summary, events_for_control, existing_action,
         format_application_args, trigger_from_selection, ActionKind, ControlKind, EventKind,
     },
+    binding_icons::BindingIcon,
     layers::{Action, LayerStore, Trigger},
     local_artwork::{ArtworkStore, ArtworkTarget},
     protocol,
@@ -49,6 +50,8 @@ const DEFAULT_HEIGHT: i32 = 700;
 const PREVIEW_MAX_SCALE: f64 = 1.5;
 /// Width of each dial's assigned-action caption in the preview rail.
 const DIAL_LEGEND_WIDTH: i32 = 86;
+/// Action icon drawn on a preview knob face.
+const DIAL_ICON_SIZE: i32 = 20;
 /// Widest configuration shell (including its margins) before it centers.
 const SHELL_MAX_WIDTH: i32 = 1272;
 
@@ -1242,6 +1245,12 @@ fn build_widgets(
         rail.put(&button, 28.0 + index as f64 * 91.0, 34.0);
         // The assigned action, centered under the knob inside the rail. It is
         // preview-only and never drawn on the physical device.
+        // The same action's icon on the knob face; clicks still reach the knob.
+        rail.put(
+            &binding_ui.dial_icons[index],
+            28.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0 + index as f64 * 91.0,
+            34.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0,
+        );
         let legend = &binding_ui.dial_legends[index];
         legend.set_size_request(DIAL_LEGEND_WIDTH, 16);
         rail.put(
@@ -1646,6 +1655,8 @@ struct BindingUi {
     summaries: Vec<Label>,
     /// Short assigned-action captions drawn under the four preview dials.
     dial_legends: Vec<Label>,
+    /// The caption's action icon, drawn on each preview knob (preview-only).
+    dial_icons: Vec<gtk::DrawingArea>,
     shortcut_preview: Label,
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
@@ -1691,10 +1702,7 @@ impl BindingUi {
         args_row: GtkBox,
         modifier_row: GtkBox,
     ) -> Self {
-        binding_icon::icon_dropdown(
-            &action_picker,
-            sdeck_plus::binding_icons::BindingIcon::for_action_type,
-        );
+        binding_icon::icon_dropdown(&action_picker, BindingIcon::for_action_type);
         status.connect_label_notify(ui::clear_feedback);
         let action_guidance = ui::helper("");
         shortcut_reference::connect(&action_guidance);
@@ -1831,6 +1839,16 @@ impl BindingUi {
                     label
                 })
                 .collect(),
+            dial_icons: (0..4)
+                .map(|_| {
+                    let icon = binding_icon::binding_icon(BindingIcon::Generic);
+                    icon.add_css_class("dial-icon");
+                    icon.set_size_request(DIAL_ICON_SIZE, DIAL_ICON_SIZE);
+                    icon.set_can_target(false);
+                    icon.set_visible(false);
+                    icon
+                })
+                .collect(),
             shortcut_preview,
             baseline: std::rc::Rc::new(RefCell::new(None)),
             undo_remove,
@@ -1862,7 +1880,15 @@ impl BindingUi {
                 })
                 .collect::<Vec<_>>();
             let legends = (1..=4)
-                .map(|dial| sdeck_plus::binding_editor::dial_legend(&store, &layer, dial))
+                .map(|dial| {
+                    sdeck_plus::binding_editor::dial_action(&store, &layer, dial).map(|action| {
+                        (
+                            sdeck_plus::binding_editor::dial_legend(&store, &layer, dial)
+                                .unwrap_or_default(),
+                            BindingIcon::for_action(&action),
+                        )
+                    })
+                })
                 .collect::<Vec<_>>();
             (summaries, legends)
         };
@@ -1871,10 +1897,21 @@ impl BindingUi {
             label.set_text(&text.replace('\n', " · "));
             label.set_tooltip_text(Some(&text));
         }
-        for (label, legend) in self.dial_legends.iter().zip(legends) {
-            label.set_text(legend.as_deref().unwrap_or_default());
-            label.set_tooltip_text(legend.as_deref());
+        for ((label, icon), legend) in self.dial_legends.iter().zip(&self.dial_icons).zip(legends) {
+            let text = legend.as_ref().map(|(text, _)| text.as_str());
+            label.set_text(text.unwrap_or_default());
+            label.set_tooltip_text(text);
             label.set_visible(legend.is_some());
+            match legend
+                .map(|(_, icon)| icon)
+                .filter(|icon| icon.shown_on_controls())
+            {
+                Some(shown) => {
+                    binding_icon::set_binding_icon(icon, shown);
+                    icon.set_visible(true);
+                }
+                None => icon.set_visible(false),
+            }
         }
     }
 

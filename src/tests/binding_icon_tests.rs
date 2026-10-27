@@ -111,3 +111,75 @@ fn assert_action_menu_icons() {
     );
     eprintln!("GTK action menu icon assertions executed");
 }
+
+#[test]
+fn preview_dials_show_their_action_icon_with_the_caption() {
+    run_gtk_test(assert_dial_icons);
+}
+
+fn assert_dial_icons() {
+    let volume = Action::Feature(sdeck_plus::features::FeatureAction::Desktop(
+        sdeck_plus::desktop_actions::DesktopAction::Media(
+            sdeck_plus::desktop_actions::MediaCommand::VolumeUp,
+        ),
+    ));
+    let Some(fixture) = fixture("dial-icons", |store| {
+        store
+            .bind("Base", Trigger::EncoderClockwise(2), volume.clone())
+            .unwrap();
+        store
+            .bind(
+                "Base",
+                Trigger::EncoderPress(3),
+                Action::Shortcut {
+                    modifiers: vec!["CTRL".into()],
+                    key: "m".into(),
+                },
+            )
+            .unwrap();
+        store
+            .bind("Base", Trigger::EncoderPress(4), Action::None)
+            .unwrap();
+    }) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let icons = &widgets.binding_ui.dial_icons;
+    assert_eq!(icons.len(), 4);
+    assert!(!icons[0].is_visible(), "unassigned dials stay plain");
+    assert!(!icons[3].is_visible(), "None shows no icon");
+    assert_eq!(icons[1].widget_name(), "volume-up");
+    assert_eq!(icons[2].widget_name(), "shortcut");
+    let content = widgets.root.child().unwrap();
+    for index in [1, 2] {
+        let icon = &icons[index];
+        assert!(icon.is_visible() && icon.has_css_class("binding-icon"));
+        assert!(!icon.can_target(), "the knob keeps every click");
+        let knob = widgets.encoder_widgets[index]
+            .compute_bounds(&content)
+            .unwrap();
+        let bounds = icon.compute_bounds(&content).unwrap();
+        let center = |rect: &gtk::graphene::Rect| {
+            (
+                rect.x() + rect.width() / 2.0,
+                rect.y() + rect.height() / 2.0,
+            )
+        };
+        let (icon_x, icon_y) = center(&bounds);
+        let (knob_x, knob_y) = center(&knob);
+        assert!((icon_x - knob_x).abs() <= 1.0 && (icon_y - knob_y).abs() <= 1.0);
+        // The caption sits directly below the same knob.
+        let caption = widgets.binding_ui.dial_legends[index]
+            .compute_bounds(&content)
+            .unwrap();
+        assert!(caption.y() >= bounds.y() + bounds.height());
+    }
+    fixture
+        .layers
+        .borrow_mut()
+        .unbind("Base", &Trigger::EncoderClockwise(2))
+        .unwrap();
+    widgets.binding_ui.refresh_summaries(&fixture.layers);
+    assert!(!icons[1].is_visible());
+    eprintln!("GTK dial icon assertions executed");
+}

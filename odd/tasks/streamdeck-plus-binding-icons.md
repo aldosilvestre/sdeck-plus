@@ -57,3 +57,11 @@ the icon in the closed button and in each menu row; menu rows replicate GTK's
 RED: `binding_icon_tests::action_menu_rows_show_an_icon_name_and_check_mark`
 (no icon widgets), then GREEN. Checks: fmt ok, clippy ok, display bin suite
 45/46 (only the known base failure).
+
+### T4a dials (delegated writer)
+`binding_editor::dial_action` (same turn > ticks > press order as `dial_legend`,
+which now reuses it). Each preview knob shows that action's icon (20px,
+`dial-icon`, pale `#e1e6eb`, not targetable) centered on its face above the
+unchanged caption; hidden when unassigned or None; preview-only.
+RED: `binding_icon_tests::preview_dials_show_their_action_icon_with_the_caption`
+(no `dial_icons`), then GREEN. Touch-zone half pending with T2 rendering.
