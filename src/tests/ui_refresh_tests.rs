@@ -1,10 +1,12 @@
 //! Main-window hierarchy and legibility contract (feature: UI refresh).
 use super::*;
+use sdeck_plus::features::FeatureAction;
 
 struct Fixture {
     root: std::path::PathBuf,
     window: ApplicationWindow,
     widgets: MonitorWidgets,
+    layers: Rc<RefCell<LayerStore>>,
 }
 
 impl Drop for Fixture {
@@ -47,7 +49,7 @@ fn fixture(tag: &str, setup: impl FnOnce(&mut LayerStore)) -> Option<Fixture> {
         .default_height(DEFAULT_HEIGHT)
         .build();
     install_style(&window);
-    let widgets = build_widgets(window.clone(), layers, artwork, commands);
+    let widgets = build_widgets(window.clone(), layers.clone(), artwork, commands);
     let stage = gtk::Fixed::new();
     widgets.root.set_size_request(DEFAULT_WIDTH, DEFAULT_HEIGHT);
     stage.put(&widgets.root, 0.0, 0.0);
@@ -58,6 +60,7 @@ fn fixture(tag: &str, setup: impl FnOnce(&mut LayerStore)) -> Option<Fixture> {
         root,
         window,
         widgets,
+        layers,
     })
 }
 
@@ -217,4 +220,81 @@ fn assert_header_connection_states() {
         assert_state(badge, tone, text, tooltip);
     }
     eprintln!("GTK plain-language connection header assertions executed");
+}
+
+#[test]
+fn preview_dials_show_their_assigned_actions() {
+    run_gtk_test(assert_dial_legends_and_touch_placeholder);
+}
+
+fn assert_dial_legends_and_touch_placeholder() {
+    let volume = Action::Feature(FeatureAction::Desktop(
+        sdeck_plus::desktop_actions::DesktopAction::Media(
+            sdeck_plus::desktop_actions::MediaCommand::VolumeUp,
+        ),
+    ));
+    let mute = Action::Shortcut {
+        modifiers: vec!["CTRL".into()],
+        key: "m".into(),
+    };
+    let Some(fixture) = fixture("dials", |store| {
+        store
+            .bind("Base", Trigger::EncoderClockwise(2), volume.clone())
+            .unwrap();
+        store
+            .bind("Base", Trigger::EncoderPress(3), mute.clone())
+            .unwrap();
+    }) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let legends = &widgets.binding_ui.dial_legends;
+    assert_eq!(legends.len(), 4);
+    assert!(!legends[0].is_visible(), "unassigned dials stay unlabeled");
+    assert!(!legends[3].is_visible());
+    let volume_text = match &volume {
+        Action::Feature(action) => action.summary(),
+        _ => unreachable!(),
+    };
+    assert_eq!(legends[1].text(), volume_text);
+    assert_eq!(legends[2].text(), "Shortcut CTRL+M");
+    let content = widgets.root.child().unwrap();
+    for (index, knob) in widgets.encoder_widgets.iter().enumerate() {
+        let legend = &legends[index];
+        assert!(legend.has_css_class("dial-legend"));
+        // Same parent rail as the knob, centered underneath it.
+        assert_eq!(legend.parent(), knob.parent());
+        if !legend.is_visible() {
+            continue;
+        }
+        assert_eq!(legend.tooltip_text(), Some(legend.text()));
+        let knob = knob.compute_bounds(&content).unwrap();
+        let below = legend.compute_bounds(&content).unwrap();
+        assert!(
+            below.y() >= knob.y() + knob.height(),
+            "legend sits below the dial"
+        );
+        assert!(
+            (below.x() + below.width() / 2.0 - knob.x() - knob.width() / 2.0).abs() <= 1.0,
+            "legend is centered under its dial: {below:?} {knob:?}"
+        );
+        let rail = legend.parent().unwrap().compute_bounds(&content).unwrap();
+        assert!(below.y() + below.height() <= rail.y() + rail.height());
+    }
+
+    // Removing the binding clears the legend on the next summary refresh.
+    fixture
+        .layers
+        .borrow_mut()
+        .unbind("Base", &Trigger::EncoderClockwise(2))
+        .unwrap();
+    widgets.binding_ui.refresh_summaries(&fixture.layers);
+    assert!(!legends[1].is_visible());
+    assert_eq!(legends[2].text(), "Shortcut CTRL+M");
+    assert_eq!(
+        widgets.touch_status.text(),
+        "Touch strip · waiting for input"
+    );
+    assert!(widgets.touch_status.has_css_class("touch-display"));
+    eprintln!("GTK dial legend and touch placeholder assertions executed");
 }

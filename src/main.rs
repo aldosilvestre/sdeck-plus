@@ -45,6 +45,8 @@ const DEFAULT_WIDTH: i32 = 1000;
 const DEFAULT_HEIGHT: i32 = 700;
 /// Largest presentation scale of the hardware preview when space allows.
 const PREVIEW_MAX_SCALE: f64 = 1.5;
+/// Width of each dial's assigned-action caption in the preview rail.
+const DIAL_LEGEND_WIDTH: i32 = 86;
 /// Widest configuration shell (including its margins) before it centers.
 const SHELL_MAX_WIDTH: i32 = 1272;
 
@@ -1169,7 +1171,7 @@ fn build_widgets(
     bezel.add_css_class("hardware-bezel");
     bezel.set_size_request(374, 77);
     chassis.put(&bezel, 27.0, 177.0);
-    let touch_status = Label::new(Some("Waiting for touch input"));
+    let touch_status = Label::new(Some("Touch strip · waiting for input"));
     touch_status.add_css_class("touch-display");
     touch_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     touch_status.set_max_width_chars(32);
@@ -1232,6 +1234,15 @@ fn build_widgets(
         label.set_visible(false);
         button.set_child(Some(&label));
         rail.put(&button, 28.0 + index as f64 * 91.0, 34.0);
+        // The assigned action, centered under the knob inside the rail. It is
+        // preview-only and never drawn on the physical device.
+        let legend = &binding_ui.dial_legends[index];
+        legend.set_size_request(DIAL_LEGEND_WIDTH, 16);
+        rail.put(
+            legend,
+            28.0 + 23.0 - f64::from(DIAL_LEGEND_WIDTH) / 2.0 + index as f64 * 91.0,
+            84.0,
+        );
         selectable_widgets.push(button.upcast());
         encoder_labels.push(label);
     }
@@ -1627,6 +1638,8 @@ struct BindingUi {
     info_location_row: GtkBox,
     // Same order as the physical selection widgets: eight buttons, touch, four encoders.
     summaries: Vec<Label>,
+    /// Short assigned-action captions drawn under the four preview dials.
+    dial_legends: Vec<Label>,
     shortcut_preview: Label,
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
@@ -1798,6 +1811,16 @@ impl BindingUi {
                     label
                 })
                 .collect(),
+            dial_legends: (0..4)
+                .map(|_| {
+                    let label = Label::new(None);
+                    label.add_css_class("dial-legend");
+                    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    label.set_max_width_chars(12);
+                    label.set_visible(false);
+                    label
+                })
+                .collect(),
             shortcut_preview,
             baseline: std::rc::Rc::new(RefCell::new(None)),
             undo_remove,
@@ -1818,7 +1841,7 @@ impl BindingUi {
             let store = layers.borrow();
             let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
                 .unwrap_or_else(|| store.active().to_owned());
-            (0..13)
+            let summaries = (0..13)
                 .map(|index| {
                     let (control, number) = match index {
                         0..=7 => (ControlKind::Button, index + 1),
@@ -1827,11 +1850,21 @@ impl BindingUi {
                     };
                     control_summary(&store, &layer, control, number as u8)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let legends = (1..=4)
+                .map(|dial| sdeck_plus::binding_editor::dial_legend(&store, &layer, dial))
+                .collect::<Vec<_>>();
+            (summaries, legends)
         };
+        let (texts, legends) = texts;
         for (label, text) in self.summaries.iter().zip(texts) {
             label.set_text(&text.replace('\n', " · "));
             label.set_tooltip_text(Some(&text));
+        }
+        for (label, legend) in self.dial_legends.iter().zip(legends) {
+            label.set_text(legend.as_deref().unwrap_or_default());
+            label.set_tooltip_text(legend.as_deref());
+            label.set_visible(legend.is_some());
         }
     }
 
@@ -6969,13 +7002,20 @@ mod tests {
         assert!(strip.x() + strip.width() < bezel_bounds.x() + bezel_bounds.width());
         let rail = chassis.last_child().unwrap();
         assert!(rail.has_css_class("hardware-rail"));
-        let mut knob = rail.first_child();
-        for key in key_bounds.iter().take(4) {
-            let current = knob.unwrap();
+        // The rail also holds each dial's legend; check the knobs themselves.
+        let mut knobs = Vec::new();
+        let mut child = rail.first_child();
+        while let Some(current) = child {
+            if current.has_css_class("encoder") {
+                knobs.push(current.clone());
+            }
+            child = current.next_sibling();
+        }
+        assert_eq!(knobs.len(), 4);
+        for (key, current) in key_bounds.iter().take(4).zip(&knobs) {
             let bounds = current.compute_bounds(content).unwrap();
             assert!(close(bounds.width(), 46.0) && close(bounds.height(), 46.0));
             assert!((bounds.x() + bounds.width() / 2.0 - key.x() - key.width() / 2.0).abs() <= 0.5);
-            knob = current.next_sibling();
         }
         for (target, picture) in pictures.iter() {
             let surface = picture.parent().unwrap();

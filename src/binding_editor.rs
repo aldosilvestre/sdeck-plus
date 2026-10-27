@@ -271,6 +271,28 @@ pub fn control_summary(
     lines.join("\n")
 }
 
+/// The one action a dial preview names: turning first (clockwise, then
+/// counterclockwise, then exact-tick overrides), else pressing. `None` when the
+/// dial has no binding on the layer's current touchscreen page.
+pub fn dial_legend(store: &LayerStore, layer: &str, number: u8) -> Option<String> {
+    let bindings = &store
+        .binding_layer(layer, &Trigger::EncoderPress(number))?
+        .bindings;
+    [
+        Trigger::EncoderClockwise(number),
+        Trigger::EncoderCounterClockwise(number),
+    ]
+    .iter()
+    .find_map(|trigger| bindings.get(trigger))
+    .or_else(|| {
+        bindings.iter().find_map(|(trigger, action)| {
+            matches!(trigger, Trigger::Rotation(index, _) if *index == number).then_some(action)
+        })
+    })
+    .or_else(|| bindings.get(&Trigger::EncoderPress(number)))
+    .map(|action| action_summary(Some(action)))
+}
+
 fn summary_event_label(event: EventKind) -> &'static str {
     match event {
         EventKind::ButtonPress | EventKind::EncoderPress => "Press",

@@ -22,7 +22,7 @@ modifier grid, loose option checkboxes, low-visibility status line).
 - [x] T1 Layout uses available width/height: preview + inspector scale, no dead band.
 - [x] T2 Toolbar hierarchy: navigation vs management groups; destructive/secondary actions lighter.
 - [x] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
-- [ ] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
+- [x] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
 - [ ] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
 - [ ] T6 Docs: DESIGN.md, README if affected, CHANGELOG, regenerated screenshots.
 
@@ -70,4 +70,17 @@ a plain next step ("Stream Deck + not connected — plug it in"); VID/PID and wo
 diagnostics move to the tooltip. Badges gained a tinted edge. RED observed first:
 `ui_refresh_tests::header_states_connection_in_plain_language` failed to compile
 (presenter missing), then GREEN. Checks: fmt ok, clippy ok, headless ok, display
-bin suite 42/43 (only the known base failure).
+bin suite 42/43 (only the known base failure). Commit ec4e16d.
+
+### T4 (delegated writer)
+Each preview dial shows a small caption (`dial_legend` in binding_editor.rs:
+turn, then exact ticks, then press) from existing bindings on the current touch
+page; hidden when unassigned, refreshed with the summaries, preview-only. Touch
+strip placeholder reads "Touch strip · waiting for input" at 11px/600 with higher
+contrast. Key labels are stored button-text artwork, so their legibility comes
+from the T1 preview scale; stored artwork and hardware geometry are untouched.
+RED observed first: `ui_refresh_tests::preview_dials_show_their_assigned_actions`
+failed to compile (no legends), then GREEN. Checks: fmt ok, clippy ok, headless
+ok, display bin suite 43/44 (only the known base failure; one intermittent
+square-hit-area frame-timing failure seen once in a pre-existing check, clean on
+two reruns).
