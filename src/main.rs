@@ -2844,11 +2844,47 @@ struct ArtworkUi {
     selected_target: Rc<Cell<ArtworkTarget>>,
     text_editor: Rc<RefCell<std::rc::Weak<button_text_editor::ButtonTextEditor>>>,
     /// Latest reading of every live information source.
-    info: Rc<
-        RefCell<
-            std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
-        >,
-    >,
+    info: Rc<RefCell<InfoState>>,
+}
+
+/// Latest reading of every live information source (the map it derefs to),
+/// plus the preview's scrolling Now playing titles.
+#[derive(Default)]
+struct InfoState {
+    values: std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
+    marquee: PreviewMarquee,
+}
+
+impl std::ops::Deref for InfoState {
+    type Target =
+        std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
+
+impl std::ops::DerefMut for InfoState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.values
+    }
+}
+
+/// Preview pictures whose title scrolls, redrawn by one ~10 fps GTK timeout
+/// that exists only while at least one title scrolls.
+#[derive(Default)]
+struct PreviewMarquee {
+    running: std::collections::HashMap<ArtworkTarget, PreviewTitle>,
+    timer: Option<glib::SourceId>,
+}
+
+struct PreviewTitle {
+    value: sdeck_plus::info::InfoValue,
+    /// Title and column widths from `info_render::marquee_extent`.
+    extent: (f64, f64),
+    started: std::time::Instant,
+    /// Whole-pixel offset last drawn.
+    offset: f64,
 }
 
 impl ArtworkUi {
@@ -3028,23 +3064,47 @@ impl ArtworkUi {
 
     /// Draw the same picture in the window's preview of `target`.
     fn paint_info_preview(&self, target: ArtworkTarget, value: &sdeck_plus::info::InfoValue) {
+        self.paint_info_preview_at(target, value, std::time::Instant::now());
+    }
+
+    /// [`Self::paint_info_preview`] as of `now`: a scrolling title is drawn at
+    /// its marquee phase, and keeps scrolling until something else shows.
+    fn paint_info_preview_at(
+        &self,
+        target: ArtworkTarget,
+        value: &sdeck_plus::info::InfoValue,
+        now: std::time::Instant,
+    ) {
         let layer = self.layers.borrow().active().to_owned();
+        let indicators = |zone: u8| {
+            let (previous, next) = self.layers.borrow().touchscreen_navigation(&layer);
+            (zone == 1 && previous, zone == 4 && next)
+        };
+        let section = match target {
+            ArtworkTarget::Keypad(_) => None,
+            ArtworkTarget::EncoderZone(zone) => Some(indicators(zone)),
+            ArtworkTarget::TouchStripBackground => return,
+        };
+        let elapsed = self.preview_marquee_phase(target, value, section, now);
         if let ArtworkTarget::EncoderZone(zone) = target {
             if self.indicated_zone(&layer, zone) {
-                self.paint_touchscreen_zone(&layer, zone, Some(value));
+                self.paint_touchscreen_zone(&layer, zone, Some(value), elapsed);
                 return;
             }
         }
         let background = self.info_background(&layer, target);
         let image = match target {
-            ArtworkTarget::Keypad(_) => {
-                sdeck_plus::info_render::compose_info_image(value, background.as_deref())
-            }
-            ArtworkTarget::EncoderZone(_) => sdeck_plus::info_render::compose_zone_image(
+            ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_at(
+                value,
+                background.as_deref(),
+                elapsed,
+            ),
+            ArtworkTarget::EncoderZone(_) => sdeck_plus::info_render::compose_zone_image_at(
                 value,
                 background.as_deref(),
                 false,
                 false,
+                elapsed,
             ),
             ArtworkTarget::TouchStripBackground => return,
         };
@@ -3060,11 +3120,105 @@ impl ArtworkUi {
         }
     }
 
+    /// Follow the title `target` now shows: start or keep its marquee (and
+    /// the timer) when it scrolls, forget it otherwise. Returns its phase.
+    fn preview_marquee_phase(
+        &self,
+        target: ArtworkTarget,
+        value: &sdeck_plus::info::InfoValue,
+        section: Option<(bool, bool)>,
+        now: std::time::Instant,
+    ) -> Duration {
+        let extent = sdeck_plus::info_render::marquee_extent(value, section);
+        let mut info = self.info.borrow_mut();
+        let marquee = &mut info.marquee;
+        let Some(extent) = extent else {
+            marquee.running.remove(&target);
+            return Duration::ZERO;
+        };
+        let title = marquee
+            .running
+            .entry(target)
+            .and_modify(|title| {
+                if title.value != *value || title.extent != extent {
+                    title.value = value.clone();
+                    title.extent = extent;
+                    title.started = now;
+                }
+            })
+            .or_insert_with(|| PreviewTitle {
+                value: value.clone(),
+                extent,
+                started: now,
+                offset: 0.0,
+            });
+        let elapsed = now.saturating_duration_since(title.started);
+        title.offset = sdeck_plus::info_render::marquee_offset(extent.0, extent.1, elapsed).round();
+        let idle = marquee.timer.is_none();
+        drop(info);
+        if idle {
+            let ui = self.clone();
+            let timer = glib::timeout_add_local(Duration::from_millis(100), move || {
+                ui.tick_preview_marquee(std::time::Instant::now())
+            });
+            self.info.borrow_mut().marquee.timer = Some(timer);
+        }
+        elapsed
+    }
+
+    /// Redraw the preview titles whose position moved by `now`. The timer
+    /// stops once no title scrolls or their window is gone.
+    fn tick_preview_marquee(&self, now: std::time::Instant) -> glib::ControlFlow {
+        let layer = self.layers.borrow().active().to_owned();
+        let shown = self.info_targets(&layer);
+        let running: Vec<_> = self
+            .info
+            .borrow()
+            .marquee
+            .running
+            .iter()
+            .map(|(target, title)| (*target, title.extent, title.started, title.offset))
+            .collect();
+        for (target, (full, column), started, offset) in running {
+            let alive = self
+                .pictures
+                .borrow()
+                .iter()
+                .any(|(shown, picture)| *shown == target && picture.root().is_some());
+            let source = shown
+                .iter()
+                .find(|(shown, _)| *shown == target)
+                .map(|(_, source)| *source);
+            match source.filter(|_| alive) {
+                Some(source) => {
+                    let elapsed = now.saturating_duration_since(started);
+                    let moved =
+                        sdeck_plus::info_render::marquee_offset(full, column, elapsed).round();
+                    if moved != offset {
+                        self.paint_info_preview_at(target, &self.info_value(source), now);
+                    }
+                }
+                None => {
+                    self.info.borrow_mut().marquee.running.remove(&target);
+                }
+            }
+        }
+        let mut info = self.info.borrow_mut();
+        if info.marquee.running.is_empty() {
+            // Returning Break removes the source; only forget its id.
+            info.marquee.timer = None;
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    }
+
     fn paint_touchscreen_zone(
         &self,
         layer: &str,
         zone: u8,
         value: Option<&sdeck_plus::info::InfoValue>,
+        elapsed: Duration,
     ) {
         let target = ArtworkTarget::EncoderZone(zone);
         let background = self.info_background(layer, target);
@@ -3073,12 +3227,13 @@ impl ArtworkUi {
             .is_none()
             .then(|| self.control_icon(layer, target))
             .flatten();
-        match sdeck_plus::image_output::compose_touchscreen_zone(
+        match sdeck_plus::image_output::compose_touchscreen_zone_at(
             zone,
             background.as_deref(),
             value,
             previous,
             next,
+            elapsed,
         )
         .and_then(|indicators| match &icon {
             // The page indicators still paint last, over the binding icon.
@@ -3106,7 +3261,7 @@ impl ArtworkUi {
             if self.indicated_zone(layer, zone)
                 && self.layers.borrow().zone_info_source(layer, zone).is_none()
             {
-                self.paint_touchscreen_zone(layer, zone, None);
+                self.paint_touchscreen_zone(layer, zone, None, Duration::ZERO);
             }
         }
     }

@@ -417,7 +417,85 @@ fn assert_now_playing_is_selectable_and_draws_its_three_states() {
         assert_eq!(preview(ArtworkTarget::Keypad(2)), Some((120, 120)));
         assert_eq!(preview(ArtworkTarget::EncoderZone(2)), Some((200, 100)));
     }
+    assert!(
+        artwork.info.borrow().marquee.timer.is_none(),
+        "short titles never start the preview timer"
+    );
 
+    // A long playing title scrolls in the preview, at a phase from the clock.
+    let pixels = |target: ArtworkTarget| {
+        let pictures = artwork.pictures.borrow();
+        let (_, picture) = pictures.iter().find(|(shown, _)| *shown == target).unwrap();
+        let texture = picture
+            .paintable()
+            .unwrap()
+            .downcast::<gtk::gdk::Texture>()
+            .unwrap();
+        let mut bytes = vec![0; texture.width() as usize * texture.height() as usize * 4];
+        texture.download(&mut bytes, texture.width() as usize * 4);
+        bytes
+    };
+    let long = InfoValue {
+        detail: "Queen".into(),
+        ..InfoValue::text(Glyph::Play, "Bohemian Rhapsody (Remastered 2011)")
+    };
+    while hardware.try_recv().is_ok() {}
+    artwork.update_info(InfoSource::NowPlaying, long.clone());
+    assert_eq!(
+        info_pictures(&hardware).len(),
+        2,
+        "the device gets the reading once; its own worker scrolls it"
+    );
+    assert_eq!(artwork.info.borrow().marquee.running.len(), 2);
+    assert!(artwork.info.borrow().marquee.timer.is_some());
+    let (key, section) = (
+        pixels(ArtworkTarget::Keypad(2)),
+        pixels(ArtworkTarget::EncoderZone(2)),
+    );
+    let later = std::time::Instant::now() + Duration::from_secs(3);
+    assert!(matches!(
+        artwork.tick_preview_marquee(later),
+        glib::ControlFlow::Continue
+    ));
+    assert_ne!(key, pixels(ArtworkTarget::Keypad(2)), "the key title moved");
+    assert_ne!(
+        section,
+        pixels(ArtworkTarget::EncoderZone(2)),
+        "the section title moved"
+    );
+    let moved = pixels(ArtworkTarget::Keypad(2));
+    artwork.tick_preview_marquee(later);
+    assert_eq!(
+        moved,
+        pixels(ArtworkTarget::Keypad(2)),
+        "no redraw in place"
+    );
+
+    // Paused: static again, and the real timer removes itself.
+    artwork.update_info(
+        InfoSource::NowPlaying,
+        InfoValue {
+            glyph: Glyph::Pause,
+            inactive: true,
+            ..long.clone()
+        },
+    );
+    assert!(artwork.info.borrow().marquee.running.is_empty());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while artwork.info.borrow().marquee.timer.is_some() && std::time::Instant::now() < deadline {
+        glib::MainContext::default().iteration(true);
+    }
+    assert!(artwork.info.borrow().marquee.timer.is_none());
+
+    // Scrolling again, then the preview leaves its window: the timer stops.
+    artwork.update_info(InfoSource::NowPlaying, long.clone());
+    assert!(artwork.info.borrow().marquee.timer.is_some());
+    window.set_child(None::<&gtk::Widget>);
+    assert!(matches!(
+        artwork.tick_preview_marquee(later),
+        glib::ControlFlow::Break
+    ));
+    assert!(artwork.info.borrow().marquee.running.is_empty());
     window.destroy();
     std::fs::remove_dir_all(root).unwrap();
 }

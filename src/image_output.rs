@@ -4,7 +4,7 @@ use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, Verti
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
 use gtk::pango::prelude::*;
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 pub const REPORT_SIZE: usize = 1024;
 const KEY_OR_FULL_CHUNK: usize = 1016;
@@ -248,13 +248,26 @@ pub fn compose_touchscreen_zone(
     previous: bool,
     next: bool,
 ) -> Result<Pixbuf, String> {
+    compose_touchscreen_zone_at(zone, background, value, previous, next, Duration::ZERO)
+}
+
+/// [`compose_touchscreen_zone`] at `elapsed` into a scrolling title.
+pub fn compose_touchscreen_zone_at(
+    zone: u8,
+    background: Option<&Path>,
+    value: Option<&crate::info::InfoValue>,
+    previous: bool,
+    next: bool,
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
     let size = dimensions(ArtworkTarget::EncoderZone(zone))?;
     let image = if let Some(value) = value {
-        crate::info_render::compose_zone_image(
+        crate::info_render::compose_zone_image_at(
             value,
             background,
             zone == 1 && previous,
             zone == 4 && next,
+            elapsed,
         )?
     } else if let Some(background) = background {
         resize_background(size, background)?
@@ -335,7 +348,26 @@ pub fn prepare_touchscreen_zone_jpeg(
     previous: bool,
     next: bool,
 ) -> Result<Vec<u8>, String> {
-    let overlay = compose_touchscreen_zone(zone, background, value, previous, next)?;
+    prepare_touchscreen_zone_jpeg_at(
+        zone,
+        background,
+        strip_background,
+        value,
+        (previous, next),
+        Duration::ZERO,
+    )
+}
+
+/// [`prepare_touchscreen_zone_jpeg`] at `elapsed` into a scrolling title.
+pub fn prepare_touchscreen_zone_jpeg_at(
+    zone: u8,
+    background: Option<&Path>,
+    strip_background: Option<&Path>,
+    value: Option<&crate::info::InfoValue>,
+    (previous, next): (bool, bool),
+    elapsed: Duration,
+) -> Result<Vec<u8>, String> {
+    let overlay = compose_touchscreen_zone_at(zone, background, value, previous, next, elapsed)?;
     if let Some(strip) = strip_background {
         let strip = prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
         let section = strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100);
@@ -438,13 +470,26 @@ pub fn prepare_info_jpeg(
     background: Option<&Path>,
     strip_background: Option<&Path>,
 ) -> Result<Vec<u8>, String> {
+    prepare_info_jpeg_at(target, value, background, strip_background, Duration::ZERO)
+}
+
+/// [`prepare_info_jpeg`] at `elapsed` into a scrolling title.
+pub fn prepare_info_jpeg_at(
+    target: ArtworkTarget,
+    value: &crate::info::InfoValue,
+    background: Option<&Path>,
+    strip_background: Option<&Path>,
+    elapsed: Duration,
+) -> Result<Vec<u8>, String> {
     let _ = dimensions(target)?;
     match target {
-        ArtworkTarget::Keypad(_) => {
-            encode_jpeg(&crate::info_render::compose_info_image(value, background)?)
-        }
+        ArtworkTarget::Keypad(_) => encode_jpeg(&crate::info_render::compose_info_image_at(
+            value, background, elapsed,
+        )?),
         ArtworkTarget::EncoderZone(zone) => {
-            let overlay = crate::info_render::compose_zone_image(value, background, false, false)?;
+            let overlay = crate::info_render::compose_zone_image_at(
+                value, background, false, false, elapsed,
+            )?;
             if let Some(strip) = strip_background {
                 let strip =
                     prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;

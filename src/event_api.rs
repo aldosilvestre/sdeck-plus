@@ -14,7 +14,7 @@ use std::{
         Arc, Condvar, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const VID: u16 = 0x0FD9;
@@ -26,6 +26,8 @@ mod device_controls;
 #[cfg(test)]
 #[path = "device_control/monitor_tests.rs"]
 mod control_monitor_tests;
+
+mod marquee;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -216,15 +218,35 @@ pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
     }
 }
 
-fn pending_artwork(commands: &Receiver<ArtworkCommand>) -> Vec<ArtworkCommand> {
+/// Queued work, and whether a snapshot replaced everything shown before it.
+fn pending_artwork(commands: &Receiver<ArtworkCommand>) -> (bool, Vec<ArtworkCommand>) {
     let mut pending = Vec::new();
+    let mut replaced = false;
     for command in commands.try_iter() {
         match command {
-            ArtworkCommand::Replace(snapshot) => pending = snapshot,
+            ArtworkCommand::Replace(snapshot) => {
+                pending = snapshot;
+                replaced = true;
+            }
             command => pending.push(command),
         }
     }
-    pending
+    (replaced, pending)
+}
+
+/// The control a command draws on; snapshots have none of their own.
+fn command_target(command: &ArtworkCommand) -> Option<ArtworkTarget> {
+    match command {
+        ArtworkCommand::Assign { target, .. }
+        | ArtworkCommand::Clear { target }
+        | ArtworkCommand::ComposeInfo { target, .. }
+        | ArtworkCommand::ComposeIcon { target, .. } => Some(*target),
+        ArtworkCommand::ComposeButton { key, .. } => Some(ArtworkTarget::Keypad(*key)),
+        ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
+            Some(ArtworkTarget::EncoderZone(*zone))
+        }
+        ArtworkCommand::Replace(_) => None,
+    }
 }
 
 trait Device {
@@ -272,6 +294,14 @@ fn discover_device(stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
 }
 
 fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String> {
+    prepare_artwork_at(command, Duration::ZERO)
+}
+
+/// Device reports for a command, with a scrolling title `elapsed` into its marquee.
+fn prepare_artwork_at(
+    command: ArtworkCommand,
+    elapsed: Duration,
+) -> Result<Vec<image_output::OutputReport>, String> {
     let (target, jpeg) = match command {
         ArtworkCommand::Assign { target, path } => {
             (target, image_output::prepare_jpeg(target, path)?)
@@ -290,13 +320,13 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
             next,
         } => (
             ArtworkTarget::EncoderZone(zone),
-            image_output::prepare_touchscreen_zone_jpeg(
+            image_output::prepare_touchscreen_zone_jpeg_at(
                 zone,
                 path.as_deref(),
                 strip_path.as_deref(),
                 value.as_ref(),
-                previous,
-                next,
+                (previous, next),
+                elapsed,
             )?,
         ),
         ArtworkCommand::ComposeInfo {
@@ -306,11 +336,12 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
             value,
         } => (
             target,
-            image_output::prepare_info_jpeg(
+            image_output::prepare_info_jpeg_at(
                 target,
                 &value,
                 path.as_deref(),
                 strip_path.as_deref(),
+                elapsed,
             )?,
         ),
         ArtworkCommand::ComposeIcon {
@@ -338,31 +369,42 @@ fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputRe
     image_output::encode_reports(target, &jpeg)
 }
 
+#[cfg(test)]
 fn process_artwork(
+    commands: &Receiver<ArtworkCommand>,
+    stop: &StopSignal,
+    sender: &Sender<MonitorEvent>,
+    prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
+    write: impl FnMut(&[u8]) -> Result<usize, String>,
+) {
+    let mut marquees = marquee::Marquees::default();
+    process_artwork_with(commands, stop, sender, prepare, write, &mut marquees);
+}
+
+/// Send queued artwork, keeping `marquees` in step with what each target shows.
+fn process_artwork_with(
     commands: &Receiver<ArtworkCommand>,
     stop: &StopSignal,
     sender: &Sender<MonitorEvent>,
     mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
     mut write: impl FnMut(&[u8]) -> Result<usize, String>,
+    marquees: &mut marquee::Marquees,
 ) {
     if !stop.live() {
         return;
     }
-    for command in pending_artwork(commands) {
+    let (replaced, pending) = pending_artwork(commands);
+    if replaced {
+        marquees.reset();
+    }
+    for command in pending {
         if !stop.live() {
             return;
         }
-        let target = match &command {
-            ArtworkCommand::Assign { target, .. }
-            | ArtworkCommand::Clear { target }
-            | ArtworkCommand::ComposeInfo { target, .. }
-            | ArtworkCommand::ComposeIcon { target, .. } => *target,
-            ArtworkCommand::ComposeButton { key, .. } => ArtworkTarget::Keypad(*key),
-            ArtworkCommand::ComposeTouchscreenZone { zone, .. } => {
-                ArtworkTarget::EncoderZone(*zone)
-            }
-            ArtworkCommand::Replace(_) => continue,
+        let Some(target) = command_target(&command) else {
+            continue;
         };
+        marquees.observe(&command, Instant::now());
         let result = prepare(command).and_then(|reports| {
             transmit_reports(&reports, stop, |report| {
                 if sender.send(MonitorEvent::Heartbeat).is_err() {
@@ -375,12 +417,53 @@ fn process_artwork(
         if !stop.live() {
             return;
         }
+        if result.is_err() {
+            marquees.stop(target);
+        }
         if sender
             .send(MonitorEvent::ArtworkResult { target, result })
             .is_err()
         {
             stop.request();
             return;
+        }
+    }
+}
+
+/// Send the marquee frames due at `now`. Frames report nothing back unless
+/// they fail, which also stops that target's marquee.
+fn send_marquee_frames(
+    marquees: &mut marquee::Marquees,
+    now: Instant,
+    stop: &StopSignal,
+    sender: &Sender<MonitorEvent>,
+    mut prepare: impl FnMut(ArtworkCommand, Duration) -> Result<Vec<image_output::OutputReport>, String>,
+    mut write: impl FnMut(&[u8]) -> Result<usize, String>,
+) {
+    if marquees.is_idle() {
+        return;
+    }
+    for (target, command, elapsed) in marquees.due(now) {
+        if !stop.live() {
+            return;
+        }
+        let result = prepare(command, elapsed)
+            .and_then(|reports| transmit_reports(&reports, stop, &mut write));
+        if !stop.live() {
+            return;
+        }
+        if let Err(error) = result {
+            marquees.stop(target);
+            if sender
+                .send(MonitorEvent::ArtworkResult {
+                    target,
+                    result: Err(error),
+                })
+                .is_err()
+            {
+                stop.request();
+                return;
+            }
         }
     }
 }
@@ -436,6 +519,8 @@ fn monitor<D: Device>(
                 return;
             }
             let mut buffer = [0u8; 64];
+            // Scrolling titles belong to this connection; a reconnect redraws.
+            let mut marquees = marquee::Marquees::default();
             controls.replay(&stop, &sender, &device);
             while stop.live() {
                 // A heartbeat detects consumer loss even when there is no input.
@@ -444,9 +529,22 @@ fn monitor<D: Device>(
                     return;
                 }
                 controls.drain(&stop, &sender, Some(&device));
-                process_artwork(&commands, &stop, &sender, &mut prepare, |report| {
-                    device.write(report)
-                });
+                process_artwork_with(
+                    &commands,
+                    &stop,
+                    &sender,
+                    &mut prepare,
+                    |report| device.write(report),
+                    &mut marquees,
+                );
+                send_marquee_frames(
+                    &mut marquees,
+                    Instant::now(),
+                    &stop,
+                    &sender,
+                    prepare_artwork_at,
+                    |report| device.write(report),
+                );
                 if !stop.live() {
                     return;
                 }
@@ -871,7 +969,8 @@ mod tests {
                 target: ArtworkTarget::Keypad(1),
             }]))
             .unwrap();
-        let pending = pending_artwork(&receiver);
+        let (replaced, pending) = pending_artwork(&receiver);
+        assert!(replaced, "a snapshot replaces everything shown before it");
         assert_eq!(pending.len(), 1);
         assert!(matches!(
             pending[0],
@@ -879,7 +978,8 @@ mod tests {
                 target: ArtworkTarget::Keypad(1)
             }
         ));
-        assert!(pending_artwork(&receiver).is_empty());
+        let (replaced, pending) = pending_artwork(&receiver);
+        assert!(!replaced && pending.is_empty());
     }
 
     #[test]

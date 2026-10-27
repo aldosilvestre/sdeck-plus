@@ -10,7 +10,7 @@ use gtk::{
     gdk_pixbuf::{Colorspace, Pixbuf},
     pango::{self, prelude::FontMapExt},
 };
-use std::{f64::consts::PI, path::Path};
+use std::{f64::consts::PI, path::Path, time::Duration};
 
 type Color = (f64, f64, f64);
 
@@ -35,7 +35,20 @@ const MEDIA: Color = (0.73, 0.64, 0.96);
 /// # Errors
 /// Returns background decoding, cairo or surface allocation failures.
 pub fn compose_info_image(value: &InfoValue, background: Option<&Path>) -> Result<Pixbuf, String> {
-    compose(value, SIZE, SIZE, background, None)
+    compose_info_image_at(value, background, Duration::ZERO)
+}
+
+/// [`compose_info_image`] at `elapsed` into a scrolling title (see
+/// [`marquee_offset`]); phase zero is the static first frame.
+///
+/// # Errors
+/// Returns background decoding, cairo or surface allocation failures.
+pub fn compose_info_image_at(
+    value: &InfoValue,
+    background: Option<&Path>,
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
+    compose(value, SIZE, SIZE, background, None, elapsed)
 }
 
 /// Compose one 200x100 touch-strip section: the section's own artwork (or
@@ -52,13 +65,66 @@ pub fn compose_zone_image(
     previous: bool,
     next: bool,
 ) -> Result<Pixbuf, String> {
+    compose_zone_image_at(value, background, previous, next, Duration::ZERO)
+}
+
+/// [`compose_zone_image`] at `elapsed` into a scrolling title.
+///
+/// # Errors
+/// Returns background decoding, cairo or surface allocation failures.
+pub fn compose_zone_image_at(
+    value: &InfoValue,
+    background: Option<&Path>,
+    previous: bool,
+    next: bool,
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
     compose(
         value,
         ZONE_WIDTH,
         ZONE_HEIGHT,
         background,
         Some((previous, next)),
+        elapsed,
     )
+}
+
+/// Pause before a long title starts scrolling, and again after every lap.
+pub const MARQUEE_PAUSE: Duration = Duration::from_millis(1500);
+/// Scrolling speed of a long title, in pixels per second.
+pub const MARQUEE_SPEED: f64 = 30.0;
+/// Space between the end of a scrolling title and its next repetition,
+/// about 1.5 em at the title's floor size.
+pub const MARQUEE_GAP: f64 = 28.0;
+/// The smallest a Now playing title shrinks to before it scrolls instead.
+const TITLE_FLOOR: f64 = 0.75;
+
+/// How far a title `text_width` wide has scrolled left inside a column
+/// `column_width` wide, `elapsed` after it started: still for
+/// [`MARQUEE_PAUSE`], then [`MARQUEE_SPEED`] pixels per second until the
+/// repetition that follows [`MARQUEE_GAP`] reaches the start, where it loops
+/// seamlessly. A title that fits never moves.
+pub fn marquee_offset(text_width: f64, column_width: f64, elapsed: Duration) -> f64 {
+    if text_width <= column_width {
+        return 0.0;
+    }
+    let travel = text_width + MARQUEE_GAP;
+    let pause = MARQUEE_PAUSE.as_secs_f64();
+    let lap = elapsed.as_secs_f64() % (pause + travel / MARQUEE_SPEED);
+    ((lap - pause) * MARQUEE_SPEED).clamp(0.0, travel)
+}
+
+/// When `value`'s title scrolls on a key (`section` = `None`) or a touch
+/// section with page indicators at `(previous, next)`: the title's width and
+/// its column's width. Only a playing Now playing title that does not fit at
+/// its floor size scrolls.
+pub fn marquee_extent(value: &InfoValue, section: Option<(bool, bool)>) -> Option<(f64, f64)> {
+    let plan = match section {
+        None => key_plan(value),
+        Some((previous, next)) => zone_plan(value, previous, next),
+    };
+    let headline = plan.headline?;
+    Some((headline.scroll?, headline.rect.width))
 }
 
 /// Native-endian premultiplied ARGB pixels: the artwork, or transparent.
@@ -104,6 +170,7 @@ fn compose(
     height: i32,
     background: Option<&Path>,
     section: Option<(bool, bool)>,
+    elapsed: Duration,
 ) -> Result<Pixbuf, String> {
     let canvas = backdrop(width, height, background)?;
     let mut surface = cairo::ImageSurface::create_for_data(
@@ -124,10 +191,11 @@ fn compose(
                 } else {
                     crate::binding_icons::ZONE_TILE_ALPHA
                 };
-                crate::binding_icons::draw_zone_tile(&cairo, alpha)
-                    .and_then(|()| draw_parts(&cairo, value, &zone_plan(value, previous, next)))
+                crate::binding_icons::draw_zone_tile(&cairo, alpha).and_then(|()| {
+                    draw_parts(&cairo, value, &zone_plan(value, previous, next), elapsed)
+                })
             }
-            None => draw(&cairo, value),
+            None => draw_parts(&cairo, value, &key_plan(value), elapsed),
         }
         .map_err(|error| error.to_string())?;
     }
@@ -271,10 +339,6 @@ fn draw_text(
     })
 }
 
-fn draw(cairo: &Context, value: &InfoValue) -> Result<(), cairo::Error> {
-    draw_parts(cairo, value, &key_plan(value))
-}
-
 /// The section tile shared with binding icons (`binding_icons::draw_zone_tile`).
 const SECTION_TILE: Rect = Rect {
     x: 3.5,
@@ -310,6 +374,8 @@ impl Rect {
 struct Text {
     layout: pango::Layout,
     rect: Rect,
+    /// The full width of a title that scrolls instead of fitting its box.
+    scroll: Option<f64>,
 }
 
 /// Where every part of a live information picture goes.
@@ -365,6 +431,44 @@ fn fitted_layout(
     make_layout(text, size, bold, width.floor() as i32, alignment)
 }
 
+/// The headline layout and, when it scrolls, its full width. A Now playing
+/// title shrinks no lower than [`TITLE_FLOOR`]; past that a playing title
+/// scrolls at the floor size and a paused one ellipsizes. Other readings
+/// follow [`fitted_layout`].
+fn headline_layout(
+    value: &InfoValue,
+    size: f64,
+    width: f64,
+    alignment: pango::Alignment,
+) -> (pango::Layout, Option<f64>) {
+    let text = &value.headline;
+    if !matches!(value.glyph, Glyph::Play | Glyph::Pause) {
+        return (fitted_layout(text, size, true, width, alignment), None);
+    }
+    let natural = f64::from(make_layout(text, size, true, -1, alignment).pixel_size().0);
+    let fitted = if natural > width {
+        (size * width / natural).floor()
+    } else {
+        size
+    };
+    let floor = (size * TITLE_FLOOR).floor();
+    if fitted >= floor {
+        return (
+            make_layout(text, fitted, true, width.floor() as i32, alignment),
+            None,
+        );
+    }
+    if value.glyph == Glyph::Play && !value.inactive {
+        let layout = make_layout(text, floor, true, -1, pango::Alignment::Left);
+        let full = f64::from(layout.pixel_size().0);
+        return (layout, Some(full));
+    }
+    (
+        make_layout(text, floor, true, width.floor() as i32, alignment),
+        None,
+    )
+}
+
 /// Stack the value, bar and detail lines in one column, vertically centered
 /// in `top..bottom`; detail lines that do not fit are left out.
 fn text_column(
@@ -376,8 +480,10 @@ fn text_column(
 ) -> (Option<Text>, Option<Rect>, Vec<Text>) {
     let height_of = |layout: &pango::Layout| f64::from(layout.pixel_size().1);
     let headline = (!value.headline.is_empty())
-        .then(|| fitted_layout(&value.headline, headline_size, true, width, alignment));
-    let mut used = headline.as_ref().map_or(0.0, height_of);
+        .then(|| headline_layout(value, headline_size, width, alignment));
+    let mut used = headline
+        .as_ref()
+        .map_or(0.0, |(layout, _)| height_of(layout));
     if value.level.is_some() {
         used += if headline.is_some() { GAP } else { 0.0 } + bar_height;
     }
@@ -402,9 +508,10 @@ fn text_column(
         y += height + GAP;
         rect
     };
-    let headline = headline.map(|layout| Text {
+    let headline = headline.map(|(layout, scroll)| Text {
         rect: place(height_of(&layout)),
         layout,
+        scroll,
     });
     let bar = value.level.map(|_| {
         let rect = place(bar_height);
@@ -425,6 +532,7 @@ fn text_column(
         .map(|layout| Text {
             rect: place(height_of(&layout)),
             layout,
+            scroll: None,
         })
         .collect();
     (headline, bar, details)
@@ -539,7 +647,12 @@ fn key_plan(value: &InfoValue) -> Plan {
     plan
 }
 
-fn draw_parts(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cairo::Error> {
+fn draw_parts(
+    cairo: &Context,
+    value: &InfoValue,
+    plan: &Plan,
+    elapsed: Duration,
+) -> Result<(), cairo::Error> {
     let color = accent(value);
     if let Some(icon) = plan.icon {
         draw_icon(cairo, value, icon, color)?;
@@ -554,9 +667,33 @@ fn draw_parts(cairo: &Context, value: &InfoValue, plan: &Plan) -> Result<(), cai
         )?;
     }
     for text in plan.texts() {
-        draw_text(cairo, &text.layout, (text.rect.x, text.rect.y), fill)?;
+        match text.scroll {
+            Some(full) => draw_marquee(cairo, text, full, elapsed, fill)?,
+            None => draw_text(cairo, &text.layout, (text.rect.x, text.rect.y), fill)?,
+        }
     }
     Ok(())
+}
+
+/// A scrolling title, clipped to its column (the shadow may spill a little
+/// above and below, never sideways into the icon or the chevron room).
+fn draw_marquee(
+    cairo: &Context,
+    text: &Text,
+    full: f64,
+    elapsed: Duration,
+    fill: Color,
+) -> Result<(), cairo::Error> {
+    let rect = text.rect;
+    let offset = marquee_offset(full, rect.width, elapsed).round();
+    cairo.save()?;
+    cairo.rectangle(rect.x, rect.y - 4.0, rect.width, rect.height + 8.0);
+    cairo.clip();
+    let result = [0.0, full + MARQUEE_GAP]
+        .iter()
+        .try_for_each(|lap| draw_text(cairo, &text.layout, (rect.x - offset + lap, rect.y), fill));
+    cairo.restore()?;
+    result
 }
 
 /// A translucent dark track keeps the proportion readable over any artwork.
@@ -759,15 +896,16 @@ mod tests {
                 assert!(f64::from(text.layout.pixel_size().0) <= text.rect.width + 0.5);
             }
         }
-        // A long title shrinks, then ends in an ellipsis instead of overflowing.
+        // A long playing title scrolls instead of shrinking below the floor.
         let long = InfoValue {
             headline: "Bohemian Rhapsody (Remastered 2011)".into(),
             ..playing.clone()
         };
         for plan in [key_plan(&long), zone_plan(&long, false, true)] {
-            let headline = plan.headline.unwrap();
-            assert!(headline.layout.is_ellipsized(), "long titles ellipsize");
-            assert!(f64::from(headline.layout.pixel_size().0) <= headline.rect.width + 0.5);
+            assert!(
+                plan.headline.unwrap().scroll.is_some(),
+                "long titles scroll"
+            );
         }
         // Nothing playing shows its whole caption on keys and sections.
         assert_eq!(key_plan(idle).details.len(), 2);
@@ -776,6 +914,118 @@ mod tests {
             .details
             .iter()
             .all(|detail| !detail.layout.is_ellipsized()));
+    }
+
+    fn long_title(glyph: Glyph, inactive: bool) -> InfoValue {
+        InfoValue {
+            detail: "Queen".into(),
+            inactive,
+            ..InfoValue::text(glyph, "Bohemian Rhapsody (Remastered 2011)")
+        }
+    }
+
+    #[test]
+    fn marquee_pauses_then_scrolls_at_its_speed_and_loops_seamlessly() {
+        let ms = Duration::from_millis;
+        assert_eq!(marquee_offset(80.0, 100.0, ms(5_000)), 0.0, "fits: still");
+        assert_eq!(marquee_offset(200.0, 100.0, ms(0)), 0.0);
+        assert_eq!(marquee_offset(200.0, 100.0, ms(1_499)), 0.0, "paused");
+        let scrolled = marquee_offset(200.0, 100.0, ms(2_500));
+        assert!((scrolled - MARQUEE_SPEED).abs() < 1e-6, "{scrolled}");
+        // One lap = pause + (text + gap) / speed; then it starts over.
+        let travel = 200.0 + MARQUEE_GAP;
+        let lap = MARQUEE_PAUSE.as_secs_f64() + travel / MARQUEE_SPEED;
+        let before = marquee_offset(200.0, 100.0, Duration::from_secs_f64(lap - 0.01));
+        assert!(
+            travel - before < 0.5,
+            "the repetition reaches the start: {before}"
+        );
+        assert_eq!(
+            marquee_offset(200.0, 100.0, Duration::from_secs_f64(lap + 0.5)),
+            0.0,
+            "the next lap pauses again"
+        );
+    }
+
+    #[test]
+    fn only_long_playing_titles_scroll_and_paused_ones_ellipsize() {
+        let short = InfoValue {
+            detail: "Miles Davis".into(),
+            ..InfoValue::text(Glyph::Play, "So What")
+        };
+        assert_eq!(marquee_extent(&short, None), None);
+        assert_eq!(marquee_extent(&short, Some((false, false))), None);
+        let playing = long_title(Glyph::Play, false);
+        let (full, column) = marquee_extent(&playing, None).unwrap();
+        assert!(full > column, "{full} > {column}");
+        // On keys the title scrolls at the readable 18px floor.
+        let headline = key_plan(&playing).headline.unwrap();
+        let size =
+            f64::from(headline.layout.font_description().unwrap().size()) / f64::from(pango::SCALE);
+        assert!((size - 18.0).abs() < 0.01, "{size}");
+        // A section's column stops before the chevron room.
+        let (_, open) = marquee_extent(&playing, Some((false, false))).unwrap();
+        let (_, indicated) = marquee_extent(&playing, Some((false, true))).unwrap();
+        assert!(indicated < open, "{indicated} vs {open}");
+        // Paused: static, at the floor size, ellipsized inside its column.
+        let paused = long_title(Glyph::Pause, true);
+        assert_eq!(marquee_extent(&paused, None), None);
+        assert_eq!(marquee_extent(&paused, Some((true, true))), None);
+        let headline = key_plan(&paused).headline.unwrap();
+        assert!(headline.layout.is_ellipsized());
+        assert!(f64::from(headline.layout.pixel_size().0) <= headline.rect.width + 0.5);
+        // Other readings keep the existing shrink-then-ellipsize rule.
+        let other = InfoValue::text(Glyph::Record, "A very long recording headline");
+        assert_eq!(marquee_extent(&other, None), None);
+    }
+
+    #[test]
+    fn marquee_frames_differ_only_inside_the_title_column() {
+        let playing = long_title(Glyph::Play, false);
+        let later = Duration::from_secs(3);
+        let cases = [
+            (
+                compose_info_image_at(&playing, None, Duration::ZERO).unwrap(),
+                compose_info_image_at(&playing, None, later).unwrap(),
+                key_plan(&playing),
+            ),
+            (
+                compose_zone_image_at(&playing, None, false, true, Duration::ZERO).unwrap(),
+                compose_zone_image_at(&playing, None, false, true, later).unwrap(),
+                zone_plan(&playing, false, true),
+            ),
+        ];
+        for (first, second, plan) in cases {
+            let rect = plan.headline.unwrap().rect;
+            let mut changed = 0;
+            for y in 0..first.height() as usize {
+                for x in 0..first.width() as usize {
+                    if rgba(&first, x, y) != rgba(&second, x, y) {
+                        changed += 1;
+                        let (x, y) = (x as f64, y as f64);
+                        assert!(
+                            x >= rect.x - 0.5
+                                && x <= rect.right() + 0.5
+                                && y >= rect.y - 4.5
+                                && y <= rect.bottom() + 4.5,
+                            "pixel {x},{y} outside {rect:?} changed"
+                        );
+                    }
+                }
+            }
+            assert!(changed > 50, "the title moved: {changed}");
+        }
+        // Paused titles and short titles render the same at any phase.
+        for value in [long_title(Glyph::Pause, true), samples()[9].clone()] {
+            assert_eq!(
+                compose_info_image_at(&value, None, Duration::ZERO)
+                    .unwrap()
+                    .read_pixel_bytes(),
+                compose_info_image_at(&value, None, later)
+                    .unwrap()
+                    .read_pixel_bytes()
+            );
+        }
     }
 
     #[test]
@@ -809,7 +1059,8 @@ mod tests {
                         "{value:?} ({previous}, {next}): {rect:?} leaves the tile"
                     );
                 }
-                for text in plan.texts() {
+                // A scrolling title is clipped to its column instead.
+                for text in plan.texts().filter(|text| text.scroll.is_none()) {
                     assert!(
                         f64::from(text.layout.pixel_size().0) <= text.rect.width + 0.5,
                         "{value:?}: text wider than its column"
