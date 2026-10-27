@@ -22,7 +22,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 - [x] L1 Touch-section live info uses the same translucent tile/layout language as binding-icon sections (no bare transparent area); chevron room kept.
 - [x] L2 Key live info: captions fully visible (no clipping), icon/value/bar/caption spacing rebalanced.
 - [x] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
-- [ ] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
+- [x] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
 - [ ] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
 - [ ] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
 
@@ -79,3 +79,17 @@ RED: `live_information_glyphs_come_from_the_binding_vocabulary` (no variants /
 `for_glyph`), then GREEN. Contact sheet inspected at key and section size.
 Checks: fmt ok; clippy ok; headless ok (321+53+2); display bin suite 52/53
 (only the known F1 failure).
+Commit 21bb6e5.
+
+### F1 (delegated writer, route: delegated direct)
+Root cause: the test found "New touchscreen page" with
+`touchscreen_controls().last_child()`. That was correct when the test was
+written (f4327f8: Touch page label, picker, previous, next, new); commit
+7a1a324 added the Delete touchscreen page button after New, as DESIGN.md
+documents ("add and delete buttons"). The test therefore clicked Delete (on the
+only page: disabled / confirmation), no pages were created, and the snapshot
+had no indicators. Product behavior matches DESIGN.md, so only the stale
+locator changed: the button is found by its tooltip/accessible name. No
+assertion was removed or relaxed.
+RED: failed at touchscreen_tests.rs:177 (`[]` vs `[(4, false, true)]`); GREEN.
+Checks: clippy ok; display bin suite 53/53.
