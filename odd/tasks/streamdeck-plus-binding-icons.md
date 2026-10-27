@@ -26,7 +26,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
 - [x] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
 - [x] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
-- [ ] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
+- [x] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
 - [ ] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
 - [ ] T11 Docs + regenerated screenshots for T7-T10.
 
@@ -163,3 +163,18 @@ Three test sibling walks now step out of the new header row.
 RED: lib `strip_gestures_list_swipes_tap_and_hold_with_default_paging` and GTK
 `strip_header_shows_gesture_badges_without_covering_the_sections` (no
 items/field), then GREEN. Checks: clippy ok, display bin suite 50/51 (known).
+
+### T9 (delegated writer)
+`Choice::binding_icon` derives each More action's icon from a representative
+`FeatureAction` through `BindingIcon::for_action`, so menus, guidance and
+saved controls can never disagree. Category rows: System `application`,
+Multimedia `play-pause`, Organization `folder`, Device `brightness`, OBS
+`obs-scene`. The Category and Action dropdowns use `icon_dropdown` (now
+closure-based, `icon_dropdown_with` for a separate closed-button icon); the
+guidance icon is a 20px vocabulary icon; the closed main Action button shows
+the selected More action's icon (synced through a weak
+`FeatureEditor::connect_icon_changed`), menu rows keep `more`. Keys, sections
+and dials already used `for_action` (no generic glyph for known actions).
+RED: `more_actions_show_specific_icons_in_menus_guidance_and_the_action_button`
+(no category icons), then GREEN. Checks: clippy ok, display bin suite only the
+known failure.

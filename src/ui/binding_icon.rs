@@ -2,6 +2,7 @@
 //! string dropdown whose rows carry one icon each.
 use gtk::{glib, prelude::*, Box as GtkBox, Image, Label, Orientation};
 use sdeck_plus::binding_icons::{self, BindingIcon};
+use std::rc::Rc;
 
 /// A binding vocabulary icon drawn in the widget's own foreground color, so
 /// it follows the light and dark palettes. It is decorative: the adjacent
@@ -39,17 +40,51 @@ pub(crate) fn set_binding_icon(area: &gtk::DrawingArea, icon: BindingIcon) {
     area.queue_draw();
 }
 
+/// An icon for each row position of a dropdown.
+pub(crate) type RowIcon = Rc<dyn Fn(u32) -> BindingIcon>;
+
 /// Show `icon_for(position)` beside each row of a string dropdown, in the
 /// closed button and in its menu. Menu rows keep GTK's check mark on the
 /// selected entry; names and accessibility come from the row's label.
-pub(crate) fn icon_dropdown(picker: &gtk::DropDown, icon_for: fn(u32) -> BindingIcon) {
-    picker.set_factory(Some(&icon_row_factory(picker, icon_for, false)));
-    picker.set_list_factory(Some(&icon_row_factory(picker, icon_for, true)));
+pub(crate) fn icon_dropdown(
+    picker: &gtk::DropDown,
+    icon_for: impl Fn(u32) -> BindingIcon + 'static,
+) {
+    let icon_for: RowIcon = Rc::new(icon_for);
+    icon_dropdown_with(picker, icon_for.clone(), icon_for);
+}
+
+/// Like [`icon_dropdown`], with a separate icon for the closed button.
+pub(crate) fn icon_dropdown_with(picker: &gtk::DropDown, closed: RowIcon, menu: RowIcon) {
+    picker.set_factory(Some(&icon_row_factory(picker, closed, false)));
+    picker.set_list_factory(Some(&icon_row_factory(picker, menu, true)));
+}
+
+/// Redraw the closed button's icon, for example when what the selected row
+/// stands for changes without a new selection.
+pub(crate) fn set_closed_icon(picker: &gtk::DropDown, icon: BindingIcon) {
+    let Some(button) = picker.first_child() else {
+        return;
+    };
+    let mut pending = vec![button];
+    while let Some(widget) = pending.pop() {
+        if let Some(area) = widget.downcast_ref::<gtk::DrawingArea>() {
+            if area.has_css_class("binding-icon") {
+                set_binding_icon(area, icon);
+                return;
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(next) = child {
+            child = next.next_sibling();
+            pending.push(next);
+        }
+    }
 }
 
 fn icon_row_factory(
     picker: &gtk::DropDown,
-    icon_for: fn(u32) -> BindingIcon,
+    icon_for: RowIcon,
     menu: bool,
 ) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();

@@ -1714,7 +1714,18 @@ impl BindingUi {
         args_row: GtkBox,
         modifier_row: GtkBox,
     ) -> Self {
-        binding_icon::icon_dropdown(&action_picker, BindingIcon::for_action_type);
+        // The closed button names the chosen More action instead of "•••";
+        // menu rows keep one icon per action type.
+        let more_icon = Rc::new(Cell::new(BindingIcon::More));
+        let closed_more = more_icon.clone();
+        binding_icon::icon_dropdown_with(
+            &action_picker,
+            Rc::new(move |position| match position {
+                5 => closed_more.get(),
+                _ => BindingIcon::for_action_type(position),
+            }),
+            Rc::new(BindingIcon::for_action_type),
+        );
         status.connect_label_notify(ui::clear_feedback);
         let action_guidance = ui::helper("");
         shortcut_reference::connect(&action_guidance);
@@ -1873,6 +1884,14 @@ impl BindingUi {
             removed: Rc::new(RefCell::new(None)),
         };
         ui.connect_dirty_tracking();
+        let picker = ui.action_picker.downgrade();
+        ui.feature_editor.connect_icon_changed(move |icon| {
+            let icon = icon.unwrap_or(BindingIcon::More);
+            more_icon.set(icon);
+            if let Some(picker) = picker.upgrade().filter(|picker| picker.selected() == 5) {
+                binding_icon::set_closed_icon(&picker, icon);
+            }
+        });
         ui
     }
 

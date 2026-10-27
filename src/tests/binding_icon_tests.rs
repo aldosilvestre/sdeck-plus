@@ -640,3 +640,70 @@ fn assert_gesture_badges() {
     );
     eprintln!("GTK strip gesture badge assertions executed");
 }
+
+#[test]
+fn more_actions_show_specific_icons_in_menus_guidance_and_the_action_button() {
+    run_gtk_test(assert_more_action_icons);
+}
+
+fn assert_more_action_icons() {
+    use sdeck_plus::features::FeatureAction;
+    let Some(fixture) = fixture("more-action-icons", |_| {}) else {
+        return;
+    };
+    let ui = &fixture.widgets.binding_ui;
+    let editor = ui.feature_editor.root.upcast_ref::<gtk::Widget>();
+    let pickers = descendants::<gtk::DropDown>(editor);
+    let (category, action) = (&pickers[0], &pickers[1]);
+    let menu_icons = |picker: &gtk::DropDown| {
+        let panel = descendants::<gtk::Popover>(picker.upcast_ref())
+            .into_iter()
+            .next()
+            .unwrap();
+        open_popup(picker, &panel);
+        let ids = icon_ids(panel.upcast_ref());
+        panel.popdown();
+        ids
+    };
+    ui.populate_action(&Action::Feature(FeatureAction::Navigation(
+        sdeck_plus::organization::NavigationAction::NextPage,
+    )));
+    wait_for_frame(&fixture.window);
+    assert_eq!(category.selected(), 2);
+    assert_eq!(
+        menu_icons(category),
+        [
+            "application",
+            "play-pause",
+            "folder",
+            "brightness",
+            "obs-scene"
+        ]
+    );
+    assert_eq!(
+        menu_icons(action)[..5],
+        [
+            "next-page",
+            "previous-page",
+            "go-to-page",
+            "folder",
+            "parent-folder"
+        ]
+    );
+    // Guidance and the closed Action button name the chosen action, not "•••".
+    let guidance: Vec<String> = icon_ids(editor)
+        .into_iter()
+        .filter(|id| id == "next-page")
+        .collect();
+    assert!(!guidance.is_empty(), "guidance shows the action icon");
+    let closed = |picker: &gtk::DropDown| icon_ids(&picker.first_child().unwrap());
+    assert_eq!(closed(&ui.action_picker), ["next-page"]);
+    ui.populate_action(&Action::Feature(FeatureAction::Obs(
+        sdeck_plus::obs::ObsAction::ToggleRecording,
+    )));
+    assert_eq!(closed(&ui.action_picker), ["record"]);
+    assert_eq!(closed(category), ["obs-scene"]);
+    ui.populate_action(&Action::Command("ls".into()));
+    assert_eq!(closed(&ui.action_picker), ["command"]);
+    eprintln!("GTK more action icon assertions executed");
+}
