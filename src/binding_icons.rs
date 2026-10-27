@@ -337,11 +337,11 @@ pub fn compose_key_image(
     let text = text.filter(|text| !text.text.is_empty());
     // (icon center y, icon size, caption) for each free band.
     let (center_y, size, caption) = match text {
-        None => (40.0, 46.0, Some(caption)),
+        None => (39.0, 50.0, Some(caption)),
         Some(text) if text.orientation == TextOrientation::Vertical => return Ok(None),
         Some(text) => match text.vertical_alignment {
             VerticalAlignment::Center => return Ok(None),
-            VerticalAlignment::Bottom => (40.0, 46.0, None),
+            VerticalAlignment::Bottom => (39.0, 50.0, None),
             VerticalAlignment::Top => (78.0, 42.0, None),
         },
     };
@@ -391,11 +391,11 @@ pub fn compose_zone_image(icon: BindingIcon, caption: &str) -> Result<Pixbuf, St
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        paint_outlined(&cairo, icon, (100.0, 36.0), 40.0, INK)
+        paint_outlined(&cairo, icon, (100.0, 35.0), 52.0, INK)
             .map_err(|error| error.to_string())?;
         if !caption.is_empty() {
-            let layout = caption_layout(caption, 15.0, ZONE_WIDTH - 16, 1);
-            draw_caption(&cairo, &layout, (8.0, 64.0)).map_err(|error| error.to_string())?;
+            let layout = caption_layout(caption, 18.0, ZONE_WIDTH - 16, 1);
+            draw_caption(&cairo, &layout, (8.0, 68.0)).map_err(|error| error.to_string())?;
         }
     }
     let data = surface.data().map_err(|error| error.to_string())?;
