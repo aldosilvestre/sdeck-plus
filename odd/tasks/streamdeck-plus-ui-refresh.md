@@ -23,7 +23,7 @@ modifier grid, loose option checkboxes, low-visibility status line).
 - [x] T2 Toolbar hierarchy: navigation vs management groups; destructive/secondary actions lighter.
 - [x] T3 Header status: plain-language connection state, visible badge, VID/PID moved to tooltip.
 - [x] T4 Device preview legibility: larger key labels, clearer touch strip, dials show assigned action.
-- [ ] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
+- [x] T5 Inspector: aligned modifier toggles, grouped options, visible status next to actions, Appearance placement.
 - [ ] T6 Docs: DESIGN.md, README if affected, CHANGELOG, regenerated screenshots.
 
 ## Route
@@ -83,4 +83,15 @@ RED observed first: `ui_refresh_tests::preview_dials_show_their_assigned_actions
 failed to compile (no legends), then GREEN. Checks: fmt ok, clippy ok, headless
 ok, display bin suite 43/44 (only the known base failure; one intermittent
 square-hit-area frame-timing failure seen once in a pre-existing check, clean on
-two reruns).
+two reruns). Commit 1c01daa.
+
+### T5 (delegated writer)
+Shortcut modifiers are one linked row of named `ToggleButton`s (Ctrl, Alt, Shift,
+Super, tooltips "Hold X with the key") beside the key field; an "Options" heading
+groups the page-return and live-information checks; the binding status is ink
+600 weight 8px under Save/Test/Remove and turns warning-toned for "Unsaved
+changes."; Appearance uses the same ink heading with extra separation. RED
+observed first: `ui_refresh_tests::inspector_groups_modifiers_options_status_and_appearance`
+failed ("row.has_css_class(linked)"), then GREEN. No-scroll 1000x700 assertions
+still pass. Checks: fmt ok, clippy ok, headless ok, examples build ok, display
+bin suite 44/45 (only the known base failure).

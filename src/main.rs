@@ -580,12 +580,10 @@ fn build_widgets(
     let args_view = TextView::new();
     args_view.set_monospace(true);
     args_view.set_size_request(-1, 48);
-    let super_mod = CheckButton::with_label("SUPER");
-    let shift_mod = CheckButton::with_label("SHIFT");
-    let ctrl_mod = CheckButton::with_label("CTRL");
-    let alt_mod = CheckButton::with_label("ALT");
+    let [ctrl_mod, alt_mod, shift_mod, super_mod] =
+        ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
     let binding_status = Label::new(Some("Select a physical control to inspect its binding."));
-    binding_status.add_css_class("muted");
+    binding_status.add_css_class("binding-status");
     binding_status.set_xalign(0.0);
     binding_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     binding_status.set_max_width_chars(32);
@@ -610,14 +608,14 @@ fn build_widgets(
     args_view.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
         args_label.upcast_ref()
     ])]);
-    let modifier_buttons = gtk::Grid::builder()
-        .column_spacing(12)
-        .row_spacing(8)
-        .build();
-    modifier_buttons.attach(&ctrl_mod, 0, 0, 1, 1);
-    modifier_buttons.attach(&alt_mod, 1, 0, 1, 1);
-    modifier_buttons.attach(&shift_mod, 0, 1, 1, 1);
-    modifier_buttons.attach(&super_mod, 1, 1, 1, 1);
+    // One aligned, linked row of toggles instead of a ragged check grid.
+    let modifier_buttons = GtkBox::new(Orientation::Horizontal, 0);
+    modifier_buttons.add_css_class("linked");
+    modifier_buttons.add_css_class("modifier-toggles");
+    modifier_buttons.set_halign(gtk::Align::Start);
+    for toggle in [&ctrl_mod, &alt_mod, &shift_mod, &super_mod] {
+        modifier_buttons.append(toggle);
+    }
     let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
@@ -760,6 +758,13 @@ fn build_widgets(
         });
     settings_card.append(&action_fields);
     settings_card.append(&binding_ui.feature_editor.root);
+    let options_heading = inspector_heading("Options");
+    binding_ui
+        .return_toggle
+        .bind_property("visible", &options_heading, "visible")
+        .sync_create()
+        .build();
+    settings_card.append(&options_heading);
     settings_card.append(&binding_ui.return_toggle);
     settings_card.append(&binding_ui.return_row);
     settings_card.append(&binding_ui.info_toggle);
@@ -775,7 +780,8 @@ fn build_widgets(
     binding_buttons.append(&save_binding);
     binding_buttons.append(&test_action);
     binding_buttons.append(&remove_binding);
-    let binding_feedback = GtkBox::new(Orientation::Vertical, 12);
+    // The status line sits right under Save/Test/Remove so results stay visible.
+    let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
     binding_feedback.append(&binding_buttons);
     binding_feedback.append(&binding_ui.status);
     binding_feedback.append(&binding_ui.undo_remove);
@@ -787,10 +793,8 @@ fn build_widgets(
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
-    let appearance_heading = Label::new(Some("Appearance"));
-    appearance_heading.set_xalign(0.0);
+    let appearance_heading = inspector_heading("Appearance");
     appearance_heading.set_hexpand(true);
-    appearance_heading.add_css_class("appearance-heading");
     let appearance_tools = GtkBox::new(Orientation::Horizontal, 12);
     appearance_tools.append(&appearance_heading);
     appearance_tools.append(&text_editor.root);
@@ -1613,10 +1617,10 @@ struct BindingUi {
     text_entry: Entry,
     application_entry: Entry,
     args_view: TextView,
-    super_mod: CheckButton,
-    shift_mod: CheckButton,
-    ctrl_mod: CheckButton,
-    alt_mod: CheckButton,
+    super_mod: gtk::ToggleButton,
+    shift_mod: gtk::ToggleButton,
+    ctrl_mod: gtk::ToggleButton,
+    alt_mod: gtk::ToggleButton,
     status: Label,
     control_number_row: GtkBox,
     layer_target_row: GtkBox,
@@ -1673,10 +1677,10 @@ impl BindingUi {
         text_entry: Entry,
         application_entry: Entry,
         args_view: TextView,
-        super_mod: CheckButton,
-        shift_mod: CheckButton,
-        ctrl_mod: CheckButton,
-        alt_mod: CheckButton,
+        super_mod: gtk::ToggleButton,
+        shift_mod: gtk::ToggleButton,
+        ctrl_mod: gtk::ToggleButton,
+        alt_mod: gtk::ToggleButton,
         status: Label,
         control_number_row: GtkBox,
         layer_target_row: GtkBox,
@@ -2126,6 +2130,8 @@ impl BindingUi {
         self.update_shortcut_preview();
         if self.is_dirty() {
             self.status.set_text("Unsaved changes.");
+            // Set after the text: any status change clears earlier feedback tones.
+            self.status.add_css_class("feedback-warning");
         }
     }
 
@@ -2174,14 +2180,16 @@ impl BindingUi {
             let notify = notify.clone();
             picker.connect_selected_notify(move |_| notify());
         }
-        for check in [
+        for toggle in [
             &self.super_mod,
             &self.shift_mod,
             &self.ctrl_mod,
             &self.alt_mod,
-            &self.return_toggle,
-            &self.info_toggle,
         ] {
+            let notify = notify.clone();
+            toggle.connect_toggled(move |_| notify());
+        }
+        for check in [&self.return_toggle, &self.info_toggle] {
             let notify = notify.clone();
             check.connect_toggled(move |_| notify());
         }
@@ -2441,6 +2449,21 @@ fn bound_layer_picker(picker: &gtk::DropDown) {
     });
     picker.set_factory(Some(&factory));
     picker.set_list_factory(Some(&factory));
+}
+
+/// A shortcut modifier as a named toggle; it joins a linked row in the editor.
+fn modifier_toggle(name: &str) -> gtk::ToggleButton {
+    let toggle = gtk::ToggleButton::with_label(name);
+    toggle.set_tooltip_text(Some(&format!("Hold {name} with the key")));
+    toggle
+}
+
+/// Small section heading inside the inspector (Options, Appearance).
+fn inspector_heading(text: &str) -> Label {
+    let heading = Label::new(Some(text));
+    heading.set_xalign(0.0);
+    heading.add_css_class("inspector-heading");
+    heading
 }
 
 fn labeled(label: &str, child: &impl IsA<gtk::Widget>) -> GtkBox {
@@ -3709,10 +3732,8 @@ mod tests {
         let text_entry = Entry::new();
         let application_entry = Entry::new();
         let args_view = TextView::new();
-        let super_mod = CheckButton::with_label("SUPER");
-        let shift_mod = CheckButton::with_label("SHIFT");
-        let ctrl_mod = CheckButton::with_label("CTRL");
-        let alt_mod = CheckButton::with_label("ALT");
+        let [ctrl_mod, alt_mod, shift_mod, super_mod] =
+            ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
         let control_number_row = labeled("Number", &control_number_picker);
         let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
         let text_row = labeled("Command / key / shortcut key / event name", &text_entry);

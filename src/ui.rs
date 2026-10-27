@@ -251,6 +251,7 @@ pub(crate) fn track_motion(widget: &impl IsA<gtk::Widget>) {
 pub(crate) fn clear_feedback(label: &Label) {
     label.remove_css_class("feedback-error");
     label.remove_css_class("feedback-success");
+    label.remove_css_class("feedback-warning");
 }
 
 pub(crate) fn feedback(label: &Label, failed: bool) {

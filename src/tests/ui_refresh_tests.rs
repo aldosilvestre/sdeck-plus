@@ -298,3 +298,82 @@ fn assert_dial_legends_and_touch_placeholder() {
     assert!(widgets.touch_status.has_css_class("touch-display"));
     eprintln!("GTK dial legend and touch placeholder assertions executed");
 }
+
+#[test]
+fn inspector_groups_modifiers_options_status_and_appearance() {
+    run_gtk_test(assert_inspector_grouping);
+}
+
+fn assert_inspector_grouping() {
+    let Some(fixture) = fixture("inspector", |_| {}) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let ui = &widgets.binding_ui;
+    ui.action_picker.set_selected(3);
+    ui.update_action_visibility();
+    widgets
+        .root
+        .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
+    let content = widgets.root.child().unwrap();
+    let bounds = |widget: &gtk::Widget| widget.compute_bounds(&content).unwrap();
+
+    // Modifiers: one aligned, linked row of named toggles in Ctrl, Alt, Shift, Super order.
+    let modifiers = [&ui.ctrl_mod, &ui.alt_mod, &ui.shift_mod, &ui.super_mod];
+    let row = modifiers[0].parent().unwrap();
+    assert!(row.has_css_class("linked"));
+    let first = bounds(modifiers[0].upcast_ref());
+    let mut previous_end = first.x();
+    for (button, name) in modifiers.iter().zip(["Ctrl", "Alt", "Shift", "Super"]) {
+        assert_eq!(button.parent().as_ref(), Some(&row));
+        assert_eq!(button.label().as_deref(), Some(name));
+        assert!(button.tooltip_text().unwrap().contains(name));
+        let current = bounds(button.upcast_ref());
+        assert!(
+            (current.y() - first.y()).abs() <= 0.5,
+            "{name} shares one row"
+        );
+        assert!(current.x() >= previous_end - 0.5, "{name} follows in order");
+        previous_end = current.x() + current.width();
+    }
+    ui.ctrl_mod.set_active(true);
+    assert_eq!(ui.status.text(), "Unsaved changes.");
+    assert!(
+        ui.status.has_css_class("feedback-warning"),
+        "unsaved edits stand out"
+    );
+
+    // Options: a small heading groups the page-return and live-information choices.
+    let options = ui.return_toggle.prev_sibling().unwrap();
+    let heading = options.downcast::<Label>().expect("options heading");
+    assert_eq!(heading.text(), "Options");
+    assert!(heading.has_css_class("inspector-heading"));
+    assert_eq!(
+        ui.info_toggle.prev_sibling().and_then(|w| w.prev_sibling()),
+        Some(ui.return_toggle.clone().upcast())
+    );
+
+    // Status: readable ink directly under the action row, not muted metadata.
+    assert!(!ui.status.has_css_class("muted"));
+    assert!(ui.status.has_css_class("binding-status"));
+    let actions = ui
+        .status
+        .prev_sibling()
+        .expect("status follows the action row");
+    let save = find_button(widgets, "Save binding");
+    assert_eq!(save.parent().as_ref(), Some(&actions));
+    let gap = bounds(ui.status.upcast_ref()).y() - bounds(&actions).y() - actions.height() as f32;
+    assert!(
+        (0.0..=8.5).contains(&gap),
+        "status stays with its actions: {gap}"
+    );
+
+    // Appearance: a clearly separated section with an ink heading.
+    let appearance = widgets.artwork_section.parent().unwrap();
+    assert!(appearance.first_child().unwrap().is::<gtk::Separator>());
+    let tools = appearance.first_child().unwrap().next_sibling().unwrap();
+    let title = tools.first_child().unwrap().downcast::<Label>().unwrap();
+    assert_eq!(title.text(), "Appearance");
+    assert!(title.has_css_class("inspector-heading"));
+    eprintln!("GTK inspector grouping assertions executed");
+}
