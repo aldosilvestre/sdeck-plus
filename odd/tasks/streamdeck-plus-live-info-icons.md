@@ -25,6 +25,8 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 - [x] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
 - [x] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
 - [x] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
+- [x] L5 Touch-section tiles clearly see-through (~0.15 fill over the strip, ~0.10 over section artwork, soft vertical fade, subtle edge); legibility from the icon/text soft shadow, chevrons still last.
+- [ ] L6 Better icons everywhere: duotone (soft accent fill ~35% under a ~1.85-unit round stroke), soft drop shadow instead of the hard outline on hardware, per-category accents on hardware images, redrawn weak glyphs; contact sheet inspected.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -134,3 +136,14 @@ test (translucent, not transparent, not black) still holds.
 Checks: fmt ok; clippy ok; lib 323 ok; display bin suite 53/53; screenshots
 regenerated. Note: the installed ~/.local/bin/sdeck-plus predates all UI work
 (17:58); reinstall with ./install.sh to see changes outside `cargo run`.
+
+### L5 (delegated writer, route: delegated direct; user feedback "more transparent")
+`ZONE_TILE_ALPHA` 0.35 -> 0.15 and `ZONE_TILE_ARTWORK_ALPHA` 0.25 -> 0.10 at
+the tile top, fading to half towards the bottom; the light edge fades from
+0.12 to 0.04; corner radius 14. Shared by binding-icon and live-information
+sections; chevrons still paint last (unchanged order).
+RED: `section_tiles_are_clearly_see_through` (alpha 89 at y=12, expected
+<=46), then GREEN. The two existing tile tests keep "translucent, not black"
+with bounds moved to the new intended values: alpha 8..60 at the tile bottom
+(was 60..255).
+Checks: fmt ok; clippy ok; lib 324 ok; display bin suite 53/53.

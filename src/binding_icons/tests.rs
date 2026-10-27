@@ -348,7 +348,7 @@ fn touch_sections_lay_the_icon_beside_its_caption_on_a_strip_tile() {
     // A translucent graphite tile, not transparent and not black, with
     // rounded transparent corners so the strip shows around it.
     let tile = pixel(80, 92);
-    assert!(tile[3] > 60 && tile[3] < 255, "translucent tile: {tile:?}");
+    assert!(tile[3] > 8 && tile[3] < 60, "see-through tile: {tile:?}");
     assert!(tile[0] > 20, "graphite, not black: {tile:?}");
     assert_eq!(pixel(0, 0)[3], 0);
     assert_eq!(pixel(199, 99)[3], 0);
@@ -469,4 +469,35 @@ fn long_captions_wrap_between_words_and_ellipsize_instead_of_breaking_words() {
         caption_lines("OBS scene: Camera", 17.0, 100, 2),
         ["OBS scene:", "Camera"]
     );
+}
+
+fn tile_alpha(alpha: f64, x: usize, y: usize) -> u8 {
+    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 200, 100).unwrap();
+    {
+        let context = cairo::Context::new(&surface).unwrap();
+        draw_zone_tile(&context, alpha).unwrap();
+    }
+    let stride = surface.stride() as usize;
+    let data = surface.data().unwrap();
+    let offset = y * stride + x * 4;
+    (u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap()) >> 24) as u8
+}
+
+#[test]
+fn section_tiles_are_clearly_see_through() {
+    // About 0.15 over the plain strip and 0.10 over section artwork, fading
+    // softly downwards; never zero, so the section still reads as a tile.
+    for (alpha, most) in [(ZONE_TILE_ALPHA, 46), (ZONE_TILE_ARTWORK_ALPHA, 31)] {
+        for y in [12, 50, 88] {
+            let shown = tile_alpha(alpha, 100, y);
+            assert!(shown > 5 && shown <= most, "{alpha} at y={y}: {shown}");
+        }
+        assert!(
+            tile_alpha(alpha, 100, 88) < tile_alpha(alpha, 100, 12),
+            "the fill fades towards the bottom"
+        );
+    }
+    const { assert!(ZONE_TILE_ARTWORK_ALPHA < ZONE_TILE_ALPHA) };
+    // The fine light edge stays subtle.
+    assert!(tile_alpha(ZONE_TILE_ALPHA, 100, 4) < 50);
 }

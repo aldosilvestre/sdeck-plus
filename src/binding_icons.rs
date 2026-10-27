@@ -580,22 +580,27 @@ pub fn compose_zone_image(
     ))
 }
 
-/// Section tile opacity over the plain strip.
-pub(crate) const ZONE_TILE_ALPHA: f64 = 0.35;
-/// Section tile opacity over the section's own artwork, so it stays visible.
-pub(crate) const ZONE_TILE_ARTWORK_ALPHA: f64 = 0.25;
+/// Section tile opacity over the plain strip (at its top; it fades downwards).
+pub(crate) const ZONE_TILE_ALPHA: f64 = 0.15;
+/// Section tile opacity over the section's own artwork, so the artwork shows.
+pub(crate) const ZONE_TILE_ARTWORK_ALPHA: f64 = 0.10;
 
-/// The section tile: graphite like the hardware rail, translucent (`alpha`)
-/// so strip or section artwork stays visible, with a fine light edge. Binding
-/// icons and live information share it.
+/// The section tile: a graphite veil like the hardware rail, clearly
+/// see-through (`alpha` at the top, fading to about half towards the bottom)
+/// so strip or section artwork stays visible, with a subtle light edge.
+/// Legibility comes from the soft shadow of icons and text, not from the
+/// fill. Binding icons and live information share it.
 pub(crate) fn draw_zone_tile(cairo: &Context, alpha: f64) -> Result<(), cairo::Error> {
-    rounded(cairo, 3.5, 4.5, 193.0, 91.0, 12.0);
+    rounded(cairo, 3.5, 4.5, 193.0, 91.0, 14.0);
     let fill = cairo::LinearGradient::new(0.0, 4.0, 0.0, 96.0);
-    fill.add_color_stop_rgba(0.0, 0.20, 0.23, 0.27, alpha);
-    fill.add_color_stop_rgba(1.0, 0.11, 0.13, 0.16, alpha);
+    fill.add_color_stop_rgba(0.0, 0.22, 0.25, 0.30, alpha);
+    fill.add_color_stop_rgba(1.0, 0.12, 0.14, 0.17, alpha * 0.5);
     cairo.set_source(&fill)?;
     cairo.fill_preserve()?;
-    cairo.set_source_rgba(1.0, 1.0, 1.0, 0.16);
+    let edge = cairo::LinearGradient::new(0.0, 4.0, 0.0, 96.0);
+    edge.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.12);
+    edge.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.04);
+    cairo.set_source(&edge)?;
     cairo.set_line_width(1.0);
     cairo.stroke()
 }

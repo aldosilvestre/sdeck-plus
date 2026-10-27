@@ -724,7 +724,7 @@ mod tests {
         // The same translucent graphite tile as binding-icon sections: not
         // transparent and not black, with transparent rounded corners.
         let tile = rgba(&image, 100, 92);
-        assert!(tile[3] > 60 && tile[3] < 255, "translucent tile: {tile:?}");
+        assert!(tile[3] > 8 && tile[3] < 60, "see-through tile: {tile:?}");
         assert!(tile[0] > 20, "graphite, not black: {tile:?}");
         assert_eq!(rgba(&image, 0, 0)[3], 0);
         assert_eq!(rgba(&image, 199, 99)[3], 0);
