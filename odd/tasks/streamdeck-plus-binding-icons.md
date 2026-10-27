@@ -27,7 +27,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T7 Touch zone icons: larger, horizontal icon+caption layout using the zone width, background integrated with the strip (no black box); preview and device.
 - [x] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
 - [x] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
-- [ ] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
+- [x] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
 - [ ] T11 Docs + regenerated screenshots for T7-T10.
 
 ## Route
@@ -178,3 +178,17 @@ and dials already used `for_action` (no generic glyph for known actions).
 RED: `more_actions_show_specific_icons_in_menus_guidance_and_the_action_button`
 (no category icons), then GREEN. Checks: clippy ok, display bin suite only the
 known failure.
+
+### T10 (delegated writer)
+`binding_icons::paint_target`/`target_marker_id` (lib): a mini map of the eight
+keys over the four strip sections, outlined at half ink, with the target
+filled (the whole strip row for the background). `binding_icon::target_dropdown`
+gives the Artwork target picker that 26x22 marker before every name (closed
+button and menu) and, in menu rows, the target's assigned action icon after
+the name with its summary as tooltip (keys: press; sections: tap, then hold;
+strip background: none). The action icon is read again each time a row maps,
+so saved bindings appear when the menu reopens. Check mark kept.
+RED: `artwork_target_menu_marks_each_control_and_its_action` (no rows) and lib
+`target_markers_fill_exactly_their_control_on_a_mini_map` (missing fns), then
+GREEN; marker enlarged once after inspecting the capture. Checks: clippy ok,
+display bin suite 52/53 (only the known failure).

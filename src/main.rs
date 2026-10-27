@@ -3506,6 +3506,24 @@ fn add_artwork_controls(
     );
     let picker = gtk::DropDown::new(Some(targets), gtk::Expression::NONE);
     picker.add_css_class("artwork-target");
+    let layers = artwork.layers.clone();
+    binding_icon::target_dropdown(
+        &picker,
+        Rc::new(move |target| {
+            let layers = layers.borrow();
+            let layer = layers.active();
+            let action = match target {
+                ArtworkTarget::Keypad(key) => layers.binding(layer, &Trigger::KeyPress(key)),
+                ArtworkTarget::EncoderZone(zone) => layers
+                    .binding(layer, &Trigger::ZoneTap(zone))
+                    .or_else(|| layers.binding(layer, &Trigger::ZonePress(zone))),
+                ArtworkTarget::TouchStripBackground => None,
+            }?;
+            let icon = BindingIcon::for_action(&action);
+            icon.shown_on_controls()
+                .then(|| (icon, sdeck_plus::binding_editor::action_caption(&action)))
+        }),
+    );
     parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {

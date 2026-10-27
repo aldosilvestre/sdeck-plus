@@ -8,6 +8,7 @@
 //! foreground in the window).
 
 use crate::button_text::{ButtonText, TextOrientation, VerticalAlignment};
+use crate::local_artwork::ArtworkTarget;
 use crate::{
     desktop_actions::{DesktopAction, MediaCommand},
     device_control::DeviceAction,
@@ -309,6 +310,74 @@ pub fn paint_outlined(
     }
     cairo.set_source(&picture)?;
     cairo.paint()
+}
+
+/// Stable name of an artwork target's marker, for example `target-zone-3`.
+pub fn target_marker_id(target: ArtworkTarget) -> String {
+    match target {
+        ArtworkTarget::Keypad(key) => format!("target-key-{key}"),
+        ArtworkTarget::TouchStripBackground => "target-strip".into(),
+        ArtworkTarget::EncoderZone(zone) => format!("target-zone-{zone}"),
+    }
+}
+
+/// Draw a mini map of the eight keys above the four-section strip, outlined,
+/// with `target` filled, so a menu row shows where its control sits.
+///
+/// # Errors
+/// Returns cairo drawing failures.
+pub fn paint_target(
+    cairo: &Context,
+    target: ArtworkTarget,
+    center: (f64, f64),
+    size: f64,
+    ink: Ink,
+) -> Result<(), cairo::Error> {
+    const CELL: f64 = 4.6;
+    const GAP: f64 = 1.33;
+    const LEFT: f64 = -11.5;
+    cairo.save()?;
+    cairo.translate(center.0, center.1);
+    cairo.scale(size / 24.0, size / 24.0);
+    cairo.set_line_width(1.0);
+    let mut elements = Vec::new();
+    for key in 1..=8u8 {
+        let column = f64::from((key - 1) % 4);
+        let row = f64::from((key - 1) / 4);
+        elements.push((
+            ArtworkTarget::Keypad(key),
+            (
+                LEFT + column * (CELL + GAP),
+                -10.0 + row * (CELL + GAP),
+                CELL,
+                CELL,
+            ),
+        ));
+    }
+    for zone in 1..=4u8 {
+        let column = f64::from(zone - 1);
+        elements.push((
+            ArtworkTarget::EncoderZone(zone),
+            (LEFT + column * (CELL + GAP), 4.0, CELL, 6.0),
+        ));
+    }
+    let strip = target == ArtworkTarget::TouchStripBackground;
+    let result = (|| {
+        for (shown, (x, y, width, height)) in elements {
+            let zone = matches!(shown, ArtworkTarget::EncoderZone(_));
+            rounded(cairo, x, y, width, height, 1.0);
+            if shown == target || (strip && zone) {
+                cairo.set_source_rgba(ink.0, ink.1, ink.2, ink.3);
+                cairo.fill()?;
+            } else {
+                cairo.set_source_rgba(ink.0, ink.1, ink.2, ink.3 * 0.5);
+                cairo.stroke()?;
+            }
+        }
+        Ok(())
+    })();
+    cairo.restore()?;
+    result
 }
 
 /// Key and touch-section ink: the same near-white as live information.

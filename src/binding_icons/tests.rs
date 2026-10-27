@@ -379,3 +379,35 @@ fn edge_page_indicators_keep_their_room_beside_the_section_icon() {
         "right chevron area stays clear"
     );
 }
+
+#[test]
+fn target_markers_fill_exactly_their_control_on_a_mini_map() {
+    use crate::local_artwork::ArtworkTarget;
+    let filled = |target: ArtworkTarget, x: i32, y: i32| {
+        let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 48, 48).unwrap();
+        {
+            let context = cairo::Context::new(&surface).unwrap();
+            paint_target(&context, target, (24.0, 24.0), 48.0, (1.0, 1.0, 1.0, 1.0)).unwrap();
+        }
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let offset = y as usize * stride + x as usize * 4;
+        u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap()) >> 24 > 0xc0
+    };
+    // Centers on the 48px map: key 1 top-left, key 8 bottom-right, zone 3, strip.
+    assert!(filled(ArtworkTarget::Keypad(1), 6, 12));
+    assert!(!filled(ArtworkTarget::Keypad(2), 6, 12));
+    assert!(filled(ArtworkTarget::Keypad(8), 42, 20));
+    assert!(filled(ArtworkTarget::EncoderZone(3), 30, 40));
+    assert!(!filled(ArtworkTarget::EncoderZone(3), 18, 40));
+    assert!(filled(ArtworkTarget::TouchStripBackground, 18, 40));
+    assert_eq!(
+        target_marker_id(ArtworkTarget::EncoderZone(3)),
+        "target-zone-3"
+    );
+    assert_eq!(
+        target_marker_id(ArtworkTarget::TouchStripBackground),
+        "target-strip"
+    );
+    assert_eq!(target_marker_id(ArtworkTarget::Keypad(5)), "target-key-5");
+}

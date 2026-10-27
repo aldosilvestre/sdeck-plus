@@ -707,3 +707,95 @@ fn assert_more_action_icons() {
     assert_eq!(closed(&ui.action_picker), ["command"]);
     eprintln!("GTK more action icon assertions executed");
 }
+
+#[test]
+fn artwork_target_menu_marks_each_control_and_its_action() {
+    run_gtk_test(assert_target_menu_icons);
+}
+
+fn assert_target_menu_icons() {
+    let Some(fixture) = fixture("target-menu-icons", |store| {
+        store
+            .bind("Base", Trigger::KeyPress(2), Action::Command("ls".into()))
+            .unwrap();
+        store
+            .bind("Base", Trigger::ZoneTap(3), Action::Emit("lights".into()))
+            .unwrap();
+    }) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    widgets.artwork_section.set_expanded(true);
+    wait_for_frame(&fixture.window);
+    let picker = &widgets.target_picker;
+    let panel = descendants::<gtk::Popover>(picker.upcast_ref())
+        .into_iter()
+        .next()
+        .unwrap();
+    let rows = || {
+        open_popup(picker, &panel);
+        let rows: Vec<(String, Option<String>)> = descendants::<GtkBox>(panel.upcast_ref())
+            .into_iter()
+            .filter(|row| row.has_css_class("icon-row"))
+            .map(|row| {
+                let areas = descendants::<gtk::DrawingArea>(row.upcast_ref());
+                let marker = areas[0].widget_name().to_string();
+                let action = areas
+                    .iter()
+                    .skip(1)
+                    .find(|area| area.is_visible())
+                    .map(|area| area.widget_name().to_string());
+                (marker, action)
+            })
+            .collect();
+        panel.popdown();
+        rows
+    };
+    let shown = rows();
+    let markers: Vec<&str> = shown.iter().map(|(marker, _)| marker.as_str()).collect();
+    assert_eq!(
+        markers,
+        [
+            "target-key-1",
+            "target-key-2",
+            "target-key-3",
+            "target-key-4",
+            "target-key-5",
+            "target-key-6",
+            "target-key-7",
+            "target-key-8",
+            "target-strip",
+            "target-zone-1",
+            "target-zone-2",
+            "target-zone-3",
+            "target-zone-4",
+        ]
+    );
+    let actions: Vec<(&str, &str)> = shown
+        .iter()
+        .filter_map(|(marker, action)| Some((marker.as_str(), action.as_deref()?)))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            ("target-key-2", "command"),
+            ("target-zone-3", "named-event")
+        ]
+    );
+    // Reopening reflects bindings saved meanwhile.
+    fixture
+        .layers
+        .borrow_mut()
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            Action::Feature(sdeck_plus::features::FeatureAction::Desktop(
+                sdeck_plus::desktop_actions::DesktopAction::Media(
+                    sdeck_plus::desktop_actions::MediaCommand::Mute,
+                ),
+            )),
+        )
+        .unwrap();
+    assert_eq!(rows()[0].1.as_deref(), Some("mute"));
+    eprintln!("GTK artwork target menu icon assertions executed");
+}
