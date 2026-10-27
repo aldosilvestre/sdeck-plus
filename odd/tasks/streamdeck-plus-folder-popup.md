@@ -23,7 +23,7 @@ line after clicking).
 
 ## Tasks
 - [x] P1 `Organization::rename_folder(layers, old, new)` with lib tests (rename, descendants, links follow, invalid/duplicate/unknown rejected, unchanged on error).
-- [ ] P2 Popover redesign: inline create row (entry + add button, Enter creates, live validation message, button disabled when blank/invalid/duplicate); folder list (boxed rows: icon, name, Open/Link/Rename/Delete flat icon buttons with tooltips and accessible names, row activation opens); inline rename (Enter saves, Escape cancels); empty state. GTK tests.
+- [x] P2 Popover redesign: inline create row (entry + add button, Enter creates, live validation message, button disabled when blank/invalid/duplicate); folder list (boxed rows: icon, name, Open/Link/Rename/Delete flat icon buttons with tooltips and accessible names, row activation opens); inline rename (Enter saves, Escape cancels); empty state. GTK tests.
 - [ ] P3 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots (page-folders).
 
 ## Route
@@ -47,5 +47,22 @@ RED: `cargo test --offline --lib organization::folder_rename` failed to compile
 50 passed. Checks: cargo fmt, clippy -D warnings clean. Commit: see git log
 (`feat(organization): rename page folders`). Engram mirror pending.
 
+### P2
+Route: delegated direct (writer). New src/feature_runtime/folder_panel.rs
+(create row, boxed ListBox rows, inline rename, empty state) routed through
+`FeatureRuntime::folder_command` in folders.rs (`change_organization` for
+create/rename, `confirm_removal` for delete, `navigate`, `link_folder`). The
+DropDown (`folder_picker`, `folder_model`, `selected_folder`) is gone. Creating
+now keeps the owning page selected and the popover open (was: entered the
+folder and popped down); the main.rs feature test opens the new folder through
+its row instead. CSS in src/ui.css uses existing tokens only (light parity via
+ui-light.css token overrides). binding_icon_tests now lists one folder so the
+per-row "Delete folder" icon action is still asserted.
+RED: new tests in src/tests/folder_panel_tests.rs run against the stashed old
+popover: 3 failed (missing rows / row controls / empty state). GREEN: 3 GTK
+tests + 1 name-check unit test pass; full `GDK_BACKEND=x11 cargo test --offline
+--bin sdeck-plus` 57 passed. fmt/clippy clean. Commit: see git log
+(`feat(folders): redesign the page folders popover`). Engram mirror pending.
+
 ## Next step
-P2.
+P3.

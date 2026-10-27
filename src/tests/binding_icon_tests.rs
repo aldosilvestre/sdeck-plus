@@ -386,6 +386,13 @@ fn assert_icon_action_consistency() {
         return;
     };
     let root = fixture.widgets.root.upcast_ref::<gtk::Widget>();
+    // Folder actions live on folder rows, so list one folder first.
+    let folder_name = descendants::<Entry>(root)
+        .into_iter()
+        .find(|entry| entry.placeholder_text().as_deref() == Some("New folder name"))
+        .expect("folder create entry");
+    folder_name.set_text("Icons");
+    folder_name.emit_activate();
     let mut deletes = Vec::new();
     for button in descendants::<Button>(root) {
         if !button.has_css_class("icon-action") {

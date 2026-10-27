@@ -18,6 +18,7 @@ use std::{
 };
 
 mod configuration;
+mod folder_panel;
 mod folders;
 mod key_swap;
 mod page_controls;
