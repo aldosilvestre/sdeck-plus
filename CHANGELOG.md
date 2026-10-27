@@ -25,6 +25,15 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Binding icons.** One icon vocabulary covers every action, including media,
+  audio, mouse, text, page and touchscreen navigation and OBS. The Action menu
+  shows an icon per type, preview dials show their action's icon on the knob,
+  and keys and touch sections without artwork show the icon with a caption in
+  the preview and on the device. Artwork, live information and button text
+  placement are unchanged, and nothing is written to the artwork stores.
+- Every delete and remove button now uses the same trash icon; Organize and
+  button text have clearer icons.
+
 - **Delete touchscreen pages.** A trash button beside the Touch page controls
   deletes the selected touch page and its bindings and artwork after confirmation.
   A profile always keeps at least one touch page.

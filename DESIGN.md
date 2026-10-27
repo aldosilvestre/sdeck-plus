@@ -212,9 +212,34 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 
 - **Card:** neutral tonal separation, readable heading and inline feedback;
   subtle inset top light, no colored accent border.
-- **Icon action:** one GTK symbolic icon family, visible outcome label,
-  accessible name and tooltip. Save is the editor's only primary action.
-  Destructive actions use the native destructive style.
+- **Icon action:** one GTK symbolic icon family at 16px, visible outcome
+  label, accessible name and tooltip. Save is the editor's only primary action.
+  Destructive actions use the native destructive style, and every delete or
+  remove (binding, page, folder, touch page, profile) uses the same trash icon;
+  clearing text or artwork keeps the clear icon. Organize uses the manage
+  (tools) icon and button text uses the plain text icon.
+- **Binding icons:** one vocabulary (`src/binding_icons.rs`) maps every
+  action to a monochrome vector glyph on a 24-unit grid with 2-unit round
+  strokes: go to page, next/previous page, folder, parent folder, command,
+  application, shortcut, named event, play sound, media transport, volume,
+  mute, audio output, scroll, text, open file, website, close application,
+  shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
+  stream, microphone mute and visibility, plus `more` for More actions, `none`
+  (menus only) and a `generic` fallback. The caller supplies the ink, so the
+  same picture serves the window (theme foreground, 16px, decorative with the
+  label carrying the name) and the device (near-white `#f0f2fa` with a dark
+  outline). The Action menu shows the icon before each row name and keeps the
+  check mark on the selected row. Each preview dial draws its caption's icon
+  (20px, pale `#e1e6eb`) on the knob face; it never takes clicks and never
+  reaches the device. A key with no artwork of its own and no live information
+  shows the icon (50px) with the action summary in up to two 14px bold lines
+  below it, on black; a touch section with no artwork shows the icon (52px)
+  with a one-line 18px caption over the strip. User button text keeps its
+  placement: top text puts the icon below it, bottom text above it, and
+  centered or vertical text leaves the key as before. Icons are derived when
+  drawing, never stored, and never replace artwork; None and unassigned
+  controls stay empty; page indicators still paint last. Preview and hardware
+  use identical pixels.
 - **Labeled field:** associated, visible label; expected-format placeholder;
   contextual explanation. Conditional fields hide their labels with the input.
 - **Binding editor:** preserve existing action indices 0 through 4 and

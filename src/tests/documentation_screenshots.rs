@@ -141,6 +141,10 @@ fn capture_documentation_screenshots() {
     for profile in ["Base", "Studio", "OBS"] {
         for (index, (label, color)) in labels.iter().zip(colors).enumerate() {
             let key = u8::try_from(index + 1).unwrap();
+            // Keys 5 to 7 have no artwork: they show their binding icons.
+            if (5..=7).contains(&key) {
+                continue;
+            }
             let pixbuf =
                 gtk::gdk_pixbuf::Pixbuf::new(gtk::gdk_pixbuf::Colorspace::Rgb, false, 8, 120, 120)
                     .unwrap();
@@ -161,7 +165,8 @@ fn capture_documentation_screenshots() {
                 )
                 .unwrap();
         }
-        for zone in 1..=4 {
+        // Sections 2 and 3 have no artwork either.
+        for zone in [1, 4] {
             images
                 .assign_in_layer(profile, ArtworkTarget::EncoderZone(zone), &source)
                 .unwrap();
@@ -174,6 +179,48 @@ fn capture_documentation_screenshots() {
                     modifiers: vec!["CTRL".into(), "ALT".into()],
                     key: "p".into(),
                 },
+            )
+            .unwrap();
+        for (key, action) in [
+            (
+                5,
+                Action::Feature(FeatureAction::Obs(ObsAction::ToggleRecording)),
+            ),
+            (
+                6,
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Website {
+                        url: "https://example.com".into(),
+                    },
+                )),
+            ),
+            (
+                7,
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(
+                        sdeck_plus::desktop_actions::MediaCommand::Next,
+                    ),
+                )),
+            ),
+        ] {
+            store.bind(profile, Trigger::KeyPress(key), action).unwrap();
+        }
+        store
+            .bind(
+                profile,
+                Trigger::ZoneTap(2),
+                Action::Feature(FeatureAction::Obs(ObsAction::Scene("Camera".into()))),
+            )
+            .unwrap();
+        store
+            .bind(
+                profile,
+                Trigger::ZoneTap(3),
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(
+                        sdeck_plus::desktop_actions::MediaCommand::Mute,
+                    ),
+                )),
             )
             .unwrap();
         store

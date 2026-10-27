@@ -533,6 +533,17 @@ Profile tabs use a violet tonal selection with a fine accent edge, and the **App
 separates button text and artwork from action editing. **Save binding** only
 persists the binding; **Test action** runs it immediately.
 
+**Binding icons.** Every action has a simple icon, used consistently: the
+**Action** menu shows one beside each type, each preview dial shows its action's
+icon on the knob above its caption, and keys and touch sections without artwork
+of their own show their action's icon with a short caption, both in the preview
+and on the Stream Deck itself. Your artwork always wins: keys and sections with
+an image look exactly as before, live information is unchanged, and button text
+keeps its placement (the icon uses the free space above or below it; centered
+text leaves the key as it was). Keys set to **None** or left unassigned stay
+black. Icons are drawn when the picture is made and are never saved into your
+artwork or button text.
+
 Profile tabs and page navigation have a 12-pixel gap; the main preview and
 editor regions have 16-pixel separation. The editor uses 16-pixel padding
 and 6-pixel gaps between related form groups; Appearance uses 4-pixel internal

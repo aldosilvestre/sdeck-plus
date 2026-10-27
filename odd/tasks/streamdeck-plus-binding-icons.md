@@ -23,7 +23,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T3 Action type menu shows an icon per action type.
 - [x] T4 Preview dials and touch zones show the action icon next to/with the caption.
 - [x] T5 UI button icons reviewed and unified (inspector, page bar, header).
-- [ ] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
+- [x] T6 Docs: DESIGN.md, README, CHANGELOG, regenerated screenshots.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -114,3 +114,20 @@ Add/Edit text now uses `format-text-plaintext-symbolic` (a plain "A") instead
 of `insert-text-symbolic`, in `button_text_editor.rs` (surface granted).
 RED: the extended `icon_actions_share_one_size_and_one_delete_icon` saw
 `insert-text-symbolic`, then GREEN. clippy ok.
+
+### T6 (delegated writer)
+Screenshot fixture: keys 5-7 have no artwork (OBS toggle recording, website,
+media next) and touch sections 2-3 none (OBS scene, mute), so captures show
+derived icons. After inspecting main-window(-light).png and action-types.png,
+one iteration enlarged key icons 46->50px and section icons 40->52px with an
+18px caption (commit style(icons)). DESIGN.md (binding icon vocabulary + rules,
+icon action consistency), README.md (Binding icons), CHANGELOG.md, and
+docs/index.html (artwork card copy, refreshed image dimensions) updated.
+No meaningful RED (documentation). Final checks: fmt ok; clippy ok; headless
+`cargo test --offline` ok (314 + 50 + 2); display bin suite 49/50 (only the
+known base failure); examples build ok; `git diff --check` ok; screenshots
+regenerated with the documented command.
+
+## Next step
+Human review of `feat/binding-icons`; push/PR remain the user's decision.
+Optional real-hardware check: `cargo run --offline --example verify_streamdeck -- --device-controls`.
