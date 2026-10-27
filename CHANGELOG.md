@@ -62,6 +62,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   while paused, and a struck-through note with "Nothing playing" when no
   player plays. A playing player wins, then the paused one that played last;
   players are only read, never controlled.
+- **Now playing shows the application's icon.** When the playing
+  application's icon is installed (found through its desktop entry and the
+  icon theme), keys and touch sections show it in full color, dimmed while
+  paused, with a small play or pause badge.
 - **Scrolling Now playing titles.** A playing title too long for its key or
   touch section scrolls right to left at a readable size (1.5 s pause, then
   30 px/s, looping) instead of shrinking, on the device and in the preview;

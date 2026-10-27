@@ -285,7 +285,15 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   pause icon and the same text in grey; no player or a stopped one shows a
   grey `media-idle` icon over a white "Nothing playing" caption; a failing
   session bus shows the usual grey `--`. A playing player wins (the first by
-  bus name), then the paused one that played last. A Now playing title
+  bus name), then the paused one that played last. When the player's MPRIS
+  `DesktopEntry` (or its `Identity` as an entry name) resolves to an icon
+  (desktop file `Icon`, current theme and its parents, then hicolor: scalable
+  SVG first, else the largest PNG up to 256px; then pixmaps), that icon
+  replaces the glyph in the same slot in full color (60% opacity while
+  paused), with a round dark badge at its bottom-right corner holding the
+  `play` (violet) or `pause` (grey) icon; nothing playing keeps
+  `media-idle`. Icons are resolved and decoded once per application on the
+  info worker. A Now playing title
   shrinks no lower than 75% of the value size (18px on keys, 19px on
   sections); a playing title that still does not fit scrolls right to left at
   that size, clipped to its text column (never into the icon or chevron room):

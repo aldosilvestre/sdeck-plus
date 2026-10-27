@@ -35,6 +35,7 @@ MPRIS over the D-Bus session bus for media actions (src/desktop_actions/mpris.rs
 - [x] N3 DESIGN.md, docs/index.html (live information), README features bullet, CHANGELOG.md, regenerated screenshots; manual check with `dbus-run-session` + mpv if available.
 
 - [x] N4 Marquee for long Now playing titles (keys and sections, device and preview); tests; docs.
+- [x] N5 Application icon on Now playing (DesktopEntry -> theme icon, cached), badge, tests, docs.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -127,5 +128,33 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   (343, 112), frames at 0 s and 3 s differ; paused/idle static.
 - Screenshots: regenerated; only noise differences (short sample title), all restored.
 
+### N5
+- Route: delegated direct (same writer; mpris.rs, new src/info/app_icon.rs, info.rs, info_render.rs).
+- Read: per player, `GetAll(org.mpris.MediaPlayer2)` gives Identity and DesktopEntry
+  (replaces the conditional `Get Identity`); 2 bounded calls per player, NO_AUTO_START, 1 s.
+- Resolve (`info::resolve_app_icon`): `<data>/applications/<entry>.desktop` (as is or lower
+  case) -> `gio::DesktopAppInfo::from_filename` -> GIcon: FileIcon path, or ThemedIcon names
+  (absolute path as is) looked up in the current theme (GNOME `icon-theme` setting via a
+  safe schema lookup, else GTK settings.ini), its `Inherits`, then hicolor (scalable SVG >
+  PNG by size up to 256 > larger PNG), then `pixmaps`. Data dirs: XDG_DATA_HOME, flatpak
+  exports (user + system), XDG_DATA_DIRS. Decoding: gdk-pixbuf (SVG at 128px, bitmaps
+  scaled down to 128, never up) into an `Arc` of cairo ARGB pixels; `AppIcon` compares
+  by path. `AppIcons` caches per entry, misses included; lookups happen on the info worker.
+- Selection: chosen player's DesktopEntry, then Identity (spaces -> `-`) as an entry hint;
+  nothing playing never carries an icon. `InfoValue::app_icon` is `None` for other sources.
+- Render: icon fills the glyph slot (full color; 60% while paused) with a 0.21-slot-radius
+  dark badge at its bottom-right holding `play` (media violet) or `pause` (grey).
+- Tests: root GetAll read (mock bus), resolution fixture (theme SVG/PNG ranking, current
+  theme over hicolor, `@2` dirs, case, absolute path, pixmaps, misses, path escape), cache
+  (decoded once, misses cached), selection with icon, render (pixels in slot, dimmed
+  paused, violet/grey badge, fallback to glyph, idle ignores icons).
+- RED/GREEN: implementation before tests (no RED observed); two tests first failed and were
+  fixed (identity hint was lower-cased before the case-preserving lookup; PNGs were upscaled).
+  GREEN lib 354, display bin 64/64.
+- Manual (dbus-run-session + mpv-mpris): DesktopEntry `mpv` resolved to
+  /usr/share/icons/hicolor/scalable/apps/mpv.svg (themes Yaru-blue, Yaru, hicolor), ~40-55 ms
+  first lookup; paused keeps the icon; after exit no icon.
+- Screenshots: unchanged (the generator has no deterministic application icon to show).
+
 ## Next step
-N5.
+Review the feature branch (RDD unavailable); push/PR are the user's decision.

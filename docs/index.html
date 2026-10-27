@@ -574,7 +574,8 @@
              that section. Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through <code>curl</code> with a city or
              <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.
              Now playing reads MPRIS players on the session bus every second without controlling them: a playing player wins, then the paused one that played
-             last; it shows <code>--</code> when the session bus is unavailable. A title too long for its key or section scrolls slowly at a readable size
+             last; it shows <code>--</code> when the session bus is unavailable. When the player's application icon can be found in the installed icon themes,
+             it replaces the play or pause icon, with a small play or pause badge in its corner. A title too long for its key or section scrolls slowly at a readable size
              while it plays (after a short pause, then looping); a paused title stays still and ends in an ellipsis.</p>
         </div>
       </div>
