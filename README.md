@@ -121,9 +121,12 @@ exactly the page you picked. Saving a binding does not start the wait.
 ![Binding with a ten-second return to the selected page](docs/screenshots/page-return.png)
 
 **Live information on keys and dials.** Under the action of a key or a dial,
-tick **Show live information** and pick what to show. The icon, bar and text are drawn directly over the
-key's own image, with transparent empty space and no background of
-their own, and update by themselves: a
+tick **Show live information** and pick what to show. On a key the icon,
+value, bar and caption are drawn directly over the key's own image, with
+transparent empty space, and always fit inside the key; on a touch section they
+sit on the same translucent graphite tile as binding icons (icon on the left,
+value, bar and caption beside it). The icons come from the binding icon
+vocabulary in each reading's accent color. They update by themselves: a
 speaker with a volume bar (crossed out and greyed while muted), the audio output
 device, Stream Deck brightness with a bar, time and date, weather with its icon,
 CPU, memory and temperature with a bar that turns amber and red under load, or
@@ -134,8 +137,9 @@ its press binding first, then its turns, then a tap or hold on that section.
 Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through `curl`: enter a city or
 `latitude,longitude`; the lookup needs internet access and shows `--` when it
 fails. Volume and audio device use `wpctl`. The previews in the window show the
-same picture as the device. On the touch strip, transparent areas reveal the
-existing strip background instead of adding a black rectangle to the section.
+same picture as the device. On the touch strip, the strip background (or the
+section's own artwork) stays visible around and through the tile, and a section
+with a page indicator keeps that edge free for the chevron.
 
 ![Demonstration clock, CPU, memory, temperature, volume and touch-section readings](docs/screenshots/live-information.png)
 ![Live-information selector and weather location field](docs/screenshots/live-information-settings.png)

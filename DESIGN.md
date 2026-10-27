@@ -242,7 +242,23 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   centered or vertical text leaves the key as before. Icons are derived when
   drawing, never stored, and never replace artwork; None and unassigned
   controls stay empty; page indicators still paint last. Preview and hardware
-  use identical pixels.
+  use identical pixels. Automatic captions wrap only between whole words and
+  end in an ellipsis when a word does not fit; a website shows only its URL
+  host (`example.com`). User button text is never shortened or rewrapped.
+- **Live information:** readings use the same vocabulary (`for_glyph`): sun =
+  `brightness`, muted speaker = `mute` (grey speaker, red cross), headphones =
+  `audio-output`, recording = `record`, live = `stream`, OBS idle =
+  `obs-scene`, plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
+  `storm`, `fog`, `cpu`, `memory` and `temperature`, outlined like key icons
+  and inked in the reading's accent color (cyan audio, amber sun/storm, violet
+  load, green temperature turning amber/red, grey when inactive). Time and
+  date has no icon. A key stacks icon (32-44px, shrinks first), a 24px bold
+  value, an 8px bar and 14px detail lines, centered inside a 4px margin;
+  detail lines that do not fit are left out, so nothing is cut at the edge. A
+  touch section draws the binding section tile (80% alpha; 55% over the
+  section's own artwork) with a 52px icon on the left and a 26px value, bar
+  and up to two 13px detail lines beside it; an indicated edge keeps 30px and
+  a 44px icon. Long values shrink to fit, then ellipsize.
 - **Strip gestures:** the preview strip's header line (beside the touch
   status, above the sections) carries compact badges for swipe left, swipe
   right, tap and hold, in that order: the gesture glyph (`swipe-left`,

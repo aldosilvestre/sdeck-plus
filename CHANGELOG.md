@@ -25,6 +25,14 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Added
 
+- **Live information matches binding icons.** Live touch sections sit on the
+  same translucent section tile as binding icons, with the icon on the left and
+  value, bar and caption beside it, keeping room for page chevrons. Live
+  readings draw their icons from the binding icon vocabulary (new volume,
+  weather, CPU, memory and temperature icons), and key captions such as CPU,
+  Memory and Temperature are no longer clipped.
+- Automatic captions for website actions show only the URL host, and long
+  captions wrap between words with an ellipsis instead of breaking mid-word.
 - **Binding icons.** One icon vocabulary covers every action, including media,
   audio, mouse, text, page and touchscreen navigation and OBS. The Action menu
   shows an icon per type, preview dials show their action's icon on the knob,

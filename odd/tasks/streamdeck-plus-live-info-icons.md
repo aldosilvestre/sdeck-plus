@@ -24,7 +24,7 @@ Follow-ups from PR #1: the base test failure and ugly wrapping of long auto capt
 - [x] L3 Live info glyphs unified with the binding icon vocabulary (shared stroke/grid; reuse `binding_icons` where an equivalent exists).
 - [x] F1 Fix `tests::touchscreen_tests::touchscreen_page_indicators_follow_selection_artwork_and_live_info` (root cause, not weakening the test).
 - [x] F2 Long auto captions on keys/sections: show URL host only and ellipsize instead of breaking mid-word.
-- [ ] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
+- [x] D1 DESIGN.md, README.md, CHANGELOG.md, regenerated screenshots.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -109,3 +109,18 @@ RED: `website_captions_show_only_the_url_host`,
 `long_captions_wrap_between_words_and_ellipsize_instead_of_breaking_words`
 (missing `url_host`/`caption_lines`), then GREEN.
 Checks: clippy ok; headless ok (323+53+2); display bin suite 53/53.
+Commit f398bf5.
+
+### D1 (delegated writer, route: delegated direct)
+DESIGN.md (caption wrapping/host rule, live information icons and key/section
+layout), README.md (live information on keys and sections), CHANGELOG.md.
+Screenshot sizes unchanged (1000x950), so docs/index.html needs no change.
+Screenshots regenerated with the documented command (12 changed); inspected
+live-information, touch-strip, main-window, main-window-light. No meaningful
+RED (documentation).
+Final checks: fmt ok; clippy ok; headless `cargo test --offline` ok
+(323+53+2); display bin suite 53/53; examples build ok; `git diff --check` ok.
+
+## Next step
+Human review of `feat/live-info-icons`; push/PR remain the user's decision.
+Optional real-hardware check: `cargo run --offline --example verify_streamdeck -- --device-controls`.
