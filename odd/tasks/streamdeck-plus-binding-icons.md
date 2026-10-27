@@ -28,7 +28,7 @@ dials/touch zones show no action cue; button icons are not reviewed as a set.
 - [x] T8 Touchpad gestures: strip shows icons/indicators for assigned swipe/tap/hold gestures (e.g. swipe -> Next page), including the default swipe paging.
 - [x] T9 More actions: specific icons per FeatureAction (Organization, OBS, audio...) in the Category/Action dropdowns, the closed Action button and on keys/zones/dials instead of the generic glyph.
 - [x] T10 Touch zone editor (Artwork and touch zones): icons identifying each zone and its action.
-- [ ] T11 Docs + regenerated screenshots for T7-T10.
+- [x] T11 Docs + regenerated screenshots for T7-T10.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files. RDD unavailable (`gentle-ai` not installed).
@@ -192,3 +192,18 @@ RED: `artwork_target_menu_marks_each_control_and_its_action` (no rows) and lib
 `target_markers_fill_exactly_their_control_on_a_mini_map` (missing fns), then
 GREEN; marker enlarged once after inspecting the capture. Checks: clippy ok,
 display bin suite 52/53 (only the known failure).
+
+### T11 (delegated writer)
+DESIGN.md (section tile, strip gesture badges, More actions icons, artwork
+target markers), README.md, CHANGELOG.md, docs/index.html image sizes.
+Screenshots regenerated with the documented command; inspected touch-strip,
+main-window, main-window-light, action-types, more-actions-categories/obs/
+audio-output and artwork-touch-zones. No meaningful RED (documentation).
+Final checks: fmt ok; clippy ok; headless `cargo test --offline` ok
+(317 + 53 + 2); display bin suite 52/53 (only the known base failure);
+examples build ok; `git diff --check` ok.
+
+## Next step
+Human review of `feat/binding-icons`; push/PR remain the user's decision.
+Optional real-hardware check of section tiles:
+`cargo run --offline --example verify_streamdeck -- --device-controls`.

@@ -33,6 +33,12 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   placement are unchanged, and nothing is written to the artwork stores.
 - Every delete and remove button now uses the same trash icon; Organize and
   button text have clearer icons.
+- **Touch strip icons.** Touch sections without artwork show a larger icon
+  beside a two-line caption on a translucent tile instead of a black box,
+  leaving room for page arrows. The preview strip shows badges for swipe
+  left/right, tap and hold, including the default swipe paging. More actions
+  categories, actions and the Action button show specific icons, and the
+  Artwork target menu marks each key or section and its assigned action.
 
 - **Delete touchscreen pages.** A trash button beside the Touch page controls
   deletes the selected touch page and its bindings and artwork after confirmation.

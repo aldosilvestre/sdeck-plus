@@ -537,7 +537,14 @@ persists the binding; **Test action** runs it immediately.
 **Action** menu shows one beside each type, each preview dial shows its action's
 icon on the knob above its caption, and keys and touch sections without artwork
 of their own show their action's icon with a short caption, both in the preview
-and on the Stream Deck itself. Your artwork always wins: keys and sections with
+and on the Stream Deck itself. Touch sections place a large icon beside its
+caption on a translucent tile that lets the strip background show through, and
+leave room for the page arrows. Above the preview strip, small badges list what
+swipe left, swipe right, tap and hold do (dimmed when an unbound swipe keeps
+its default page change). **More actions** shows each category and action with
+its own icon, and the **Action** button shows the chosen one. In **Artwork and
+touch zones**, each target has a small map marking its key or section, and the
+menu shows the action assigned to it. Your artwork always wins: keys and sections with
 an image look exactly as before, live information is unchanged, and button text
 keeps its placement (the icon uses the free space above or below it; centered
 text leaves the key as it was). Keys set to **None** or left unassigned stay

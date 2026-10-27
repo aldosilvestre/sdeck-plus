@@ -233,13 +233,36 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   (20px, pale `#e1e6eb`) on the knob face; it never takes clicks and never
   reaches the device. A key with no artwork of its own and no live information
   shows the icon (50px) with the action summary in up to two 14px bold lines
-  below it, on black; a touch section with no artwork shows the icon (52px)
-  with a one-line 18px caption over the strip. User button text keeps its
+  below it, on black. A touch section with no artwork shows a translucent
+  graphite tile (rounded 12px, 80% alpha, fine light edge) over the strip, so
+  strip artwork shows through and around it, with a 58px icon on the left and
+  up to two 17px bold caption lines beside it; a section that carries a page
+  indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
   placement: top text puts the icon below it, bottom text above it, and
   centered or vertical text leaves the key as before. Icons are derived when
   drawing, never stored, and never replace artwork; None and unassigned
   controls stay empty; page indicators still paint last. Preview and hardware
   use identical pixels.
+- **Strip gestures:** the preview strip's header line (beside the touch
+  status, above the sections) carries compact badges for swipe left, swipe
+  right, tap and hold, in that order: the gesture glyph (`swipe-left`,
+  `swipe-right`, `tap`, `hold`) then the action icon, 11px on a pale pill.
+  Unbound swipes show their default touch paging dimmed; explicit None and
+  unassigned tap or hold show nothing. Each badge's tooltip and accessible
+  name read like "Swipe left (default): Next touchscreen page". The badges are
+  preview-only: on the device, the edge chevrons already show swipe paging and
+  badges would cover section content.
+- **More actions:** each feature action's icon comes from the same mapping as
+  saved controls (derived from a representative action). Category rows use
+  System `application`, Multimedia `play-pause`, Organization `folder`, Device
+  `brightness` and OBS `obs-scene`; Action rows, the guidance line (20px) and
+  the closed Action button show the chosen action's icon, while the Action
+  menu row keeps `more`.
+- **Artwork targets:** every row of the Artwork target menu starts with a
+  26x22 mini map of the eight keys over the four strip sections, outlined at
+  half ink with its target filled (the whole strip row for the background),
+  and menu rows end with the target's assigned action icon (key press; section
+  tap, then hold), refreshed whenever the menu opens.
 - **Labeled field:** associated, visible label; expected-format placeholder;
   contextual explanation. Conditional fields hide their labels with the input.
 - **Binding editor:** preserve existing action indices 0 through 4 and
