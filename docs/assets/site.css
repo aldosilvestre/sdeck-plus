@@ -376,7 +376,7 @@ code {
   position: relative;
   width: 100%; max-width: 600px; margin-left: auto;
   padding: 5.5% 6% 6%;
-  border-radius: 7cqi;
+  border-radius: 2cqi;
   background:
     radial-gradient(120% 80% at 20% 0%, #2a2c35 0%, transparent 60%),
     linear-gradient(160deg, #22242b 0%, var(--dev-body) 45%, #0e0f13 100%);
