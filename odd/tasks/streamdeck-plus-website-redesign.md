@@ -105,6 +105,7 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   lightbox, theme, copy fallback, docs filter) behave as specified.
 - Content coverage vs `main:docs/index.html`: 501 text blocks, 0 missing
   (only rewording: the Actions lead now ends "provides the categories below").
+- Commit: e57647b
 - `git diff --check` clean. CHANGELOG entry added; AGENTS.md row updated
   (git-excluded, not committed).
 - Not verifiable here: real clipboard write (headless file:// exercised the
