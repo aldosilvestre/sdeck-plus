@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found · sdeck-plus</title>
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/sdeck-plus/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/sdeck-plus/assets/site.css">
+<script>
+  (function () {
+    try {
+      var theme = localStorage.getItem("sdeck-plus-theme");
+      if (theme === "light" || theme === "dark") document.documentElement.setAttribute("data-theme", theme);
+    } catch (e) { /* follow the system theme */ }
+  })();
+</script>
+</head>
+<body>
+<main id="main" class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Error 404</p>
+      <h1 style="font-size: clamp(2.4rem, 7vw, 4.5rem); margin-top: 0.8rem">This key is not bound.</h1>
+      <p class="lead">The page you asked for does not exist. It may have moved when the documentation was reorganized.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/sdeck-plus/">Back to the home page</a>
+        <a class="btn" href="/sdeck-plus/docs.html">Open the documentation</a>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

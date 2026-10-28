@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sdeck-plus documentation: install, configuration and development</title>
+<meta name="description" content="sdeck-plus documentation: installation and requirements, how every control, action, profile, artwork and OBS setting behaves, data files, tray, and development checks.">
+<link rel="canonical" href="https://aldosilvestre.github.io/sdeck-plus/docs.html">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0a10" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="sdeck-plus">
+<meta property="og:url" content="https://aldosilvestre.github.io/sdeck-plus/docs.html">
+<meta property="og:title" content="sdeck-plus documentation">
+<meta property="og:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + on Linux.">
+<meta property="og:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="sdeck-plus documentation">
+<meta name="twitter:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + on Linux.">
+<meta name="twitter:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
+<meta name="twitter:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  /* Runs before paint: theme choice and JS flag. */
+  (function () {
+    var root = document.documentElement;
+    root.classList.add("js");
+    try {
+      var forced = /[?&]theme=(light|dark)(?:&|$)/.exec(location.search);
+      var theme = forced ? forced[1] : localStorage.getItem("sdeck-plus-theme");
+      if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+    } catch (e) { /* storage unavailable: follow the system theme */ }
+  })();
+</script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="docs-page">
+<svg xmlns="http://www.w3.org/2000/svg" class="visually-hidden" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="5" y="5" width="14" height="14" rx="2.5"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="7" width="18" height="10" rx="2"/><path d="M7 11v2M11 11v2M15 11v2M7 17v3M12 17v3M17 17v3"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M14 14.5V5a2 2 0 0 0-4 0v9.5a4 4 0 1 0 4 0z"/><path d="M12 10v6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-record" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/></symbol>
+    <symbol id="i-broadcast" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+    <symbol id="i-scene" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="2" y="6" width="14" height="12" rx="2.5"/><path d="m16 10.5 6-3.5v10l-6-3.5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M7 5v14l12-7z"/></symbol>
+    <symbol id="i-skip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M5 6v12l9-6z"/><path d="M18 6v12"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle class="duo" cx="6" cy="18" r="3"/><circle class="duo" cx="17" cy="16" r="3"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M4 9v6h4l5 4V5L8 9z"/><path d="m16 9 5 6M21 9l-5 6"/></symbol>
+    <symbol id="i-output" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect class="duo" x="3" y="14" width="4" height="7" rx="1.5"/><rect class="duo" x="17" y="14" width="4" height="7" rx="1.5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-pages" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="4" y="3" width="12" height="15" rx="2"/><path d="M8 21h9a2 2 0 0 0 2-2V7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M7 19h10a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6 11a4 4 0 0 0 1 8z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8M6.5 6.5a8 8 0 1 0 11 0"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="2" y="6" width="20" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></symbol>
+    <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+    <symbol id="i-mouse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"/></symbol>
+    <symbol id="i-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></symbol>
+    <symbol id="i-tray" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="4" width="18" height="16" rx="3"/><path d="M3 14h5l1.5 2h5l1.5-2h5"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-1.3-1.2-1.6-1.2-2.9 0-.9.7-1.5 1.6-1.5H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7z"/><circle cx="7.5" cy="11" r="1" fill="currentColor"/><circle cx="10" cy="7" r="1" fill="currentColor"/><circle cx="15" cy="7.5" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M8 3v5h7V3M8 21v-6h8v6"/></symbol>
+    <symbol id="i-dial" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="8"/><path d="M12 7v5"/></symbol>
+    <symbol id="i-touch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="2" y="8" width="20" height="8" rx="2"/><path d="M8 12h8M13 9.5l3 2.5-3 2.5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect class="duo" x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19v2h15"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 6.3-6.3a4 4 0 0 1-1.6-5.4z"/><path d="M3 21l6-6"/></symbol>
+    <symbol id="i-chev-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-chev-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-zoom" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M8 11h6M11 8v6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+  </defs>
+</svg>
+<a class="skip-link" href="#doc-content">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="./#features">Features</a></li>
+        <li><a href="./#actions">Actions</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="docs.html" aria-current="page">Documentation</a></li>
+        <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
+      </ul>
+    </nav>
+    <div class="header-tools">
+      <button class="icon-btn theme-toggle" type="button" aria-label="Switch to dark theme">
+        <svg class="i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+      <button class="icon-btn menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+        <svg class="i-menu" aria-hidden="true"><use href="#i-menu"/></svg>
+        <svg class="i-close" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="doc-hero" aria-labelledby="doc-title">
+    <div class="wrap doc-hero-grid">
+      <div>
+        <p class="eyebrow">Documentation</p>
+        <h1 id="doc-title">Install, configure and <span class="grad">develop</span>.</h1>
+        <p class="lead">Every requirement and installer option, how each part of sdeck-plus behaves and where it stores its data, and the checks for working on it.</p>
+      </div>
+      <div class="search" role="search">
+        <label for="doc-search">Filter the documentation</label>
+        <div class="search-field">
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="doc-search" type="search" autocomplete="off" spellcheck="false" placeholder="Try “uinput”, “swipe” or “obs.json”" aria-describedby="search-status">
+          <kbd aria-hidden="true">/</kbd>
+        </div>
+        <p class="search-status" id="search-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap doc-layout">
+    <details class="toc" id="toc" open>
+      <summary>On this page <svg aria-hidden="true"><use href="#i-chev-down"/></svg></summary>
+      <ol>
+        <li><a href="#install">Install</a>
+          <ol>
+            <li><a href="#install-details">Build and install</a></li>
+            <li><a href="#requirements">Requirements</a></li>
+          </ol>
+        </li>
+        <li><a href="#configuration">Configuration</a>
+          <ol>
+            <li><a href="#getting-around">Getting around</a></li>
+            <li><a href="#controls-and-actions">Controls and actions</a></li>
+            <li><a href="#touch-strip">Touch strip and touchscreen pages</a></li>
+            <li><a href="#profiles-pages-folders">Profiles, pages and folders</a></li>
+            <li><a href="#appearance">Appearance</a></li>
+            <li><a href="#obs-studio">OBS Studio</a></li>
+            <li><a href="#data-tray-lifecycle">Data, tray and lifecycle</a></li>
+          </ol>
+        </li>
+        <li><a href="#development">Development</a>
+          <ol>
+            <li><a href="#dev-checks">Checks</a></li>
+            <li><a href="#dev-screenshots">Documentation screenshots</a></li>
+            <li><a href="#dev-device-checks">Real-device checks</a></li>
+            <li><a href="#dev-event-api">In-process event API</a></li>
+            <li><a href="#dev-code">Code organization</a></li>
+          </ol>
+        </li>
+      </ol>
+    </details>
+
+    <div class="doc-content" id="doc-content">
+      <section class="doc-section" id="install" aria-labelledby="install-title">
+        <header>
+          <p class="eyebrow">Get started</p>
+          <h2 id="install-title">Install</h2>
+          <p>Builds from source with Cargo and installs for the current user only. It never installs system packages or changes device permissions.</p>
+        </header>
+
+        <div class="doc-group" id="install-details" style="--c: var(--fam-load)">
+          <h3>Build and install</h3>
+          <div class="cards">
+            <article class="card wide">
+              <h4>Build and install</h4>
+              <div class="code-block">
+<pre><code>sudo pacman -S gtk4 base-devel
+git clone https://github.com/aldosilvestre/sdeck-plus.git
+cd sdeck-plus
+./install.sh</code></pre>
+              </div>
+              <p>Or run it directly from the checkout:</p>
+              <div class="code-block">
+<pre><code>cargo run</code></pre>
+              </div>
+              <p>The installer builds the release binary with <code>Cargo.lock</code> and installs <code>~/.local/bin/sdeck-plus</code>, the launcher
+                 <code>~/.local/share/applications/dev.streamdeck.EventMonitor.desktop</code>, the icon
+                 <code>~/.local/share/icons/hicolor/scalable/apps/sdeck-plus.svg</code> and the license in <code>~/.local/share/doc/sdeck-plus/</code>.
+                 <code>PREFIX</code> overrides the executable prefix, an absolute <code>XDG_DATA_HOME</code> the data directory, and <code>CARGO_TARGET_DIR</code> the build output.
+                 It runs from any directory, refuses to run as root, does not enable autostart or launch the app, and re-running it updates the files
+                 (<code>./install.sh --help</code> for usage).</p>
+            </article>
+            <article class="card">
+              <h4>After installing</h4>
+              <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable, a <strong>Start at login</strong> entry pointing elsewhere,
+                 missing optional tools, and a connected device your user cannot open (printing the udev rule an administrator can install, without running it).</p>
+            </article>
+            <article class="card">
+              <h4>Uninstall</h4>
+              <p>Remove it with <code>./install.sh --uninstall</code>, using the same <code>PREFIX</code> and <code>XDG_DATA_HOME</code>. Configuration, profiles, artwork and any
+                 <strong>Start at login</strong> entry are kept, and a running instance is not stopped.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="requirements" style="--c: var(--fam-system)">
+          <h3>Requirements</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Build and runtime requirements</h4>
+              <ul class="req-list">
+                <li>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code> and <code>glib-compile-resources</code></li>
+                <li>GTK 4.8 or newer and libudev development files</li>
+                <li>A StatusNotifierItem tray (for example, Omarchy's)</li>
+                <li>Stream Deck + over USB, with permission to open its HID node</li>
+                <li>Keyboard and mouse-wheel actions need <code>/dev/uinput</code> access</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Optional tools and device access</h4>
+              <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
+                 <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), an MPRIS player (media transport).</p>
+              <p>If opening the device is denied, use your distribution's supported mechanism, for example an administrator-installed udev rule scoped to this VID/PID with
+                 <code>TAG+="uaccess"</code>, then reconnect the device. Missing tools or access are reported; the app never installs packages or changes permissions.</p>
+              <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="configuration" aria-labelledby="configuration-title">
+        <header>
+          <p class="eyebrow">Reference</p>
+          <h2 id="configuration-title">Configuration</h2>
+          <p>How each part of the application behaves, where it stores its data and what it needs from the system.
+            Saving or inspecting a binding never executes it; only <strong>Test action</strong> or input from the device does.
+            The app never installs packages, changes permissions or edits OBS configuration.</p>
+        </header>
+
+        <div class="doc-group" id="getting-around" style="--c: var(--fam-media)">
+          <h3>Getting around</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Main window and connection status</h4>
+              <p>The header says in plain words whether the Stream Deck + is connected (for example "Stream Deck + not connected — plug it in")
+                 next to a colored <strong>Not connected</strong>, <strong>Unavailable</strong>, <strong>Disconnected</strong> or <strong>Connected</strong> badge;
+                 hover it for the USB IDs (VID <code>0x0FD9</code>, PID <code>0x0084</code>) and technical details.</p>
+              <p>If the device is absent, inaccessible or disconnected, the window stays open, reports the state and retries detection.
+                 Touch gestures use Elgato's 800 × 100 logical-pixel space and are reported after the interaction completes,
+                 not as separate contact start and release events. Each dial in the preview shows the action it is assigned to.</p>
+            </article>
+            <article class="card">
+              <h4>Configure an action</h4>
+              <ol>
+                <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
+                <li>Pick an event valid for that control: key press; dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes.</li>
+                <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
+                <li><strong>Save binding</strong> creates or updates the control event; <strong>Remove binding</strong> clears it.</li>
+              </ol>
+              <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
+                 Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
+            </article>
+            <article class="card">
+              <h4>Assignment summaries</h4>
+              <p>Hover a control to see its assignments on the selected keypad page or touchscreen page, including <strong>Unassigned</strong> events:
+                 dials list <strong>Press</strong>, <strong>CW</strong> and <strong>CCW</strong>; the strip lists tap, hold, flick and directional swipes.
+                 Legacy exact-tick rotation overrides appear separately. Long text is shortened; select the event to see every saved field.
+                 Summaries refresh after saving or removing bindings, changing layers and <strong>Go to profile or page</strong> actions.</p>
+            </article>
+            <article class="card">
+              <h4>Selection, live input and swapping keys</h4>
+              <p>The control being edited has a thick violet ring. A pressed key or dial gets a green outline and brightens while held,
+                 a dial turn flashes amber, and a touch tap, hold or flick lights the touched zone in cyan, drawn over any artwork.</p>
+              <p>Drag a key onto another key in the preview to exchange their action, background image and text styling on the current page.
+                 An empty key exchanges its empty configuration too. The exchange is saved automatically and never runs either action;
+                 other pages, dials, touch zones and unsaved editor drafts are unchanged. Dropping on the same key or cancelling changes nothing.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="controls-and-actions" style="--c: var(--fam-system)">
+          <h3>Controls and actions</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Action types</h4>
+              <p>The <strong>Action</strong> menu offers layer and page switching, shell commands, launching applications, keyboard shortcuts,
+                 named events, the categorized <strong>More actions</strong>, <strong>Play sound</strong> and <strong>None</strong>.
+                 Untouched buttons, including those on new profiles and pages, start with <strong>None</strong>: it keeps a saved binding that does nothing,
+                 can still show artwork, text or live information, and never schedules a page return.</p>
+              <p><strong>Test action</strong> runs the selected action immediately and can affect the desktop, the device or OBS; test only what you intend to perform.</p>
+            </article>
+            <article class="card">
+              <h4>Dials and device brightness</h4>
+              <p>The four dials have independent press, clockwise and counterclockwise bindings, for example volume up and down on rotation and mute on press,
+                 or relative brightness on another dial. Mouse-wheel directions are vertical or horizontal.</p>
+              <p>Device brightness is the Stream Deck's display, not the monitor backlight. Sleep sets brightness to zero and wake restores the remembered level;
+                 before an explicit absolute level, relative and wake actions assume 100% because the device cannot report its brightness.
+                 Legacy exact-tick rotation bindings remain supported and take priority over directional ones.</p>
+            </article>
+            <article class="card">
+              <h4>Sounds and audio output</h4>
+              <p>Choose <strong>Play sound</strong>, then <strong>Choose file...</strong> or enter a path. WAV, MP3, FLAC, OGG, M4A/AAC, Opus and other formats decoded by
+                 <code>mpv</code> work. Playback replaces the app's previous sound; <strong>More actions &gt; Multimedia &gt; Stop audio file</strong> stops only app-owned playback,
+                 not other media players.</p>
+              <p><strong>Change audio output</strong> switches the default PipeWire output with <code>wpctl</code>; <strong>Refresh</strong> discovers new outputs with <code>pw-dump</code>.
+                 Bindings store the stable device name, so reconnecting does not select a different device; a disconnected saved device reports an error when used.
+                 <strong>Rotate</strong> advances from the system's current output to the next connected one on each press, wrapping after the last.
+                 Volume uses the default output in 5% steps, capped at 100%. Media transport uses the session's MPRIS player.</p>
+            </article>
+            <article class="card">
+              <h4>Text, files, websites and processes</h4>
+              <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
+                 and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+                 Closing an application targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
+            </article>
+            <article class="card">
+              <h4>Commands and application launch</h4>
+              <p>Applications are launched with distinct process arguments; no shell evaluates them. In the argument box, an empty box means zero arguments
+                 and <code>\empty</code> on its own line means one empty argument. Backslash, newline, carriage return and tab are written as
+                 <code>\\</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>, so leading and trailing spaces are preserved.</p>
+              <p>Only the <strong>Command</strong> action runs <code>/bin/sh -c</code> with the configured string. External actions run one at a time on a background worker,
+                 and failures appear in the window without blocking it.</p>
+            </article>
+            <article class="card">
+              <h4>Return to a page afterwards</h4>
+              <p>A non-None binding can return to a page after a delay: tick <strong>Return to a page afterwards</strong>, pick the destination
+                 (listed with its profile and folder, such as <code>Base</code> or <code>Studio / Page 2</code>) and a delay of 1–86400 seconds.
+                 Pressing the key again restarts the wait and <strong>Device &gt; Cancel timer</strong> cancels it. Saving never starts the wait.</p>
+            </article>
+            <article class="card wide">
+              <h4>Physical keyboard actions and <code>/dev/uinput</code></h4>
+              <p><strong>Shortcut</strong> uses a Linux uinput virtual keyboard, not compositor dispatch, shell commands or text typing. Without modifiers it sends one key down/up;
+                 with modifiers it holds them around the main key and releases them in reverse order (<code>CTRL + D</code>, <code>SUPER + RETURN</code>).
+                 Modifiers are never kept held between actions; failed sends attempt release cleanup. <strong>Key names and aliases</strong> opens a reference of every accepted name,
+                 without saving or running the draft.</p>
+              <ul>
+                <li>Chord text and modifier toggles are merged in CTRL, SHIFT, ALT, SUPER order. Names are case-insensitive; <code>Control</code> = <code>CTRL</code>,
+                    <code>Win</code>/<code>Windows</code>/<code>Meta</code> = <code>SUPER</code>, <code>Return</code> = <code>Enter</code>. Uppercase letters do not add Shift.</li>
+                <li>Supported keys: ASCII letters and digits, F1–F24, Enter, Tab, Escape, Space, navigation, named punctuation, keypad and media keys. Unknown names,
+                    empty segments, several main keys or modifier-only chords are rejected.</li>
+                <li>Media names: <code>XF86AudioLowerVolume</code>, <code>XF86AudioRaiseVolume</code>, <code>XF86AudioMute</code>, <code>XF86AudioMicMute</code> (<code>mute_mic</code>),
+                    <code>XF86AudioPlay</code> (<code>play</code>), <code>XF86AudioPause</code> (<code>media_pause</code>), <code>play_pause</code>, <code>XF86AudioNext</code> (<code>next_track</code>),
+                    <code>XF86AudioPrev</code> (<code>previous</code>), <code>XF86AudioStop</code>, <code>XF86AudioRecord</code>, <code>XF86AudioRewind</code>, <code>XF86AudioForward</code>,
+                    <code>XF86Eject</code>, <code>XF86MonBrightnessUp</code>/<code>Down</code> and <code>XF86KbdBrightnessUp</code>/<code>Down</code>/<code>XF86KbdLightOnOff</code>.
+                    <code>PAUSE</code>, <code>NEXT</code> and <code>STOP</code> keep their keyboard meanings; desktop bindings decide what media keys do.</li>
+                <li>Names identify physical key positions; the active keyboard layout decides the resulting symbols.</li>
+                <li>Saved legacy <strong>Press key</strong> actions keep working and show as a Shortcut without modifiers; they are rewritten only when you save them again.
+                    Unsupported legacy names stay visible and report an error when run.</li>
+                <li>One persistent virtual keyboard is opened on first use, after a 200 ms discovery grace period. It needs kernel uinput support and effective access to
+                    <code>/dev/uinput</code>; failures are reported with no fallback, privilege escalation, module loading or permission change.
+                    Ask an administrator for narrowly scoped access if needed. Mouse-wheel actions need the same access.</li>
+              </ul>
+            </article>
+            <article class="card wide">
+              <h4>Live information on keys and dials</h4>
+              <p>Under the action of a key or dial, tick <strong>Show live information</strong> and choose volume (crossed out while muted), audio output device,
+                 Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load), OBS state (recording, streaming and scene)
+                 or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
+                 On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
+                 beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
+                 window preview matches the device.</p>
+              <p>Each touch section can show information for its Tap or Hold binding. A dial's section shows its press binding first, then its turns, then a tap or hold on
+                 that section. Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through <code>curl</code> with a city or
+                 <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.
+                 Now playing reads MPRIS players on the session bus every second without controlling them: a playing player wins, then the paused one that played
+                 last; it shows <code>--</code> when the session bus is unavailable. When the player's application icon can be found in the installed icon themes,
+                 it replaces the play or pause icon, with a small play or pause badge in its corner. A title too long for its key or section scrolls slowly at a readable size
+                 while it plays (after a short pause, then looping); a paused title stays still and ends in an ellipsis.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="touch-strip" style="--c: var(--fam-audio)">
+          <h3>Touch strip and touchscreen pages</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Sections and gestures</h4>
+              <p>The strip has four sections, one above each dial. Choose <strong>Touch</strong>, then control <strong>1</strong> to <strong>4</strong>, and give each section its own
+                 <strong>Tap</strong> and <strong>Hold</strong> binding. <strong>Any</strong> keeps the older whole-strip bindings, which still handle taps no section claims.
+                 Flick and swipes always apply to the whole strip.</p>
+              <p>Touch bindings, section information, strip and section images and every dial binding belong to the profile's selected touchscreen page,
+                 not to keypad pages or folders: changing a keypad page or opening a folder keeps the touch page.</p>
+            </article>
+            <article class="card">
+              <h4>Touchscreen pages and swipes</h4>
+              <p>Select a dial, the strip or a section to show <strong>Touch page</strong>. Browse with its selector and arrows, add a blank page with <strong>+</strong>,
+                 or delete the selected one with the trash button after confirming (keypad pages are unchanged; a profile keeps at least one). Each profile remembers its
+                 selection across restarts and holds up to 64 touch pages.</p>
+              <p>Swiping left shows the next touch page and right the previous one while those gestures have no binding of their own; a Flick binding also takes precedence.
+                 Swipe up and down have no default. <strong>More actions &gt; Organization &gt; Next/Previous touchscreen page</strong> is offered only for touch controls and does not wrap.
+                 Edge chevrons on the device and preview show available directions. Delayed returns still target keypad pages.</p>
+            </article>
+            <article class="card wide">
+              <h4>Touchscreen data and upgrades</h4>
+              <p>Existing configurations migrate automatically: each distinct touch and dial configuration in a profile becomes a touchscreen page, equal ones share a page,
+                 and actions, None bindings, delayed returns, information and image references are preserved. Upgraded version-1 touch pages keep their edits and receive a copy
+                 of the dials from their profile's main keypad page; legacy records are retained and migration is not repeated. The upgraded <code>touchscreen.json</code>
+                 is version 2, which older app versions cannot read.</p>
+              <p>Invalid touchscreen configuration blocks saving instead of replacing the file. <code>layers.conf</code> and <code>touchscreen.json</code> are staged together;
+                 if the final replacement fails the previous layer file is restored, and a synced recovery journal lets startup restore or keep the pair after an interrupted save.
+                 Unreadable recovery state is reported, never silently replaced.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="profiles-pages-folders" style="--c: var(--fam-org)">
+          <h3>Profiles, pages and folders</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Profiles and application switching</h4>
+              <p>Profiles are tabs, with <strong>Base</strong> always available and undeletable. <strong>Organize &gt; New profile</strong> creates one
+                 (<strong>Create profile</strong> stays disabled until the name is new). <strong>Organize &gt; Edit profile</strong> sets an optional window class or executable
+                 name such as <code>kitty</code>, <code>firefox</code> or <code>obs</code>; <strong>Save changes</strong> is enabled only when the rule changed. Base cannot require an application.</p>
+              <p>Detection uses Hyprland IPC focus events, not process polling. A matching application selects its profile; unmatched or unavailable focus returns to Base;
+                 focusing the configuration window keeps the last external context. A manual tab choice lasts until the next external focus change. Selecting a profile never
+                 launches its application. Every start opens on Base's first page.</p>
+            </article>
+            <article class="card">
+              <h4>Pages</h4>
+              <p><strong>New page</strong> asks for a name first. The pencil renames the current page (<strong>Save name</strong> or Enter): names must be non-blank, without control
+                 characters and at most 64 UTF-8 bytes; surrounding spaces are trimmed. The trash button deletes the page with its folders, bindings and artwork after confirming.
+                 Previous, next and parent arrows sit before the page name. Navigation stays within the current profile and folder, and switching tabs restores that
+                 profile's last page for the session.</p>
+            </article>
+            <article class="card wide">
+              <h4>Page folders</h4>
+              <p>The folder icon in the page bar opens <strong>Page folders</strong>. Type a name in <strong>New folder name</strong> and press Enter; blank, duplicate and invalid names are explained
+                 while typing. Each row offers <strong>Open</strong>, <strong>Link to control</strong> (saves navigation to the folder on the selected control and event without opening it),
+                 <strong>Rename</strong> (Enter saves, Escape cancels; linked controls follow the new name) and <strong>Delete</strong> (removes only this page's folder and its links).
+                 <strong>Parent</strong> returns to the exact owning page.</p>
+              <p><code>organization.json</code> stores this hierarchy (version 2, with stable page-owner keys). Version-1 folders attach to their former parent's first surviving page;
+                 flat layers load as independent profiles; legacy <code>brightness-v1</code> and <code>scroll-v1</code> records load as typed actions.
+                 Invalid metadata is kept untouched and disables organization writes until repaired.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="appearance" style="--c: var(--fam-web)">
+          <h3>Appearance</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Button text</h4>
+              <p>Select a key and click <strong>Add text</strong> (<strong>Edit text</strong> once saved). The popup names the key and page, for example "Key 3 on “Everyday / Page 1”".
+                 Choose an installed font, a size from 6 to 120 px, horizontal or vertical orientation (vertical rotates the text 90° clockwise) and a position on a 3x3 grid.
+                 Text is white with a black outline and may span several lines.</p>
+              <p>The preview shows the key as the device will: over its image, over its action icon when the text leaves room, or over black, with a warning when the text does not fit
+                 (the device clips it). <strong>Save text</strong> or <strong>Ctrl+Enter</strong> saves; it is enabled only for non-blank changes, flagged by "Unsaved changes".
+                 Closing discards the draft. <strong>Remove text</strong> keeps the background image, and clearing the image keeps the text.</p>
+            </article>
+            <article class="card">
+              <h4>Window layout and themes</h4>
+              <p>The window opens at 1000 × 700 with the device preview on the left and the editor on the right; long forms and smaller windows scroll vertically. The desk uses
+                 the window width up to 1240 px and centers beyond it; the preview grows up to 1.5 times, and at 640 px the preview and editor stack without horizontal scrolling.
+                 Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
+                 Transitions follow GTK's animation setting. The full layout contract is in
+                 <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
+            </article>
+            <article class="card wide">
+              <h4>Background images</h4>
+              <p>Pick a target in <strong>Artwork target (active layer)</strong>, then <strong>Image…</strong> or <strong>×</strong> (Clear artwork). There are thirteen targets: eight keys,
+                 the touch-strip background and four touch zones. Clicking a key or zone selects its target; clicking a dial selects only its binding. PNG, GIF and any format
+                 supported by the installed GdkPixbuf loaders work; GIFs are sent as a still image because the hardware upload format is JPEG.
+                 Images are center-cropped and sent as 120 × 120 (keys), 800 × 100 (strip) or 200 × 100 (zone) JPEGs; the strip background and zones are layered.</p>
+              <p>Images are copied into the data directory, so originals can be moved or deleted. Artwork is independent per layer: switching layers replaces the device's
+                 whole image state (unassigned keys turn black) and the same state is replayed after reconnecting. Clearing a key sends a black image; clearing strip artwork
+                 rebuilds the strip from what remains. A file chooser saves to the target and layer captured when it opened. A failed import keeps the current assignment,
+                 storage failures disable artwork writes instead of saving an empty fallback, and upload failures appear in the connection status.</p>
+            </article>
+            <article class="card wide">
+              <h4>Binding icons</h4>
+              <p>Every action has a two-tone icon used in the <strong>Action</strong> and <strong>More actions</strong> menus, on the preview dials, and on keys and touch sections without
+                 their own artwork, both in the preview and on the device. Each family has its own color: media violet, audio cyan, OBS red, apps and system amber, websites blue,
+                 pages and folders white. Badges above the preview strip list what swipes, tap and hold do (dimmed while an unbound swipe keeps its default page change).
+                 Your artwork always wins, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
+                 Icons are never saved into your artwork or text.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="obs-studio" style="--c: var(--fam-obs)">
+          <h3>OBS Studio</h3>
+          <div class="cards">
+            <article class="card wide">
+              <h4>Connect to OBS</h4>
+              <p>In OBS, enable the built-in WebSocket server under <strong>Tools &gt; WebSocket Server Settings</strong>. In sdeck-plus, click <strong>OBS</strong> in the profile bar, enter
+                 the local endpoint (normally <code>ws://127.0.0.1:4455</code>) and password, save and test. The test queries scenes and recording/streaming state and never starts an
+                 output. Scene, source and input names must match OBS.</p>
+              <p>Only loopback endpoints are accepted. Requests run on a worker with bounded waits, and authentication, connection and request errors appear in the window.
+                 Credentials are stored in owner-only <code>obs.json</code>, not in bindings, and are masked in the editor and diagnostics.
+                 The app does not enable the OBS server or change its configuration.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="data-tray-lifecycle" style="--c: var(--fam-load)">
+          <h3>Data, tray and lifecycle</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Data location and files</h4>
+              <p>Configuration lives in <code>$XDG_DATA_HOME/sdeck-plus</code>, or <code>$HOME/.local/share/sdeck-plus</code> when it is unset (normally
+                 <code>~/.local/share/sdeck-plus</code>): <code>layers.conf</code> (keypad layers and bindings), <code>touchscreen.json</code>, <code>organization.json</code>,
+                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>.</p>
+              <p>An unreadable or unsupported <code>layers.conf</code> leaves configuration unavailable with writes disabled; repair it and restart. In a readable file, invalid, conflicting
+                 or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.</p>
+            </article>
+            <article class="card">
+              <h4>Backup and restore</h4>
+              <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, artwork filenames, button text,
+                 live information, page returns, local sound files and OBS settings, including credentials. Format version 2 stores images as <code>{"path":"assets/filename.png"}</code>
+                 without image data. Executables, commands, document paths, autostart and tray preferences stay local references.</p>
+              <p>Before importing, the named images must exist in the destination's <code>assets</code> directory; missing or invalid images cancel the import. Import validates the file, asks
+                 for confirmation, keeps the previous configuration in a sibling backup directory whose path it shows, and refreshes the device. It never runs a saved action.
+                 Older exports with embedded images are still accepted.</p>
+            </article>
+            <article class="card">
+              <h4>System tray and login startup</h4>
+              <p>Closing the window hides it; the device, bindings, artwork, timers and app-owned playback stay active until <strong>Quit</strong>. Either click on the tray icon opens
+                 <strong>Open configuration</strong>, <strong>Start at login</strong>, <strong>Start in tray</strong> (on by default; saved in <code>tray.json</code>), <strong>About</strong> and <strong>Quit</strong>.
+                 A tray supporting StatusNotifierItem is required.</p>
+              <p>Autostart writes <code>$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop</code> (or <code>~/.config/autostart/</code>) and starts the current executable with
+                 <code>--background</code>; disable and re-enable it after moving the executable. Run <code>cargo run -- --background</code> for a quiet manual start.
+                 Repeated launches reuse the running instance. If the session bus is unreachable, closing the window exits instead of hiding.</p>
+            </article>
+            <article class="card">
+              <h4>Quitting and reconnecting</h4>
+              <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black, stops the action worker and app-owned playback,
+                 cancels timers and releases the device; a blocked driver call can delay exiting. Independently opened applications stay open.
+                 On the next launch brightness returns to 100% and saved artwork is replayed. While running, unplugging and reconnecting retries automatically.</p>
+            </article>
+            <article class="card wide">
+              <h4>Upgrading from the previous name</h4>
+              <p>The application, package and executable are named <strong>sdeck-plus</strong>, with the data directory <code>sdeck-plus</code> and autostart entry
+                 <code>sdeck-plus.desktop</code>; the application ID stays the same so launches reuse one instance. Files are not migrated automatically: quit the old application,
+                 move its data directory to the new path to keep profiles, artwork and OBS settings, then disable the old autostart entry and re-enable <strong>Start at login</strong>.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="development" aria-labelledby="development-title">
+        <header>
+          <p class="eyebrow">Contributing</p>
+          <h2 id="development-title">Development</h2>
+          <p>Checks and tools for working on sdeck-plus from a checkout. Build requirements are listed under <a href="#install">Install</a>.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-load)">
+          <div class="cards">
+            <article class="card wide" id="dev-checks">
+              <h4>Checks</h4>
+              <div class="code-block">
+<pre><code>cargo fmt --all -- --check
+env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=x11 cargo test --offline
+cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
+              </div>
+              <p>The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
+                 its GTK main thread, for example:</p>
+              <div class="code-block">
+<pre><code>GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::button_text_alignment_icons_update_preview_and_save \
+  -- --exact --nocapture --test-threads=1</code></pre>
+              </div>
+              <p>The serialized layout test checks the thirteen artwork paths and every action at 1000 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
+                 reachability at 640 × 480. These checks do not replace real file-chooser, accessibility or device verification.</p>
+            </article>
+            <article class="card wide" id="dev-screenshots">
+              <h4>Documentation screenshots</h4>
+              <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
+                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window):</p>
+              <div class="code-block">
+<pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
+  cargo test --offline --bin sdeck-plus \
+  tests::documentation_screenshots::regenerate_documentation_screenshots_when_explicitly_requested \
+  -- --exact --nocapture --test-threads=1</code></pre>
+              </div>
+            </article>
+            <article class="card wide" id="dev-device-checks">
+              <h4>Opt-in real-device checks</h4>
+              <p>Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
+                 brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture.</p>
+              <div class="code-block">
+<pre><code>cargo run --offline --example verify_streamdeck -- --device-controls
+cargo run --offline --example verify_streamdeck -- --input
+cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
+cargo run --offline --example verify_desktop
+dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav</code></pre>
+              </div>
+              <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
+                 through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
+                 silent audio file and the <code>mpv-mpris</code> plugin.</p>
+            </article>
+            <article class="card wide" id="dev-event-api">
+              <h4>In-process event API</h4>
+              <p><code>src/event_api.rs</code> defines the typed <code>MonitorEvent</code> boundary: <code>Connection(ConnectionState)</code>, <code>Input(protocol::Event)</code> for decoded
+                 HID input and <code>ArtworkResult</code> for upload results; consumers ignore the <code>Heartbeat</code> probe. <code>start_hid_monitor</code> returns an owned
+                 <code>HidController</code> with an artwork sender, explicit cancellation and idempotent joined cleanup, and runs initialization, retries, timed reads and serialized
+                 image writes on one thread. Only the newest pending artwork snapshot is applied, and GTK polls results with a short GLib timer.
+                 Internal events use the <code>MonitorEvent::AppEvent</code> channel. There is no TCP, HTTP or WebSocket listener.</p>
+              <p>The protocol decoder validates the report ID and declared little-endian payload length before decoding input.</p>
+            </article>
+            <article class="card wide" id="dev-code">
+              <h4>Code organization</h4>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
+                  <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
+                  <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>
+                  <tr><th><code>src/info.rs</code>, <code>src/info_render.rs</code></th><td>Live readings and the key/section compositor</td></tr>
+                  <tr><th><code>src/desktop_actions/audio_output.rs</code></th><td>Fixed and rotating PipeWire output selection</td></tr>
+                  <tr><th><code>src/tray.rs</code>, <code>src/autostart.rs</code></th><td>Tray menu, About dialog, login startup entry</td></tr>
+                  <tr><th><code>src/ui.rs</code>, <code>DESIGN.md</code></th><td>Shared controls and panels; layout and accessibility contract</td></tr>
+                </table>
+              </div>
+              <p>Keep device work off the GTK thread; closing the window must not stop bindings, polling or timers, and shutdown owns cleanup. GTK checks keep a single owning
+                 test thread. Run the checks above after changing code or tests.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <div class="no-results" id="no-results" hidden>
+        <p><strong>No sections match your filter.</strong></p>
+        <p>Try a shorter word, or clear the filter to show everything.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
+        <p>Native GTK4 control desk for the Elgato Stream Deck + on Linux.</p>
+      </div>
+      <nav aria-label="Product">
+        <h2>Product</h2>
+        <ul>
+          <li><a href="./#features">Features</a></li>
+          <li><a href="./#actions">Actions</a></li>
+          <li><a href="./#gallery">Gallery</a></li>
+          <li><a href="#install">Install</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Resources">
+        <h2>Resources</h2>
+        <ul>
+          <li><a href="#configuration">Configuration</a></li>
+          <li><a href="#development">Development</a></li>
+          <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
+          <li><a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/CHANGELOG.md">Changelog</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="footer-legal">
+      <span>sdeck-plus · MIT License · © 2026 Aldo Silvestre</span>
+      <span>Not affiliated with Elgato or Corsair.</span>
+    </div>
+  </div>
+</footer>
+<a class="icon-btn to-top" href="#main" aria-label="Back to top"><svg aria-hidden="true"><use href="#i-arrow-up"/></svg></a>
+<p class="visually-hidden" id="live-status" role="status" aria-live="polite"></p>
+</body>
+</html>
