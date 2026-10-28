@@ -27,7 +27,7 @@ the README makes it very long and hard to scan. No interactivity beyond anchors.
 ## Tasks
 - [x] W1 Structure: landing page (index.html) with asymmetric hero and feature storytelling; docs split into dedicated page(s) (e.g. docs.html with sticky sidebar table of contents and scroll-spy) for Configuration and Development; shared CSS/JS files; nav, footer, sitemap.
 - [x] W2 Interactivity: interactive Stream Deck + mockup in the hero (click/hover keys, dials and strip to see example actions and live info), screenshot gallery with lightbox and keyboard navigation, tabbed/filterable actions table, copy buttons on code blocks, docs search/filter, scroll reveal animations (reduced-motion safe), theme toggle.
-- [ ] W3 Verification and polish: headless Chromium screenshots at 375/768/1440 in light and dark, link/anchor check, HTML validity check, no console errors; README/AGENTS links still valid; CHANGELOG entry.
+- [x] W3 Verification and polish: headless Chromium screenshots at 375/768/1440 in light and dark, link/anchor check, HTML validity check, no console errors; README/AGENTS links still valid; CHANGELOG entry.
 
 ## Route
 Delegated direct (one writer): 2+ non-trivial files.
@@ -84,6 +84,32 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   Esc clears, Enter jumps to the first match, `?q=` pre-fills it.
 - Bento tiles follow the pointer with a soft glow.
 - Checks: scripted headless interaction run at 375/768/1440 (see W3).
+- Commit: e528860
+
+### W3 Verification and polish
+- Route: delegated direct (single writer), scratch outputs outside the repo.
+- HTML parse/nesting (python3 -I html.parser tag stack) on index, docs, 404:
+  0 errors, 0 unclosed, 0 duplicate ids.
+- Links/anchors: 261 href/src (files, ids, sprite `#i-*` refs, `/sdeck-plus/`
+  paths on 404) resolve; 0 broken.
+- Chromium headless (`--force-prefers-reduced-motion` for deterministic frames)
+  at 375, 768 and 1440, light and dark, both pages. Fixes made: caption card
+  no longer covers the dials; marquee measured on the block so it scrolls;
+  1000x950 captures cropped by CSS `aspect-ratio`/`object-fit` to their content
+  (full image in the lightbox); small popovers inset over the large capture;
+  gallery regrid; list bullets no longer split inline `<strong>`; mobile code
+  blocks pad above the copy button; footer double spacing; scroll-spy defaults
+  to the first section; lightbox focus return deferred past the browser's own.
+- Console/overflow: 0 JS errors and no horizontal overflow at 360/375/768/1440
+  on both pages; scripted interactions (keys, dials, strip pages, tabs,
+  lightbox, theme, copy fallback, docs filter) behave as specified.
+- Content coverage vs `main:docs/index.html`: 501 text blocks, 0 missing
+  (only rewording: the Actions lead now ends "provides the categories below").
+- `git diff --check` clean. CHANGELOG entry added; AGENTS.md row updated
+  (git-excluded, not committed).
+- Not verifiable here: real clipboard write (headless file:// exercised the
+  select fallback), screen-reader pass, Space Grotesk loading (offline renders
+  used the system fallback).
 
 ## Next step
-W3.
+Human review; push / PR are the user's decision. Engram mirror still pending.
