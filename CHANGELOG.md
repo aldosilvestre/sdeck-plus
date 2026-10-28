@@ -8,6 +8,20 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Website redesign.** The GitHub Pages site is now a landing page
+  (`docs/index.html`) and a documentation page (`docs/docs.html`) sharing
+  `docs/assets/site.css` and `docs/assets/site.js`, with light and dark themes
+  (system default plus a remembered toggle) and asymmetric layouts. The landing
+  page has an interactive Stream Deck + preview (keys, touch strip with two
+  touch pages and dials that describe their actions and animate demonstration
+  readings), a capabilities grid, alternating feature rows, a screenshot gallery
+  with a keyboard-operable lightbox, tabbed action categories and copy buttons
+  on code. Install, Configuration and Development moved to the documentation
+  page, which adds a sticky table of contents with scroll-spy and a filter over
+  its sections. Old `#configuration` and `#development` links forward to the new
+  page, README links point there, the sitemap lists both pages and a 404 page
+  was added. Animations respect reduced-motion preferences and every page works
+  without JavaScript.
 - **README simplified.** The README now covers only what sdeck-plus is, why
   it exists, its key features, installation and one main-window screenshot.
   Configuration, behavior details and development material (checks,

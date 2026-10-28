@@ -67,16 +67,16 @@ Your user needs permission to open the device's HID node. If access is denied,
 an administrator can install a udev rule scoped to this VID/PID with
 `TAG+="uaccess"` (the installer prints one when needed). Some actions need
 optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions need
-`/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/#install)
+`/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.
 
 ## Documentation
 
 - [Features](https://aldosilvestre.github.io/sdeck-plus/#features) and
   [Actions](https://aldosilvestre.github.io/sdeck-plus/#actions): what each part does.
-- [Configuration](https://aldosilvestre.github.io/sdeck-plus/#configuration): controls,
+- [Configuration](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration): controls,
   touchscreen pages, profiles, artwork, OBS setup, data files, tray and startup.
-- [Development](https://aldosilvestre.github.io/sdeck-plus/#development): checks,
+- [Development](https://aldosilvestre.github.io/sdeck-plus/docs.html#development): checks,
   documentation screenshots, real-device checks and code organization.
 
 The site is published from [`docs/`](docs/index.html); changes are tracked in
