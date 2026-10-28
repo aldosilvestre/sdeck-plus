@@ -26,7 +26,7 @@ the README makes it very long and hard to scan. No interactivity beyond anchors.
 
 ## Tasks
 - [x] W1 Structure: landing page (index.html) with asymmetric hero and feature storytelling; docs split into dedicated page(s) (e.g. docs.html with sticky sidebar table of contents and scroll-spy) for Configuration and Development; shared CSS/JS files; nav, footer, sitemap.
-- [ ] W2 Interactivity: interactive Stream Deck + mockup in the hero (click/hover keys, dials and strip to see example actions and live info), screenshot gallery with lightbox and keyboard navigation, tabbed/filterable actions table, copy buttons on code blocks, docs search/filter, scroll reveal animations (reduced-motion safe), theme toggle.
+- [x] W2 Interactivity: interactive Stream Deck + mockup in the hero (click/hover keys, dials and strip to see example actions and live info), screenshot gallery with lightbox and keyboard navigation, tabbed/filterable actions table, copy buttons on code blocks, docs search/filter, scroll reveal animations (reduced-motion safe), theme toggle.
 - [ ] W3 Verification and polish: headless Chromium screenshots at 375/768/1440 in light and dark, link/anchor check, HTML validity check, no console errors; README/AGENTS links still valid; CHANGELOG entry.
 
 ## Route
@@ -57,8 +57,33 @@ Created 2026-10-27. Engram mirror pending (engram tools unavailable this session
   teaser cards carry those ids.
 - Font: one Google Font (Space Grotesk, headings); body uses system UI fonts.
 - Checks: HTML parse/nesting and link/anchor check clean (see W3).
+- Commit: 94dc54a
 - Note: this commit's script holds only the W1 behaviour; the tab list and the
   docs filter field are styled but become interactive in W2.
 
+### W2 Interactivity
+- Route: delegated direct (single writer). File: `docs/assets/site.js`.
+- Device preview: every key, touch section and dial is a button; hover, focus
+  or click fills the caption panel (aria-live) with what it can do; arrow keys,
+  Home and End move between controls. Live demo: real-time clock key, CPU
+  random walk with load colors, Now playing marquee that scrolls only when the
+  title overflows; Key 4 toggles a recording state, Key 5 play/pause (greys the
+  title and stops it), Key 6 rotates outputs; dials turn on click (volume and
+  brightness update the strip, brightness dims the preview, tracks change the
+  title); strip edge arrows and pointer swipes switch between two touch pages.
+  Motion-based demos stop under reduced motion.
+- Lightbox: native modal `dialog` over all 26 screenshots, arrow/Home/End keys,
+  Esc and backdrop close, focus returns to the thumbnail; without JS the
+  thumbnails link to the image files.
+- Actions: ARIA tabs (roving tabindex, arrows, Home/End); without JS all
+  category panels are listed.
+- Copy buttons on every code block: Clipboard API, `execCommand` fallback, and
+  a final fallback that selects the code; status announced in a live region.
+- Docs filter: hides non-matching cards, groups and sections, dims TOC links,
+  highlights matches, shows a no-results card and a count; `/` focuses it,
+  Esc clears, Enter jumps to the first match, `?q=` pre-fills it.
+- Bento tiles follow the pointer with a soft glow.
+- Checks: scripted headless interaction run at 375/768/1440 (see W3).
+
 ## Next step
-W2.
+W3.
