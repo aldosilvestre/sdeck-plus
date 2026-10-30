@@ -237,6 +237,11 @@ pub fn control_summary(
             format!("{}: {}", summary_event_label(event), action_summary(action))
         })
         .collect();
+    if control == ControlKind::Button {
+        if let Some(action) = bindings.and_then(|bindings| bindings.get(&Trigger::KeyHold(number))) {
+            lines.push(format!("Hold 2 seconds: {}", action_summary(Some(action))));
+        }
+    }
     if control == ControlKind::Touch {
         if let Some(bindings) = bindings {
             for zone in 1..=4 {

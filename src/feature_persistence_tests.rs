@@ -36,6 +36,170 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn key_hold_storage_reload_swap_and_unbind_preserve_independent_metadata() {
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    store.create("Other").unwrap();
+    let tap = Trigger::KeyPress(1);
+    let hold = Trigger::KeyHold(1);
+    let followup = PageReturn {
+        layer: "Other".into(),
+        seconds: 7,
+    };
+    store
+        .bind("Base", tap.clone(), Action::Emit("tap".into()))
+        .unwrap();
+    store
+        .bind("Base", hold.clone(), Action::Emit("hold".into()))
+        .unwrap();
+    store.bind("Base", Trigger::KeyHold(8), Action::None).unwrap();
+    store
+        .bind("Other", hold.clone(), Action::Emit("other".into()))
+        .unwrap();
+    store
+        .set_return("Base", &hold, Some(followup.clone()))
+        .unwrap();
+    store
+        .set_info("Base", &tap, Some(InfoSource::Clock))
+        .unwrap();
+    store.persist().unwrap();
+    let original = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let mut loaded = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(loaded.diagnostics().is_empty());
+    assert!(loaded.conflicts().is_empty());
+    assert_eq!(
+        loaded.binding("Base", &hold),
+        Some(Action::Emit("hold".into()))
+    );
+    assert_eq!(loaded.page_return("Base", &hold), Some(followup.clone()));
+    assert!(!hold.is_touchscreen());
+    loaded.swap_keys("Base", 1, 8).unwrap();
+    assert_eq!(
+        loaded.binding("Base", &Trigger::KeyHold(8)),
+        Some(Action::Emit("hold".into()))
+    );
+    assert_eq!(loaded.binding("Base", &hold), Some(Action::None));
+    assert_eq!(
+        loaded.page_return("Base", &Trigger::KeyHold(8)),
+        Some(followup)
+    );
+    assert_eq!(loaded.page_return("Base", &hold), None);
+    assert_eq!(
+        loaded.info_source("Base", &Trigger::KeyPress(8)),
+        Some(InfoSource::Clock)
+    );
+    assert_eq!(
+        loaded.binding("Other", &hold),
+        Some(Action::Emit("other".into()))
+    );
+    assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), original);
+    loaded.unbind("Base", &Trigger::KeyHold(8)).unwrap();
+    assert_eq!(loaded.page_return("Base", &Trigger::KeyHold(8)), None);
+    assert_eq!(
+        loaded.binding("Base", &Trigger::KeyPress(8)),
+        Some(Action::Emit("tap".into()))
+    );
+    loaded.persist().unwrap();
+    let loaded = LayerStore::open_at(&fixture.0).unwrap();
+    assert_eq!(loaded.binding("Base", &Trigger::KeyHold(8)), None);
+    assert_eq!(loaded.binding("Base", &hold), Some(Action::None));
+}
+
+#[test]
+fn key_hold_validation_rejects_invalid_input_without_mutating_bindings_or_disk() {
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    store
+        .bind("Base", Trigger::KeyPress(1), Action::Emit("keep".into()))
+        .unwrap();
+    store.persist().unwrap();
+    let original = fs::read(fixture.0.join("layers.conf")).unwrap();
+    let bindings = store.layers()["Base"].bindings.clone();
+    for (owner, trigger, action, message) in [
+        (
+            "Base",
+            Trigger::KeyHold(0),
+            Action::None,
+            "key index out of range",
+        ),
+        (
+            "Base",
+            Trigger::KeyHold(9),
+            Action::None,
+            "key index out of range",
+        ),
+        ("Missing", Trigger::KeyHold(1), Action::None, "unknown layer"),
+        (
+            "Base",
+            Trigger::KeyHold(1),
+            Action::Command("".into()),
+            "commands must be non-empty shell strings without NUL bytes",
+        ),
+        (
+            "Base",
+            Trigger::KeyHold(1),
+            Action::Feature(FeatureAction::Touchscreen(
+                crate::features::TouchscreenAction::NextPage,
+            )),
+            "touchscreen page actions require a touchscreen gesture",
+        ),
+    ] {
+        let error = store.bind(owner, trigger, action).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), message);
+        assert_eq!(store.layers()["Base"].bindings, bindings);
+        assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), original);
+    }
+}
+
+#[test]
+fn key_hold_bundle_roundtrip_retains_actions_and_returns() {
+    let fixture = Fixture::new();
+    let root = fixture.0.join("source");
+    let mut store = LayerStore::open_at(&root).unwrap();
+    store.create("Other").unwrap();
+    let hold = Trigger::KeyHold(8);
+    let followup = PageReturn {
+        layer: "Other".into(),
+        seconds: 3,
+    };
+    store
+        .bind(
+            "Base",
+            Trigger::KeyPress(8),
+            Action::Feature(FeatureAction::Timer { seconds: 60 }),
+        )
+        .unwrap();
+    store
+        .bind(
+            "Base",
+            hold.clone(),
+            Action::Feature(FeatureAction::CancelTimer),
+        )
+        .unwrap();
+    store
+        .set_return("Base", &hold, Some(followup.clone()))
+        .unwrap();
+    store.persist().unwrap();
+    let bundle = fixture.0.join("hold.sdeck-plus.json");
+    crate::config_bundle::export(&root, &bundle).unwrap();
+    let destination = fixture.0.join("imported");
+    assert_eq!(
+        crate::config_bundle::import(&bundle, &destination).unwrap(),
+        None
+    );
+    let loaded = LayerStore::open_at(&destination).unwrap();
+    assert!(loaded.conflicts().is_empty());
+    assert!(loaded.diagnostics().is_empty());
+    assert_eq!(loaded.binding("Base", &hold), store.binding("Base", &hold));
+    assert_eq!(loaded.page_return("Base", &hold), Some(followup));
+    assert_eq!(
+        loaded.binding("Base", &Trigger::KeyPress(8)),
+        store.binding("Base", &Trigger::KeyPress(8))
+    );
+}
+
+#[test]
 fn none_binding_survives_reload_and_blocks_whole_strip_fallback() {
     let fixture = Fixture::new();
     let mut store = LayerStore::open_at(&fixture.0).unwrap();

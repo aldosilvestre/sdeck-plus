@@ -30,6 +30,8 @@ pub enum SwipeDirection {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Trigger {
     KeyPress(u8),
+    /// Optional exclusive physical keypad hold, recognized after two seconds.
+    KeyHold(u8),
     EncoderPress(u8),
     Rotation(u8, i8),
     EncoderClockwise(u8),
@@ -474,7 +476,8 @@ impl LayerStore {
             .get(trigger)
             .cloned()
     }
-    /// Swap two keypad bindings in memory without persisting the layer store.
+    /// Swap two keypad bindings, including optional hold actions and metadata,
+    /// in memory without persisting the layer store.
     ///
     /// # Errors
     /// Returns an error for an unknown layer or keys outside 1..=8.
@@ -488,32 +491,35 @@ impl LayerStore {
         if first == second {
             return Ok(());
         }
-        let first = Trigger::KeyPress(first);
-        let second = Trigger::KeyPress(second);
-        let first_return = data.returns.remove(&first);
-        let second_return = data.returns.remove(&second);
-        if let Some(value) = first_return {
-            data.returns.insert(second.clone(), value);
-        }
-        if let Some(value) = second_return {
-            data.returns.insert(first.clone(), value);
-        }
-        let first_display = data.displays.remove(&first);
-        let second_display = data.displays.remove(&second);
-        if let Some(value) = first_display {
-            data.displays.insert(second.clone(), value);
-        }
-        if let Some(value) = second_display {
-            data.displays.insert(first.clone(), value);
-        }
-        let bindings = &mut data.bindings;
-        let first_action = bindings.remove(&first);
-        let second_action = bindings.remove(&second);
-        if let Some(action) = first_action {
-            bindings.insert(second, action);
-        }
-        if let Some(action) = second_action {
-            bindings.insert(first, action);
+        for (first, second) in [
+            (Trigger::KeyPress(first), Trigger::KeyPress(second)),
+            (Trigger::KeyHold(first), Trigger::KeyHold(second)),
+        ] {
+            let first_return = data.returns.remove(&first);
+            let second_return = data.returns.remove(&second);
+            if let Some(value) = first_return {
+                data.returns.insert(second.clone(), value);
+            }
+            if let Some(value) = second_return {
+                data.returns.insert(first.clone(), value);
+            }
+            let first_display = data.displays.remove(&first);
+            let second_display = data.displays.remove(&second);
+            if let Some(value) = first_display {
+                data.displays.insert(second.clone(), value);
+            }
+            if let Some(value) = second_display {
+                data.displays.insert(first.clone(), value);
+            }
+            let bindings = &mut data.bindings;
+            let first_action = bindings.remove(&first);
+            let second_action = bindings.remove(&second);
+            if let Some(action) = first_action {
+                bindings.insert(second, action);
+            }
+            if let Some(action) = second_action {
+                bindings.insert(first, action);
+            }
         }
         Ok(())
     }
@@ -635,7 +641,9 @@ fn shows_information(trigger: &Trigger) -> bool {
 }
 fn validate_trigger(t: &Trigger) -> io::Result<()> {
     match t {
-        Trigger::KeyPress(n) if !(1..=8).contains(n) => Err(invalid("key index out of range")),
+        Trigger::KeyPress(n) | Trigger::KeyHold(n) if !(1..=8).contains(n) => {
+            Err(invalid("key index out of range"))
+        }
         Trigger::EncoderPress(n)
         | Trigger::Rotation(n, _)
         | Trigger::EncoderClockwise(n)
@@ -771,6 +779,7 @@ fn unhex(value: &str) -> Result<String, String> {
 fn encode_trigger(t: &Trigger) -> String {
     match t {
         Trigger::KeyPress(n) => format!("k:{n}"),
+        Trigger::KeyHold(n) => format!("kh:{n}"),
         Trigger::EncoderPress(n) => format!("b:{n}"),
         Trigger::Rotation(n, ticks) => format!("r:{n}:{ticks}"),
         Trigger::EncoderClockwise(n) => format!("r:{n}:+"),
@@ -804,6 +813,7 @@ fn decode_trigger(s: &str) -> Result<Trigger, String> {
     let p: Vec<_> = s.split(':').collect();
     let t = match p.as_slice() {
         ["k", n] => Trigger::KeyPress(n.parse().map_err(|_| "invalid key")?),
+        ["kh", n] => Trigger::KeyHold(n.parse().map_err(|_| "invalid key")?),
         ["b", n] => Trigger::EncoderPress(n.parse().map_err(|_| "invalid encoder")?),
         ["r", n, "+"] => Trigger::EncoderClockwise(n.parse().map_err(|_| "invalid encoder")?),
         ["r", n, "-"] => {

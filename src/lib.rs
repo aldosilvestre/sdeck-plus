@@ -12,6 +12,8 @@ pub mod features;
 pub mod image_output;
 pub mod info;
 pub mod info_render;
+pub mod key_hold;
+pub mod key_hold_editor;
 pub mod keyboard;
 pub mod layers;
 pub mod local_artwork;
@@ -22,6 +24,8 @@ pub mod protocol;
 pub mod app_focus;
 #[cfg(test)]
 mod feature_persistence_tests;
+#[cfg(test)]
+mod key_hold_tests;
 #[cfg(test)]
 mod touchscreen_navigation_tests;
 #[cfg(test)]
