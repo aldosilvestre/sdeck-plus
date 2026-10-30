@@ -32,6 +32,7 @@ mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
 mod shortcut_reference;
+mod timer_artwork;
 mod tray;
 mod tray_preference;
 mod ui;
@@ -659,6 +660,7 @@ fn build_widgets(
         args_row,
         modifier_row,
     );
+    binding_ui.refresh_layer_targets(&layers.borrow().names());
     binding_ui.update_for_control(false);
     binding_ui.update_action_visibility();
     binding_ui.load_selected_binding(&layers);
@@ -718,7 +720,10 @@ fn build_widgets(
     layer_card.append(&navigation_row);
     if let Some(app) = window.application() {
         let cleanup = feature_runtime.clone();
-        app.connect_shutdown(move |_| cleanup.cancel_timer());
+        app.connect_shutdown(move |_| {
+            cleanup.cancel_key_holds();
+            cleanup.cancel_timer();
+        });
     }
 
     let settings_card = card();
@@ -741,6 +746,7 @@ fn build_widgets(
     // dials and the touch strip show these selectors.
     selector_row.set_visible(false);
     settings_card.append(&selector_row);
+    settings_card.append(&binding_ui.hold_toggle);
     settings_card.append(&binding_ui.action_guidance);
     settings_card.append(&binding_ui.layer_target_row);
     let action_fields = gtk::FlowBox::builder()
@@ -893,6 +899,7 @@ fn build_widgets(
                 return;
             }
             let index = picker.selected() as usize;
+            runtime.cancel_key_holds();
             if let Some(snapshot) = select_layer(&layers, index) {
                 runtime.persist(snapshot);
             }
@@ -938,6 +945,7 @@ fn build_widgets(
                 let index = layer_index(&layers, &trimmed);
                 picker.set_selected(index);
                 updating_layers.set(false);
+                runtime.cancel_key_holds();
                 if let Some(snapshot) = select_layer(&layers, index as usize) {
                     runtime.save_profile(snapshot);
                     runtime.edit_profile(&trimmed);
@@ -956,6 +964,7 @@ fn build_widgets(
         let layers = layers.clone();
         let ui = binding_ui.clone();
         ui.control_picker.clone().connect_selected_notify(move |_| {
+            ui.reset_hold_mode();
             ui.update_for_control(true);
             ui.load_selected_binding(&layers);
         });
@@ -965,7 +974,19 @@ fn build_widgets(
         let ui = binding_ui.clone();
         ui.control_number_picker
             .clone()
-            .connect_selected_notify(move |_| ui.load_selected_binding(&layers));
+            .connect_selected_notify(move |_| {
+                ui.reset_hold_mode();
+                ui.load_selected_binding(&layers);
+            });
+    }
+    {
+        let layers = layers.clone();
+        let ui = binding_ui.clone();
+        ui.hold_toggle.clone().connect_toggled(move |_| {
+            if !ui.hold_reset.get() {
+                ui.load_selected_binding(&layers);
+            }
+        });
     }
     {
         let layers = layers.clone();
@@ -1643,15 +1664,15 @@ fn start_event_updates(
                     feature_runtime.complete_key_swap(&layer, first, second, result);
                 }
                 MonitorEvent::Connection(state) => {
+                    if !matches!(state, ConnectionState::Connected) {
+                        feature_runtime.cancel_key_holds();
+                    }
                     if show_connection_state(status, connection_detail, &state) {
                         artwork.refresh(true);
                     }
                 }
                 MonitorEvent::Input(event) => {
-                    if let Some((identity, action, page_return)) = matching_binding(&layers, &event)
-                    {
-                        feature_runtime.execute_with_return(identity, action, page_return);
-                    }
+                    feature_runtime.execute_input(&event);
                     match event {
                         protocol::Event::Key { index, pressed } => {
                             if let Some(label) = key_labels.get(index) {
@@ -1760,6 +1781,7 @@ fn start_event_updates(
                 }
             }
         }
+        feature_runtime.poll_key_holds();
         glib::ControlFlow::Continue
     })
 }
@@ -1792,6 +1814,8 @@ struct BindingUi {
     modifier_row: GtkBox,
     feature_editor: feature_editor::FeatureEditor,
     action_guidance: Label,
+    hold_toggle: CheckButton,
+    hold_reset: Rc<Cell<bool>>,
     return_toggle: CheckButton,
     return_target: gtk::DropDown,
     return_model: gtk::StringList,
@@ -1969,6 +1993,8 @@ impl BindingUi {
             modifier_row,
             feature_editor: feature_editor::FeatureEditor::new(),
             action_guidance,
+            hold_toggle: sdeck_plus::key_hold_editor::hold_toggle(),
+            hold_reset: Rc::new(Cell::new(false)),
             return_toggle,
             return_target,
             return_model,
@@ -2108,7 +2134,8 @@ impl BindingUi {
     /// Keys, dials and a tap or hold on one touch section can show information.
     fn info_supported(&self) -> bool {
         match self.control_kind() {
-            ControlKind::Button | ControlKind::Encoder => true,
+            ControlKind::Button => !self.hold_toggle.is_active(),
+            ControlKind::Encoder => true,
             ControlKind::Touch => {
                 matches!(
                     self.event_kind(),
@@ -2151,7 +2178,14 @@ impl BindingUi {
         self.update_info_visibility();
     }
 
+    fn reset_hold_mode(&self) {
+        self.hold_reset.set(true);
+        self.hold_toggle.set_active(false);
+        self.hold_reset.set(false);
+    }
+
     fn update_for_control(&self, reset_event: bool) {
+        self.hold_toggle.set_visible(self.control_kind() == ControlKind::Button);
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
@@ -2183,6 +2217,15 @@ impl BindingUi {
         number: Option<u8>,
         reset_event: bool,
     ) -> Result<(), String> {
+        // The catalog reselects its target before applying an action. Rebuilding
+        // the number model for the same key emits selection notifications that
+        // reset hold mode, incorrectly replacing the short action instead.
+        if control == ControlKind::Button
+            && self.control_kind() == control
+            && self.control_number() == number
+        {
+            return Ok(());
+        }
         let selected = match control {
             ControlKind::Button => {
                 let number = number.ok_or_else(|| "Select a button number.".to_string())?;
@@ -2340,6 +2383,7 @@ impl BindingUi {
     fn fingerprint(&self) -> String {
         let buffer = self.args_view.buffer();
         [
+            self.hold_toggle.is_active().to_string(),
             self.action_picker.selected().to_string(),
             self.layer_target_picker.selected().to_string(),
             self.text_entry.text().to_string(),
@@ -2463,8 +2507,11 @@ impl BindingUi {
         let number = self
             .control_number()
             .ok_or_else(|| "Select a control number.".to_string())?;
-        let trigger = trigger_from_selection(self.control_kind(), number, self.event_kind())
-            .map_err(|error| error.0)?;
+        let trigger = if self.control_kind() == ControlKind::Button {
+            sdeck_plus::key_hold_editor::key_trigger(number, self.hold_toggle.is_active())
+        } else {
+            trigger_from_selection(self.control_kind(), number, self.event_kind())
+        }.map_err(|error| error.0)?;
         let owner = layers
             .borrow()
             .binding_layer(&layer, &trigger)
@@ -2998,6 +3045,7 @@ struct ArtworkUi {
 struct InfoState {
     values: std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
     marquee: PreviewMarquee,
+    countdown: Option<timer_artwork::CountdownArtwork>,
 }
 
 impl std::ops::Deref for InfoState {
@@ -3094,6 +3142,15 @@ impl ArtworkUi {
                 return self.touchscreen_zone_command(layer, zone);
             }
         }
+        self.info_value_command(layer, target, self.info_value(source))
+    }
+
+    fn info_value_command(
+        &self,
+        layer: &str,
+        target: ArtworkTarget,
+        value: sdeck_plus::info::InfoValue,
+    ) -> ArtworkCommand {
         ArtworkCommand::ComposeInfo {
             target,
             path: self.info_background(layer, target),
@@ -3102,7 +3159,7 @@ impl ArtworkUi {
             } else {
                 None
             },
-            value: self.info_value(source),
+            value,
         }
     }
 
@@ -3154,7 +3211,7 @@ impl ArtworkUi {
                 other.push(self.touchscreen_zone_command(layer, zone));
             }
         }
-        self.with_icons(layer, other)
+        self.with_countdown(layer, self.with_icons(layer, other))
     }
 
     /// Replace the pictures of keys and touch sections without artwork by
@@ -3336,7 +3393,7 @@ impl ArtworkUi {
                 .iter()
                 .find(|(shown, _)| *shown == target)
                 .map(|(_, source)| *source);
-            match source.filter(|_| alive) {
+            match source.filter(|_| alive && !self.countdown_shows(&layer, target)) {
                 Some(source) => {
                     let elapsed = now.saturating_duration_since(started);
                     let moved =
@@ -3415,8 +3472,11 @@ impl ArtworkUi {
 
     fn paint_info_previews(&self, layer: &str) {
         for (target, source) in self.info_targets(layer) {
-            self.paint_info_preview(target, &self.info_value(source));
+            if !self.countdown_shows(layer, target) {
+                self.paint_info_preview(target, &self.info_value(source));
+            }
         }
+        self.paint_countdown_preview(layer);
     }
 
     /// Store a new reading and redraw only what shows it, on the device and in the window.
@@ -3431,7 +3491,7 @@ impl ArtworkUi {
         }
         let layer = self.layers.borrow().active().to_owned();
         for (target, shown) in self.info_targets(&layer) {
-            if shown == source {
+            if shown == source && !self.countdown_shows(&layer, target) {
                 self.paint_info_preview(target, &value);
                 let _ = self.output.send(self.info_command(&layer, target, source));
             }
@@ -4292,6 +4352,10 @@ mod tests {
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
+    mod timer_countdown_tests;
+    mod key_hold_ui_tests;
+    mod key_hold_integration_tests;
+    mod timer_notification_tests;
     mod touchscreen_tests;
     mod ui_refresh_tests;
 

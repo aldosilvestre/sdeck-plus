@@ -23,6 +23,7 @@ impl FeatureRuntime {
         }
         self.configuration_operation.set(Some(operation));
         if operation == Operation::Import {
+            self.cancel_key_holds();
             self.cancel_timer();
         }
         self.artwork.chooser_owners.borrow_mut().clear();
@@ -125,6 +126,7 @@ impl FeatureRuntime {
         let mut artwork = ArtworkStore::open_at_for_layer(root, Some(layers.active()))?;
         layers.initialize_touchscreens(&organization, &mut artwork)?;
         let obs = ObsConfig::load_at(root)?;
+        self.cancel_key_holds();
         *self.layers.borrow_mut() = layers;
         *self.organization.borrow_mut() = Some(organization);
         *self.artwork.store.borrow_mut() = Some(artwork);

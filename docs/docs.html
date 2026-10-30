@@ -249,7 +249,7 @@ cd sdeck-plus
             <article class="card">
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
-                 <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), an MPRIS player (media transport).</p>
+                 <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
               <p>If opening the device is denied, use your distribution's supported mechanism, for example an administrator-installed udev rule scoped to this VID/PID with
                  <code>TAG+="uaccess"</code>, then reconnect the device. Missing tools or access are reported; the app never installs packages or changes permissions.</p>
               <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
@@ -291,7 +291,7 @@ cd sdeck-plus
               <p>The action selector remains available for dials and the touch strip; keys use the Actions catalog:</p>
               <ol>
                 <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
-                <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key has a single press event, so its Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below.</li>
+                <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key's Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below. Select <strong>Hold 2 seconds</strong> to configure its optional secondary action without replacing the short action.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
                 <li>The three icon buttons at the top of the right-hand panel act on the selected control: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears it. Hover any of them for a tooltip that explains what it does; the result message appears right below them.</li>
               </ol>
@@ -376,6 +376,30 @@ cd sdeck-plus
                  <code>\\</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>, so leading and trailing spaces are preserved.</p>
               <p>Only the <strong>Command</strong> action runs <code>/bin/sh -c</code> with the configured string. External actions run one at a time on a background worker,
                  and failures appear in the window without blocking it.</p>
+            </article>
+            <article class="card">
+              <h4>Optional two-second key hold</h4>
+              <p>Save a key's short action, then select <strong>Hold 2 seconds</strong> and choose its secondary action from the Actions catalog.
+                 Parameterless actions such as <strong>Cancel timer</strong> save automatically; otherwise fill the settings and use <strong>Save binding</strong>.
+                 Release before two seconds to run only the short action; hold for two seconds to run only the secondary action. Releasing afterwards does nothing.
+                 For example, assign <strong>Start timer</strong> to the short action and <strong>Cancel timer</strong> to the hold action.</p>
+              <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> in hold mode removes only the secondary action;
+                 without one, keys run immediately on key-down. Hold actions keep independent page returns and do not replace primary artwork or live information.
+                 Dial presses and touch-strip gestures are unchanged.</p>
+            </article>
+            <article class="card">
+              <h4>Countdown timers</h4>
+              <p><strong>Device &gt; Start timer</strong> starts a countdown of 1–86400 seconds. Starting it with a physical keypad key temporarily shows
+                 the time left on that key and its app preview: <code>45s</code>, <code>02:15</code> or <code>01:02:15</code>.
+                 The countdown stays on its original page, survives reconnects, and restores the key's artwork, text or live information when it ends or is cancelled.
+                 Starting another timer replaces it; <strong>Test action</strong> and dial or touch input do not claim a keypad key.
+                 When it finishes, sdeck-plus sends one system notification
+                 with the timer duration, even while the configuration window is hidden. Desktop notification settings, including Do Not Disturb, control its presentation;
+                 the in-app completion status remains available. Completion also plays the desktop theme's <code>alarm-clock-elapsed</code> sound using optional
+                 <code>canberra-gtk-play</code>, independently of notification settings and without stopping a <strong>Play audio file</strong> action.
+                 Audio output, volume and theme sound availability still determine audibility. If the helper is missing or playback fails, the GTK bell is attempted
+                 (it may be silent); the notification is still sent. Starting another timer replaces the countdown, <strong>Cancel timer</strong> cancels it
+                 without a completion notification or chime, and <strong>Quit</strong> cancels pending timers. Saving a binding does not start it.</p>
             </article>
             <article class="card">
               <h4>Return to a page afterwards</h4>

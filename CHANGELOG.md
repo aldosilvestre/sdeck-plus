@@ -8,6 +8,21 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Optional exclusive two-second key hold.** Configure a key's short action,
+  then select **Hold 2 seconds** and assign a separate catalog action, such as
+  **Cancel timer**. A short release runs only the short action; reaching two
+  seconds runs only the hold action, with no action on release afterwards.
+  Catalog assignment to the same key preserves the selected short/hold mode
+  instead of overwriting the short action. Removing the hold binding restores
+  immediate key-down behavior. Primary artwork and live information remain independent.
+
+- **Countdown on the initiating key.** A timer started with a physical keypad key
+  shows its remaining time on that key and the GTK preview (`45s`, `02:15`,
+  `01:02:15`). It stays on its original page and survives artwork refreshes and
+  device reconnects. Completion, cancellation or replacement restores normal
+  artwork, button text or live information. Test action and non-key controls still
+  start timers without claiming a key; completion notifications and chimes are unchanged.
+
 - **Reference-only configuration exports.** Version 4 exports contain no image,
   sound or other file contents, including key, touch-strip and zone backgrounds.
   Configuration entries are readable UTF-8 text, never base64. File targets keep their basenames under
@@ -230,6 +245,12 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Fixed
 
+- Countdown timers now send a native system notification with their duration on
+  completion, including while the configuration window is hidden. Cancellation
+  and replacement do not notify or play sound. Completion also plays a theme alarm
+  via optional `canberra-gtk-play`, without interrupting Play audio file actions.
+  If the helper is missing or fails, the GTK bell is attempted (possibly silent);
+  the completion status and notification remain available.
 - A stale error colour could remain on the "Manual selection" status after a
   failed profile creation.
 - Opening a page name dialog no longer enabled manual profile selection before

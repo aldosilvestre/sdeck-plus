@@ -64,9 +64,7 @@ fn ms(value: u64) -> Duration {
 #[test]
 fn key_hold_editor_maps_optional_mode_and_preserves_existing_event_choices() {
     use crate::{
-        binding_editor::{
-            events_for_control, trigger_from_selection, ControlKind, EventKind,
-        },
+        binding_editor::{events_for_control, trigger_from_selection, ControlKind, EventKind},
         key_hold_editor::key_trigger,
     };
     assert_eq!(
@@ -74,7 +72,10 @@ fn key_hold_editor_maps_optional_mode_and_preserves_existing_event_choices() {
         vec![EventKind::ButtonPress]
     );
     for number in 1..=8 {
-        assert_eq!(key_trigger(number, false).unwrap(), Trigger::KeyPress(number));
+        assert_eq!(
+            key_trigger(number, false).unwrap(),
+            Trigger::KeyPress(number)
+        );
         assert_eq!(key_trigger(number, true).unwrap(), Trigger::KeyHold(number));
     }
     for number in [0, 9, 255] {
@@ -273,7 +274,9 @@ fn key_hold_explicit_cancel_for_disconnect_shutdown_import_suppresses_held_keys(
 fn key_hold_down_snapshot_at_deadline_dispatches_explicit_none_only_once() {
     let fixture = Fixture::new();
     let mut store = fixture.store(false);
-    store.bind("Base", Trigger::KeyHold(1), Action::None).unwrap();
+    store
+        .bind("Base", Trigger::KeyHold(1), Action::None)
+        .unwrap();
     let mut keys = KeyHoldRecognizer::default();
     assert!(keys.update(&store, 0, true, ms(0)).is_empty());
     assert!(keys.update(&store, 0, true, ms(1999)).is_empty());
@@ -322,7 +325,10 @@ fn key_hold_remains_keypad_owned_when_touchscreen_pages_change() {
         .initialize_touchscreens(&organization, &mut artwork)
         .unwrap();
     assert_eq!(
-        store.binding_layer("Base", &Trigger::KeyHold(1)).unwrap().name,
+        store
+            .binding_layer("Base", &Trigger::KeyHold(1))
+            .unwrap()
+            .name,
         "Base"
     );
     let mut keys = KeyHoldRecognizer::default();

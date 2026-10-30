@@ -52,6 +52,7 @@ impl TouchscreenControls {
         let callback = runtime.clone();
         self.create.connect_clicked(move |_| {
             let Some(profile) = callback.touchscreen_profile() else { return; };
+            callback.cancel_key_holds();
             let result = callback.layers.borrow_mut().create_touchscreen_page(&profile);
             match result {
                 Ok(_) => {
@@ -91,6 +92,7 @@ impl TouchscreenControls {
                 if already_selected {
                     return;
                 }
+                callback.cancel_key_holds();
                 if callback
                     .layers
                     .borrow_mut()
@@ -210,6 +212,7 @@ impl FeatureRuntime {
             .remove_touchscreen_page(profile, owner)
             .map_err(|error| error.to_string())?;
         self.artwork.remove_layers(&[owner.to_owned()])?;
+        self.cancel_key_holds();
         *self.layers.borrow_mut() = layers;
         self.refresh_selection();
         self.persist(self.layers.borrow().clone());
@@ -220,6 +223,7 @@ impl FeatureRuntime {
             self.report("Touchscreen navigation is unavailable.", true);
             return;
         };
+        self.cancel_key_holds();
         let changed = self
             .layers
             .borrow_mut()

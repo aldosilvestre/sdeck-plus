@@ -21,11 +21,13 @@ mod configuration;
 mod folder_panel;
 mod folders;
 mod key_swap;
+mod key_hold;
 mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
 mod touchscreen;
+mod timer_sound;
 
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
@@ -218,7 +220,11 @@ pub(crate) struct FeatureRuntime {
     pub(crate) indicator: Label,
     pub(crate) status: Label,
     pub(crate) timer_status: Label,
+    key_hold: Rc<RefCell<sdeck_plus::key_hold::KeyHoldRecognizer>>,
+    key_epoch: Instant,
+    key_generation: Rc<Cell<u64>>,
     timer: Rc<RefCell<Option<glib::SourceId>>>,
+    timer_sound: Rc<RefCell<timer_sound::TimerSound>>,
     page_return: Rc<RefCell<Option<glib::SourceId>>>,
     info_watch: Rc<RefCell<Option<mpsc::Sender<std::collections::BTreeSet<InfoSource>>>>>,
     brightness: Rc<Cell<u8>>,
@@ -358,7 +364,11 @@ impl FeatureRuntime {
             indicator,
             status,
             timer_status,
+            key_hold: Rc::default(),
+            key_epoch: Instant::now(),
+            key_generation: Rc::new(Cell::new(0)),
             timer: Rc::new(RefCell::new(None)),
+            timer_sound: Rc::new(RefCell::new(timer_sound::TimerSound::default())),
             page_return: Rc::new(RefCell::new(None)),
             info_watch: Rc::new(RefCell::new(None)),
             brightness: Rc::new(Cell::new(100)),
@@ -514,6 +524,7 @@ impl FeatureRuntime {
         let Some(key) = key else {
             return;
         };
+        self.cancel_key_holds();
         if !self.layers.borrow_mut().select(&key) {
             self.report("Could not select profile: its page is unavailable.", true);
             return;
@@ -953,6 +964,7 @@ impl FeatureRuntime {
     }
 
     fn navigate(&self, action: &NavigationAction) {
+        self.cancel_key_holds();
         let result = {
             let mut organization = self.organization.borrow_mut();
             let Some(organization) = organization.as_mut() else {
@@ -975,6 +987,22 @@ impl FeatureRuntime {
         }
     }
 
+    pub(crate) fn execute_input(&self, event: &sdeck_plus::protocol::Event) {
+        if self.configuration_operation.get() == Some(configuration::Operation::Import) {
+            return;
+        }
+        if let sdeck_plus::protocol::Event::Key { index, pressed } = event {
+            let dispatches = self.key_hold.borrow_mut().update(
+                &self.layers.borrow(), *index, *pressed, self.key_epoch.elapsed(),
+            );
+            self.dispatch_keys(dispatches);
+            return;
+        }
+        if let Some((identity, action, page_return)) = crate::matching_binding(&self.layers, event) {
+            self.execute_with_return(identity, action, page_return);
+        }
+    }
+
     pub(crate) fn execute(&self, binding_id: String, action: Action) {
         if self.configuration_operation.get() == Some(configuration::Operation::Import) {
             return;
@@ -982,6 +1010,7 @@ impl FeatureRuntime {
         match action {
             Action::None => {}
             Action::SwitchLayer(target) => {
+                self.cancel_key_holds();
                 if self.layers.borrow_mut().apply_switch(&target) {
                     self.refresh_selection();
                     self.persist(self.layers.borrow().clone());
@@ -1082,6 +1111,7 @@ impl FeatureRuntime {
             Duration::from_secs(u64::from(value.seconds)),
             move || {
                 runtime.page_return.borrow_mut().take();
+                runtime.cancel_key_holds();
                 if runtime.layers.borrow_mut().select(&value.layer) {
                     runtime.manual_profile.set(true);
                     runtime.refresh_selection();
@@ -1094,6 +1124,15 @@ impl FeatureRuntime {
         ));
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_timer_sound_for_test(
+        &self,
+        launcher: gtk::gio::SubprocessLauncher,
+        argv: Vec<std::ffi::OsString>,
+    ) {
+        *self.timer_sound.borrow_mut() = timer_sound::TimerSound::for_test(launcher, argv);
+    }
+
     fn start_timer(&self, seconds: u32) {
         self.cancel_countdown();
         let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
@@ -1102,6 +1141,9 @@ impl FeatureRuntime {
         self.timer_status.set_visible(true);
         let status = self.timer_status.clone();
         let source = self.timer.clone();
+        let sound = self.timer_sound.clone();
+        let artwork = self.artwork.clone();
+        let mut last_seconds = u64::from(seconds);
         *self.timer.borrow_mut() = Some(glib::timeout_add_local(
             Duration::from_millis(250),
             move || {
@@ -1109,16 +1151,36 @@ impl FeatureRuntime {
                 if remaining.is_zero() {
                     // The returning Break removes the source; do not remove it twice.
                     source.borrow_mut().take();
+                    artwork.clear_countdown();
                     status.set_text("Timer complete.");
                     crate::ui::feedback(&status, false);
-                    // Native GTK bell honors the user's existing bell setting.
-                    status.error_bell();
+                    let bell = status.downgrade();
+                    sound.borrow().play(move |success| {
+                        if !success {
+                            if let Some(status) = bell.upgrade() {
+                                status.error_bell();
+                            }
+                        }
+                    });
+                    if let Some(app) = status
+                        .root()
+                        .and_downcast::<gtk::Window>()
+                        .and_then(|window| window.application())
+                    {
+                        let notification = gtk::gio::Notification::new("Timer complete");
+                        notification.set_body(Some(&format!(
+                            "Your {seconds}-second timer has finished."
+                        )));
+                        app.send_notification(Some("timer-complete"), &notification);
+                    }
                     glib::ControlFlow::Break
                 } else {
-                    status.set_text(&format!(
-                        "Timer: {}s remaining",
-                        remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0)
-                    ));
+                    let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0);
+                    if seconds != last_seconds {
+                        last_seconds = seconds;
+                        status.set_text(&format!("Timer: {seconds}s remaining"));
+                        artwork.update_countdown(seconds);
+                    }
                     glib::ControlFlow::Continue
                 }
             },
@@ -1129,6 +1191,7 @@ impl FeatureRuntime {
         if let Some(source) = self.timer.borrow_mut().take() {
             source.remove();
         }
+        self.artwork.clear_countdown();
     }
 
     /// Cancels the countdown and any pending page return.

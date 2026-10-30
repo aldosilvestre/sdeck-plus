@@ -40,6 +40,7 @@ impl FeatureRuntime {
         if !removed.is_empty() {
             self.artwork.remove_layers(&removed)?;
         }
+        self.cancel_key_holds();
         *self.layers.borrow_mut() = layers;
         *self.organization.borrow_mut() = Some(organization);
         self.manual_profile.set(true);
