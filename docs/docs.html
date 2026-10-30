@@ -353,7 +353,7 @@ cd sdeck-plus
               <p>Choose <strong>Play sound</strong>, then <strong>Choose file...</strong> or enter a path. WAV, MP3, FLAC, OGG, M4A/AAC, Opus and other formats decoded by
                  <code>mpv</code> work. Playback replaces the app's previous sound; <strong>More actions &gt; Multimedia &gt; Stop audio file</strong> stops only app-owned playback,
                  not other media players.</p>
-              <p>Saving a <strong>Play sound</strong> or <strong>Open file or folder</strong> binding with an absolute path creates a symbolic link to the target inside the app's data directory (<code>links/</code>) and stores that link. Relative paths are kept unchanged. The editor still shows the real file, and the same file reuses one link. If the original is moved or deleted, or a relative path such as <code>dry-fart.mp3</code> or <code>~/Music/dry-fart.mp3</code> points nowhere (playback does not expand <code>~</code>), the key or touch section shows a red cross so you can see it could not run: it replaces the key's own image while the file is missing, and any button text stays on top of the cross, otherwise it is labeled <strong>Missing file</strong>. Live information still takes priority over the warning. The warning updates when the control is redrawn (for example after saving or changing pages), not immediately when a file disappears. Images are different: they are copied into the app's own storage when chosen. Exported bundles contain sound contents, not links; Open file/folder targets are restored to their original paths and are not embedded.</p>
+              <p>Saving a <strong>Play sound</strong> or <strong>Open file or folder</strong> binding with an absolute path creates a symbolic link to the target inside the app's data directory (<code>links/</code>) and stores that link. Relative paths are kept unchanged. The editor still shows the real file, and the same file reuses one link. If the original is moved or deleted, or a relative path such as <code>dry-fart.mp3</code> or <code>~/Music/dry-fart.mp3</code> points nowhere (playback does not expand <code>~</code>), the key or touch section shows a red cross so you can see it could not run: it replaces the key's own image while the file is missing, and any button text stays on top of the cross, otherwise it is labeled <strong>Missing file</strong>. Live information still takes priority over the warning. The warning updates when the control is redrawn (for example after saving or changing pages), not immediately when a file disappears. Images are different: they are copied into the app's own storage when chosen. Exports contain relative file references only: <code>./sonidos/name.mp3</code>, <code>./imagenes/name.png</code> and <code>./archivos/name</code>. Neither file contents nor original parent paths or symlink destinations are included.</p>
               <figure>
                 <a href="screenshots/missing-file.png"><img width="1000" height="950" src="screenshots/missing-file.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 shows a missing sound as a red cross behind its text."></a>
                 <figcaption>Key 8 shows a missing sound as a red cross behind its text.</figcaption>
@@ -580,12 +580,18 @@ cd sdeck-plus
             </article>
             <article class="card">
               <h4>Backup and restore</h4>
-              <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, artwork filenames, button text,
-                 live information, page returns, local sound files and OBS settings, including credentials. Format version 2 stores images as <code>{"path":"assets/filename.png"}</code>
-                 without image data. Executables, commands, document paths, autostart and tray preferences stay local references.</p>
-              <p>Before importing, the named images must exist in the destination's <code>assets</code> directory; missing or invalid images cancel the import. Import validates the file, asks
-                 for confirmation, keeps the previous configuration in a sibling backup directory whose path it shows, and refreshes the device. It never runs a saved action.
-                 Older exports with embedded images are still accepted.</p>
+              <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, image references, button text,
+                 live information, page returns and OBS settings, including credentials. Format version 4 stores configuration as readable UTF-8 text inside JSON, without base64. It never includes image, sound or other file contents.</p>
+              <p>File references keep only a type folder and filename: <code>/home/aldo/.../musica/cancionX.mp3</code> becomes <code>./sonidos/cancionX.mp3</code>;
+                 all background images (keys, the whole touch strip and individual zones) use <code>./imagenes/filename.png</code>, and Open file/folder targets and explicit executable paths use <code>./archivos/filename</code>.
+                 Existing copied images keep their app-assigned filename. Original directories and symlink destinations stay on the source machine.
+                 Different targets with the same exported name cancel export with a collision message; rename one before retrying.</p>
+              <p>On import, these folders are relative to the destination's application data directory, not the export file or the working directory. Local files and links are preserved;
+                 missing files do not block import. Put the files (or local symlinks to them) in those folders, or choose replacement files in the editor. Existing copied images in
+                 <code>assets</code> can be reused by filename. An existing unreadable or invalid image cancels import rather than discarding its assignment.
+                 Import validates first, asks for confirmation, retains previous configuration metadata in a sibling backup, and refreshes the device without running saved actions.
+                 Legacy version-1, version-2 and version-3 exports remain importable with their original encoding and file-reference rules.</p>
+              <p>This is not general secret redaction: URLs, command text, application arguments, button text and OBS credentials remain verbatim. Review those fields before sharing.</p>
             </article>
             <article class="card">
               <h4>System tray and login startup</h4>

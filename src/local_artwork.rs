@@ -136,7 +136,7 @@ impl ArtworkStore {
     pub fn assigned_path_in_layer(&self, layer: &str, target: ArtworkTarget) -> Option<PathBuf> {
         self.assignments
             .get(&(layer.to_owned(), target))
-            .map(|name| self.root.join("assets").join(name))
+            .map(|name| artwork_path(&self.root, name))
     }
 
     pub fn button_text_in_layer(&self, layer: &str, target: ArtworkTarget) -> Option<&ButtonText> {
@@ -357,10 +357,25 @@ impl ArtworkStore {
         for name in old.values() {
             if !self.assignments.values().any(|remaining| remaining == name) {
                 // Cleanup is best effort after the configuration commit, never before.
-                let _ = fs::remove_file(self.root.join("assets").join(name));
+                if !name.starts_with("./imagenes/") {
+                    let _ = fs::remove_file(self.root.join("assets").join(name));
+                }
             }
         }
         Ok(())
+    }
+}
+
+fn artwork_path(root: &Path, name: &str) -> PathBuf {
+    if let Some(leaf) = name.strip_prefix("./imagenes/") {
+        let path = root.join("imagenes").join(leaf);
+        // Reuse pre-v3 copied artwork on the same machine, without exporting it.
+        if !path.exists() && root.join("assets").join(leaf).exists() {
+            return root.join("assets").join(leaf);
+        }
+        path
+    } else {
+        root.join("assets").join(name)
     }
 }
 
@@ -433,10 +448,12 @@ fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
         let Some(target) = ArtworkTarget::from_id(id) else {
             return invalid_config(strict, "unknown artwork target");
         };
-        if name.is_empty()
-            || name.starts_with('.')
-            || name.contains(['/', '\\', '\t', '\n', '\r'])
-            || Path::new(name).components().count() != 1
+        let portable = name.starts_with("./imagenes/");
+        let leaf = name.strip_prefix("./imagenes/").unwrap_or(name);
+        if leaf.is_empty()
+            || leaf.starts_with('.')
+            || leaf.contains(['/', '\\', '\t', '\n', '\r'])
+            || Path::new(leaf).components().count() != 1
         {
             return invalid_config(strict, "unsafe artwork asset path");
         }
@@ -444,8 +461,14 @@ fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
         if result.contains_key(&key) {
             return invalid_config(strict, "duplicate artwork assignment");
         }
-        let path = root.join("assets").join(name);
-        if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file()) {
+        let path = artwork_path(root, name);
+        if portable && !path.try_exists()? {
+            result.insert(key, name.to_owned());
+            continue;
+        }
+        if !fs::metadata(&path).is_ok_and(|metadata| metadata.is_file())
+            || (!portable && fs::symlink_metadata(&path)?.file_type().is_symlink())
+        {
             if strict {
                 return invalid_config(true, "missing or non-regular artwork asset");
             }

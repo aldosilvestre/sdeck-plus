@@ -641,10 +641,10 @@
             <p class="feature-num">11 · Backup</p>
             <h3>Save and restore configuration</h3>
             <p>The top-right <strong>Menu</strong> imports and exports <code>.sdeck-plus.json</code> files containing
-               saved profiles, pages, bindings, button text, local sounds, information and OBS settings.</p>
-            <p>Version 2 exports image filenames only, without base64 image data. The named files must already exist
-               in the destination's <code>assets</code> directory. Import validates first, asks for confirmation
-               and keeps the previous configuration as a backup. Older version-1 exports remain supported.</p>
+               saved profiles, pages, bindings, button text, file references, information and OBS settings.</p>
+            <p>Version 4 exports readable configuration without base64: <code>./sonidos/cancionX.mp3</code>, <code>./imagenes/name.png</code> and <code>./archivos/name</code> replace original file locations.
+               No background-image, sound or other file contents, nor symlink destinations, travel with the export. Import preserves local files and lets you reconnect missing references on the destination machine.
+               Older version-1, version-2 and version-3 exports remain supported.</p>
             <p class="callout">Exports include saved OBS credentials. Keep them private. Cancel or an invalid file leaves the current configuration intact.</p>
           </div>
           <div class="stage stack">
@@ -653,7 +653,7 @@
               <span class="zoom-badge" aria-hidden="true"><svg><use href="#i-zoom"/></svg></span>
             </a>
             <a class="zoom" href="screenshots/import-configuration.png" data-caption="Import confirmation explaining replacement and backup, with Cancel as the default">
-              <img width="440" height="164" src="screenshots/import-configuration.png" loading="lazy" decoding="async" alt="Import confirmation explaining replacement and backup, with Cancel as the default">
+              <img width="440" height="195" src="screenshots/import-configuration.png" loading="lazy" decoding="async" alt="Import confirmation explaining replacement and backup, with Cancel as the default">
               <span class="zoom-badge" aria-hidden="true"><svg><use href="#i-zoom"/></svg></span>
             </a>
           </div>
@@ -707,7 +707,7 @@
             <p class="feature-num">Files · Availability</p>
             <h3>See when a sound is missing</h3>
             <p>Sounds and file/folder targets with absolute paths are saved through app-owned symbolic links. The editor shows the original path; images remain copied.</p>
-            <p>If a target disappears, a red cross replaces its image and stays visible behind button text when the control is redrawn. Live information still takes priority. Exports contain sound contents, not symlinks; file/folder targets retain their original paths.</p>
+            <p>If a target disappears, a red cross replaces its image and stays visible behind button text when the control is redrawn. Live information still takes priority. Exports contain only relative references in <code>sonidos</code>, <code>imagenes</code> and <code>archivos</code>; no file contents or original parent paths.</p>
           </div>
           <div class="stage">
             <a class="zoom" href="screenshots/missing-file.png" data-caption="Missing sound marked with a red cross on Key 8, behind its existing text">

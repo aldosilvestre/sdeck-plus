@@ -174,17 +174,12 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     assert!(bundle.is_file());
     let exported: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&bundle).unwrap()).unwrap();
-    let image_name = format!(
-        "assets/{}",
-        image_path.file_name().unwrap().to_str().unwrap()
-    );
-    let image_entry = exported["files"]
+    assert_eq!(exported["version"], 4);
+    assert!(exported["files"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["path"] == image_name)
-        .unwrap();
-    assert!(image_entry.get("data").is_none());
+        .all(|entry| !entry["path"].as_str().unwrap().contains('/')));
 
     layers
         .borrow_mut()

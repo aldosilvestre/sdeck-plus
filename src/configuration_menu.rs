@@ -192,7 +192,8 @@ impl ConfigurationMenu {
         content.set_margin_top(16);
         content.set_margin_bottom(16);
         content.append(&ui::helper(
-            "Importing replaces all profiles, actions, artwork and settings. \
+            "Importing replaces profiles, actions, artwork assignments and settings. \
+             Reference-only imports keep local files; missing files must be selected locally. \
              Your previous configuration will be retained as a backup.",
         ));
         let file = gtk::Label::new(Some(&path.to_string_lossy()));

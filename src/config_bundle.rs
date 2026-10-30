@@ -1,9 +1,10 @@
 //! Portable, versioned configuration snapshots. No action is ever executed.
 //!
-//! The JSON envelope is `{ "format": "sdeck-plus", "version": 2,
-//! "files": [{ "path": "...", "data": "<standard base64>" }] }`.
-//! Image entries contain only `"path": "assets/<filename>"`, without data.
-//! Import resolves these names from the existing local assets directory.
+//! Version 4 contains only readable UTF-8 configuration entries, without base64.
+//! Background images and other structured
+//! file targets use ./imagenes/<name>, ./sonidos/<name>, ./archivos/<name>.
+//! Original directories and file contents are not exported. Legacy v1-v3
+//! bundles remain importable. Commands, arguments and credentials are verbatim.
 //! Limits are 192 MiB encoded, 128 MiB decoded, 32 MiB per asset/media file,
 //! 4 MiB per configuration file, and 4096 entries. Credentials are included;
 //! bundles and installed files are owner-only, and staging directories are 0700.
@@ -18,7 +19,6 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, DirBuilder, OpenOptions},
@@ -268,36 +268,136 @@ fn audio_bindings(layers: &LayerStore) -> Vec<(String, crate::layers::Trigger, P
         .collect()
 }
 
-/// A sound behind one of the application's own links is read through it, to
-/// the real file; every other path keeps the strict no-symlink rule.
-fn through_app_link(root: &Path, source: &Path) -> io::Result<PathBuf> {
-    if source.starts_with(root.join("links")) {
-        fs::canonicalize(source)
-    } else {
-        Ok(source.to_path_buf())
-    }
+// References contain only an app-local type folder and a filename, never a
+// source machine's directory structure. No target contents are read.
+fn portable_name(path: &Path, folder: &str) -> io::Result<String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| safe_name(n))
+        .ok_or_else(|| invalid("unsafe reference filename"))?;
+    Ok(format!("./{folder}/{name}"))
 }
 
-/// "Open" bindings whose target is one of the application's links, with the
-/// real target in place of the link.
-fn app_linked_open_targets(
-    layers: &LayerStore,
+fn local_reference(root: &Path, reference: &Path, folder: &str) -> io::Result<PathBuf> {
+    let text = reference
+        .to_str()
+        .ok_or_else(|| invalid("non-UTF-8 file reference"))?;
+    let prefix = format!("./{folder}/");
+    let name = text
+        .strip_prefix(&prefix)
+        .filter(|n| safe_name(n))
+        .ok_or_else(|| invalid("file reference must use its relative type folder"))?;
+    Ok(root.join(folder).join(name))
+}
+
+fn transform_files(
+    layers: &mut LayerStore,
     root: &Path,
-) -> Vec<(String, crate::layers::Trigger, Action)> {
-    layers
+    destination: Option<&Path>,
+) -> io::Result<()> {
+    let bindings: Vec<_> = layers
         .configurations()
         .flat_map(|layer| {
-            let name = &layer.name;
-            layer.bindings.iter().filter_map(move |(trigger, action)| {
-                let real = crate::asset_links::unlink_action(root, action);
-                let is_open = matches!(
-                    action,
-                    Action::Feature(FeatureAction::Desktop(DesktopAction::Open { .. }))
-                );
-                (is_open && real != *action).then(|| (name.clone(), trigger.clone(), real))
-            })
+            layer
+                .bindings
+                .iter()
+                .map(|(trigger, action)| (layer.name.clone(), trigger.clone(), action.clone()))
         })
-        .collect()
+        .collect();
+    let mut names = BTreeMap::new();
+    for (layer, trigger, action) in bindings {
+        let action = if destination.is_some() {
+            crate::asset_links::unlink_action(root, &action)
+        } else {
+            action
+        };
+        let convert = |path: &Path,
+                       folder: &str,
+                       names: &mut BTreeMap<String, PathBuf>|
+         -> io::Result<PathBuf> {
+            if let Some(destination) = destination {
+                let original = if path.is_absolute() {
+                    path.to_owned()
+                } else {
+                    std::env::current_dir()?.join(path)
+                };
+                let original = fs::canonicalize(&original).unwrap_or(original);
+                if original == destination {
+                    return Err(invalid("export destination is a file used by a binding"));
+                }
+                let relative = portable_name(path, folder)?;
+                if names.get(&relative).is_some_and(|known| known != &original) {
+                    return Err(invalid(format!(
+                        "multiple files map to {relative}; rename one before exporting"
+                    )));
+                }
+                names.insert(relative.clone(), original);
+                Ok(relative.into())
+            } else {
+                local_reference(root, path, folder)
+            }
+        };
+        let transformed = match action {
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
+                Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                    path: convert(&path, "sonidos", &mut names)?,
+                }))
+            }
+            Action::Feature(FeatureAction::Desktop(DesktopAction::Open { target })) => {
+                let path = if target.starts_with("file://") && destination.is_some() {
+                    gtk::glib::filename_from_uri(&target)
+                        .map_err(|_| invalid("invalid file URI"))?
+                        .0
+                } else if target.starts_with("file://") {
+                    return Err(invalid("file reference must use its relative type folder"));
+                } else if target.contains("://") || target.starts_with("mailto:") {
+                    continue;
+                } else {
+                    PathBuf::from(target)
+                };
+                Action::Feature(FeatureAction::Desktop(DesktopAction::Open {
+                    target: convert(&path, "archivos", &mut names)?
+                        .to_string_lossy()
+                        .into_owned(),
+                }))
+            }
+            Action::Launch { executable, args }
+                if executable.components().count() > 1 || executable.is_absolute() =>
+            {
+                Action::Launch {
+                    executable: convert(&executable, "archivos", &mut names)?,
+                    args,
+                }
+            }
+            _ => continue,
+        };
+        layers.bind_configuration(&layer, trigger, transformed)?;
+    }
+    Ok(())
+}
+
+fn portable_artwork(bytes: &[u8]) -> io::Result<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).map_err(|_| invalid("artwork manifest is not UTF-8"))?;
+    let mut lines = text.lines();
+    let mut result = format!("{}\n", lines.next().unwrap_or_default());
+    for line in lines {
+        let mut fields: Vec<_> = line.split('\t').map(str::to_owned).collect();
+        if matches!(fields.len(), 2 | 3) {
+            let last = fields
+                .last_mut()
+                .ok_or_else(|| invalid("malformed artwork row"))?;
+            // Validate existing names before discarding any parent components.
+            let name = last.strip_prefix("./imagenes/").unwrap_or(last);
+            if !safe_name(name) {
+                return Err(invalid("unsafe artwork asset path"));
+            }
+            *last = portable_name(Path::new(name), "imagenes")?;
+        }
+        result.push_str(&fields.join("\t"));
+        result.push('\n');
+    }
+    Ok(result.into_bytes())
 }
 
 fn bind_audio(
@@ -321,7 +421,7 @@ fn persist_layers(layers: &LayerStore) -> io::Result<()> {
     )
 }
 
-/// Export the whitelisted configuration and local audio into one JSON bundle.
+/// Export configuration only, with type-specific relative file references.
 ///
 /// All validation happens on an isolated snapshot. The destination is replaced
 /// only after validation, serialization and staging cleanup have succeeded.
@@ -351,79 +451,12 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
                 Err(error) => return Err(error),
             }
         }
-        match fs::symlink_metadata(root.join("assets")) {
-            Ok(metadata) => {
-                if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                    return Err(invalid("assets must be a regular directory"));
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        // Only manifest-owned artwork is copied, never stale assets, logs or
-        // other files that happen to live inside the application directory.
-        if let Some(manifest) = files.get("artwork.conf") {
-            let manifest = std::str::from_utf8(manifest)
-                .map_err(|_| invalid("artwork manifest is not UTF-8"))?;
-            let names: BTreeSet<_> = manifest
-                .lines()
-                .skip(1)
-                .filter_map(|line| {
-                    let fields: Vec<_> = line.split('\t').collect();
-                    match fields.as_slice() {
-                        [_, name] | [_, _, name] => Some((*name).to_owned()),
-                        _ => None,
-                    }
-                })
-                .collect();
-            for name in names {
-                if !safe_name(&name) {
-                    return Err(invalid("unsafe asset filename"));
-                }
-                let bytes = read_regular(&root.join("assets").join(&name), MAX_FILE)?;
-                add(&mut files, format!("assets/{name}"), bytes)?;
-            }
+        if let Some(manifest) = files.get_mut("artwork.conf") {
+            *manifest = portable_artwork(manifest)?;
         }
         materialize(&stage, &files)?;
         let mut layers = validate(&stage)?;
-        for (layer, trigger, path) in audio_bindings(&layers) {
-            let source = if path.is_absolute() {
-                path.clone()
-            } else {
-                std::env::current_dir()?.join(&path)
-            };
-            let source = through_app_link(&root, &source)?;
-            if fs::canonicalize(&source)? == destination {
-                return Err(invalid(
-                    "export destination is a sound file used by a binding",
-                ));
-            }
-            let bytes = read_regular(&source, MAX_FILE)?;
-            let extension = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .filter(|ext| {
-                    !ext.is_empty()
-                        && ext.len() <= 16
-                        && ext.bytes().all(|b| b.is_ascii_alphanumeric())
-                })
-                .unwrap_or("bin");
-            let portable = format!(
-                "media/{:x}.{}",
-                Sha256::digest(&bytes),
-                extension.to_ascii_lowercase()
-            );
-            if !files.contains_key(&portable) {
-                add(&mut files, portable.clone(), bytes.clone())?;
-                write_private(&stage.join(&portable), &bytes)?;
-            }
-            bind_audio(&mut layers, &layer, trigger, portable.into())?;
-        }
-        // A bundle never points into this machine's data directory: file
-        // targets name the real file again, as the user chose it.
-        for (layer, trigger, action) in app_linked_open_targets(&layers, &root) {
-            layers.bind_configuration(&layer, trigger, action)?;
-        }
+        transform_files(&mut layers, &root, Some(&destination))?;
         persist_layers(&layers)?;
         // Strict artwork loading may migrate a legacy manifest in the snapshot.
         for name in ["layers.conf", "artwork.conf", "touchscreen.json"] {
@@ -436,17 +469,20 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
                 )?;
             }
         }
-        validate_portable_audio(&layers, &stage)?;
         let bundle = Bundle {
             format: "sdeck-plus".into(),
-            version: 2,
+            version: 4,
             files: files
                 .into_iter()
                 .map(|(path, bytes)| {
-                    let data = (!path.starts_with("assets/")).then(|| STANDARD.encode(bytes));
-                    Entry { path, data }
+                    let text = String::from_utf8(bytes)
+                        .map_err(|_| invalid("configuration is not UTF-8"))?;
+                    Ok(Entry {
+                        path,
+                        data: Some(text),
+                    })
                 })
-                .collect(),
+                .collect::<io::Result<_>>()?,
         };
         let bytes = serde_json::to_vec(&bundle).map_err(io::Error::other)?;
         if bytes.len() > MAX_BUNDLE {
@@ -511,7 +547,7 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
     let bytes = read_regular(source, MAX_BUNDLE)?;
     let bundle: Bundle =
         serde_json::from_slice(&bytes).map_err(|_| invalid("invalid configuration bundle JSON"))?;
-    if bundle.format != "sdeck-plus" || !matches!(bundle.version, 1 | 2) {
+    if bundle.format != "sdeck-plus" || !matches!(bundle.version, 1..=4) {
         return Err(invalid("unsupported bundle format or version"));
     }
     if bundle.files.len() > MAX_ENTRIES {
@@ -521,10 +557,14 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
     let mut files = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for entry in bundle.files {
-        if !allowed(&entry.path) || !seen.insert(entry.path.clone()) {
+        if !allowed(&entry.path)
+            || !seen.insert(entry.path.clone())
+            || (bundle.version >= 3 && !CONFIGS.contains(&entry.path.as_str()))
+        {
             return Err(invalid("unsafe, duplicate or oversized bundle entry"));
         }
         let bytes = match entry.data {
+            Some(data) if bundle.version == 4 => data.into_bytes(),
             Some(data) => {
                 if data.len() > limit(&entry.path).div_ceil(3) * 4 {
                     return Err(invalid("oversized bundle entry"));
@@ -553,6 +593,9 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
+    if bundle.version >= 3 {
+        return import_references(&root, &files);
+    }
     let stage = stage_for(&root)?;
     let result = (|| {
         materialize(&stage, &files)?;
@@ -569,6 +612,71 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
         }
         install(&stage, &root, |from, to| fs::rename(from, to))
     })();
+    cleanup(&stage, result)
+}
+
+// Move local file directories intact, never dereference their symlinks or copy
+// their contents into the bundle. On a failed install they return to old root.
+fn import_references(
+    root: &Path,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> io::Result<Option<PathBuf>> {
+    let stage = stage_for(root)?;
+    let mut moved = Vec::new();
+    let result = (|| {
+        materialize(&stage, files)?;
+        let mut layers = validate(&stage)?;
+        transform_files(&mut layers, root, None)?;
+        persist_layers(&layers)?;
+        for name in [
+            "assets", "media", "links", "imagenes", "sonidos", "archivos",
+        ] {
+            let source = root.join(name);
+            match fs::symlink_metadata(&source) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    if stage.join(name).exists() {
+                        fs::remove_dir(stage.join(name))?;
+                    }
+                    fs::rename(&source, stage.join(name))?;
+                    moved.push(name);
+                }
+                Ok(_) => {
+                    return Err(invalid(
+                        "local file directory must not be a symlink or file",
+                    ))
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    if !stage.join(name).exists() {
+                        private_dir(&stage.join(name))?;
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        validate(&stage)?;
+        for name in CONFIGS {
+            if stage.join(name).exists() {
+                fs::set_permissions(stage.join(name), fs::Permissions::from_mode(0o600))?;
+            }
+        }
+        install(&stage, root, |from, to| fs::rename(from, to))
+    })();
+    if result.is_err() {
+        for name in moved.into_iter().rev() {
+            if let Err(error) = fs::rename(stage.join(name), root.join(name)) {
+                // Never clean a stage that still holds original user files.
+                return Err(io::Error::other(format!(
+                    "{}; {error}; local files retained at {}",
+                    result
+                        .as_ref()
+                        .err()
+                        .map(ToString::to_string)
+                        .unwrap_or_default(),
+                    stage.display()
+                )));
+            }
+        }
+    }
     cleanup(&stage, result)
 }
 

@@ -8,6 +8,15 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Reference-only configuration exports.** Version 4 exports contain no image,
+  sound or other file contents, including key, touch-strip and zone backgrounds.
+  Configuration entries are readable UTF-8 text, never base64. File targets keep their basenames under
+  `./imagenes/`, `./sonidos/` or `./archivos/`, without original parent paths or
+  symlink destinations. Import resolves these folders under the local app data
+  directory, preserves local files/links and allows missing references. Legacy
+  v1/v2/v3 imports remain supported. Duplicate target basenames cancel export;
+  command text, application arguments, URLs and OBS credentials remain verbatim.
+
 - **Website redesign.** The GitHub Pages site is now a landing page
   (`docs/index.html`) and a documentation page (`docs/docs.html`) sharing
   `docs/assets/site.css` and `docs/assets/site.js`, with light and dark themes

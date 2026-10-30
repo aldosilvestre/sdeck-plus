@@ -40,7 +40,8 @@ permissions on its own.
   show or hide sources over the local WebSocket server.
 - **System tray** with optional start at login.
 - **Light and dark GTK themes** following the desktop.
-- **Configuration backup and restore** through a single export file.
+- **Configuration backup and restore** through a single readable metadata-only export file (no base64);
+  images, sounds and other files use relative references and stay local.
 
 ## Installation
 

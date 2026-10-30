@@ -61,15 +61,11 @@ const LAYERS: &[u8] = b"streamdeck-layers-v1\nactive\t42617365\nlayer\t42617365\
 fn contents(path: &Path) -> BTreeMap<String, Vec<u8>> {
     let bundle: Bundle = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     assert_eq!(bundle.format, "sdeck-plus");
-    assert_eq!(bundle.version, 2);
+    assert_eq!(bundle.version, 4);
     bundle
         .files
         .into_iter()
-        .filter_map(|entry| {
-            entry
-                .data
-                .map(|data| (entry.path, STANDARD.decode(data).unwrap()))
-        })
+        .filter_map(|entry| entry.data.map(|data| (entry.path, data.into_bytes())))
         .collect()
 }
 
@@ -97,7 +93,7 @@ fn export_preserves_configuration_and_external_audio_inputs() {
 }
 
 #[test]
-fn audio_and_files_behind_app_links_export_as_real_contents_without_symlinks() {
+fn audio_and_files_behind_app_links_export_only_relative_references() {
     use crate::{
         asset_links::link_action, desktop_actions::DesktopAction, features::FeatureAction,
     };
@@ -133,30 +129,29 @@ fn audio_and_files_behind_app_links_export_as_real_contents_without_symlinks() {
     let bundle = f.0.join("links.sdeck-plus.json");
     export(&root, &bundle).unwrap();
     let files = contents(&bundle);
-    let (_, bytes) = files
-        .iter()
-        .find(|(path, _)| path.starts_with("media/"))
-        .expect("the sound travels inside the bundle");
-    assert_eq!(bytes, b"linked audio");
+    assert!(files.keys().all(|path| CONFIGS.contains(&path.as_str())));
     let exported = String::from_utf8_lossy(&files["layers.conf"]).into_owned();
     assert!(
         !exported.contains("links/"),
         "no reference into the data directory: {exported}"
     );
-    // The imported-elsewhere bundle names the real file to open, not our link.
+    // Only a type folder and basename survive on the other machine.
     let imported = f.root("elsewhere");
     import(&bundle, &imported).unwrap();
     let store = LayerStore::open_at(&imported).unwrap();
     assert_eq!(
         store.binding("Base", &Trigger::KeyPress(2)),
         Some(as_action(DesktopAction::Open {
-            target: notes.to_string_lossy().into_owned()
+            target: imported
+                .join("archivos/notes.txt")
+                .to_string_lossy()
+                .into_owned()
         }))
     );
 }
 
 #[test]
-fn relative_audio_uses_the_playback_working_directory() {
+fn relative_audio_exports_only_its_filename() {
     let f = Fixture::new();
     let root = f.root("source");
     // Cargo runs tests from the package root. Different bytes in the config
@@ -177,11 +172,15 @@ fn relative_audio_uses_the_playback_working_directory() {
     let bundle = f.0.join("export.sdeck-plus.json");
     export(&root, &bundle).unwrap();
     let files = contents(&bundle);
-    let (_, bytes) = files
-        .iter()
-        .find(|(path, _)| path.starts_with("media/"))
-        .unwrap();
-    assert_eq!(bytes, &expected);
+    assert!(files.keys().all(|path| CONFIGS.contains(&path.as_str())));
+    assert!(!files.values().any(|bytes| bytes == &expected));
+    let destination = f.0.join("destination");
+    import(&bundle, &destination).unwrap();
+    let restored = LayerStore::open_at(&destination).unwrap();
+    for (_, _, path) in audio_bindings(&restored) {
+        assert_eq!(path, destination.join("sonidos/Cargo.toml"));
+        assert!(!path.exists());
+    }
 }
 
 #[test]
@@ -267,25 +266,10 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
     assert_private(&bundle, 0o600);
     assert_eq!(fs::read(original.join("layers.conf")).unwrap(), before);
     let exported: serde_json::Value = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
-    let image_path = format!("assets/{}", asset.file_name().unwrap().to_str().unwrap());
-    let image_entry = exported["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["path"] == image_path)
-        .unwrap();
-    assert!(
-        image_entry.get("data").is_none(),
-        "exported images must contain only their filename"
-    );
+    let image_path = format!("imagenes/{}", asset.file_name().unwrap().to_str().unwrap());
+    assert_eq!(exported["version"], 4);
     let files = contents(&bundle);
-    assert_eq!(
-        files
-            .keys()
-            .filter(|path| path.starts_with("media/"))
-            .count(),
-        1
-    );
+    assert!(files.keys().all(|path| CONFIGS.contains(&path.as_str())));
     assert!(!files
         .keys()
         .any(|path| path.contains("unrelated") || path.ends_with(".tmp")));
@@ -295,7 +279,7 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
 
     let destination = f.root("installed");
     write_private(&destination.join("previous-marker"), b"old configuration").unwrap();
-    private_dir(&destination.join("assets")).unwrap();
+    private_dir(&destination.join("imagenes")).unwrap();
     write_private(&destination.join(&image_path), &fs::read(&asset).unwrap()).unwrap();
     let backup = import(&bundle, &destination).unwrap().unwrap();
     assert_eq!(
@@ -323,15 +307,23 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
     );
     assert_eq!(
         imported.layers()["Base"].bindings[&Trigger::KeyPress(4)],
-        launch
+        Action::Launch {
+            executable: destination.join("archivos/application"),
+            args: vec!["--flag".into()]
+        }
     );
     assert_eq!(
         imported.layers()["Base"].bindings[&Trigger::KeyPress(5)],
-        open
+        Action::Feature(FeatureAction::Desktop(DesktopAction::Open {
+            target: destination
+                .join("archivos/document")
+                .to_string_lossy()
+                .into_owned()
+        }))
     );
     for (_, _, path) in audio_bindings(&imported) {
-        assert!(path.starts_with(destination.join("media")));
-        assert_eq!(fs::read(path).unwrap(), b"RIFF isolated audio fixture");
+        assert_eq!(path, destination.join("sonidos/sound.WAV"));
+        assert!(!path.exists());
     }
     assert_eq!(
         fs::read(destination.join("organization.json")).unwrap(),
@@ -364,7 +356,7 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
 }
 
 #[test]
-fn referenced_images_require_valid_local_assets_before_replacement() {
+fn referenced_images_allow_missing_files_and_preserve_existing_local_images() {
     let f = Fixture::new();
     let source = f.root("source");
     let image = f.0.join("image.png");
@@ -379,26 +371,22 @@ fn referenced_images_require_valid_local_assets_before_replacement() {
     let bundle = f.0.join("references.sdeck-plus.json");
     export(&source, &bundle).unwrap();
     let destination = f.root("installed");
-    private_dir(&destination.join("assets")).unwrap();
-    let local = destination.join("assets").join(asset.file_name().unwrap());
+    import(&bundle, &destination).unwrap();
+    let artwork = ArtworkStore::open_at_for_layer(&destination, Some("Base")).unwrap();
+    let local = artwork
+        .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1))
+        .unwrap();
+    assert!(local.starts_with(destination.join("imagenes")));
+    assert!(!local.exists());
     let before = fs::read(destination.join("layers.conf")).unwrap();
-
-    assert!(import(&bundle, &destination).is_err());
-    assert_eq!(fs::read(destination.join("layers.conf")).unwrap(), before);
     write_private(&local, b"not an image").unwrap();
     assert!(import(&bundle, &destination).is_err());
     assert_eq!(fs::read(destination.join("layers.conf")).unwrap(), before);
+    assert_eq!(fs::read(&local).unwrap(), b"not an image");
     fs::remove_file(&local).unwrap();
     symlink(&asset, &local).unwrap();
-    assert!(import(&bundle, &destination).is_err());
-    assert_eq!(fs::read(destination.join("layers.conf")).unwrap(), before);
-    assert!(!fs::read_dir(&f.0).unwrap().any(|entry| {
-        entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .contains(".stage-")
-    }));
+    import(&bundle, &destination).unwrap();
+    assert_eq!(fs::read_link(&local).unwrap(), asset);
 }
 
 #[test]
@@ -445,7 +433,7 @@ fn first_install_and_extensionless_audio_are_supported() {
     export(&source, &bundle).unwrap();
     assert!(contents(&bundle)
         .keys()
-        .any(|path| path.starts_with("media/") && path.ends_with(".bin")));
+        .all(|path| CONFIGS.contains(&path.as_str())));
     assert!(import(&bundle, &f.0.join("new")).unwrap().is_none());
 }
 
@@ -581,7 +569,7 @@ fn rejects_missing_or_external_import_audio() {
 }
 
 #[test]
-fn export_rejects_symlinks_and_nonregular_inputs_and_preserves_destination() {
+fn export_rejects_nonregular_configs_but_never_reads_sound_targets() {
     let f = Fixture::new();
     let source = f.root("source");
     let destination = f.0.join("export.sdeck-plus.json");
@@ -594,12 +582,13 @@ fn export_rejects_symlinks_and_nonregular_inputs_and_preserves_destination() {
     private_dir(&source.join("obs.json")).unwrap();
     assert!(export(&source, &destination).is_err());
     fs::remove_dir(source.join("obs.json")).unwrap();
+    assert_eq!(fs::read(&destination).unwrap(), b"previous export");
     let mut layers = LayerStore::open_at(&source).unwrap();
     let audio = f.0.join("linked.wav");
     symlink(&external, &audio).unwrap();
     bind_audio(&mut layers, "Base", Trigger::KeyPress(1), audio).unwrap();
     layers.persist().unwrap();
-    assert!(export(&source, &destination).is_err());
+    export(&source, &destination).unwrap();
     let linked_directory = f.0.join("linked-directory");
     symlink(&source, &linked_directory).unwrap();
     bind_audio(
@@ -610,8 +599,10 @@ fn export_rejects_symlinks_and_nonregular_inputs_and_preserves_destination() {
     )
     .unwrap();
     layers.persist().unwrap();
-    assert!(export(&source, &destination).is_err());
-    assert_eq!(fs::read(&destination).unwrap(), b"previous export");
+    export(&source, &destination).unwrap();
+    assert!(contents(&destination)
+        .keys()
+        .all(|path| CONFIGS.contains(&path.as_str())));
 }
 
 #[test]
@@ -799,13 +790,388 @@ fn touchscreen_pages_and_unselected_audio_roundtrip_with_independent_owners() {
     else {
         panic!("touch audio missing")
     };
-    assert!(path.starts_with(target.join("media")));
-    assert_eq!(fs::read(path).unwrap(), b"portable touch audio");
+    assert_eq!(path, target.join("sonidos/touch.wav"));
+    assert!(!path.exists());
     let Some(Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path }))) =
         restored.binding("Base", &Trigger::EncoderClockwise(4))
     else {
         panic!("dial audio missing")
     };
-    assert!(path.starts_with(target.join("media")));
-    assert_eq!(fs::read(path).unwrap(), b"portable touch audio");
+    assert_eq!(path, target.join("sonidos/touch.wav"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn metadata_export_uses_type_folders_without_contents_or_parent_paths() {
+    let f = Fixture::new();
+    let root = f.root("source");
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    let action = |a| Action::Feature(FeatureAction::Desktop(a));
+    let sound = crate::asset_links::link_action(
+        &root,
+        action(DesktopAction::PlayAudio {
+            path: f.0.join("private/music/cancionX.mp3"),
+        }),
+    )
+    .unwrap();
+    layers
+        .bind_configuration("Base", Trigger::KeyPress(1), sound)
+        .unwrap();
+    layers
+        .bind_configuration(
+            "Base",
+            Trigger::KeyPress(2),
+            action(DesktopAction::Open {
+                target: f
+                    .0
+                    .join("private/documents/notes.txt")
+                    .to_string_lossy()
+                    .into_owned(),
+            }),
+        )
+        .unwrap();
+    layers
+        .bind_configuration(
+            "Base",
+            Trigger::KeyPress(3),
+            Action::Launch {
+                executable: f.0.join("private/bin/tool"),
+                args: vec!["--flag".into()],
+            },
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let before = fs::read(root.join("layers.conf")).unwrap();
+    // A portable image assignment remains valid even before its local file exists.
+    write_private(
+        &root.join("artwork.conf"),
+        b"streamdeck-artwork-v3\n42617365\tkeypad-1\t./imagenes/picture.png\n",
+    )
+    .unwrap();
+    let bundle = f.0.join("references.json");
+    export(&root, &bundle).unwrap();
+    let envelope: Bundle = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
+    assert_eq!(envelope.version, 4);
+    assert!(envelope
+        .files
+        .iter()
+        .all(|entry| CONFIGS.contains(&entry.path.as_str())));
+    let decoded: Vec<_> = envelope
+        .files
+        .iter()
+        .map(|e| e.data.as_ref().unwrap().as_bytes().to_vec())
+        .collect();
+    assert!(decoded
+        .iter()
+        .all(|b| !String::from_utf8_lossy(b).contains(f.0.to_str().unwrap())));
+    assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+    let destination = f.root("destination");
+    private_dir(&destination.join("sonidos")).unwrap();
+    let local_sound = destination.join("sonidos/cancionX.mp3");
+    symlink(f.0.join("local-only/original.mp3"), &local_sound).unwrap();
+    let link_before = fs::read_link(&local_sound).unwrap();
+    let backup = import(&bundle, &destination).unwrap().unwrap();
+    assert!(backup.join("layers.conf").exists());
+    assert_eq!(fs::read_link(&local_sound).unwrap(), link_before);
+    let restored = LayerStore::open_at(&destination).unwrap();
+    assert_eq!(
+        restored.binding("Base", &Trigger::KeyPress(1)),
+        Some(action(DesktopAction::PlayAudio {
+            path: destination.join("sonidos/cancionX.mp3"),
+        }))
+    );
+    assert_eq!(
+        restored.binding("Base", &Trigger::KeyPress(2)),
+        Some(action(DesktopAction::Open {
+            target: destination
+                .join("archivos/notes.txt")
+                .to_string_lossy()
+                .into_owned(),
+        }))
+    );
+    assert_eq!(
+        restored.binding("Base", &Trigger::KeyPress(3)),
+        Some(Action::Launch {
+            executable: destination.join("archivos/tool"),
+            args: vec!["--flag".into()],
+        })
+    );
+    let artwork = ArtworkStore::open_at_for_layer(&destination, Some("Base")).unwrap();
+    assert!(artwork
+        .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1))
+        .unwrap()
+        .ends_with("imagenes/picture.png"));
+    let again = f.0.join("again.json");
+    export(&destination, &again).unwrap();
+    assert_eq!(fs::read(&bundle).unwrap(), fs::read(&again).unwrap());
+}
+
+#[test]
+fn export_rejects_ambiguous_basenames_without_changing_inputs_or_destination() {
+    let f = Fixture::new();
+    let root = f.root("source");
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    for (key, folder) in [(1, "a"), (2, "b")] {
+        bind_audio(
+            &mut layers,
+            "Base",
+            Trigger::KeyPress(key),
+            f.0.join(folder).join("same.mp3"),
+        )
+        .unwrap();
+    }
+    layers.persist().unwrap();
+    let before = fs::read(root.join("layers.conf")).unwrap();
+    let bundle = f.0.join("collision.json");
+    write_private(&bundle, b"keep destination").unwrap();
+    let error = export(&root, &bundle).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "multiple files map to ./sonidos/same.mp3; rename one before exporting"
+    );
+    assert_eq!(fs::read(&bundle).unwrap(), b"keep destination");
+    assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+}
+
+#[test]
+fn legacy_v2_embedded_audio_and_local_image_references_still_import() {
+    let f = Fixture::new();
+    let source = f.root("source");
+    let image = f.0.join("legacy.png");
+    Pixbuf::new(Colorspace::Rgb, false, 8, 1, 1)
+        .unwrap()
+        .savev(&image, "png", &[])
+        .unwrap();
+    let asset = ArtworkStore::open_at_for_layer(&source, Some("Base"))
+        .unwrap()
+        .assign_in_layer("Base", ArtworkTarget::Keypad(1), &image)
+        .unwrap();
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    bind_audio(
+        &mut layers,
+        "Base",
+        Trigger::KeyPress(1),
+        "media/old.mp3".into(),
+    )
+    .unwrap();
+    layers.persist().unwrap();
+    let image_entry = format!("assets/{}", asset.file_name().unwrap().to_str().unwrap());
+    let entries = vec![
+        Entry {
+            path: "layers.conf".into(),
+            data: Some(STANDARD.encode(fs::read(source.join("layers.conf")).unwrap())),
+        },
+        Entry {
+            path: "artwork.conf".into(),
+            data: Some(STANDARD.encode(fs::read(source.join("artwork.conf")).unwrap())),
+        },
+        Entry {
+            path: image_entry.clone(),
+            data: None,
+        },
+        Entry {
+            path: "media/old.mp3".into(),
+            data: Some(STANDARD.encode(b"legacy sound")),
+        },
+    ];
+    let bundle = f.0.join("v2.json");
+    write_private(
+        &bundle,
+        &serde_json::to_vec(&Bundle {
+            format: "sdeck-plus".into(),
+            version: 2,
+            files: entries,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let target = f.root("target");
+    let before = fs::read(target.join("layers.conf")).unwrap();
+    assert!(import(&bundle, &target).is_err());
+    assert_eq!(fs::read(target.join("layers.conf")).unwrap(), before);
+    private_dir(&target.join("assets")).unwrap();
+    write_private(&target.join(&image_entry), &fs::read(&asset).unwrap()).unwrap();
+    import(&bundle, &target).unwrap();
+    let store = LayerStore::open_at(&target).unwrap();
+    assert_eq!(audio_bindings(&store)[0].2, target.join("media/old.mp3"));
+    assert_eq!(
+        fs::read(target.join("media/old.mp3")).unwrap(),
+        b"legacy sound"
+    );
+    assert!(ArtworkStore::open_at_for_layer(&target, Some("Base"))
+        .unwrap()
+        .assigned_path(ArtworkTarget::Keypad(1))
+        .unwrap()
+        .is_file());
+}
+
+#[test]
+fn v3_rejects_unsafe_references_payloads_and_symlinked_local_directories_without_data_loss() {
+    let f = Fixture::new();
+    let root = f.root("installed");
+    private_dir(&root.join("assets")).unwrap();
+    write_private(&root.join("assets/keep"), b"local data").unwrap();
+    let before = fs::read(root.join("layers.conf")).unwrap();
+    for bad in [
+        "./sonidos/../escape.mp3",
+        "/private/sound.mp3",
+        "./archivos/wrong.mp3",
+    ] {
+        let source = f.root(&format!(
+            "source-{}",
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut layers = LayerStore::open_at(&source).unwrap();
+        bind_audio(&mut layers, "Base", Trigger::KeyPress(1), bad.into()).unwrap();
+        layers.persist().unwrap();
+        let bundle = Bundle {
+            format: "sdeck-plus".into(),
+            version: 3,
+            files: vec![Entry {
+                path: "layers.conf".into(),
+                data: Some(STANDARD.encode(fs::read(source.join("layers.conf")).unwrap())),
+            }],
+        };
+        let path = f.0.join("malformed.json");
+        fs::write(&path, serde_json::to_vec(&bundle).unwrap()).unwrap();
+        assert!(import(&path, &root).is_err());
+        assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+        assert_eq!(fs::read(root.join("assets/keep")).unwrap(), b"local data");
+    }
+    let source = f.root("valid-source");
+    let bundle = f.0.join("valid.json");
+    export(&source, &bundle).unwrap();
+    symlink(&f.0, root.join("sonidos")).unwrap();
+    assert!(import(&bundle, &root).is_err());
+    assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+    assert_eq!(fs::read(root.join("assets/keep")).unwrap(), b"local data");
+    assert_eq!(fs::read_link(root.join("sonidos")).unwrap(), f.0);
+    let mut payload: Bundle = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
+    payload.files.push(Entry {
+        path: "media/secret.mp3".into(),
+        data: Some(STANDARD.encode(b"forbidden")),
+    });
+    fs::write(&bundle, serde_json::to_vec(&payload).unwrap()).unwrap();
+    assert!(import(&bundle, &root).is_err());
+    assert!(!root.join("media/secret.mp3").exists());
+    assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+}
+
+#[test]
+fn background_images_export_as_references_and_all_configuration_is_plain_text() {
+    let f = Fixture::new();
+    let root = f.root("source");
+    let image = f.0.join("background.png");
+    let pixbuf = Pixbuf::new(Colorspace::Rgb, false, 8, 2, 2).unwrap();
+    pixbuf.fill(0x55aa33ff);
+    pixbuf.savev(&image, "png", &[]).unwrap();
+    let image_bytes = fs::read(&image).unwrap();
+    let mut artwork = ArtworkStore::open_at_for_layer(&root, Some("Base")).unwrap();
+    let targets = [
+        ArtworkTarget::Keypad(1),
+        ArtworkTarget::TouchStripBackground,
+        ArtworkTarget::EncoderZone(1),
+    ];
+    let names: Vec<_> = targets
+        .into_iter()
+        .map(|target| {
+            artwork
+                .assign_in_layer("Base", target, &image)
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    let bundle = f.0.join("backgrounds.json");
+    export(&root, &bundle).unwrap();
+    let serialized = fs::read(&bundle).unwrap();
+    let envelope: Bundle = serde_json::from_slice(&serialized).unwrap();
+    assert!(envelope
+        .files
+        .iter()
+        .all(|entry| CONFIGS.contains(&entry.path.as_str())));
+    let manifest = envelope
+        .files
+        .iter()
+        .find(|entry| entry.path == "artwork.conf")
+        .unwrap()
+        .data
+        .as_deref()
+        .unwrap();
+    assert!(manifest.starts_with("streamdeck-artwork-v3\n"));
+    assert_eq!(envelope.version, 4);
+    for name in &names {
+        assert!(manifest.contains(&format!("./imagenes/{name}")));
+    }
+    assert!(!String::from_utf8_lossy(&serialized).contains(&STANDARD.encode(&image_bytes)));
+    assert!(!String::from_utf8_lossy(&serialized).contains(image.to_str().unwrap()));
+    for entry in &envelope.files {
+        let text = entry.data.as_deref().unwrap();
+        if entry.path.ends_with(".json") {
+            serde_json::from_str::<serde_json::Value>(text).unwrap();
+        } else {
+            assert!(
+                text.starts_with("streamdeck-"),
+                "configuration must be raw text: {}",
+                entry.path
+            );
+        }
+    }
+    let target = f.0.join("target");
+    import(&bundle, &target).unwrap();
+    let mut layers = LayerStore::open_at(&target).unwrap();
+    let organization = Organization::open_at(&target, &layers).unwrap();
+    let mut restored = ArtworkStore::open_at_for_layer(&target, Some("Base")).unwrap();
+    layers
+        .initialize_touchscreens(&organization, &mut restored)
+        .unwrap();
+    let touchscreen = layers.touchscreen_owner("Base").unwrap();
+    for (control, name) in targets.into_iter().zip(names) {
+        let owner = if matches!(control, ArtworkTarget::Keypad(_)) {
+            "Base"
+        } else {
+            touchscreen
+        };
+        assert_eq!(
+            restored.assigned_path_in_layer(owner, control),
+            Some(target.join("imagenes").join(name))
+        );
+        assert!(!restored
+            .assigned_path_in_layer(owner, control)
+            .unwrap()
+            .exists());
+    }
+}
+
+#[test]
+fn legacy_v3_base64_configuration_still_imports_relative_file_references() {
+    let f = Fixture::new();
+    let root = f.root("source");
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    bind_audio(
+        &mut layers,
+        "Base",
+        Trigger::KeyPress(1),
+        f.0.join("private/song.mp3"),
+    )
+    .unwrap();
+    layers.persist().unwrap();
+    let path = f.0.join("legacy-v3.json");
+    export(&root, &path).unwrap();
+    let mut bundle: Bundle = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle.version = 3;
+    for entry in &mut bundle.files {
+        entry.data = Some(STANDARD.encode(entry.data.take().unwrap().as_bytes()));
+    }
+    fs::write(&path, serde_json::to_vec(&bundle).unwrap()).unwrap();
+    let destination = f.0.join("destination");
+    import(&path, &destination).unwrap();
+    let restored = LayerStore::open_at(&destination).unwrap();
+    assert_eq!(
+        audio_bindings(&restored)[0].2,
+        destination.join("sonidos/song.mp3")
+    );
+    assert!(!destination.join("sonidos/song.mp3").exists());
 }
