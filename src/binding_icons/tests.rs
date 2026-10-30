@@ -838,3 +838,91 @@ fn a_missing_file_key_keeps_its_red_cross_whatever_the_text_placement() {
         );
     }
 }
+
+/// The whole-canvas shadow `with_soft_shadow` drew before it clipped its
+/// stamps to the ink, kept to prove the clipped one is pixel-identical.
+fn unclipped_soft_shadow(
+    cairo: &cairo::Context,
+    unit: f64,
+    draw: impl FnOnce(&cairo::Context) -> Result<(), cairo::Error>,
+) -> Result<(), cairo::Error> {
+    cairo.push_group();
+    let drawn = draw(cairo);
+    let picture = cairo.pop_group()?;
+    drawn?;
+    let unit = unit.max(0.75);
+    for (reach, alpha) in SHADOW_RINGS {
+        for index in 0..12 {
+            let angle = f64::from(index) * TAU / 12.0;
+            cairo.save()?;
+            cairo.translate(
+                angle.cos() * reach * unit,
+                (angle.sin() * reach + 0.6) * unit,
+            );
+            cairo.set_source_rgba(0.0, 0.0, 0.0, alpha);
+            let stamped = cairo.mask(&picture);
+            cairo.restore()?;
+            stamped?;
+        }
+    }
+    cairo.set_source(&picture)?;
+    cairo.paint()
+}
+
+#[test]
+fn clipped_soft_shadow_matches_the_whole_canvas_shadow() {
+    type Shadow = fn(
+        &cairo::Context,
+        f64,
+        Box<dyn FnOnce(&cairo::Context) -> Result<(), cairo::Error>>,
+    ) -> Result<(), cairo::Error>;
+    let render = |shadow: Shadow, setup: u8| {
+        let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 200, 100).unwrap();
+        {
+            let context = cairo::Context::new(&surface).unwrap();
+            context.set_source_rgba(0.2, 0.4, 0.6, 0.5);
+            context.paint().unwrap();
+            match setup {
+                // A clip already in place offsets the group surface.
+                1 => {
+                    context.rectangle(30.5, 10.0, 120.0, 70.0);
+                    context.clip();
+                }
+                // A transformed context takes the whole-canvas fallback.
+                2 => {
+                    context.translate(12.3, -4.7);
+                    context.scale(1.4, 0.9);
+                }
+                _ => {}
+            }
+            for (center, size) in [((40.0, 50.0), 36.0), ((187.0, 8.0), 30.0)] {
+                shadow(
+                    &context,
+                    size / 24.0,
+                    Box::new(move |cairo| {
+                        paint(
+                            cairo,
+                            BindingIcon::Record,
+                            center,
+                            size,
+                            (1.0, 1.0, 1.0, 0.9),
+                        )
+                    }),
+                )
+                .unwrap();
+            }
+            // Nothing drawn still leaves its (empty) group as the source.
+            shadow(&context, 1.0, Box::new(|_| Ok(()))).unwrap();
+            assert!(context.source().type_() == cairo::PatternType::Surface);
+        }
+        let pixels = surface.data().unwrap().to_vec();
+        pixels
+    };
+    for setup in 0..3 {
+        assert!(
+            render(|c, u, d| with_soft_shadow(c, u, d), setup)
+                == render(|c, u, d| unclipped_soft_shadow(c, u, d), setup),
+            "setup {setup} differs from the whole-canvas shadow"
+        );
+    }
+}

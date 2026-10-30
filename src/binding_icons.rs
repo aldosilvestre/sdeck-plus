@@ -527,22 +527,118 @@ pub(crate) fn with_soft_shadow(
     let picture = cairo.pop_group()?;
     drawn?;
     let unit = unit.max(0.75);
-    for (reach, alpha) in [(0.6, 0.28), (1.3, 0.15), (2.3, 0.08)] {
-        for index in 0..12 {
-            let angle = f64::from(index) * TAU / 12.0;
-            cairo.save()?;
-            cairo.translate(
-                angle.cos() * reach * unit,
-                (angle.sin() * reach + 0.6) * unit,
+    let stamps: Vec<_> = SHADOW_RINGS
+        .iter()
+        .flat_map(|&(reach, alpha)| {
+            (0..12).map(move |index| {
+                let angle = f64::from(index) * TAU / 12.0;
+                let offset = (
+                    angle.cos() * reach * unit,
+                    (angle.sin() * reach + 0.6) * unit,
+                );
+                (offset, alpha)
+            })
+        })
+        .collect();
+    // Each stamp composites a whole-canvas mask, so the 36 stamps cost far
+    // more than the drawing. Clip them to the ink plus the farthest stamp:
+    // outside that the mask is transparent, so the pixels are the same.
+    cairo.save()?;
+    let mut margin = (0.0f64, 0.0f64);
+    for ((x, y), _) in &stamps {
+        let (x, y) = cairo.user_to_device_distance(*x, *y)?;
+        margin = (margin.0.max(x.abs()), margin.1.max(y.abs()));
+    }
+    let shown = match ink_extents(&picture) {
+        Some(Some((x, y, width, height))) => {
+            // Filtering a fractional offset reads one pixel past the shape.
+            let (grow_x, grow_y) = (margin.0.ceil() + 2.0, margin.1.ceil() + 2.0);
+            let matrix = cairo.matrix();
+            cairo.identity_matrix();
+            cairo.rectangle(
+                x - grow_x,
+                y - grow_y,
+                width + 2.0 * grow_x,
+                height + 2.0 * grow_y,
             );
-            cairo.set_source_rgba(0.0, 0.0, 0.0, alpha);
+            cairo.clip();
+            cairo.set_matrix(matrix);
+            true
+        }
+        // Nothing was drawn, so there is nothing to shadow.
+        Some(None) => false,
+        // Not a readable image group: shadow the whole canvas as before.
+        None => true,
+    };
+    let result = (|| {
+        if !shown {
+            return Ok(());
+        }
+        for ((x, y), alpha) in &stamps {
+            cairo.save()?;
+            cairo.translate(*x, *y);
+            cairo.set_source_rgba(0.0, 0.0, 0.0, *alpha);
             let stamped = cairo.mask(&picture);
             cairo.restore()?;
             stamped?;
         }
-    }
+        cairo.set_source(&picture)?;
+        cairo.paint()
+    })();
+    cairo.restore()?;
     cairo.set_source(&picture)?;
-    cairo.paint()
+    result
+}
+
+/// Shadow rings as (reach in grid units, alpha), twelve stamps each.
+const SHADOW_RINGS: [(f64, f64); 3] = [(0.6, 0.28), (1.3, 0.15), (2.3, 0.08)];
+
+/// The device-space box of a group's visible pixels: `None` when the group
+/// is not an image surface, `Some(None)` when nothing in it is visible.
+fn ink_extents(picture: &cairo::Pattern) -> Option<Option<(f64, f64, f64, f64)>> {
+    let pattern = cairo::SurfacePattern::try_from(picture.clone()).ok()?;
+    let surface = cairo::ImageSurface::try_from(pattern.surface().ok()?).ok()?;
+    if surface.format() != cairo::Format::ARgb32 || pattern.matrix() != cairo::Matrix::identity() {
+        return None;
+    }
+    let (width, height) = (surface.width(), surface.height());
+    let stride = usize::try_from(surface.stride()).ok()?;
+    // A group surface maps device (x, y) to its pixel (x + dx, y + dy).
+    let (dx, dy) = surface.device_offset();
+    let mut bounds: Option<(i32, i32, i32, i32)> = None;
+    surface
+        .with_data(|data| {
+            for row in 0..height {
+                let start = row as usize * stride;
+                let Some(pixels) = data.get(start..start + width as usize * 4) else {
+                    continue;
+                };
+                for (column, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                    // Premultiplied: an invisible pixel is all zero.
+                    if *pixel != [0, 0, 0, 0] {
+                        let column = column as i32;
+                        bounds = Some(match bounds {
+                            None => (column, row, column, row),
+                            Some((left, top, right, bottom)) => (
+                                left.min(column),
+                                top.min(row),
+                                right.max(column),
+                                bottom.max(row),
+                            ),
+                        });
+                    }
+                }
+            }
+        })
+        .ok()?;
+    Some(bounds.map(|(left, top, right, bottom)| {
+        (
+            f64::from(left) - dx,
+            f64::from(top) - dy,
+            f64::from(right - left + 1),
+            f64::from(bottom - top + 1),
+        )
+    }))
 }
 
 /// Stable name of an artwork target's marker, for example `target-zone-3`.
