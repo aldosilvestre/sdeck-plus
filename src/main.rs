@@ -1334,18 +1334,21 @@ fn build_widgets(
         connect_artwork_selection(
             &widget.clone().downcast::<Button>().unwrap(),
             &target_picker,
+            &artwork,
             ArtworkTarget::Keypad((index + 1) as u8),
         );
     }
     connect_artwork_selection(
         &strip_button,
         &target_picker,
+        &artwork,
         ArtworkTarget::TouchStripBackground,
     );
     for (index, button) in zone_select_buttons.iter().enumerate() {
         connect_artwork_selection(
             button,
             &target_picker,
+            &artwork,
             ArtworkTarget::EncoderZone((index + 1) as u8),
         );
     }
@@ -2185,7 +2188,8 @@ impl BindingUi {
     }
 
     fn update_for_control(&self, reset_event: bool) {
-        self.hold_toggle.set_visible(self.control_kind() == ControlKind::Button);
+        self.hold_toggle
+            .set_visible(self.control_kind() == ControlKind::Button);
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
@@ -2511,7 +2515,8 @@ impl BindingUi {
             sdeck_plus::key_hold_editor::key_trigger(number, self.hold_toggle.is_active())
         } else {
             trigger_from_selection(self.control_kind(), number, self.event_kind())
-        }.map_err(|error| error.0)?;
+        }
+        .map_err(|error| error.0)?;
         let owner = layers
             .borrow()
             .binding_layer(&layer, &trigger)
@@ -3882,15 +3887,24 @@ fn register_picture(artwork: &ArtworkUi, target: ArtworkTarget, picture: &Pictur
         .push((target, picture.clone()));
 }
 
-fn connect_artwork_selection(button: &Button, picker: &gtk::DropDown, target: ArtworkTarget) {
-    let picker = picker.clone();
+fn connect_artwork_selection(
+    button: &Button,
+    picker: &gtk::DropDown,
+    artwork: &ArtworkUi,
+    target: ArtworkTarget,
+) {
+    let (picker, artwork) = (picker.clone(), artwork.clone());
     button.connect_clicked(move |_| {
-        picker.set_selected(
-            ArtworkTarget::ALL
-                .iter()
-                .position(|item| *item == target)
-                .unwrap() as u32,
-        );
+        match ArtworkTarget::TOUCH.iter().position(|item| *item == target) {
+            Some(index) => picker.set_selected(index as u32),
+            // Keys are not in the picker; their right-click menu reads this target.
+            None => {
+                artwork.selected_target.set(target);
+                if let Some(editor) = artwork.text_editor.borrow().upgrade() {
+                    editor.load_context(false);
+                }
+            }
+        }
     });
 }
 
@@ -3907,7 +3921,7 @@ fn add_artwork_controls(
     artwork: &ArtworkUi,
 ) -> gtk::DropDown {
     let targets = gtk::StringList::new(
-        &ArtworkTarget::ALL
+        &ArtworkTarget::TOUCH
             .map(|target| match target {
                 ArtworkTarget::Keypad(key) => format!("Key {key}"),
                 ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
@@ -3940,7 +3954,7 @@ fn add_artwork_controls(
     parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {
-        if let Some(target) = ArtworkTarget::ALL.get(picker.selected() as usize) {
+        if let Some(target) = ArtworkTarget::TOUCH.get(picker.selected() as usize) {
             artwork_selection.selected_target.set(*target);
             if let Some(editor) = artwork_selection.text_editor.borrow().upgrade() {
                 editor.load_context(false);
@@ -4348,6 +4362,8 @@ mod tests {
     mod documentation_screenshots;
     mod folder_panel_tests;
     mod hover_help_tests;
+    mod key_hold_integration_tests;
+    mod key_hold_ui_tests;
     mod live_info_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;
@@ -4360,8 +4376,6 @@ mod tests {
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
     mod timer_countdown_tests;
-    mod key_hold_ui_tests;
-    mod key_hold_integration_tests;
     mod timer_notification_tests;
     mod touchscreen_tests;
     mod ui_refresh_tests;
@@ -6852,7 +6866,7 @@ mod tests {
         source: &std::path::Path,
     ) {
         let picker = &widgets.target_picker;
-        assert_eq!(picker.model().unwrap().n_items(), 13);
+        assert_eq!(picker.model().unwrap().n_items(), 5);
         let mut buttons = Vec::new();
         collect_layout_buttons(content, &mut buttons);
         let clear = buttons
@@ -6860,11 +6874,14 @@ mod tests {
             .find(|b| button_caption(b).as_deref() == Some("Clear"))
             .unwrap();
         assert!(clear.is_sensitive());
-        for (index, target) in ArtworkTarget::ALL.into_iter().enumerate() {
+        // Key 1 is the initial target and the picker starts on entry 0: move it so
+        // selecting entry 0 below is a real change.
+        picker.set_selected(1);
+        for (index, target) in ArtworkTarget::TOUCH.into_iter().enumerate() {
             picker.set_selected(index as u32);
             assert_eq!(artwork.selected_target.get(), target);
             let owner = artwork.capture_owner();
-            picker.set_selected(((index + 1) % 13) as u32);
+            picker.set_selected(((index + 1) % 5) as u32);
             // Encoder selection changes only the binding, never the image target.
             let encoder = widgets.encoder_labels[index % 4]
                 .parent()
@@ -6901,21 +6918,27 @@ mod tests {
         key_button(&widgets.key_labels[7]).emit_clicked();
         assert_eq!(artwork.selected_target.get(), ArtworkTarget::Keypad(8));
         artwork.import(&owner, source).unwrap();
+        // Keys do not move the picker: change entry, then return to the strip.
+        picker.set_selected(1);
         picker.set_selected(0);
+        assert_eq!(
+            artwork.selected_target.get(),
+            ArtworkTarget::TouchStripBackground
+        );
         clear.emit_clicked();
         assert!(artwork
             .store
             .borrow()
             .as_ref()
             .unwrap()
-            .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1))
+            .assigned_path_in_layer("Base", ArtworkTarget::TouchStripBackground)
             .is_some());
         assert!(artwork
             .store
             .borrow()
             .as_ref()
             .unwrap()
-            .assigned_path_in_layer("Studio", ArtworkTarget::Keypad(1))
+            .assigned_path_in_layer("Studio", ArtworkTarget::TouchStripBackground)
             .is_none());
         // Restore the layer models so the existing long-value matrix stays meaningful.
         artwork
@@ -6963,14 +6986,19 @@ mod tests {
                     );
                 }
                 ArtworkTarget::TouchStripBackground => {
+                    // Keys leave the picker alone: move it so entry 0 is a real change.
+                    picker.set_selected(1);
                     picker.set_selected(
-                        ArtworkTarget::ALL.iter().position(|t| t == target).unwrap() as u32,
+                        ArtworkTarget::TOUCH
+                            .iter()
+                            .position(|t| t == target)
+                            .unwrap() as u32,
                     );
                     assert_eq!(artwork.selected_target.get(), *target);
                 }
             }
         }
-        eprintln!("GTK shared editor executed: all 13 assign/clear paths, key/zone/background selection, encoder independence, chooser target/layer capture and active-layer Clear");
+        eprintln!("GTK shared editor executed: all 13 assign/clear paths (keys via their buttons), key/zone/background selection, encoder independence, chooser target/layer capture and active-layer Clear");
     }
 
     fn assert_scrollable_workspace(

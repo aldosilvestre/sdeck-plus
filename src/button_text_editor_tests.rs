@@ -188,11 +188,16 @@ fn assert_button_text_editor() {
         Some(&value)
     );
 
-    widgets.target_picker.set_selected(1);
+    // Keys are not in the picker; clicking one selects it like this.
+    let select = |target| {
+        artwork.selected_target.set(target);
+        editor.load_context(false);
+    };
+    select(ArtworkTarget::Keypad(2));
     assert_eq!(editor.value().unwrap(), ButtonText::default());
     editor.input.buffer().set_text("Second");
     editor.save.emit_clicked();
-    widgets.target_picker.set_selected(0);
+    select(ArtworkTarget::Keypad(1));
     assert_eq!(editor.value().unwrap(), value);
     layers.borrow_mut().select("Studio");
     artwork.refresh(false);
@@ -202,10 +207,10 @@ fn assert_button_text_editor() {
     layers.borrow_mut().select("Base");
     artwork.refresh(false);
     assert_eq!(editor.value().unwrap(), value);
-    widgets.target_picker.set_selected(8);
+    select(ArtworkTarget::TouchStripBackground);
     editor.popup();
     assert!(!editor.panel.is_visible(), "text controls are keypad-only");
-    widgets.target_picker.set_selected(0);
+    select(ArtworkTarget::Keypad(1));
     editor.remove.emit_clicked();
     assert!(artwork
         .store

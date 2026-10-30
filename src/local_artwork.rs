@@ -40,6 +40,15 @@ impl ArtworkTarget {
         Self::EncoderZone(4),
     ];
 
+    /// Destinations offered by the Appearance picker; keys use their right-click menu.
+    pub const TOUCH: [Self; 5] = [
+        Self::TouchStripBackground,
+        Self::EncoderZone(1),
+        Self::EncoderZone(2),
+        Self::EncoderZone(3),
+        Self::EncoderZone(4),
+    ];
+
     fn id(self) -> String {
         match self {
             Self::Keypad(n) if (1..=8).contains(&n) => format!("keypad-{n}"),

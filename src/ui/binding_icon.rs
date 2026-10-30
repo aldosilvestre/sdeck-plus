@@ -284,7 +284,8 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
                 let Some(row) = item.child() else {
                     return;
                 };
-                let Some(target) = ArtworkTarget::ALL.get(item.position() as usize).copied() else {
+                let Some(target) = ArtworkTarget::TOUCH.get(item.position() as usize).copied()
+                else {
                     return;
                 };
                 if let Some(marker) = row.first_child().and_downcast::<gtk::DrawingArea>() {
@@ -321,7 +322,7 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
 }
 
 fn sync_target_action(item: &gtk::ListItem, area: &gtk::DrawingArea, action: &TargetAction) {
-    let assigned = ArtworkTarget::ALL
+    let assigned = ArtworkTarget::TOUCH
         .get(item.position() as usize)
         .and_then(|target| action(*target));
     match assigned {

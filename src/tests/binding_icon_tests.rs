@@ -813,14 +813,6 @@ fn assert_target_menu_icons() {
     assert_eq!(
         markers,
         [
-            "target-key-1",
-            "target-key-2",
-            "target-key-3",
-            "target-key-4",
-            "target-key-5",
-            "target-key-6",
-            "target-key-7",
-            "target-key-8",
             "target-strip",
             "target-zone-1",
             "target-zone-2",
@@ -832,20 +824,14 @@ fn assert_target_menu_icons() {
         .iter()
         .filter_map(|(marker, action)| Some((marker.as_str(), action.as_deref()?)))
         .collect();
-    assert_eq!(
-        actions,
-        [
-            ("target-key-2", "command"),
-            ("target-zone-3", "named-event")
-        ]
-    );
+    assert_eq!(actions, [("target-zone-3", "named-event")]);
     // Reopening reflects bindings saved meanwhile.
     fixture
         .layers
         .borrow_mut()
         .bind(
             "Base",
-            Trigger::KeyPress(1),
+            Trigger::ZoneTap(1),
             Action::Feature(sdeck_plus::features::FeatureAction::Desktop(
                 sdeck_plus::desktop_actions::DesktopAction::Media(
                     sdeck_plus::desktop_actions::MediaCommand::Mute,
@@ -853,7 +839,7 @@ fn assert_target_menu_icons() {
             )),
         )
         .unwrap();
-    assert_eq!(rows()[0].1.as_deref(), Some("mute"));
+    assert_eq!(rows()[1].1.as_deref(), Some("mute"));
     eprintln!("GTK artwork target menu icon assertions executed");
 }
 
