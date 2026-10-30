@@ -3398,7 +3398,14 @@ impl ArtworkUi {
                     let elapsed = now.saturating_duration_since(started);
                     let moved =
                         sdeck_plus::info_render::marquee_offset(full, column, elapsed).round();
-                    if moved != offset {
+                    // A window hidden in the tray keeps its pictures; skip
+                    // drawing them until they are shown again.
+                    let visible = self
+                        .pictures
+                        .borrow()
+                        .iter()
+                        .any(|(shown, picture)| *shown == target && picture.is_mapped());
+                    if visible && moved != offset {
                         self.paint_info_preview_at(target, &self.info_value(source), now);
                     }
                 }
