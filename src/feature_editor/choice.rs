@@ -1,7 +1,7 @@
 use sdeck_plus::{binding_icons::BindingIcon, features::FeatureAction, layers::Action};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Choice {
+pub(crate) enum Choice {
     ShortcutToggle,
     Text,
     Open,
@@ -47,13 +47,13 @@ pub(super) enum Choice {
 impl Choice {
     /// The vocabulary icon of this action: by construction the same picture
     /// keys, sections and dials show once it is saved.
-    pub(super) fn binding_icon(self) -> BindingIcon {
+    pub(crate) fn binding_icon(self) -> BindingIcon {
         BindingIcon::for_action(&Action::Feature(self.example()))
     }
 
     /// The icon of one category row: System, Multimedia, Organization,
     /// Device, OBS.
-    pub(super) fn category_icon(category: u32) -> BindingIcon {
+    pub(crate) fn category_icon(category: u32) -> BindingIcon {
         match category {
             0 => BindingIcon::Application,
             1 => BindingIcon::PlayPause,
@@ -180,7 +180,7 @@ impl Choice {
         }
     }
 
-    pub(super) const ALL: [Self; 40] = [
+    pub(crate) const ALL: [Self; 40] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
@@ -223,7 +223,7 @@ impl Choice {
         Self::StopStreaming,
     ];
 
-    pub(super) fn category(self) -> u32 {
+    pub(crate) fn category(self) -> u32 {
         match self {
             Self::ShortcutToggle
             | Self::Text
@@ -268,7 +268,7 @@ impl Choice {
         }
     }
 
-    pub(super) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::ShortcutToggle => "Alternate shortcuts",
             Self::Text => "Type text",

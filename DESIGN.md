@@ -7,9 +7,35 @@ surfaces, restrained violet actions and cyan interaction cues frame the graphite
 keys, a touch strip and four circular encoders. Preserve its coordinates,
 artwork and existing functions.
 
-Configuration follows a short path: choose a profile, select a control, choose
-an action, complete its fields, then save. Secondary organization and artwork
-tools use progressive disclosure instead of competing with action editing.
+Configuration follows a short path: choose a profile, drag an action from the
+right-hand searchable catalog onto a keypad button, then complete its fields
+below the device preview. Parameter-free actions save on drop; parameterized
+actions remain drafts until Save binding, keeping the previous action active.
+Saving never executes the action. Clicking a catalog action assigns it to the
+selected key as a keyboard-accessible alternative. Unsaved edits block another
+catalog assignment; save them or discard them through control selection first.
+Existing key-to-key MOVE dragging still swaps saved settings and artwork;
+catalog COPY dragging has a distinct payload type and cyan target outline.
+The right-hand panel is one card with three segmented tabs: **Actions**, **Dials**
+and **Binding** (checked tab uses the selected-tab surface). Dials lists presets
+(Volume, Brightness, Tracks, Scroll, Pages) as two-line rows; dropping one on a
+dial, or clicking it with a dial selected, binds every event it lists in one
+validated, atomic save without executing anything and without touching the
+dial's other events, and refuses while edits are unsaved. Binding holds the
+live-information option for the selected control and explains when it is not
+available. The Actions tab groups actions into collapsible categories (Basic open by default,
+then System, Multimedia, Organization, Device and OBS), each header showing an
+icon, its name and an action count. Rows are frameless 36px targets with the
+action icon in a bordered tile and a drag grip that brightens on hover; dragging
+shows the row itself. Searching opens every category with matches, hides the
+rest and shows "No actions match your search." when nothing matches; clearing
+restores the categories as the user left them.
+Dropping a catalog action on a dial opens a small popover beside it offering
+Turn clockwise, Turn counterclockwise and Press; only the chosen event is
+assigned, with the same save-or-draft rule as keys, and clicking an action with a
+dial selected uses the event chosen in the inspector. The touch strip retains
+its existing action selector. Secondary
+organization and artwork tools use progressive disclosure.
 
 Touchscreen configuration is profile-owned and has its own page selection,
 independent of keypad pages and folders. Only the touch inspector shows the
@@ -127,7 +153,11 @@ device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
 the added return and information options within the default 1000x700 layout.
-Event/action selectors and Save/Test/Remove controls have 12px inline gaps.
+Event/action selectors (shown for dials and the touch strip only; a key has one
+event and takes its action from the catalog) and Save/Test/Remove controls have
+12px inline gaps. The "Do nothing…" hint is also hidden for an unassigned key, and a key's extended
+action hides its Category and Action dropdowns (the catalog chooses them) while
+keeping the action's icon, description and fields.
 A small "Options" heading groups the page-return and live-information checks.
 Binding feedback sits directly under its action buttons at an 8px vertical gap
 in primary ink, while the Appearance separator, a 4px extra top margin and an
@@ -140,8 +170,8 @@ compact confirmation style (Keep editing is the default, Discard changes is
 destructive). Remove leaves an Undo remove button under that status line until
 another control is loaded; it re-saves the binding, its page return and its
 live information.
-The related controls inside Appearance use 4px gaps so expanded artwork and
-the taller shortcut/argument fields still fit the default client height.
+The related controls inside Appearance use 4px gaps to keep expanded artwork
+and the taller shortcut/argument fields compact within the scrolling workspace.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
 
 Executable and arguments are one related adaptive group: two columns with a
@@ -155,8 +185,8 @@ Commands and named events occupy a full-width field. Hidden fields also hide
 their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.
-This redistribution makes room for breathing space without adding primary
-scrolling at the default 1000x700 size.
+The inspector-below-preview workspace uses vertical scrolling at the default
+1000x700 size, while retaining the form's compact field groups.
 
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
@@ -165,11 +195,11 @@ between Save/Remove actions; its 120px preview remains unchanged.
 
 The fixed-geometry device chassis sits in its preview card (440x428 at 1x,
 including padding and border). The card is presented through `ScaledBin`
-(`src/ui/scaled_bin.rs`): one uniform transform between 1.0x and 1.5x that
-fits the card into its region's width and height, top-aligned and horizontally
-centered. Hardware coordinates, artwork targets and the card's minimum size
-never change, so scaling only uses spare room and never adds scrolling; the
-card never stretches non-uniformly to match a tall form. GTK applies the same
+(`src/ui/scaled_bin.rs`) at a fixed 1.0x (`PREVIEW_MAX_SCALE`), top-aligned and
+horizontally centered: the preview keeps one size whatever the window width,
+the selected action or the form beside it, so it never jumps. Hardware
+coordinates, artwork targets and the card's size never change, and the card
+never stretches to match a tall form. GTK applies the same
 transform to drawing and pointer picking, so selection, drag-and-drop and
 focus keep working. The inspector uses its content height, without an
 arbitrary minimum height.
@@ -178,14 +208,28 @@ body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
 share the shell's leading/trailing edges. The native FlowBox decides wrapping
 from natural widths, so the preview's natural width stays unscaled; spare
-width reaches both regions through horizontal expansion and spare height
-reaches the preview row through vertical expansion. At 1000x700 the preview
-is about 1.1x; at 1280x800 and wider it reaches at least 1.25x.
+width reaches the preview/editor workspace and the action catalog through
+horizontal expansion. The preview does not consume spare vertical space so
+its inspector follows immediately underneath. The inspector sits in its own
+vertical scroller (`settings-scroll`) capped at about one window of height
+(window height minus 240px, at least 320px): a tall form scrolls inside that
+region instead of stretching the page, and the outer viewport only scrolls when
+the window is shorter than the preview itself. The action catalog has its own
+bounded scrolling list.
 At narrow widths the shell shrinks to the available width and the same native
 container stacks the regions; only vertical scrolling is needed at 640px.
 These two size-only containers are the only custom layout; there is no resize
 polling.
 
+Information buttons (the circled "i" beside a field label, `ui::field_help`) reveal their
+help on hover, or on keyboard focus when navigating with the keyboard, in a light popover
+with the topic as its title; no click is needed, the popover ignores the pointer so it never
+blocks the form, and there is no second native tooltip. A form that opens with the button
+focused does not pop the help open by itself.
+The Organize popover has a header with the menu's icon, the title "Profiles", a one-line
+subtitle and a frameless icon-only Close; its Edit/New tabs use the segmented style of the
+sidebar tabs; the Base note is a callout with a cyan accent edge; the footer has a divider
+and two equal-width buttons (Save changes primary, Delete profile destructive).
 The profile tabs, profile organization menu and OBS menu form a compact toolbar;
 Organize and OBS are frameless (hover shows the surface) so they stay secondary
 to the tabs. The organization popover contains only profile creation, application
@@ -221,9 +265,10 @@ away cancels, and validation errors stay inline without ending the edit.
 Delete still confirms and is unavailable while artwork writes are disabled.
 A page without folders shows a dim folder icon and "No folders on this page
 yet". Rows use only `@desk_*` tokens, so light and dark themes match, and
-keyboard focus draws the cyan focus ring. The physical preview and a minimum-300px inspector sit side by side
-when roomy and stack at narrow desktop widths. The outer `ScrolledWindow`
-owns primary vertical overflow. A text editor may scroll its own text; native
+keyboard focus draws the cyan focus ring. The physical preview and a minimum-300px
+inspector form one vertical workspace, beside the minimum-250px action catalog
+when roomy. The catalog wraps below that workspace at narrow desktop widths.
+The outer `ScrolledWindow` owns primary vertical overflow. A text editor may scroll its own text; native
 popovers contain secondary content. No primary field forces horizontal scroll.
 
 ## 5. Components and states
@@ -244,7 +289,11 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   mute, audio output, scroll, text, open file, website, close application,
   shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
   stream, microphone mute and visibility, plus `more` for More actions, `none`
-  (menus only) and a `generic` fallback (a four-pointed sparkle). The caller
+  (menus only), `missing-file` (a red cross in a soft circle, its own red
+  family, drawn instead of an icon on a key or touch section whose sound or
+  file target no longer exists, captioned "Missing file"; unlike other icons it
+  also replaces the control's own picture and sits behind button text of any
+  placement, large and centered) and a `generic` fallback (a four-pointed sparkle). The caller
   supplies the ink, so the same picture serves the window (theme foreground
   for both layers, 16px, decorative with the label carrying the name) and the
   device. On keys, touch sections and preview dials the ink is the icon
@@ -339,7 +388,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   check button reveals a labeled destination selector (profiles, folders and
   pages by name) and a seconds field. It is off by
   default, saved with the binding, and applies once after the action runs.
-- **Live information option:** below the page return, a "Show live information
+- **Live information option:** in the sidebar's Binding tab, a "Show live information
   on the key" check button reveals a labeled source selector, plus a location
   field only for Weather. Keys, dials and a tap or hold on one touch section; the
   picture is drawn by `info_render` directly over the key's own artwork (120x120)
@@ -355,8 +404,11 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   stale picker result must not write into another editor context.
 - **Shortcut reference:** a cyan keyboard-focusable Key names and aliases link
   lives in Shortcut guidance without adding a form row. It opens a read-only
-  native dialog with selectable aliases, canonical names and physical key names
-  from the parser's shared catalogue. The list owns vertical scrolling; Close
+  native dialog from the parser's shared catalogue. Aliases are one table: a
+  header (Key, Also accepted as), one row per canonical key with its aliases in
+  monospace, columns aligned by a size group, thin row dividers and softly
+  alternating rows (`reference-table`). Physical key names follow as compact
+  selectable chips. The list owns vertical scrolling; Close
   remains outside the list. Existing 16px padding and 8px related-item gaps apply.
 - **Organization:** visible profile/folder/page context and navigation;
   contextual creation tools. Invalid metadata disables writes and preserves
@@ -384,11 +436,21 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 - **Artwork disclosure:** independent key/strip/zone artwork editing remains
   reachable in a clearly named expandable section of the selected editor.
   An Appearance group separates text and artwork from the action form.
-  Save binding is filled violet; Test action remains neutral and explicitly
+  Save binding, Test action and Remove binding are icon-only buttons in a
+  toolbar at the top of the right-hand panel, above its tabs: a floppy disk
+  (violet fill), a play triangle (neutral) and a red X in a circle. Each tooltip
+  has two lines, its name then what it does, and doubles as the accessible name
+  and test caption. The status line and Undo remove sit directly under it. The
+  floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
+  `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
+  Test action remains neutral and explicitly
   labeled, with guidance that testing executes and saving only persists.
-- **Button text:** the configuration inspector contains one keypad-only
-  Add text / Edit text button. Both states open the same anchored popup,
-  prefilled with the selected key's saved settings. A muted context line under
+- **Button text and image:** right-clicking a key selects it and opens a small
+  menu with "Add text and image…" or "Edit text and image…", which opens the
+  popup anchored to that key, prefilled with its saved settings. The popup also
+  has a "Background image" row naming the key's image, with Image… and Clear
+  image (disabled when there is none). The Appearance group is hidden while a
+  key or a dial is selected and stays for the touch strip and its zones. A muted context line under
   the title names what is edited, "Key N on “<view>”", where the view is the
   page indicator's label (profile / folders / page). The editor fields and
   enlarged preview appear only in the popup. A compact two-column body keeps

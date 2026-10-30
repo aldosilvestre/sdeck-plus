@@ -213,7 +213,7 @@ fn assert_live_information_is_saved_drawn_on_keys_and_zones_and_updated_in_place
     // Removing the dial binding restores the zone's own image.
     while requests.try_recv().is_ok() {}
     while hardware.try_recv().is_ok() {}
-    find("Remove").emit_clicked();
+    find("Remove binding").emit_clicked();
     assert_eq!(layers.borrow().zone_info_source("Base", 1), None);
     assert_eq!(preview(ArtworkTarget::EncoderZone(1)), None);
     assert!(info_pictures(&hardware)

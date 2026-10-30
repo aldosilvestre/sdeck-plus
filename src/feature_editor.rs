@@ -15,7 +15,7 @@ use std::{
 };
 
 mod audio_output;
-mod choice;
+pub(crate) mod choice;
 use choice::Choice;
 #[cfg(test)]
 mod tests;
@@ -52,6 +52,10 @@ pub(crate) struct EditorWidgets {
     browse_folder: gtk::Button,
     generation: Cell<u64>,
     touchscreen: Cell<bool>,
+    /// A key takes its action from the catalog, so the pickers stay hidden.
+    pickers_hidden: Cell<bool>,
+    /// Play audio edits its sound directly and has no pickers either.
+    direct_sound: Cell<bool>,
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
 }
@@ -178,6 +182,8 @@ impl FeatureEditor {
             browse_folder,
             generation: Cell::new(0),
             touchscreen: Cell::new(false),
+            pickers_hidden: Cell::new(false),
+            direct_sound: Cell::new(false),
             picker: RefCell::new(None),
             audio_output,
         }));
@@ -467,6 +473,16 @@ impl FeatureEditor {
         .join("\u{1f}")
     }
 
+    /// Start a fresh catalog draft using the same choices as the regular editor.
+    pub(crate) fn select_catalog_choice(&self, choice: Choice) {
+        self.reset();
+        self.category.set_selected(choice.category());
+        if let Some(index) = self.choices().position(|value| value == choice) {
+            self.action.set_selected(index as u32);
+        }
+        self.update_fields();
+    }
+
     pub(crate) fn reset(&self) {
         self.invalidate_picker();
         self.audio_output.select(None);
@@ -481,6 +497,17 @@ impl FeatureEditor {
         self.update_fields();
     }
 
+    /// Hide Category and Action while a key is edited: the catalog chooses them.
+    pub(crate) fn set_pickers_hidden(&self, hidden: bool) {
+        self.pickers_hidden.set(hidden);
+        self.update_picker_visibility();
+    }
+
+    fn update_picker_visibility(&self) {
+        self.selectors
+            .set_visible(!self.direct_sound.get() && !self.pickers_hidden.get());
+    }
+
     pub(crate) fn show_direct_sound(&self, direct: bool) {
         if direct && self.choice() != Ok(Choice::PlayAudio) {
             self.populate(&FeatureAction::Desktop(DesktopAction::PlayAudio {
@@ -490,7 +517,8 @@ impl FeatureEditor {
         if self.selectors.is_visible() == direct {
             self.invalidate_picker();
         }
-        self.selectors.set_visible(!direct);
+        self.direct_sound.set(direct);
+        self.update_picker_visibility();
     }
 
     pub(crate) fn parse(&self) -> Result<FeatureAction, String> {

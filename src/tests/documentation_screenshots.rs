@@ -15,6 +15,32 @@ fn descendants<T: IsA<gtk::Widget> + glib::object::IsClass>(widget: &gtk::Widget
     found
 }
 
+/// The right-hand panel's tab stack (Actions, Dials, Binding).
+fn sidebar_tabs(widgets: &MonitorWidgets) -> gtk::Stack {
+    descendants::<gtk::Stack>(widgets.root.upcast_ref())
+        .into_iter()
+        .find(|stack| {
+            stack
+                .first_child()
+                .is_some_and(|page| stack.page(&page).title().as_deref() == Some("Actions"))
+        })
+        .expect("sidebar tabs")
+}
+
+fn right_click(widget: &gtk::Widget) {
+    let controllers = widget.observe_controllers();
+    let gesture = (0..controllers.n_items())
+        .filter_map(|index| {
+            controllers
+                .item(index)?
+                .downcast::<gtk::GestureClick>()
+                .ok()
+        })
+        .find(|gesture| gesture.button() == 3)
+        .expect("right-click gesture");
+    gesture.emit_by_name::<()>("pressed", &[&1i32, &30.0f64, &30.0f64]);
+}
+
 fn click(widgets: &MonitorWidgets, caption: &str) {
     let mut buttons = Vec::new();
     collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
@@ -301,6 +327,16 @@ fn capture_documentation_screenshots() {
     capture("main-window-light");
     settings.set_gtk_theme_name(Some("Adwaita-dark"));
     settings.set_gtk_application_prefer_dark_theme(true);
+    // The right-hand panel's other two tabs.
+    let tabs = sidebar_tabs(&widgets);
+    tabs.set_visible_child_name("dials");
+    wait_for_frame(&widgets.root);
+    capture("dials-tab");
+    tabs.set_visible_child_name("binding");
+    wait_for_frame(&widgets.root);
+    capture("binding-tab");
+    tabs.set_visible_child_name("actions");
+    wait_for_frame(&widgets.root);
     key_button(&widgets.key_labels[7]).emit_clicked();
     capture("default-none");
     key_button(&widgets.key_labels[0]).emit_clicked();
@@ -310,6 +346,13 @@ fn capture_documentation_screenshots() {
     widgets.binding_ui.return_target.set_selected(0);
     capture("page-return");
     widgets.binding_ui.return_toggle.set_active(false);
+    // Keys take their action from the catalog; dials still choose it here.
+    widgets.binding_ui.mark_clean();
+    widgets.encoder_widgets[2]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
     assert_reachable(&widgets.binding_ui.action_picker, &widgets.root);
     dropdown(
         &directory,
@@ -322,6 +365,8 @@ fn capture_documentation_screenshots() {
         descendants::<gtk::DropDown>(widgets.binding_ui.feature_editor.root.upcast_ref()).remove(0);
     assert_reachable(&category, &widgets.root);
     dropdown(&directory, &category, "more-actions-categories");
+    widgets.binding_ui.mark_clean();
+    key_button(&widgets.key_labels[0]).emit_clicked();
     widgets
         .binding_ui
         .populate_action(&Action::Feature(FeatureAction::Obs(ObsAction::Scene(
@@ -371,15 +416,21 @@ fn capture_documentation_screenshots() {
     key_button(&widgets.key_labels[0]).emit_clicked();
     let editor = &widgets._text_editor;
     wait_for_frame(&widgets.root);
-    assert_reachable(&editor.open, &widgets.root);
+    assert_reachable(&widgets.key_widgets[0], &widgets.root);
     wait_for_frame(&widgets.root);
     // Show an edited draft: Save enabled, the unsaved hint and a grid choice.
     editor.panel.set_autohide(false);
-    editor.open.popup();
+    editor.popup();
     editor.input.buffer().set_text("Play\nNow");
     editor.position[7].set_active(true);
     save(&directory, editor.panel.upcast_ref(), "button-text-editor");
-    editor.open.popdown();
+    editor.panel.popdown();
+    // Touch sections keep the Appearance section; keys use their right-click menu.
+    widgets.zone_widgets[0]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&widgets.root);
     assert_reachable(&widgets.target_picker, &widgets.root);
@@ -388,6 +439,36 @@ fn capture_documentation_screenshots() {
     widgets.root.vadjustment().set_value(0.0);
     wait_for_frame(&widgets.root);
 
+    // Right-click menu of a key, and the event choice after dropping an action on a dial.
+    widgets.binding_ui.mark_clean();
+    right_click(&widgets.key_widgets[1]);
+    let key_menu = descendants::<gtk::Popover>(widgets.key_widgets[1].upcast_ref())
+        .into_iter()
+        .next()
+        .expect("key context menu");
+    save(&directory, key_menu.upcast_ref(), "key-context-menu");
+    key_menu.popdown();
+    assert!(super::dial_action_tests::drop_on_dial(
+        &widgets,
+        "Volume up",
+        1
+    ));
+    let dial_choice = descendants::<gtk::Popover>(widgets.encoder_widgets[1].upcast_ref())
+        .into_iter()
+        .next()
+        .expect("dial event choice");
+    save(&directory, dial_choice.upcast_ref(), "dial-event-choice");
+    dial_choice.popdown();
+    // The shortcut reference table behind "Key names and aliases".
+    widgets.binding_ui.mark_clean();
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    assert!(widgets
+        .binding_ui
+        .action_guidance
+        .emit_by_name::<bool>("activate-link", &[&"shortcut-reference"]));
+    let reference = current_dialog();
+    save(&directory, reference.upcast_ref(), "shortcut-reference");
+    reference.response(ResponseType::Close);
     widgets.feature_runtime.edit_profile("Studio");
     menu(
         &directory,
@@ -399,6 +480,28 @@ fn capture_documentation_screenshots() {
     tasks.set_visible_child_name("new");
     menu(&directory, &widgets.management_menu, "organize-new-profile");
     tasks.set_visible_child_name("edit");
+    // The information icon reveals its help on hover.
+    widgets.management_menu.popup();
+    let help_icon = descendants::<gtk::MenuButton>(panel.upcast_ref())
+        .into_iter()
+        .find(|button| button.has_css_class("field-help"))
+        .expect("help icon");
+    let help_tip = help_icon.popover().unwrap();
+    let hover = {
+        let controllers = help_icon.observe_controllers();
+        (0..controllers.n_items())
+            .find_map(|index| {
+                controllers
+                    .item(index)?
+                    .downcast::<gtk::EventControllerMotion>()
+                    .ok()
+            })
+            .expect("hover controller")
+    };
+    hover.emit_by_name::<()>("enter", &[&2.0f64, &2.0f64]);
+    save(&directory, help_tip.upcast_ref(), "field-help");
+    hover.emit_by_name::<()>("leave", &[]);
+    widgets.management_menu.popdown();
     settings.set_gtk_theme_name(Some("Adwaita"));
     settings.set_gtk_application_prefer_dark_theme(false);
     wait_for_frame(&widgets.root);
@@ -576,7 +679,39 @@ fn capture_documentation_screenshots() {
     capture("live-information");
     widgets.binding_ui.info_source.set_selected(4);
     widgets.binding_ui.info_location.set_text("Mexico City");
+    sidebar_tabs(&widgets).set_visible_child_name("binding");
+    wait_for_frame(&widgets.root);
     capture("live-information-settings");
+    sidebar_tabs(&widgets).set_visible_child_name("actions");
+    // A key whose sound is gone shows a red cross behind its text.
+    {
+        let root = artwork.layers.borrow().root().to_path_buf();
+        let missing = sdeck_plus::asset_links::link_action(
+            &root,
+            Action::Feature(FeatureAction::Desktop(
+                sdeck_plus::desktop_actions::DesktopAction::PlayAudio {
+                    path: root.join("airhorn.mp3"),
+                },
+            )),
+        )
+        .unwrap();
+        artwork
+            .layers
+            .borrow_mut()
+            .bind("Base", Trigger::KeyPress(8), missing)
+            .unwrap();
+    }
+    artwork.refresh(true);
+    widgets.binding_ui.mark_clean();
+    key_button(&widgets.key_labels[7]).emit_clicked();
+    widgets.root.vadjustment().set_value(0.0);
+    capture("missing-file");
+    artwork
+        .layers
+        .borrow_mut()
+        .unbind("Base", &Trigger::KeyPress(8))
+        .unwrap();
+    artwork.refresh(true);
 
     // Then: every documented artifact was rendered, with no dispatched action.
     assert_eq!(widgets.status.text(), "Not connected");
@@ -591,7 +726,7 @@ fn capture_documentation_screenshots() {
     settings.set_gtk_enable_animations(original_animations);
     std::fs::remove_dir_all(root).unwrap();
     eprintln!(
-        "Generated all 26 native documentation screenshots in {}",
+        "Generated all 33 native documentation screenshots in {}",
         directory.display()
     );
 }

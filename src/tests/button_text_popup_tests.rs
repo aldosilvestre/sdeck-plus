@@ -27,7 +27,7 @@ impl PopupFixture {
     fn open(&self, key: usize) {
         key_button(&self.widgets.key_labels[key - 1]).emit_clicked();
         let editor = self.editor();
-        rendered_text_popup(&editor.panel, || editor.open.popup());
+        rendered_text_popup(&editor.panel, || editor.popup());
         assert!(editor.panel.is_mapped(), "text popup must be mapped");
     }
 
@@ -136,7 +136,7 @@ fn assert_save_state() {
     let editor = fixture.editor();
     // Given: a key without saved text.
     fixture.open(1);
-    assert_eq!(editor.open.tooltip_text().as_deref(), Some("Add text"));
+    assert_eq!(editor.caption(), "Add text");
     assert!(!editor.save.is_sensitive(), "nothing to save yet");
     assert!(!editor.remove.is_visible(), "no saved text to remove");
     assert!(!editor.unsaved.is_visible());
@@ -167,7 +167,7 @@ fn assert_save_state() {
     assert!(!editor.panel.is_visible());
     // Then: reopening shows the saved value as unchanged and offers Remove.
     fixture.open(1);
-    assert_eq!(editor.open.tooltip_text().as_deref(), Some("Edit text"));
+    assert_eq!(editor.caption(), "Edit text");
     assert!(!editor.save.is_sensitive(), "the saved value is unchanged");
     assert!(editor.remove.is_visible() && editor.remove.is_sensitive());
     assert!(!editor.unsaved.is_visible());
@@ -189,7 +189,7 @@ fn assert_save_state() {
     );
     fixture.open(1);
     assert!(!editor.remove.is_visible());
-    assert_eq!(editor.open.tooltip_text().as_deref(), Some("Add text"));
+    assert_eq!(editor.caption(), "Add text");
     // Another key keeps its own state.
     editor.input.buffer().set_text("Draft");
     fixture.open(2);
@@ -541,4 +541,183 @@ fn assert_overflow_warning() {
     editor.size.set_value(60.0);
     editor.save.emit_clicked();
     assert_eq!(fixture.saved(1).unwrap().font_size, 60);
+}
+
+fn all_buttons(widget: &gtk::Widget, found: &mut Vec<Button>) {
+    if let Some(button) = widget.downcast_ref::<Button>() {
+        found.push(button.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        all_buttons(&current, found);
+        child = current.next_sibling();
+    }
+}
+
+fn button_named(widget: &gtk::Widget, caption: &str) -> Option<Button> {
+    let mut buttons = Vec::new();
+    all_buttons(widget, &mut buttons);
+    buttons
+        .into_iter()
+        .find(|button| button_caption(button).as_deref() == Some(caption))
+}
+
+fn right_click(widget: &gtk::Widget) {
+    let controllers = widget.observe_controllers();
+    let gesture = (0..controllers.n_items())
+        .filter_map(|index| {
+            controllers
+                .item(index)?
+                .downcast::<gtk::GestureClick>()
+                .ok()
+        })
+        .find(|gesture| gesture.button() == 3)
+        .expect("right-click gesture");
+    gesture.emit_by_name::<()>("pressed", &[&1i32, &4.0f64, &4.0f64]);
+}
+
+/// Wait for the real map signal, never a fixed sleep.
+fn wait_until_mapped(panel: &gtk::Popover) {
+    if panel.is_mapped() {
+        return;
+    }
+    let main_loop = glib::MainLoop::new(None, false);
+    let done = main_loop.clone();
+    let signal = panel.connect_map(move |_| done.quit());
+    let expired = Rc::new(Cell::new(false));
+    let flag = expired.clone();
+    let done = main_loop.clone();
+    let guard = glib::timeout_add_local_once(Duration::from_secs(5), move || {
+        flag.set(true);
+        done.quit();
+    });
+    main_loop.run();
+    panel.disconnect(signal);
+    if !expired.get() {
+        guard.remove();
+    }
+    assert!(panel.is_mapped(), "text and image modal never opened");
+}
+
+#[test]
+fn right_clicking_a_key_opens_the_text_and_image_modal_on_that_key() {
+    run_gtk_test(assert_right_click_opens_modal);
+}
+
+fn assert_right_click_opens_modal() {
+    let Some(fixture) = popup_fixture("key-context-menu", |_, _, _| {}) else {
+        return;
+    };
+    let editor = fixture.editor();
+    let key = fixture.widgets.key_widgets[2].clone();
+    assert!(!editor.panel.is_visible());
+    right_click(&key);
+    // The menu itself must really appear, not only exist in the widget tree.
+    let menu = {
+        let mut popovers = Vec::new();
+        collect_popovers(key.upcast_ref(), &mut popovers);
+        popovers.into_iter().next().expect("context menu popover")
+    };
+    wait_until_mapped(&menu);
+    let entry = button_named(&key, "Add text and image…").expect("context menu entry");
+    entry.emit_clicked();
+    wait_until_mapped(&editor.panel);
+    assert_eq!(editor.panel.parent().as_ref(), Some(&key));
+    assert_eq!(editor.context_line.text(), "Key 3 on “Base / Page 1”");
+    if let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        rendered_text_popup(&editor.panel, || {})
+            .save_to_png(std::path::Path::new(&directory).join("key-modal.png"))
+            .unwrap();
+    }
+}
+
+#[test]
+fn appearance_section_is_hidden_for_keys_and_kept_for_touch_sections() {
+    run_gtk_test(assert_appearance_hidden_for_keys);
+}
+
+fn assert_appearance_hidden_for_keys() {
+    let Some(fixture) = popup_fixture("key-appearance-hidden", |_, _, _| {}) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let appearance = widgets.artwork_section.parent().unwrap();
+    assert!(!appearance.is_visible(), "keys are styled from their menu");
+    widgets.zone_widgets[0]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
+    assert!(appearance.is_visible(), "touch sections still need it");
+    key_button(&widgets.key_labels[0]).emit_clicked();
+    assert!(!appearance.is_visible());
+}
+
+#[test]
+fn the_modal_chooses_and_clears_the_keys_background_image() {
+    run_gtk_test(assert_modal_image_controls);
+}
+
+fn assert_modal_image_controls() {
+    let Some(fixture) = popup_fixture("key-modal-image", |_, images, source| {
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), source)
+            .unwrap();
+    }) else {
+        return;
+    };
+    fixture.open(1);
+    let panel = fixture.editor().panel.clone();
+    let choose = button_named(panel.upcast_ref(), "Image…").expect("image chooser in the modal");
+    let clear = button_named(panel.upcast_ref(), "Clear image").expect("image clearing");
+    assert!(choose.is_sensitive());
+    assert!(clear.is_sensitive(), "a key with an image can clear it");
+    clear.emit_clicked();
+    let assigned = fixture
+        .artwork
+        .store
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .assigned_path_in_layer("Base", ArtworkTarget::Keypad(1));
+    assert!(assigned.is_none(), "image must be removed from storage");
+    assert!(!clear.is_sensitive(), "nothing left to clear");
+}
+
+#[test]
+fn appearance_section_is_hidden_for_dials() {
+    run_gtk_test(assert_appearance_hidden_for_dials);
+}
+
+fn assert_appearance_hidden_for_dials() {
+    let Some(fixture) = popup_fixture("dial-appearance-hidden", |_, _, _| {}) else {
+        return;
+    };
+    let widgets = &fixture.widgets;
+    let appearance = widgets.artwork_section.parent().unwrap();
+    widgets.encoder_widgets[1]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
+    assert_eq!(widgets.binding_ui.control_kind(), ControlKind::Encoder);
+    assert!(!appearance.is_visible(), "dials have no appearance to edit");
+    widgets.zone_widgets[0]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
+    assert!(appearance.is_visible(), "touch sections keep it");
+}
+
+fn collect_popovers(widget: &gtk::Widget, found: &mut Vec<gtk::Popover>) {
+    if let Some(popover) = widget.downcast_ref::<gtk::Popover>() {
+        found.push(popover.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        collect_popovers(&current, found);
+        child = current.next_sibling();
+    }
 }

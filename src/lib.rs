@@ -1,5 +1,6 @@
 //! In-process API for observing Stream Deck + HID input.
 
+pub mod asset_links;
 pub mod binding_editor;
 pub mod binding_icons;
 pub mod button_text;

@@ -146,6 +146,13 @@ pub fn compose_button_image(source: Option<&Path>, text: &ButtonText) -> Result<
             image
         }
     };
+    compose_button_text_over(background, text)
+}
+
+/// Draw the button text, with its thin black outline, over a 120x120
+/// `background` that is already prepared (for example a picture with a cross).
+pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result<Pixbuf, String> {
+    text.validate().map_err(|error| error.to_string())?;
     if text.text.is_empty() {
         return Ok(background);
     }

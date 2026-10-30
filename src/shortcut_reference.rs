@@ -41,6 +41,20 @@ fn show(parent: &gtk::Window) {
         "input-keyboard-symbolic",
         "Key aliases",
     ));
+    // One table: the canonical key, then every alias that resolves to it.
+    let table = GtkBox::new(Orientation::Vertical, 0);
+    table.add_css_class("reference-table");
+    let key_column = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+    let header = GtkBox::new(Orientation::Horizontal, 0);
+    header.add_css_class("reference-head");
+    header.append(&cell("Key", "reference-key", &key_column, false));
+    header.append(&cell(
+        "Also accepted as",
+        "reference-aliases",
+        &gtk::SizeGroup::new(gtk::SizeGroupMode::None),
+        false,
+    ));
+    table.append(&header);
     for canonical in supported_key_names() {
         let aliases = supported_key_aliases()
             .filter(|(_, target)| *target == canonical)
@@ -49,31 +63,39 @@ fn show(parent: &gtk::Window) {
         if aliases.is_empty() {
             continue;
         }
-        let row = GtkBox::new(Orientation::Vertical, 4);
-        let name = Label::new(Some(canonical));
-        name.add_css_class("section-label");
-        name.set_xalign(0.0);
-        name.set_selectable(true);
-        row.append(&name);
-        let values = Label::new(Some(&aliases.join(", ")));
-        values.set_xalign(0.0);
-        values.set_wrap(true);
-        values.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        values.set_max_width_chars(48);
-        values.set_selectable(true);
-        row.append(&values);
-        list.append(&row);
+        let row = GtkBox::new(Orientation::Horizontal, 0);
+        row.add_css_class("reference-row");
+        row.append(&cell(canonical, "reference-key", &key_column, true));
+        row.append(&cell(
+            &aliases.join(", "),
+            "reference-aliases",
+            &gtk::SizeGroup::new(gtk::SizeGroupMode::None),
+            true,
+        ));
+        table.append(&row);
     }
+    list.append(&table);
     list.append(&ui::section_heading(
         "input-keyboard-symbolic",
         "Physical key names",
     ));
-    let names = Label::new(Some(&supported_key_names().collect::<Vec<_>>().join(", ")));
-    names.set_xalign(0.0);
-    names.set_wrap(true);
-    names.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    names.set_max_width_chars(48);
-    names.set_selectable(true);
+    let names = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .column_spacing(6)
+        .row_spacing(6)
+        .min_children_per_line(1)
+        .max_children_per_line(12)
+        .homogeneous(false)
+        .build();
+    for name in supported_key_names() {
+        let chip = Label::new(Some(name));
+        chip.add_css_class("reference-chip");
+        chip.set_selectable(true);
+        let item = gtk::FlowBoxChild::new();
+        item.set_focusable(false);
+        item.set_child(Some(&chip));
+        names.insert(&item, -1);
+    }
     list.append(&names);
     let modifiers = Label::new(Some(
         "Modifiers: CTRL / Control; SHIFT; ALT; SUPER / Win / Windows / Meta.",
@@ -99,4 +121,21 @@ fn show(parent: &gtk::Window) {
     dialog.set_default_response(ResponseType::Close);
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.present();
+}
+
+/// One table cell: a left-aligned, selectable label sharing its column width.
+fn cell(text: &str, class: &str, column: &gtk::SizeGroup, selectable: bool) -> Label {
+    let label = Label::new(Some(text));
+    label.add_css_class(class);
+    label.set_xalign(0.0);
+    label.set_valign(gtk::Align::Start);
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_selectable(selectable);
+    if class == "reference-aliases" {
+        label.set_hexpand(true);
+        label.set_max_width_chars(44);
+    }
+    column.add_widget(&label);
+    label
 }

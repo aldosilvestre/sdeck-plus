@@ -113,7 +113,7 @@ pub(super) fn assert_compact_profile_manager() {
                 .unwrap()
                 .downcast::<gtk::MenuButton>()
                 .unwrap();
-            assert!(new_help.tooltip_text().is_some());
+            assert!(new_help.popover().is_some(), "help opens on hover");
             new_help.popup();
             save("new-help", new_help.popover().unwrap().upcast_ref());
             new_help.popdown();
@@ -142,7 +142,7 @@ pub(super) fn assert_compact_profile_manager() {
                 .unwrap()
                 .downcast::<gtk::MenuButton>()
                 .unwrap();
-            assert!(help.tooltip_text().is_some());
+            assert!(help.popover().is_some(), "help opens on hover");
             help.popup();
             save("help", help.popover().unwrap().upcast_ref());
             help.popdown();

@@ -58,7 +58,7 @@ fn assert_button_text_editor() {
     commands.try_iter().for_each(drop);
     assert!(!editor.panel.is_visible());
     wait_for_frame(&widgets.root);
-    rendered_text_popup(&editor.panel, || editor.open.popup());
+    rendered_text_popup(&editor.panel, || editor.popup());
     assert!(editor.panel.is_mapped(), "new text popup must be mapped");
     assert!(editor.panel.is_visible());
     for button in editor.orientation.iter().chain(editor.position.iter()) {
@@ -170,13 +170,13 @@ fn assert_button_text_editor() {
     assert_eq!(actual_pixels, expected_pixels);
 
     // Reopening edits the saved values in the same popup; closing drops drafts.
-    rendered_text_popup(&editor.panel, || editor.open.popup());
+    rendered_text_popup(&editor.panel, || editor.popup());
     assert_eq!(editor.value().unwrap(), value);
     editor.input.buffer().set_text("Discard this draft");
     editor.panel.popdown();
     assert_eq!(editor.value().unwrap(), value);
     assert!(commands.try_recv().is_err());
-    rendered_text_popup(&editor.panel, || editor.open.popup());
+    rendered_text_popup(&editor.panel, || editor.popup());
     editor.input.buffer().set_text("Resume\nNow");
     let value = editor.value().unwrap();
     editor.save.emit_clicked();
@@ -203,7 +203,8 @@ fn assert_button_text_editor() {
     artwork.refresh(false);
     assert_eq!(editor.value().unwrap(), value);
     widgets.target_picker.set_selected(8);
-    assert!(!editor.root.is_visible(), "text controls are keypad-only");
+    editor.popup();
+    assert!(!editor.panel.is_visible(), "text controls are keypad-only");
     widgets.target_picker.set_selected(0);
     editor.remove.emit_clicked();
     assert!(artwork
@@ -253,7 +254,7 @@ fn assert_button_text_editor() {
                         "compact editor scrolls"
                     );
                 }
-                let bounds = editor.open.compute_bounds(&widgets.root).unwrap();
+                let bounds = widgets.key_widgets[0].compute_bounds(&widgets.root).unwrap();
                 scroll.set_value(
                     (scroll.value() + f64::from(bounds.y()) - f64::from(height) / 2.0)
                         .clamp(0.0, (scroll.upper() - scroll.page_size()).max(0.0)),
@@ -261,11 +262,11 @@ fn assert_button_text_editor() {
                 wait_for_frame(&widgets.root);
                 for (name, orientation) in [("horizontal", 0), ("vertical", 1)] {
                     let texture = rendered_text_popup(&editor.panel, || {
-                        editor.open.popup();
+                        editor.popup();
                         editor.orientation[orientation].set_active(true);
                     });
                     assert!(editor.panel.is_mapped(), "popup must be mapped at {width}x{height}; anchor={:?}, window={}x{}, panel={}x{}",
-                        editor.open.compute_bounds(&window), window.width(), window.height(),
+                        widgets.key_widgets[0].compute_bounds(&window), window.width(), window.height(),
                         editor.panel.width(), editor.panel.height());
                     {
                         assert!(texture.width() <= width && texture.height() <= height);
@@ -281,7 +282,7 @@ fn assert_button_text_editor() {
                 if width == 1000 {
                     for (index, name) in ["start", "center", "end"].into_iter().enumerate() {
                         let texture = rendered_text_popup(&editor.panel, || {
-                            editor.open.popup();
+                            editor.popup();
                             editor.position[index * 4].set_active(true);
                             assert!(editor.position[index * 4].grab_focus());
                             window.set_focus_visible(true);
@@ -296,7 +297,7 @@ fn assert_button_text_editor() {
                     }
                     window.set_focus_visible(false);
                     let texture = rendered_text_popup(&editor.panel, || {
-                        editor.open.popup();
+                        editor.popup();
                         for button in &editor.position {
                             button.set_sensitive(false);
                         }
@@ -336,7 +337,6 @@ fn assert_button_text_editor() {
         .unwrap();
     let editor_owner = Rc::downgrade(editor);
     let input = editor.input.clone();
-    let open = editor.open.clone();
     let panel = editor.panel.clone();
     let save = editor.save.clone();
     let key = key_button(&widgets.key_labels[1]);
@@ -358,7 +358,10 @@ fn assert_button_text_editor() {
 
     // When: selection and Add text are activated after production startup.
     key.emit_clicked();
-    rendered_text_popup(&panel, || assert!(open.activate()));
+    rendered_text_popup(&panel, || {
+        // Reach the editor through its weak owner so startup must have kept it alive.
+        editor_owner.upgrade().expect("retained text editor").popup()
+    });
     // Then: the selected key's saved state loads, typing composes, and Save persists.
     assert_eq!(
         input.buffer().text(
@@ -550,7 +553,7 @@ fn assert_saved_text_on_streamdeck() {
     for (key, orientation) in [(1, 0), (8, 1)] {
         // Given: the production key selection and editor, wired to the real HID owner.
         key_button(&widgets.key_labels[key - 1]).emit_clicked();
-        rendered_text_popup(&editor.panel, || editor.open.popup());
+        rendered_text_popup(&editor.panel, || editor.popup());
         editor.input.buffer().set_text(&format!("Key {key}"));
         editor.size.set_value(18.0);
         editor.orientation[orientation].set_active(true);

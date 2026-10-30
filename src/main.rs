@@ -22,11 +22,13 @@ use std::{
     time::Duration,
 };
 
+mod action_catalog;
 mod app_icon;
 mod autostart;
 mod button_swap;
 mod button_text_editor;
 mod configuration_menu;
+mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
 mod shortcut_reference;
@@ -46,8 +48,9 @@ const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
 const DEFAULT_WIDTH: i32 = 1000;
 const DEFAULT_HEIGHT: i32 = 700;
-/// Largest presentation scale of the hardware preview when space allows.
-const PREVIEW_MAX_SCALE: f64 = 1.5;
+/// The hardware preview is always shown at its natural size, so it never
+/// changes with the window or the configuration beside it.
+const PREVIEW_MAX_SCALE: f64 = 1.0;
 /// Width of each dial's assigned-action caption in the preview rail.
 const DIAL_LEGEND_WIDTH: i32 = 86;
 /// Action icon drawn on a preview knob face.
@@ -475,7 +478,7 @@ fn build_widgets(
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Choose an event and an action. More actions adds System, Multimedia, Organization, Device and OBS."),
+        ("preferences-system-symbolic", "2. Configure an action", "Drag an action from the right onto a key or a dial (a dial asks for clockwise, counterclockwise or press). Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected control, or use the Action selector for any control."),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
         ("view-grid-symbolic", "Touch strip pages", "Touchscreen pages belong to the profile. Select the touch strip to add or choose a Touch page. Swiping left or right changes page unless you bind those swipes to something else."),
     ] {
@@ -593,12 +596,19 @@ fn build_widgets(
     binding_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
     binding_status.set_max_width_chars(32);
     binding_status.connect_label_notify(|label| label.set_tooltip_text(Some(&label.text())));
-    let save_binding = ui::button("document-save-symbolic", "Save binding");
+    let save_binding = binding_tool(
+        "sdeck-save-symbolic",
+        "Save binding",
+        "Saves this control's binding without running the action.",
+    );
     save_binding.add_css_class("suggested-action");
-    let remove_binding = ui::button("user-trash-symbolic", "Remove");
-    remove_binding.set_tooltip_text(Some("Remove binding"));
-    remove_binding.set_has_frame(false);
+    let remove_binding = binding_tool(
+        "sdeck-remove-symbolic",
+        "Remove binding",
+        "Deletes this control's binding. You can undo it right after.",
+    );
     remove_binding.add_css_class("destructive-action");
+    remove_binding.add_css_class("remove-binding");
     let control_number_row = labeled("Number", &control_number_picker);
     let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
     let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
@@ -668,11 +678,20 @@ fn build_widgets(
     profile_tasks.add_titled(feature_runtime.management(), Some("edit"), "Edit profile");
     profile_tasks.add_titled(&creation, Some("new"), "New profile");
     let task_picker = gtk::StackSwitcher::builder().stack(&profile_tasks).build();
+    task_picker.add_css_class("popover-tabs");
     task_picker.set_halign(gtk::Align::Fill);
     management.append(&task_picker);
     management.append(&profile_tasks);
     let management_scroll = ui::panel_body(&management);
+    // The header, subtitle and footer divider take room; keep the forms scroll-free.
+    management_scroll.set_max_content_height(344);
     let management_popover = ui::popover("Profiles", &management_scroll);
+    management_popover.add_css_class("organize-popover");
+    ui::refine_popover_header(
+        &management_popover,
+        "preferences-system-symbolic",
+        "Choose a profile to edit, or create a new one.",
+    );
     let management_menu = ui::menu_button(
         "preferences-system-symbolic",
         "Organize",
@@ -718,6 +737,9 @@ fn build_widgets(
     let selector_row = GtkBox::new(Orientation::Horizontal, 12);
     selector_row.append(&labeled("Event", &binding_ui.event_picker));
     selector_row.append(&labeled("Action", &binding_ui.action_picker));
+    // A key has one event and takes its action from the catalog, so only
+    // dials and the touch strip show these selectors.
+    selector_row.set_visible(false);
     settings_card.append(&selector_row);
     settings_card.append(&binding_ui.action_guidance);
     settings_card.append(&binding_ui.layer_target_row);
@@ -776,45 +798,58 @@ fn build_widgets(
     settings_card.append(&options_heading);
     settings_card.append(&binding_ui.return_toggle);
     settings_card.append(&binding_ui.return_row);
-    settings_card.append(&binding_ui.info_toggle);
-    settings_card.append(&binding_ui.info_row);
-    let binding_buttons = GtkBox::new(Orientation::Horizontal, 12);
-    let test_action = ui::button("media-playback-start-symbolic", "Test action");
-    test_action.set_tooltip_text(Some(
-        "Run this action now. Saving a binding does not execute it.",
-    ));
-    save_binding.set_tooltip_text(Some(
-        "Save this control's binding without executing the action.",
-    ));
+    let binding_buttons = GtkBox::new(Orientation::Horizontal, 8);
+    let test_action = binding_tool(
+        "media-playback-start-symbolic",
+        "Test action",
+        "Runs this action now. Saving a binding never runs it.",
+    );
     binding_buttons.append(&save_binding);
     binding_buttons.append(&test_action);
     binding_buttons.append(&remove_binding);
     // The status line sits right under Save/Test/Remove so results stay visible.
+    // The toolbar tops the right-hand panel, above its tabs.
     let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
+    binding_feedback.add_css_class("binding-toolbar");
     binding_feedback.append(&binding_buttons);
     binding_feedback.append(&binding_ui.status);
     binding_feedback.append(&binding_ui.undo_remove);
-    settings_card.append(&binding_feedback);
     let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
     *artwork.text_editor.borrow_mut() = Rc::downgrade(&text_editor);
     text_editor.follow_page_label(&feature_runtime.indicator);
+    text_editor.attach_image_controls(&window);
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
+    // Keys are styled from their right-click menu and dials have no artwork,
+    // so only the touch strip and its sections show this section.
+    appearance.set_visible(false);
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
     let appearance_heading = inspector_heading("Appearance");
     appearance_heading.set_hexpand(true);
     let appearance_tools = GtkBox::new(Orientation::Horizontal, 12);
     appearance_tools.append(&appearance_heading);
-    appearance_tools.append(&text_editor.root);
     appearance.append(&appearance_tools);
     let editor = Rc::downgrade(&text_editor);
+    let appearance_weak = appearance.downgrade();
+    let selector_row_weak = selector_row.downgrade();
+    let feature_editor = binding_ui.feature_editor.clone();
+    // The initial control is a key.
+    feature_editor.set_pickers_hidden(true);
     binding_ui
         .control_picker
         .connect_selected_notify(move |picker| {
+            if let Some(row) = selector_row_weak.upgrade() {
+                row.set_visible(picker.selected() != 0);
+            }
+            feature_editor.set_pickers_hidden(picker.selected() == 0);
             if let Some(editor) = editor.upgrade() {
                 editor.set_control_available(picker.selected() == 0);
+            }
+            if let Some(appearance) = appearance_weak.upgrade() {
+                // Only the touch strip and its sections have artwork to set here.
+                appearance.set_visible(picker.selected() == 2);
             }
         });
     let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
@@ -972,8 +1007,11 @@ fn build_widgets(
                     }
                     let snapshot = {
                         let mut store = layers.borrow_mut();
-                        store
-                            .bind(&layer, trigger.clone(), action)
+                        // Sounds and files are kept as app-owned links, never as the real path.
+                        let root = store.root().to_path_buf();
+                        let action = sdeck_plus::asset_links::link_action(&root, action);
+                        action
+                            .and_then(|action| store.bind(&layer, trigger.clone(), action))
                             .and_then(|_| store.set_return(&layer, &trigger, page_return))
                             .and_then(|_| store.set_info(&layer, &trigger, info))
                             .map(|_| store.clone())
@@ -1124,9 +1162,8 @@ fn build_widgets(
         .column_spacing(16)
         .row_spacing(16)
         .build();
-    // Natural-width FlowBox keeps the fixed preview and readable inspector
-    // together on wide desktops, while retaining GTK's native narrow wrapping.
-    // Spare height reaches the preview row, which scales the hardware into it.
+    // The preview and its inspector stay together; the action catalog wraps
+    // beneath them on narrow desktops.
     body.set_vexpand(true);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
@@ -1325,6 +1362,33 @@ fn build_widgets(
         .collect();
     let selected_widgets = Rc::new(selectable_widgets);
     button_swap::connect(&selected_widgets[..8], &artwork, &feature_runtime, &root);
+    {
+        // Right-click selects the key like a left click would, unless it already is.
+        let ui = binding_ui.clone();
+        let artwork = artwork.clone();
+        let keys: Vec<_> = selected_widgets[..8]
+            .iter()
+            .map(ObjectExt::downgrade)
+            .collect();
+        text_editor.connect_context_menu(
+            &selected_widgets[..8],
+            Rc::new(move |index| {
+                let number = (index + 1) as u8;
+                let current =
+                    ui.control_kind() == ControlKind::Button && ui.control_number() == Some(number);
+                if !current {
+                    if let Some(button) = keys
+                        .get(index)
+                        .and_then(glib::WeakRef::upgrade)
+                        .and_then(|key| key.downcast::<Button>().ok())
+                    {
+                        button.emit_clicked();
+                    }
+                }
+                artwork.selected_target.get() == ArtworkTarget::Keypad(number)
+            }),
+        );
+    }
     set_selected_control(&selected_widgets, 0);
     for index in 0..8 {
         connect_control_selection(
@@ -1388,10 +1452,77 @@ fn build_widgets(
     // spare width/height enlarges the whole preview without moving controls.
     let preview = scaled_bin::ScaledBin::new(&device_area, PREVIEW_MAX_SCALE);
     preview.set_hexpand(true);
-    preview.set_vexpand(true);
+    preview.set_vexpand(false);
     preview.add_css_class("device-preview");
-    body.insert(&preview, -1);
-    sidebar.append(&settings_card);
+    let workspace = GtkBox::new(Orientation::Vertical, 12);
+    workspace.set_hexpand(true);
+    workspace.append(&preview);
+    // A tall form scrolls here, within its own region, instead of stretching the page.
+    let settings_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_height(true)
+        .max_content_height(480)
+        .hexpand(true)
+        .valign(gtk::Align::Start)
+        .child(&settings_card)
+        .build();
+    settings_scroll.add_css_class("settings-scroll");
+    workspace.append(&settings_scroll);
+    body.insert(&workspace, -1);
+    // The right-hand panel: draggable actions, dial presets and per-binding options.
+    let side_panel = card();
+    side_panel.add_css_class("action-catalog");
+    side_panel.set_size_request(250, -1);
+    side_panel.set_valign(gtk::Align::Start);
+    let tabs = gtk::Stack::builder()
+        .vhomogeneous(false)
+        .hhomogeneous(true)
+        .build();
+    tabs.add_titled(
+        &action_catalog::connect(
+            selected_widgets.clone(),
+            &binding_ui,
+            &layers,
+            &settings_heading,
+            &save_binding,
+        ),
+        Some("actions"),
+        "Actions",
+    );
+    tabs.add_titled(
+        &dial_presets::connect(
+            selected_widgets.clone(),
+            &binding_ui,
+            &layers,
+            &settings_heading,
+            &feature_runtime,
+            &artwork,
+        ),
+        Some("dials"),
+        "Dials",
+    );
+    let binding_page = GtkBox::new(Orientation::Vertical, 12);
+    binding_page.append(&ui::helper(
+        "Options saved with the selected control's binding. Use Save binding to apply them.",
+    ));
+    binding_page.append(&binding_ui.info_toggle);
+    binding_page.append(&binding_ui.info_row);
+    let unavailable = ui::helper("Live information is not available for this control event.");
+    binding_ui
+        .info_toggle
+        .bind_property("visible", &unavailable, "visible")
+        .sync_create()
+        .invert_boolean()
+        .build();
+    binding_page.append(&unavailable);
+    tabs.add_titled(&binding_page, Some("binding"), "Binding");
+    let switcher = gtk::StackSwitcher::builder().stack(&tabs).build();
+    switcher.add_css_class("sidebar-tabs");
+    side_panel.append(&binding_feedback);
+    side_panel.append(&switcher);
+    side_panel.append(&tabs);
+    sidebar.append(&side_panel);
     body.insert(&sidebar, -1);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
@@ -1410,6 +1541,15 @@ fn build_widgets(
         .child(&clamp::Clamp::new(&root, SHELL_MAX_WIDTH))
         .build();
     feature_runtime.attach_configuration_root(viewport.upcast_ref());
+    // Keep the form within about one window of height; the preview stays put.
+    let scroll = settings_scroll.downgrade();
+    viewport
+        .vadjustment()
+        .connect_page_size_notify(move |adjustment| {
+            if let Some(scroll) = scroll.upgrade() {
+                scroll.set_max_content_height((adjustment.page_size() as i32 - 240).max(320));
+            }
+        });
     MonitorWidgets {
         root: viewport,
         toast,
@@ -1923,7 +2063,7 @@ impl BindingUi {
                         (
                             sdeck_plus::binding_editor::dial_legend(&store, &layer, dial)
                                 .unwrap_or_default(),
-                            BindingIcon::for_action(&action),
+                            BindingIcon::for_saved_action(&action),
                         )
                     })
                 })
@@ -2101,8 +2241,10 @@ impl BindingUi {
                 "Type a key or chord. <a href=\"shortcut-reference\">Key names and aliases</a>",
             );
         }
+        // "Do nothing" needs no explaining on a key, whose selectors are hidden.
+        let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
         self.action_guidance
-            .set_visible(!matches!(kind, ActionKind::Extended));
+            .set_visible(!matches!(kind, ActionKind::Extended) && !idle_key);
         if let Some(label) = self
             .text_row
             .first_child()
@@ -2172,6 +2314,9 @@ impl BindingUi {
         };
         match action {
             Some(action) => {
+                // The editor names the real file, not our link to it.
+                let action =
+                    sdeck_plus::asset_links::unlink_action(layers.borrow().root(), &action);
                 self.populate_action(&action);
                 self.populate_return(layers.borrow().page_return(&layer, &trigger));
                 let store = layers.borrow();
@@ -3031,7 +3176,9 @@ impl ArtworkUi {
                 .borrow()
                 .as_ref()
                 .and_then(|store| store.button_text_in_layer(layer, target).cloned());
-            if !sdeck_plus::binding_icons::key_has_room(text.as_ref()) {
+            if icon.icon != BindingIcon::MissingFile
+                && !sdeck_plus::binding_icons::key_has_room(text.as_ref())
+            {
                 continue;
             }
             let command = ArtworkCommand::ComposeIcon {
@@ -3404,18 +3551,23 @@ impl ArtworkUi {
                 ArtworkTarget::TouchStripBackground => None,
             }
         }?;
-        let icon = BindingIcon::for_action(&action);
-        if !icon.shown_on_controls()
-            || self.info_background(layer, target).is_some()
-            || self.shows_info(layer, target)
-        {
+        let icon = BindingIcon::for_saved_action(&action);
+        // A missing file is an error to show over the control's own picture;
+        // every other icon only fills a control that has none.
+        let own_picture =
+            icon != BindingIcon::MissingFile && self.info_background(layer, target).is_some();
+        if !icon.shown_on_controls() || own_picture || self.shows_info(layer, target) {
             return None;
         }
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
         Some(ControlIcon {
             target,
             icon,
-            caption: sdeck_plus::binding_editor::action_caption(&action),
+            caption: if icon == BindingIcon::MissingFile {
+                "Missing file".to_owned()
+            } else {
+                sdeck_plus::binding_editor::action_caption(&action)
+            },
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(4) && next,
         })
@@ -3432,8 +3584,12 @@ impl ArtworkUi {
         text: &sdeck_plus::button_text::ButtonText,
     ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
         let path = self.info_background(layer, target);
-        if path.is_none() {
-            if let Some(icon) = self.control_icon(layer, target) {
+        let icon = self.control_icon(layer, target);
+        let missing = icon
+            .as_ref()
+            .is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
+        if path.is_none() || missing {
+            if let Some(icon) = icon {
                 if let Some(image) = icon.compose(Some(text))? {
                     return Ok((image, true));
                 }
@@ -3577,7 +3733,8 @@ fn set_button_picture(
     text: Option<&sdeck_plus::button_text::ButtonText>,
     icon: Option<&ControlIcon>,
 ) {
-    if path.is_none() {
+    let missing = icon.is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
+    if path.is_none() || missing {
         match icon.map(|icon| icon.compose(text)).transpose() {
             Ok(Some(Some(image))) => {
                 picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
@@ -3670,6 +3827,13 @@ fn connect_artwork_selection(button: &Button, picker: &gtk::DropDown, target: Ar
     });
 }
 
+/// An icon-only binding tool whose tooltip names it, then says what it does.
+fn binding_tool(icon: &str, name: &str, explanation: &str) -> Button {
+    let button = ui::icon_button(icon, name);
+    button.set_tooltip_text(Some(&format!("{name}\n{explanation}")));
+    button
+}
+
 fn add_artwork_controls(
     parent: &GtkBox,
     window: &ApplicationWindow,
@@ -3733,71 +3897,72 @@ fn add_artwork_controls(
     let available = artwork.store.borrow().is_some();
     choose.set_sensitive(available);
     clear.set_sensitive(available);
-    let parent_window = window.clone();
-    let artwork_ref = artwork.clone();
-    choose.connect_clicked(move |_| {
-        let owner = artwork_ref.capture_owner();
-        let chooser = FileChooserNative::new(
-            Some("Choose artwork"),
-            Some(&parent_window),
-            FileChooserAction::Open,
-            Some("Open"),
-            Some("Cancel"),
-        );
-        let image_filter = gtk::FileFilter::new();
-        image_filter.set_name(Some("PNG, JPG/JPEG and GIF images"));
-        image_filter.add_mime_type("image/png");
-        image_filter.add_mime_type("image/jpeg");
-        image_filter.add_mime_type("image/gif");
-        chooser.add_filter(&image_filter);
-        let supported_filter = gtk::FileFilter::new();
-        supported_filter.set_name(Some("All supported image formats"));
-        supported_filter.add_pixbuf_formats();
-        chooser.add_filter(&supported_filter);
-        let artwork = artwork_ref.clone();
-        let error_parent = parent_window.clone();
-        chooser.connect_response(move |dialog, response| {
-            if response == ResponseType::Accept {
-                if let Some(path) = dialog.file().and_then(|file| file.path()) {
-                    if let Err(error) = artwork.import(&owner, &path) {
-                        show_artwork_error(
-                            &error_parent,
-                            &format!("Could not assign image: {error}"),
-                        );
-                    }
+    let (parent_window, artwork_ref) = (window.clone(), artwork.clone());
+    choose.connect_clicked(move |_| choose_artwork_image(&parent_window, &artwork_ref));
+    let (parent_window, artwork_ref) = (window.clone(), artwork.clone());
+    clear.connect_clicked(move |_| clear_artwork_image(&parent_window, &artwork_ref));
+    picker
+}
+
+/// Ask for an image and assign it to the selected control.
+fn choose_artwork_image(parent_window: &ApplicationWindow, artwork_ref: &ArtworkUi) {
+    let owner = artwork_ref.capture_owner();
+    let chooser = FileChooserNative::new(
+        Some("Choose artwork"),
+        Some(parent_window),
+        FileChooserAction::Open,
+        Some("Open"),
+        Some("Cancel"),
+    );
+    let image_filter = gtk::FileFilter::new();
+    image_filter.set_name(Some("PNG, JPG/JPEG and GIF images"));
+    image_filter.add_mime_type("image/png");
+    image_filter.add_mime_type("image/jpeg");
+    image_filter.add_mime_type("image/gif");
+    chooser.add_filter(&image_filter);
+    let supported_filter = gtk::FileFilter::new();
+    supported_filter.set_name(Some("All supported image formats"));
+    supported_filter.add_pixbuf_formats();
+    chooser.add_filter(&supported_filter);
+    let artwork = artwork_ref.clone();
+    let error_parent = parent_window.clone();
+    chooser.connect_response(move |dialog, response| {
+        if response == ResponseType::Accept {
+            if let Some(path) = dialog.file().and_then(|file| file.path()) {
+                if let Err(error) = artwork.import(&owner, &path) {
+                    show_artwork_error(&error_parent, &format!("Could not assign image: {error}"));
                 }
-            }
-        });
-        chooser.show();
-    });
-    let artwork = artwork.clone();
-    let parent_window = window.clone();
-    clear.connect_clicked(move |_| {
-        let layer = {
-            let layers = artwork.layers.borrow();
-            layers
-                .artwork_owner(layers.active(), artwork.selected_target.get())
-                .to_owned()
-        };
-        let cleared = {
-            let mut store = artwork.store.borrow_mut();
-            store
-                .as_mut()
-                .ok_or_else(|| "Artwork storage is unavailable".to_owned())
-                .and_then(|store| {
-                    store
-                        .clear_in_layer(&layer, artwork.selected_target.get())
-                        .map_err(|error| error.to_string())
-                })
-        };
-        match cleared {
-            Ok(()) => artwork.refresh(true),
-            Err(error) => {
-                show_artwork_error(&parent_window, &format!("Could not clear artwork: {error}"))
             }
         }
     });
-    picker
+    chooser.show();
+}
+
+/// Remove the image of the selected control on the active page.
+fn clear_artwork_image(parent_window: &ApplicationWindow, artwork: &ArtworkUi) {
+    let layer = {
+        let layers = artwork.layers.borrow();
+        layers
+            .artwork_owner(layers.active(), artwork.selected_target.get())
+            .to_owned()
+    };
+    let cleared = {
+        let mut store = artwork.store.borrow_mut();
+        store
+            .as_mut()
+            .ok_or_else(|| "Artwork storage is unavailable".to_owned())
+            .and_then(|store| {
+                store
+                    .clear_in_layer(&layer, artwork.selected_target.get())
+                    .map_err(|error| error.to_string())
+            })
+    };
+    match cleared {
+        Ok(()) => artwork.refresh(true),
+        Err(error) => {
+            show_artwork_error(parent_window, &format!("Could not clear artwork: {error}"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4102,21 +4267,31 @@ mod tests {
     use super::*;
     use sdeck_plus::layers::SwipeDirection;
     use std::sync::Mutex;
+    mod action_catalog_tests;
+    mod asset_link_save_tests;
     mod binding_icon_tests;
+    mod binding_toolbar_tests;
     mod button_swap_tests;
     mod button_text_popup_tests;
+    mod catalog_overwrite_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
+    mod dial_action_tests;
+    mod dial_preset_tests;
     mod documentation_screenshots;
     mod folder_panel_tests;
+    mod hover_help_tests;
     mod live_info_tests;
     mod multimedia_action_tests;
+    mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
+    mod preview_layout_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
+    mod shortcut_table_tests;
     mod touchscreen_tests;
     mod ui_refresh_tests;
 
@@ -5587,7 +5762,7 @@ mod tests {
             widgets.artwork_section.set_expanded(false);
             let _ = rendered_pixels(&window, &widgets.root);
         }
-        assert_normal_no_scroll(&widgets, &content, &artwork, "empty");
+        assert_scrollable_workspace(&widgets, &content, &artwork, "empty");
         assert_inactive_backgrounds(&window, &widgets, &content, &artwork);
         assert_compact_responsive_regions(&widgets, &content);
         assert_sidebar_hierarchy(&widgets, &content);
@@ -5675,12 +5850,13 @@ mod tests {
                 "loading artwork changes surface bounds"
             );
         }
-        assert_normal_no_scroll(&widgets, &content, &artwork, "loaded long values");
+        assert_scrollable_workspace(&widgets, &content, &artwork, "loaded long values");
         for (width, height) in [(1840, 980), (1280, 720), (960, 640), (900, 700), (640, 480)] {
             widgets.root.allocate(width, height, -1, None);
             assert_eq!(widgets.root.width(), width);
             assert_eq!(widgets.root.height(), height);
-            assert!(widgets.binding_ui.action_picker.is_visible());
+            // Keys take their action from the catalog, so the selector stays hidden.
+            assert!(!widgets.binding_ui.action_picker.is_visible());
             assert!(widgets.feature_runtime.profile_tabs().is_visible());
             assert_eq!(artwork.pictures.borrow().len(), 13);
             assert_artwork_geometry(&artwork, &content, true);
@@ -5879,7 +6055,7 @@ mod tests {
             ui.summaries[7].text()
         );
         eprintln!("GTK production selection and full-editor assertions executed");
-        assert_normal_no_scroll(&widgets, &content, &artwork, "cleared long values");
+        assert_scrollable_workspace(&widgets, &content, &artwork, "cleared long values");
         capture_frontend_matrix(&window, &widgets, &artwork);
         assert_feature_integration(&window, &widgets, &layers, &commands);
         window.close();
@@ -6162,7 +6338,13 @@ mod tests {
             let LayerCommand::SaveBinding(snapshot, Some(_)) = commands.try_recv().unwrap() else {
                 panic!("sound save must persist without executing");
             };
-            assert_eq!(snapshot.layers()[&layer].bindings[&trigger], expected);
+            // The saved binding holds the app's link; the link names the chosen file.
+            let stored = &snapshot.layers()[&layer].bindings[&trigger];
+            assert_ne!(stored, &expected, "the real path is not what is stored");
+            assert_eq!(
+                sdeck_plus::asset_links::unlink_action(snapshot.root(), stored),
+                expected
+            );
             assert!(commands.try_recv().is_err());
             ui.load_selected_binding(layers);
             assert_eq!(ui.action_picker.selected(), 6);
@@ -6177,7 +6359,7 @@ mod tests {
 
         // Remove deletes the binding, and the feedback line can bring it back.
         let removed_action = layers.borrow().binding(&layer, &trigger).unwrap();
-        find("Remove").emit_clicked();
+        find("Remove binding").emit_clicked();
         while commands.try_recv().is_ok() {}
         assert!(layers.borrow().binding(&layer, &trigger).is_none());
         let undo = ui.undo_remove.clone();
@@ -6720,7 +6902,7 @@ mod tests {
         eprintln!("GTK shared editor executed: all 13 assign/clear paths, key/zone/background selection, encoder independence, chooser target/layer capture and active-layer Clear");
     }
 
-    fn assert_normal_no_scroll(
+    fn assert_scrollable_workspace(
         widgets: &MonitorWidgets,
         content: &gtk::Widget,
         artwork: &ArtworkUi,
@@ -6736,18 +6918,22 @@ mod tests {
             let minimum = content.measure(Orientation::Vertical, DEFAULT_WIDTH - 48).0;
             let horizontal = widgets.root.hadjustment();
             let vertical = widgets.root.vadjustment();
-            eprintln!("GTK no-scroll {phase} action {action}: height-for-width(924)={minimum}, allocation={}x{}, upper/page={}/{}, {}/{}", content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
+            // Editing below the fold may have scrolled to the focused field.
+            // Reset the viewport for the geometry matrix, not application state.
+            vertical.set_value(0.0);
+            eprintln!("GTK scrollable workspace {phase} action {action}: height-for-width(924)={minimum}, allocation={}x{}, upper/page={}/{}, {}/{}", content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
             assert!(
                 horizontal.upper() <= horizontal.page_size(),
                 "normal width scrolls"
             );
-            assert!(
-                vertical.upper() <= vertical.page_size(),
-                "normal height scrolls"
-            );
+            // The requested inspector-below-preview layout intentionally scrolls.
+            assert!(vertical.upper() > vertical.page_size());
             assert_eq!(horizontal.value(), 0.0);
             assert_eq!(vertical.value(), 0.0);
             assert_visible_bounds(content, &widgets.root);
+            let editor = settings_region(widgets).compute_bounds(content).unwrap();
+            let preview = device_canvas(widgets).compute_bounds(content).unwrap();
+            assert!(editor.y() >= preview.y() + preview.height() + 11.0);
             assert_eq!(widgets.key_labels.len(), 8);
             for (index, label) in widgets.key_labels.iter().enumerate() {
                 let button = key_button(label);
@@ -6816,7 +7002,7 @@ mod tests {
             assert_artwork_geometry(artwork, content, phase == "loaded long values");
             let settings = sidebar_settings(widgets);
             let device = device_canvas(widgets);
-            let settings_bounds = settings.compute_bounds(content).unwrap();
+            let settings_bounds = settings_region(widgets).compute_bounds(content).unwrap();
             let device_bounds = device.compute_bounds(content).unwrap();
             eprintln!(
                 "GTK aligned panels {phase} action {action}: settings={}, preview={}, top={}/{}",
@@ -6826,15 +7012,24 @@ mod tests {
                 device_bounds.y()
             );
             assert_eq!(settings.clone().downcast::<GtkBox>().unwrap().spacing(), 6);
-            assert!((settings_bounds.y() - device_bounds.y()).abs() <= 0.5);
+            assert!(
+                (settings_bounds.y() - device_bounds.y() - device_bounds.height() - 12.0).abs()
+                    <= 1.0
+            );
             let scale = preview_scale(widgets);
             assert!(
                 (device_bounds.height() - 428.0 * scale).abs() <= 1.0,
                 "preview card scales uniformly, never stretches: {device_bounds:?} at {scale}"
             );
             let bounds = content.compute_bounds(&widgets.root).unwrap();
-            assert_eq!(bounds.y(), 16.0);
-            assert_eq!(bounds.height(), 668.0);
+            assert!(
+                bounds.y() <= 16.0,
+                "scrolling may move the shell above its top margin"
+            );
+            assert!(
+                bounds.height() > 668.0,
+                "inspector is reachable through vertical scrolling"
+            );
             assert_eq!(bounds.width(), 968.0, "shell uses the full window width");
             assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
             let mut buttons = Vec::new();
@@ -6855,15 +7050,17 @@ mod tests {
                 .profile_tabs()
                 .current_page()
                 .is_some());
-            assert!(widgets.binding_ui.action_picker.is_visible());
-            assert!(widgets.binding_ui.event_picker.is_visible());
+            // A selected key has one event and takes its action from the catalog.
+            assert!(!widgets.binding_ui.action_picker.is_visible());
+            assert!(!widgets.binding_ui.event_picker.is_visible());
         }
-        eprintln!("GTK 1000x700 {phase} five-action no-scroll assertions executed");
+        eprintln!("GTK 1000x700 {phase} five-action scrollable workspace assertions executed");
         widgets.artwork_section.set_expanded(true);
     }
 
     fn assert_visible_bounds(widget: &gtk::Widget, root: &gtk::ScrolledWindow) {
-        if !widget.is_visible() {
+        // Overlay scrollbars belong to their scroller, not to the content measure.
+        if !widget.is_visible() || widget.is::<gtk::Scrollbar>() {
             return;
         }
         if let Some(label) = widget.downcast_ref::<Label>() {
@@ -6872,11 +7069,8 @@ mod tests {
         assert!(!widget.has_css_class("events-card"));
         let bounds = widget.compute_bounds(root).unwrap();
         assert!(
-            bounds.x() >= -1.0
-                && bounds.y() >= -1.0
-                && bounds.x() + bounds.width() <= root.width() as f32 + 1.0
-                && bounds.y() + bounds.height() <= root.height() as f32 + 1.0,
-            "widget {} outside client: {bounds:?}",
+            bounds.x() >= -1.0 && bounds.x() + bounds.width() <= root.width() as f32 + 1.0,
+            "widget {} outside client width: {bounds:?}",
             widget.type_().name()
         );
         // Internal entry/textview contents may intentionally scroll long editable text.
@@ -7105,7 +7299,12 @@ mod tests {
                     .and_then(|child| child.downcast::<Label>().ok())
                     .map(|label| label.text())
             })
-            .or_else(|| button.tooltip_text())
+            // Icon-only buttons are named by the first line of their tooltip.
+            .or_else(|| {
+                button
+                    .tooltip_text()
+                    .map(|tip| tip.lines().next().unwrap_or_default().into())
+            })
     }
 
     /// The discard prompt specifically, so a stray dialog from another test cannot answer it.
@@ -7171,6 +7370,14 @@ mod tests {
             .unwrap()
     }
 
+    /// The configuration region: the form's own scroller, which stays put while
+    /// the form scrolls inside it.
+    fn settings_region(widgets: &MonitorWidgets) -> gtk::Widget {
+        sidebar_settings(widgets)
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .expect("configuration region scroller")
+    }
+
     fn sidebar_settings(widgets: &MonitorWidgets) -> gtk::Widget {
         widgets
             .binding_ui
@@ -7187,7 +7394,7 @@ mod tests {
         for (width, height) in [(1840, 980), (1000, 700), (640, 480)] {
             widgets.root.allocate(width, height, -1, None);
             let device = device_canvas(widgets).compute_bounds(content).unwrap();
-            let editor = sidebar_settings(widgets).compute_bounds(content).unwrap();
+            let editor = settings_region(widgets).compute_bounds(content).unwrap();
             let shell = content.compute_bounds(&widgets.root).unwrap();
             let header = content
                 .first_child()
@@ -7197,6 +7404,8 @@ mod tests {
             let tabs = widgets.feature_runtime.profile_tabs();
             let tab_header = tabs.first_child().unwrap().compute_bounds(content).unwrap();
             let body = device_canvas(widgets)
+                .parent()
+                .unwrap()
                 .parent()
                 .unwrap()
                 .parent()
@@ -7224,10 +7433,7 @@ mod tests {
                     "wide configuration shell stops at its maximum measure: {shell:?}"
                 );
                 assert!((shell.x() + shell.width() / 2.0 - width as f32 / 2.0).abs() <= 1.0);
-                assert!(
-                    (device.x() - (shell.width() - editor.x() - editor.width())).abs() <= 32.0,
-                    "body should be centered under the bounded chrome"
-                );
+                assert!(device.x() >= 0.0 && editor.x() >= 0.0);
             } else if width == 640 {
                 assert_eq!(shell.width(), 608.0, "narrow shell uses available width");
             }
@@ -7246,19 +7452,12 @@ mod tests {
                 cell.width(),
                 cell.height()
             );
-            if width >= 1280 {
-                assert!(scale >= 1.25, "spare room enlarges the preview: {scale}");
-            }
+            // Vertical room belongs to the inspector rather than preview expansion.
             assert!(
-                editor.width() <= 640.0,
-                "editor needs a bounded reading measure: {editor:?}"
+                editor.width() <= 720.0,
+                "below-preview editor needs a bounded reading measure: {editor:?}"
             );
-            if width >= 1000 {
-                assert!((device.y() - editor.y()).abs() <= 0.5);
-                assert!(editor.x() - device.x() - device.width() <= 32.0);
-            } else {
-                assert!(editor.y() >= device.y() + device.height() + 15.0);
-            }
+            assert!((editor.y() - device.y() - device.height() - 12.0).abs() <= 1.0);
             assert!(widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size());
         }
         let previous = widgets.binding_ui.action_picker.selected();
@@ -7294,9 +7493,16 @@ mod tests {
     fn assert_sidebar_hierarchy(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         assert!(settings.next_sibling().is_none(), "no event card");
-        let sidebar = settings.parent().unwrap().downcast::<GtkBox>().unwrap();
+        // The card sits in its own vertical scroller inside the workspace column.
+        let sidebar = settings
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .unwrap()
+            .parent()
+            .unwrap()
+            .downcast::<GtkBox>()
+            .unwrap();
         assert_eq!(sidebar.orientation(), Orientation::Vertical);
-        assert_eq!(sidebar.spacing(), 6);
+        assert_eq!(sidebar.spacing(), 12);
         let body = sidebar
             .parent()
             .unwrap()
@@ -7309,7 +7515,7 @@ mod tests {
         assert_eq!(body.column_spacing(), 16);
         assert_eq!(body.row_spacing(), 16);
         assert_eq!(
-            body.last_child()
+            body.first_child()
                 .unwrap()
                 .downcast::<gtk::FlowBoxChild>()
                 .unwrap()
@@ -7356,7 +7562,12 @@ mod tests {
     fn assert_sidebar_geometry(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         let device = device_canvas(widgets);
+        // Viewport and scroller of the configuration region, then the workspace column.
         let profile_content = settings
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .parent()
             .unwrap()
             .parent()
@@ -7418,7 +7629,12 @@ mod tests {
             );
         }
         let cell = device.parent().unwrap().compute_bounds(content).unwrap();
-        let settings = settings.compute_bounds(content).unwrap();
+        // The region (its scroller) stays put while the form scrolls inside it.
+        let settings = settings
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .unwrap()
+            .compute_bounds(content)
+            .unwrap();
         let device = device.compute_bounds(content).unwrap();
         if (settings.y() - device.y()).abs() <= 0.5 {
             // A height-limited preview is centered in its column.
@@ -7429,8 +7645,8 @@ mod tests {
             );
         } else {
             assert!(
-                (settings.y() - device.y() - device.height() - 16.0).abs() <= 1.0,
-                "stacked regions keep a 16px gap: {settings:?}, {device:?}"
+                (settings.y() - device.y() - device.height() - 12.0).abs() <= 1.0,
+                "preview and inspector keep a 12px gap: {settings:?}, {device:?}"
             );
         }
         eprintln!("GTK sidebar geometry assertions executed");
@@ -7579,7 +7795,7 @@ mod tests {
                     "Image…"
                         | "Clear"
                         | "Save binding"
-                        | "Remove"
+                        | "Remove binding"
                         | "Create profile"
                         | "Delete profile"
                         | "Test action"
@@ -7606,10 +7822,31 @@ mod tests {
     }
 
     fn assert_reachable(widget: &impl IsA<gtk::Widget>, viewport: &gtk::ScrolledWindow) {
+        // A hidden control (for example Appearance while a key is selected) has
+        // no position to reach.
+        if !widget.as_ref().is_visible() {
+            return;
+        }
         let vertical = viewport.vadjustment();
         let horizontal = viewport.hadjustment();
         horizontal.set_value(0.0);
         vertical.set_value(0.0);
+        // A control inside a region that scrolls on its own (the configuration
+        // form) is reached by scrolling that region first, as a person would.
+        let mut parent = widget.as_ref().parent();
+        while let Some(ancestor) = parent {
+            if let Some(inner) = ancestor.downcast_ref::<gtk::ScrolledWindow>() {
+                if inner != viewport {
+                    inner.vadjustment().set_value(0.0);
+                    inner.allocate(inner.width(), inner.height(), -1, None);
+                    if let Some(bounds) = widget.compute_bounds(inner) {
+                        let adjustment = inner.vadjustment();
+                        adjustment.set_value(adjustment.value() + f64::from(bounds.y()));
+                    }
+                }
+            }
+            parent = ancestor.parent();
+        }
         viewport.queue_allocate();
         viewport.allocate(viewport.width(), viewport.height(), -1, None);
         let bounds = widget
@@ -7622,7 +7859,10 @@ mod tests {
         let bounds = widget.compute_bounds(viewport).unwrap();
         assert!(
             bounds.x() >= 0.0 && bounds.x() + bounds.width() <= viewport.width() as f32,
-            "control is horizontally clipped: {bounds:?}"
+            "control is horizontally clipped: {bounds:?} ({} in a {}px viewport, scrollable width {})",
+            widget.type_().name(),
+            viewport.width(),
+            horizontal.upper()
         );
         assert!(
             bounds.y() >= -1.0 && bounds.y() + bounds.height() <= viewport.height() as f32 + 1.0,

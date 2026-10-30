@@ -343,15 +343,13 @@ fn assert_inspector_grouping() {
         "unsaved edits stand out"
     );
 
-    // Options: a small heading groups the page-return and live-information choices.
+    // Options: a small heading groups the page-return choice; live information
+    // moved to the sidebar's Binding tab.
     let options = ui.return_toggle.prev_sibling().unwrap();
     let heading = options.downcast::<Label>().expect("options heading");
     assert_eq!(heading.text(), "Options");
     assert!(heading.has_css_class("inspector-heading"));
-    assert_eq!(
-        ui.info_toggle.prev_sibling().and_then(|w| w.prev_sibling()),
-        Some(ui.return_toggle.clone().upcast())
-    );
+    assert!(!ui.info_toggle.is_ancestor(&sidebar_settings(widgets)));
 
     // Status: readable ink directly under the action row, not muted metadata.
     assert!(!ui.status.has_css_class("muted"));

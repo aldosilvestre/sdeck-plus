@@ -90,7 +90,13 @@ fn controller<T: IsA<gtk::EventController> + IsA<glib::Object> + glib::object::I
 ) -> T {
     let controllers = widget.observe_controllers();
     (0..controllers.n_items())
-        .find_map(|index| controllers.item(index)?.downcast::<T>().ok())
+        .filter_map(|index| controllers.item(index)?.downcast::<T>().ok())
+        .find(|controller| {
+            controller
+                .upcast_ref::<gtk::EventController>()
+                .downcast_ref::<gtk::DropTarget>()
+                .is_none_or(|target| target.actions() == gtk::gdk::DragAction::MOVE)
+        })
         .expect("native controller")
 }
 

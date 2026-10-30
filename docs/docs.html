@@ -281,14 +281,26 @@ cd sdeck-plus
             </article>
             <article class="card">
               <h4>Configure an action</h4>
+              <p>For keypad buttons, use the right-hand panel, which has three tabs. <strong>Actions</strong>: search the catalog, open a category and drag an action onto a key or a dial. Dropping on a dial asks whether it belongs to <strong>Turn clockwise</strong>, <strong>Turn counterclockwise</strong> or <strong>Press</strong>; clicking an action with a dial selected uses the event chosen in the inspector.
+                 <strong>Dials</strong>: drag a preset (Volume, Brightness, Tracks, Scroll or Pages) onto a dial. A preset assigns turn and, where it makes sense, press, replaces only the events it lists and saves immediately without running anything.
+                 <strong>Binding</strong>: options saved with the selected control, such as live information.
+                 Its configuration opens below the fixed-size device preview; long forms scroll inside the settings area. Actions without parameters save on drop without executing;
+                 actions that need settings keep the previous binding active until you complete the form and click <strong>Save binding</strong>.
+                 You can also select a key and click a catalog action instead of dragging.
+                 Choosing another action replaces the draft already on that control; if the draft is on a different control you are asked before it is discarded. Existing key-to-key dragging still swaps saved settings and artwork.</p>
+              <p>The action selector remains available for dials and the touch strip; keys use the Actions catalog:</p>
               <ol>
                 <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
-                <li>Pick an event valid for that control: key press; dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes.</li>
+                <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key has a single press event, so its Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
-                <li><strong>Save binding</strong> creates or updates the control event; <strong>Remove binding</strong> clears it.</li>
+                <li>The three icon buttons at the top of the right-hand panel act on the selected control: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears it. Hover any of them for a tooltip that explains what it does; the result message appears right below them.</li>
               </ol>
               <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
                  Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
+              <figure>
+                <a href="screenshots/main-window.png"><img width="1000" height="950" src="screenshots/main-window.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Actions catalog, selected key settings and the Save, Test and Remove toolbar."></a>
+                <figcaption>Actions catalog, selected key settings and the Save, Test and Remove toolbar.</figcaption>
+              </figure>
             </article>
             <article class="card">
               <h4>Assignment summaries</h4>
@@ -326,12 +338,26 @@ cd sdeck-plus
               <p>Device brightness is the Stream Deck's display, not the monitor backlight. Sleep sets brightness to zero and wake restores the remembered level;
                  before an explicit absolute level, relative and wake actions assume 100% because the device cannot report its brightness.
                  Legacy exact-tick rotation bindings remain supported and take priority over directional ones.</p>
+              <p>The <strong>Dials</strong> tab provides Volume, Brightness, Tracks, Scroll and Pages presets. Drag one onto a dial to save its listed events; unlisted events are preserved. For a single action, drag it from <strong>Actions</strong> and choose the dial event in the popup.</p>
+              <figure>
+                <a href="screenshots/dials-tab.png"><img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dials tab with the five ready-to-use presets."></a>
+                <figcaption>Dials tab with the five ready-to-use presets.</figcaption>
+              </figure>
+              <figure>
+                <a href="screenshots/dial-event-choice.png"><img width="266" height="216" src="screenshots/dial-event-choice.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dropping a catalog action on a dial asks which event to bind."></a>
+                <figcaption>Dropping a catalog action on a dial asks which event to bind.</figcaption>
+              </figure>
             </article>
             <article class="card">
               <h4>Sounds and audio output</h4>
               <p>Choose <strong>Play sound</strong>, then <strong>Choose file...</strong> or enter a path. WAV, MP3, FLAC, OGG, M4A/AAC, Opus and other formats decoded by
                  <code>mpv</code> work. Playback replaces the app's previous sound; <strong>More actions &gt; Multimedia &gt; Stop audio file</strong> stops only app-owned playback,
                  not other media players.</p>
+              <p>Saving a <strong>Play sound</strong> or <strong>Open file or folder</strong> binding with an absolute path creates a symbolic link to the target inside the app's data directory (<code>links/</code>) and stores that link. Relative paths are kept unchanged. The editor still shows the real file, and the same file reuses one link. If the original is moved or deleted, or a relative path such as <code>dry-fart.mp3</code> or <code>~/Music/dry-fart.mp3</code> points nowhere (playback does not expand <code>~</code>), the key or touch section shows a red cross so you can see it could not run: it replaces the key's own image while the file is missing, and any button text stays on top of the cross, otherwise it is labeled <strong>Missing file</strong>. Live information still takes priority over the warning. The warning updates when the control is redrawn (for example after saving or changing pages), not immediately when a file disappears. Images are different: they are copied into the app's own storage when chosen. Exported bundles contain sound contents, not links; Open file/folder targets are restored to their original paths and are not embedded.</p>
+              <figure>
+                <a href="screenshots/missing-file.png"><img width="1000" height="950" src="screenshots/missing-file.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 shows a missing sound as a red cross behind its text."></a>
+                <figcaption>Key 8 shows a missing sound as a red cross behind its text.</figcaption>
+              </figure>
               <p><strong>Change audio output</strong> switches the default PipeWire output with <code>wpctl</code>; <strong>Refresh</strong> discovers new outputs with <code>pw-dump</code>.
                  Bindings store the stable device name, so reconnecting does not select a different device; a disconnected saved device reports an error when used.
                  <strong>Rotate</strong> advances from the system's current output to the next connected one on each press, wrapping after the last.
@@ -361,8 +387,12 @@ cd sdeck-plus
               <h4>Physical keyboard actions and <code>/dev/uinput</code></h4>
               <p><strong>Shortcut</strong> uses a Linux uinput virtual keyboard, not compositor dispatch, shell commands or text typing. Without modifiers it sends one key down/up;
                  with modifiers it holds them around the main key and releases them in reverse order (<code>CTRL + D</code>, <code>SUPER + RETURN</code>).
-                 Modifiers are never kept held between actions; failed sends attempt release cleanup. <strong>Key names and aliases</strong> opens a reference of every accepted name,
+                 Modifiers are never kept held between actions; failed sends attempt release cleanup. <strong>Key names and aliases</strong> opens a reference of every accepted name, with the aliases laid out as a table (key and the other names it answers to),
                  without saving or running the draft.</p>
+              <figure>
+                <a href="screenshots/shortcut-reference.png"><img width="560" height="420" src="screenshots/shortcut-reference.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Shortcut reference with aligned key names and their accepted aliases."></a>
+                <figcaption>Shortcut reference with aligned key names and their accepted aliases.</figcaption>
+              </figure>
               <ul>
                 <li>Chord text and modifier toggles are merged in CTRL, SHIFT, ALT, SUPER order. Names are case-insensitive; <code>Control</code> = <code>CTRL</code>,
                     <code>Win</code>/<code>Windows</code>/<code>Meta</code> = <code>SUPER</code>, <code>Return</code> = <code>Enter</code>. Uppercase letters do not add Shift.</li>
@@ -383,12 +413,16 @@ cd sdeck-plus
             </article>
             <article class="card wide">
               <h4>Live information on keys and dials</h4>
-              <p>Under the action of a key or dial, tick <strong>Show live information</strong> and choose volume (crossed out while muted), audio output device,
+              <p>In the <strong>Binding</strong> tab of the right-hand panel, tick <strong>Show live information on the key</strong> for the selected key or dial and choose volume (crossed out while muted), audio output device,
                  Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load), OBS state (recording, streaming and scene)
                  or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
                  On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
                  beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
                  window preview matches the device.</p>
+              <figure>
+                <a href="screenshots/binding-tab.png"><img src="screenshots/binding-tab.png" width="1000" height="950" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Binding tab with the live-information toggle for the selected control"></a>
+                <figcaption>Binding tab with the live-information toggle for the selected control.</figcaption>
+              </figure>
               <p>Each touch section can show information for its Tap or Hold binding. A dial's section shows its press binding first, then its turns, then a tap or hold on
                  that section. Flick, swipes and whole-strip gestures cannot show information. Weather uses Open-Meteo through <code>curl</code> with a city or
                  <code>latitude,longitude</code>, needs internet access and shows <code>--</code> when the lookup fails. Volume and audio device use <code>wpctl</code>.
@@ -470,24 +504,35 @@ cd sdeck-plus
           <div class="cards">
             <article class="card">
               <h4>Button text</h4>
-              <p>Select a key and click <strong>Add text</strong> (<strong>Edit text</strong> once saved). The popup names the key and page, for example "Key 3 on “Everyday / Page 1”".
+              <p><strong>Right-click a key</strong> and choose <strong>Add text and image…</strong> (<strong>Edit text and image…</strong> once it has text). The popover opens on that key and also holds its <strong>Background image</strong>: <strong>Image…</strong> chooses one and <strong>Clear image</strong> removes it. The Appearance section is gone from the inspector for keys and dials; only the touch strip and its zones keep theirs for now. The popover names the key and page, for example "Key 3 on “Everyday / Page 1”".
                  Choose an installed font, a size from 6 to 120 px, horizontal or vertical orientation (vertical rotates the text 90° clockwise) and a position on a 3x3 grid.
                  Text is white with a black outline and may span several lines.</p>
               <p>The preview shows the key as the device will: over its image, over its action icon when the text leaves room, or over black, with a warning when the text does not fit
                  (the device clips it). <strong>Save text</strong> or <strong>Ctrl+Enter</strong> saves; it is enabled only for non-blank changes, flagged by "Unsaved changes".
                  Closing discards the draft. <strong>Remove text</strong> keeps the background image, and clearing the image keeps the text.</p>
+              <figure>
+                <a href="screenshots/key-context-menu.png"><img width="254" height="124" src="screenshots/key-context-menu.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Right-click a decorated key to edit its text and image."></a>
+                <figcaption>Right-click a decorated key to edit its text and image.</figcaption>
+              </figure>
+              <figure>
+                <a href="screenshots/button-text-editor.png"><img width="554" height="551" src="screenshots/button-text-editor.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Text and background image editing in one key popover."></a>
+                <figcaption>Text and background image editing in one key popover.</figcaption>
+              </figure>
             </article>
             <article class="card">
               <h4>Window layout and themes</h4>
-              <p>The window opens at 1000 × 700 with the device preview on the left and the editor on the right; long forms and smaller windows scroll vertically. The desk uses
-                 the window width up to 1240 px and centers beyond it; the preview grows up to 1.5 times, and at 640 px the preview and editor stack without horizontal scrolling.
+              <p>The window opens at 1000 × 700 with a fixed 440 × 428 device preview and the selected control's settings on the left; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; at 640 px the panels stack without horizontal scrolling.
                  Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
-                 Transitions follow GTK's animation setting. The full layout contract is in
+                 Bare information icons show their help on hover or keyboard-visible focus. The Organize panel uses Edit profile and New profile tabs; the Base profile callout explains its restrictions. Transitions follow GTK's animation setting. The full layout contract is in
                  <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
+              <figure>
+                <a href="screenshots/field-help.png"><img width="427" height="252" src="screenshots/field-help.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile auto-switch help shown by hovering its information icon."></a>
+                <figcaption>Profile auto-switch help shown by hovering its information icon.</figcaption>
+              </figure>
             </article>
             <article class="card wide">
               <h4>Background images</h4>
-              <p>Pick a target in <strong>Artwork target (active layer)</strong>, then <strong>Image…</strong> or <strong>×</strong> (Clear artwork). There are thirteen targets: eight keys,
+              <p>For a key, right-click and use <strong>Image…</strong> or <strong>Clear image</strong> in its text/image popover. For the strip and its zones, pick a target in <strong>Artwork target (active layer)</strong> under Appearance, then choose or clear its image. There are thirteen targets: eight keys,
                  the touch-strip background and four touch zones. Clicking a key or zone selects its target; clicking a dial selects only its binding. PNG, GIF and any format
                  supported by the installed GdkPixbuf loaders work; GIFs are sent as a still image because the hardware upload format is JPEG.
                  Images are center-cropped and sent as 120 × 120 (keys), 800 × 100 (strip) or 200 × 100 (zone) JPEGs; the strip background and zones are layered.</p>
@@ -501,7 +546,7 @@ cd sdeck-plus
               <p>Every action has a two-tone icon used in the <strong>Action</strong> and <strong>More actions</strong> menus, on the preview dials, and on keys and touch sections without
                  their own artwork, both in the preview and on the device. Each family has its own color: media violet, audio cyan, OBS red, apps and system amber, websites blue,
                  pages and folders white. Badges above the preview strip list what swipes, tap and hold do (dimmed while an unbound swipe keeps its default page change).
-                 Your artwork always wins, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
+                 Your artwork normally wins; a missing sound/file target instead shows a red cross even over artwork or behind centered/vertical text (live information retains priority). For other action icons, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
                  Icons are never saved into your artwork or text.</p>
             </article>
           </div>

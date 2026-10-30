@@ -12,8 +12,7 @@ use std::{
 };
 
 pub(super) struct ButtonTextEditor {
-    pub(super) root: GtkBox,
-    pub(super) open: gtk::MenuButton,
+    /// Anchored to the right-clicked key while open; unparented otherwise.
     pub(super) panel: gtk::Popover,
     pub(super) input: gtk::TextView,
     pub(super) font: gtk::FontButton,
@@ -33,6 +32,14 @@ pub(super) struct ButtonTextEditor {
     /// Ctrl+Enter saves from anywhere in the popup; plain Enter stays a new line.
     pub(super) save_shortcut: gtk::Shortcut,
     status: Label,
+    /// Names the key's current background image; the buttons act on it.
+    image_status: Label,
+    image_choose: gtk::Button,
+    image_clear: gtk::Button,
+    /// "Add text" or "Edit text", the verb of the key's context menu entry.
+    caption: RefCell<String>,
+    /// The eight key widgets the modal opens on.
+    anchors: RefCell<Vec<glib::WeakRef<gtk::Widget>>>,
     loading: Cell<bool>,
     control_available: Cell<bool>,
     context: RefCell<Option<(String, ArtworkTarget)>>,
@@ -125,6 +132,27 @@ impl ButtonTextEditor {
         preview_column.append(&status);
         body.append(&preview_column);
         content.append(&body);
+        let image_section = GtkBox::new(Orientation::Vertical, 6);
+        let image_heading = Label::new(Some("Background image"));
+        image_heading.add_css_class("inspector-heading");
+        image_heading.set_xalign(0.0);
+        image_section.append(&image_heading);
+        let image_row = GtkBox::new(Orientation::Horizontal, 8);
+        let image_status = Label::new(None);
+        image_status.add_css_class("muted");
+        image_status.set_xalign(0.0);
+        image_status.set_hexpand(true);
+        image_status.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        image_status.set_max_width_chars(24);
+        let image_choose = ui::button("image-x-generic-symbolic", "Image…");
+        image_choose.set_tooltip_text(Some("Choose a background image for this key"));
+        let image_clear = ui::button("edit-clear-symbolic", "Clear image");
+        image_clear.set_tooltip_text(Some("Remove this key's background image"));
+        image_row.append(&image_status);
+        image_row.append(&image_choose);
+        image_row.append(&image_clear);
+        image_section.append(&image_row);
+        content.append(&image_section);
         let buttons = GtkBox::new(Orientation::Horizontal, 12);
         let save = ui::button("document-save-symbolic", "Save text");
         save.add_css_class("suggested-action");
@@ -146,13 +174,7 @@ impl ButtonTextEditor {
         shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
         shortcuts.add_shortcut(save_shortcut.clone());
         panel.add_controller(shortcuts);
-        let open = ui::menu_button("format-text-plaintext-symbolic", "Add text", &panel);
-        open.set_halign(gtk::Align::Start);
-        let root = GtkBox::new(Orientation::Vertical, 8);
-        root.append(&open);
         let editor = Rc::new(Self {
-            root,
-            open,
             panel,
             input,
             font,
@@ -167,6 +189,11 @@ impl ButtonTextEditor {
             unsaved,
             save_shortcut,
             status,
+            image_status,
+            image_choose,
+            image_clear,
+            caption: RefCell::new("Add text".into()),
+            anchors: RefCell::new(Vec::new()),
             loading: Cell::new(false),
             control_available: Cell::new(true),
             context: RefCell::new(None),
@@ -226,22 +253,18 @@ impl ButtonTextEditor {
             }
         });
         let weak = Rc::downgrade(&editor);
-        editor.open.set_create_popup_func(move |_| {
-            if let Some(editor) = weak.upgrade() {
-                editor.load_context(true);
-            }
-        });
-        let weak = Rc::downgrade(&editor);
         editor.panel.connect_show(move |_| {
             if let Some(editor) = weak.upgrade() {
                 editor.input.grab_focus();
             }
         });
         let weak = Rc::downgrade(&editor);
-        editor.panel.connect_closed(move |_| {
+        editor.panel.connect_closed(move |panel| {
             if let Some(editor) = weak.upgrade() {
                 editor.load_context(true);
             }
+            // A popover parented to a key must be released when it closes.
+            panel.unparent();
         });
         editor.load_context(false);
         editor
@@ -264,9 +287,6 @@ impl ButtonTextEditor {
             }
         }
         *self.context.borrow_mut() = Some(context);
-        self.root.set_visible(
-            self.control_available.get() && matches!(target, ArtworkTarget::Keypad(_)),
-        );
         if !matches!(target, ArtworkTarget::Keypad(_)) {
             return;
         }
@@ -285,13 +305,7 @@ impl ButtonTextEditor {
         } else {
             "Edit text"
         };
-        self.open.set_child(Some(&ui::icon_caption(
-            "format-text-plaintext-symbolic",
-            caption,
-        )));
-        self.open.set_tooltip_text(Some(caption));
-        self.open
-            .update_property(&[gtk::accessible::Property::Label(caption)]);
+        *self.caption.borrow_mut() = caption.to_owned();
         self.loading.set(true);
         self.input.buffer().set_text(&value.text);
         let mut font = gtk::pango::FontDescription::new();
@@ -307,12 +321,133 @@ impl ButtonTextEditor {
             .set_active(true);
         self.loading.set(false);
         let available = self.artwork.store.borrow().is_some();
-        self.root.set_sensitive(available);
+        self.panel.set_sensitive(available);
+        self.image_choose.set_sensitive(available);
+        self.refresh_image_state();
         self.status.set_text("");
         if let Err(error) = self.render_preview(&value) {
             self.feedback(&error, true);
         }
         self.update_state();
+    }
+
+    /// "Add text" or "Edit text", following whether the selected key has text.
+    pub(super) fn caption(&self) -> String {
+        self.caption.borrow().clone()
+    }
+
+    /// Remember the key widgets the modal opens on.
+    pub(super) fn set_anchors(&self, keys: &[gtk::Widget]) {
+        *self.anchors.borrow_mut() = keys.iter().map(|key| key.downgrade()).collect();
+    }
+
+    /// Open the modal on the selected key.
+    pub(super) fn popup(&self) {
+        let ArtworkTarget::Keypad(key) = self.artwork.selected_target.get() else {
+            return;
+        };
+        let anchor = self
+            .anchors
+            .borrow()
+            .get(usize::from(key).wrapping_sub(1))
+            .and_then(glib::WeakRef::upgrade);
+        let (true, Some(anchor)) = (self.control_available.get(), anchor) else {
+            return;
+        };
+        self.load_context(true);
+        if self.panel.parent().as_ref() != Some(&anchor) {
+            if self.panel.parent().is_some() {
+                self.panel.unparent();
+            }
+            self.panel.set_parent(&anchor);
+        }
+        self.panel.popup();
+    }
+
+    /// Wire the image buttons to the shared chooser and clearing logic.
+    pub(super) fn attach_image_controls(&self, window: &gtk::ApplicationWindow) {
+        let (parent, artwork) = (window.clone(), self.artwork.clone());
+        self.image_choose
+            .connect_clicked(move |_| super::choose_artwork_image(&parent, &artwork));
+        let (parent, artwork) = (window.clone(), self.artwork.clone());
+        self.image_clear
+            .connect_clicked(move |_| super::clear_artwork_image(&parent, &artwork));
+    }
+
+    /// Show the key's image name and enable Clear only when there is one.
+    fn refresh_image_state(&self) {
+        let target = self.artwork.selected_target.get();
+        if !matches!(target, ArtworkTarget::Keypad(_)) {
+            return;
+        }
+        let owner = {
+            let layers = self.artwork.layers.borrow();
+            layers.artwork_owner(layers.active(), target).to_owned()
+        };
+        let name = self
+            .artwork
+            .store
+            .borrow()
+            .as_ref()
+            .and_then(|store| store.assigned_path_in_layer(&owner, target))
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
+        self.image_clear.set_sensitive(name.is_some());
+        self.image_status
+            .set_text(&name.map_or_else(|| "No image".to_owned(), |name| format!("Image: {name}")));
+    }
+
+    /// Right-clicking a key selects it and offers its text and image modal.
+    pub(super) fn connect_context_menu(
+        self: &Rc<Self>,
+        keys: &[gtk::Widget],
+        select: Rc<dyn Fn(usize) -> bool>,
+    ) {
+        self.set_anchors(keys);
+        for (index, key) in keys.iter().enumerate().take(8) {
+            let gesture = gtk::GestureClick::builder().button(3).build();
+            let editor = Rc::downgrade(self);
+            let weak_key = key.downgrade();
+            let select = select.clone();
+            gesture.connect_pressed(move |_, _, x, y| {
+                let (Some(editor), Some(key)) = (editor.upgrade(), weak_key.upgrade()) else {
+                    return;
+                };
+                if select(index) {
+                    editor.show_menu(&key, x, y);
+                }
+            });
+            key.add_controller(gesture);
+        }
+    }
+
+    fn show_menu(self: &Rc<Self>, key: &gtk::Widget, x: f64, y: f64) {
+        let menu = gtk::Popover::new();
+        menu.set_parent(key);
+        menu.set_has_arrow(false);
+        menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        menu.add_css_class("key-context-menu");
+        let entry = gtk::Button::with_label(&format!("{} and image…", self.caption()));
+        entry.add_css_class("flat");
+        let weak = Rc::downgrade(self);
+        let menu_ref = menu.downgrade();
+        entry.connect_clicked(move |_| {
+            if let Some(menu) = menu_ref.upgrade() {
+                menu.popdown();
+            }
+            // Open after the menu has released its grab.
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(editor) = weak.upgrade() {
+                    editor.popup();
+                }
+            });
+        });
+        menu.set_child(Some(&entry));
+        menu.connect_closed(|menu| menu.unparent());
+        menu.popup();
     }
 
     /// Follow the page indicator's tooltip, which names the current view.
@@ -380,9 +515,6 @@ impl ButtonTextEditor {
 
     pub(super) fn set_control_available(&self, available: bool) {
         self.control_available.set(available);
-        self.root.set_visible(
-            available && matches!(self.artwork.selected_target.get(), ArtworkTarget::Keypad(_)),
-        );
         if !available {
             self.panel.popdown();
         }
@@ -443,6 +575,7 @@ impl ButtonTextEditor {
     }
 
     pub(super) fn refresh_preview(&self) {
+        self.refresh_image_state();
         if let Err(error) = self.value().and_then(|value| self.render_preview(&value)) {
             self.feedback(&error, true);
         }

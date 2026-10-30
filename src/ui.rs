@@ -219,14 +219,68 @@ pub(crate) fn field_help(row: &GtkBox, title: &str, explanation: &str) {
     label.set_hexpand(true);
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.append(&label);
-    let panel = popover(title, &helper(explanation));
+    // A light panel that appears on hover or keyboard focus: no click needed,
+    // and no native tooltip repeating it.
+    let panel = Popover::new();
+    panel.set_autohide(false);
+    panel.set_can_target(false);
+    panel.set_position(gtk::PositionType::Bottom);
+    panel.add_css_class("help-popover");
+    track_motion(&panel);
+    let body = GtkBox::new(Orientation::Vertical, 6);
+    body.set_margin_top(12);
+    body.set_margin_bottom(12);
+    body.set_margin_start(14);
+    body.set_margin_end(14);
+    let heading = Label::new(Some(title));
+    heading.add_css_class("section-label");
+    heading.set_xalign(0.0);
+    body.append(&heading);
+    body.append(&helper(explanation));
+    panel.set_child(Some(&body));
     let help = gtk::MenuButton::builder()
         .icon_name("help-about-symbolic")
-        .tooltip_text(explanation)
         .popover(&panel)
         .build();
     help.add_css_class("field-help");
+    // Just the glyph: no button frame around the information icon.
+    help.set_has_frame(false);
     help.update_property(&[gtk::accessible::Property::Label(title)]);
+    let motion = gtk::EventControllerMotion::new();
+    let weak = panel.downgrade();
+    motion.connect_enter(move |_, _, _| {
+        if let Some(panel) = weak.upgrade() {
+            panel.popup();
+        }
+    });
+    let weak = panel.downgrade();
+    motion.connect_leave(move |_| {
+        if let Some(panel) = weak.upgrade() {
+            panel.popdown();
+        }
+    });
+    help.add_controller(motion);
+    let focus = gtk::EventControllerFocus::new();
+    let weak = panel.downgrade();
+    // Only keyboard navigation (visible focus) opens it; a form that merely
+    // starts with this button focused must not pop the help open by itself.
+    focus.connect_enter(move |controller| {
+        let keyboard = controller
+            .widget()
+            .and_then(|widget| widget.root())
+            .and_downcast::<gtk::Window>()
+            .is_some_and(|window| window.gets_focus_visible());
+        if let (Some(panel), true) = (weak.upgrade(), keyboard) {
+            panel.popup();
+        }
+    });
+    let weak = panel.downgrade();
+    focus.connect_leave(move |_| {
+        if let Some(panel) = weak.upgrade() {
+            panel.popdown();
+        }
+    });
+    help.add_controller(focus);
     header.append(&help);
     row.prepend(&header);
 }
@@ -274,6 +328,31 @@ pub(crate) fn panel_body(body: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .max_content_height(288)
         .child(body)
         .build()
+}
+
+/// Give a titled popover an icon, a one-line subtitle and an icon-only Close.
+pub(crate) fn refine_popover_header(panel: &Popover, icon: &str, subtitle: &str) {
+    let Some(content) = panel.child().and_downcast::<GtkBox>() else {
+        return;
+    };
+    let Some(header) = content.first_child().and_downcast::<GtkBox>() else {
+        return;
+    };
+    let image = Image::from_icon_name(icon);
+    image.set_pixel_size(20);
+    image.add_css_class("popover-icon");
+    header.prepend(&image);
+    if let Some(close) = header.last_child().and_downcast::<Button>() {
+        let glyph = Image::from_icon_name("window-close-symbolic");
+        glyph.set_pixel_size(16);
+        close.set_child(Some(&glyph));
+        close.set_tooltip_text(Some("Close"));
+        close.add_css_class("popover-close");
+        close.update_property(&[gtk::accessible::Property::Label("Close")]);
+    }
+    let note = helper(subtitle);
+    note.add_css_class("organize-subtitle");
+    content.insert_child_after(&note, Some(&header));
 }
 
 pub(crate) fn popover(title: &str, body: &impl IsA<gtk::Widget>) -> Popover {

@@ -28,6 +28,20 @@ fn icon_ids(widget: &gtk::Widget) -> Vec<String> {
 
 /// Open the dropdown's native popup and wait until it is mapped and painted.
 fn open_popup(picker: &gtk::DropDown, panel: &gtk::Popover) {
+    // Catalog layout places the inspector below the preview. Popups need their
+    // anchor visible so GTK allocates and paints the native list rows.
+    let mut ancestor = picker.parent();
+    while let Some(widget) = ancestor {
+        if let Some(scroll) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            if let Some(bounds) = picker.compute_bounds(scroll) {
+                let adjustment = scroll.vadjustment();
+                adjustment.set_value(adjustment.value() + f64::from(bounds.y()) - 40.0);
+                wait_for_frame(scroll);
+            }
+            // Keep going: the form's own scroller sits inside the page's.
+        }
+        ancestor = widget.parent();
+    }
     let main_loop = glib::MainLoop::new(None, false);
     let done = main_loop.clone();
     let signal = panel.connect_map(move |_| done.quit());
@@ -48,6 +62,25 @@ fn open_popup(picker: &gtk::DropDown, panel: &gtk::Popover) {
     }
     assert!(panel.is_mapped(), "dropdown popup did not map");
     wait_for_frame(panel);
+    // The list creates its rows in idle steps after mapping, possibly in
+    // batches under load: wait until the drawn icons stop changing (bounded).
+    let drawn = || {
+        descendants::<gtk::DrawingArea>(panel.upcast_ref())
+            .iter()
+            .filter(|area| area.has_css_class("binding-icon") && area.is_visible())
+            .count()
+    };
+    let started = std::time::Instant::now();
+    let mut previous = usize::MAX;
+    while started.elapsed() < Duration::from_secs(3) {
+        glib::MainContext::default().iteration(false);
+        wait_for_frame(panel);
+        let now = drawn();
+        if now > 0 && now == previous {
+            break;
+        }
+        previous = now;
+    }
 }
 
 #[test]
@@ -59,6 +92,12 @@ fn assert_action_menu_icons() {
     let Some(fixture) = fixture("action-menu-icons", |_| {}) else {
         return;
     };
+    // Keys hide the Action selector (their actions come from the catalog); dials show it.
+    fixture
+        .widgets
+        .binding_ui
+        .select_control(ControlKind::Encoder, Some(1), true)
+        .unwrap();
     let picker = &fixture.widgets.binding_ui.action_picker;
     picker.set_selected(3);
     let panel = descendants::<gtk::Popover>(picker.upcast_ref())
@@ -405,12 +444,12 @@ fn assert_icon_action_consistency() {
             let name = image.icon_name().unwrap_or_default();
             assert!(name.ends_with("-symbolic"), "{caption}: {name}");
         }
-        if caption.starts_with("Delete") || caption == "Remove binding" {
+        // Removing a binding has its own red circled X, set by the toolbar.
+        if caption.starts_with("Delete") {
             deletes.push((caption, image_names(button.upcast_ref())));
         }
     }
     for caption in [
-        "Remove binding",
         "Delete page",
         "Delete folder",
         "Delete touchscreen page",
@@ -435,19 +474,15 @@ fn assert_icon_action_consistency() {
         Some("preferences-system-symbolic"),
         "profile organization is not a new-folder action"
     );
-    let text = descendants::<gtk::MenuButton>(root)
-        .into_iter()
-        .find(|button| {
-            matches!(
+    // Text and image editing moved to each key's right-click menu.
+    assert!(
+        !descendants::<gtk::MenuButton>(root)
+            .into_iter()
+            .any(|button| matches!(
                 button.tooltip_text().as_deref(),
                 Some("Add text" | "Edit text")
-            )
-        })
-        .expect("button text editor");
-    assert_eq!(
-        image_names(text.upcast_ref()).first().map(String::as_str),
-        Some("format-text-plaintext-symbolic"),
-        "button text reads as text"
+            )),
+        "the inspector no longer carries a text button"
     );
     eprintln!("GTK icon action consistency assertions executed");
 }
@@ -660,6 +695,9 @@ fn assert_more_action_icons() {
         return;
     };
     let ui = &fixture.widgets.binding_ui;
+    // Keys hide the Action selector (their actions come from the catalog); dials show it.
+    ui.select_control(ControlKind::Encoder, Some(1), true)
+        .unwrap();
     let editor = ui.feature_editor.root.upcast_ref::<gtk::Widget>();
     let pickers = descendants::<gtk::DropDown>(editor);
     let (category, action) = (&pickers[0], &pickers[1]);
@@ -678,6 +716,11 @@ fn assert_more_action_icons() {
     )));
     wait_for_frame(&fixture.window);
     assert_eq!(category.selected(), 2);
+    // The inspector now follows the preview, so scroll its selectors into view.
+    let bounds = category.compute_bounds(&fixture.widgets.root).unwrap();
+    let adjustment = fixture.widgets.root.vadjustment();
+    adjustment.set_value(adjustment.value() + f64::from(bounds.y()) - 40.0);
+    wait_for_frame(&fixture.window);
     assert_eq!(
         menu_icons(category),
         [
@@ -733,6 +776,12 @@ fn assert_target_menu_icons() {
         return;
     };
     let widgets = &fixture.widgets;
+    // The Appearance section is for touch sections; keys use their right-click menu.
+    widgets.zone_widgets[0]
+        .clone()
+        .downcast::<Button>()
+        .unwrap()
+        .emit_clicked();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&fixture.window);
     let picker = &widgets.target_picker;
@@ -806,4 +855,194 @@ fn assert_target_menu_icons() {
         .unwrap();
     assert_eq!(rows()[0].1.as_deref(), Some("mute"));
     eprintln!("GTK artwork target menu icon assertions executed");
+}
+
+#[test]
+fn sounds_and_files_whose_original_is_gone_show_a_red_cross_on_their_control() {
+    run_gtk_test(assert_missing_file_icons);
+}
+
+fn assert_missing_file_icons() {
+    use sdeck_plus::{
+        asset_links::link_action, desktop_actions::DesktopAction, features::FeatureAction,
+    };
+    let Some(fixture) = icon_fixture("missing-file-icons", |store, _, _| {
+        let root = store.root().to_path_buf();
+        let present = root.join("present.wav");
+        std::fs::write(&present, b"audio").unwrap();
+        let desktop = |action| Action::Feature(FeatureAction::Desktop(action));
+        let bindings = [
+            (
+                Trigger::KeyPress(1),
+                desktop(DesktopAction::PlayAudio {
+                    path: root.join("gone.wav"),
+                }),
+            ),
+            (
+                Trigger::KeyPress(2),
+                desktop(DesktopAction::PlayAudio { path: present }),
+            ),
+            (
+                Trigger::KeyPress(3),
+                desktop(DesktopAction::Open {
+                    target: root.join("gone.txt").to_string_lossy().into_owned(),
+                }),
+            ),
+            (
+                Trigger::ZoneTap(1),
+                desktop(DesktopAction::Open {
+                    target: root.join("gone-too.txt").to_string_lossy().into_owned(),
+                }),
+            ),
+        ];
+        for (trigger, action) in bindings {
+            let linked = link_action(&root, action).unwrap();
+            store.bind("Base", trigger, linked).unwrap();
+        }
+    }) else {
+        return;
+    };
+    let snapshot = fixture
+        .hardware
+        .try_iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::Replace(commands) => Some(commands),
+            _ => None,
+        })
+        .last()
+        .expect("a device snapshot");
+    let icons: Vec<(ArtworkTarget, BindingIcon, String)> = snapshot
+        .iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::ComposeIcon {
+                target,
+                icon,
+                caption,
+                ..
+            } => Some((*target, *icon, caption.clone())),
+            _ => None,
+        })
+        .collect();
+    let icon_of = |target| {
+        icons
+            .iter()
+            .find(|(shown, _, _)| *shown == target)
+            .map(|(_, icon, caption)| (*icon, caption.clone()))
+    };
+    for target in [
+        ArtworkTarget::Keypad(1),
+        ArtworkTarget::Keypad(3),
+        ArtworkTarget::EncoderZone(1),
+    ] {
+        let (icon, caption) = icon_of(target).unwrap_or_else(|| panic!("{target:?} has an icon"));
+        assert_eq!(icon, BindingIcon::MissingFile, "{target:?}");
+        assert!(caption.contains("Missing"), "{caption}");
+    }
+    assert_eq!(
+        icon_of(ArtworkTarget::Keypad(2)).map(|(icon, _)| icon),
+        Some(BindingIcon::PlaySound),
+        "a file that is there keeps its normal icon"
+    );
+    if let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") {
+        for (name, target) in [
+            ("missing-key", ArtworkTarget::Keypad(1)),
+            ("present-key", ArtworkTarget::Keypad(2)),
+            ("missing-zone", ArtworkTarget::EncoderZone(1)),
+        ] {
+            if let Some(texture) = picture(&fixture, target)
+                .paintable()
+                .and_downcast::<gtk::gdk::Texture>()
+            {
+                texture
+                    .save_to_png(std::path::Path::new(&directory).join(format!("{name}.png")))
+                    .unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn a_missing_sound_shows_its_cross_even_with_key_text_or_artwork() {
+    run_gtk_test(assert_missing_file_overrides_text_and_artwork);
+}
+
+fn assert_missing_file_overrides_text_and_artwork() {
+    use sdeck_plus::{
+        asset_links::link_action, button_text::ButtonText, desktop_actions::DesktopAction,
+        features::FeatureAction,
+    };
+    let Some(fixture) = icon_fixture("missing-file-text-art", |store, images, source| {
+        let root = store.root().to_path_buf();
+        let sound = |name: &str| {
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                path: root.join(name),
+            }))
+        };
+        for (key, name) in [
+            (4u8, "dry-fart.mp3"),
+            (5, "dry-fart.mp3"),
+            (6, "dry-fart.mp3"),
+        ] {
+            let linked = link_action(&root, sound(name)).unwrap();
+            store.bind("Base", Trigger::KeyPress(key), linked).unwrap();
+        }
+        // Key 4: centered text, the default placement that leaves no free band.
+        images
+            .set_button_text_in_layer(
+                "Base",
+                ArtworkTarget::Keypad(4),
+                ButtonText {
+                    text: "Fart".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // Key 5: the user's own picture.
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(5), source)
+            .unwrap();
+    }) else {
+        return;
+    };
+    let snapshot = fixture
+        .hardware
+        .try_iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::Replace(commands) => Some(commands),
+            _ => None,
+        })
+        .last()
+        .expect("a device snapshot");
+    for key in [4u8, 5, 6] {
+        let icon = snapshot.iter().find_map(|command| match command {
+            ArtworkCommand::ComposeIcon { target, icon, .. }
+                if *target == ArtworkTarget::Keypad(key) =>
+            {
+                Some(*icon)
+            }
+            _ => None,
+        });
+        assert_eq!(icon, Some(BindingIcon::MissingFile), "key {key}");
+    }
+    // The window's preview of those keys shows red too.
+    for key in [4u8, 5, 6] {
+        let reddish = bright_pixels(&picture(&fixture, ArtworkTarget::Keypad(key)), 0..120);
+        assert!(reddish > 0, "key {key} preview is drawn");
+    }
+    if let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") {
+        for (name, key) in [
+            ("missing-text", 4u8),
+            ("missing-art", 5),
+            ("missing-plain", 6),
+        ] {
+            if let Some(texture) = picture(&fixture, ArtworkTarget::Keypad(key))
+                .paintable()
+                .and_downcast::<gtk::gdk::Texture>()
+            {
+                texture
+                    .save_to_png(std::path::Path::new(&directory).join(format!("{name}.png")))
+                    .unwrap();
+            }
+        }
+    }
 }

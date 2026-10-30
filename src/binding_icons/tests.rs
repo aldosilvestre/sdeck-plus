@@ -771,3 +771,70 @@ fn surface_pixbuf(mut surface: cairo::ImageSurface) -> gtk::gdk_pixbuf::Pixbuf {
         width * 3,
     )
 }
+
+#[test]
+fn the_missing_file_icon_is_a_red_cross_of_its_own() {
+    let icon = BindingIcon::MissingFile;
+    assert_eq!(icon.id(), "missing-file");
+    assert!(icon.shown_on_controls());
+    assert!(BindingIcon::ALL.contains(&icon));
+    let (red, green, blue, alpha) = icon.accent();
+    assert!(
+        red > 0.85 && green < 0.45 && blue < 0.45 && alpha > 0.99,
+        "red, unlike every other family: {:?}",
+        icon.accent()
+    );
+    for other in BindingIcon::ALL.into_iter().filter(|other| *other != icon) {
+        assert_ne!(other.accent(), icon.accent(), "{}", other.id());
+    }
+}
+
+fn red_pixels(image: &gtk::gdk_pixbuf::Pixbuf) -> usize {
+    let bytes = image.read_pixel_bytes();
+    let (stride, channels) = (image.rowstride() as usize, image.n_channels() as usize);
+    let mut count = 0;
+    for y in 0..image.height() as usize {
+        for x in 0..image.width() as usize {
+            let pixel = &bytes[y * stride + x * channels..];
+            if pixel[0] > 170 && pixel[1] < 110 && pixel[2] < 110 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn a_missing_file_key_keeps_its_red_cross_whatever_the_text_placement() {
+    use crate::button_text::{TextOrientation, VerticalAlignment};
+    let plain = compose_key_image(BindingIcon::MissingFile, "Missing file", None)
+        .unwrap()
+        .expect("the cross without text");
+    assert!(red_pixels(&plain) > 300, "{}", red_pixels(&plain));
+    let centered = ButtonText {
+        text: "Fart".into(),
+        ..ButtonText::default()
+    };
+    let vertical = ButtonText {
+        text: "Fart".into(),
+        orientation: TextOrientation::Vertical,
+        ..ButtonText::default()
+    };
+    let top = ButtonText {
+        text: "Fart".into(),
+        vertical_alignment: VerticalAlignment::Top,
+        ..ButtonText::default()
+    };
+    for text in [&centered, &vertical, &top] {
+        let image = compose_key_image(BindingIcon::MissingFile, "Missing file", Some(text))
+            .unwrap()
+            .unwrap_or_else(|| panic!("the cross stays behind text {text:?}"));
+        assert!(red_pixels(&image) > 300, "{text:?}: {}", red_pixels(&image));
+        let text_only = crate::image_output::compose_button_image(None, text).unwrap();
+        assert_ne!(
+            image.read_pixel_bytes().as_ref(),
+            text_only.read_pixel_bytes().as_ref(),
+            "{text:?} is not just the text picture"
+        );
+    }
+}

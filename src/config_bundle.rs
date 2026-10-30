@@ -268,6 +268,38 @@ fn audio_bindings(layers: &LayerStore) -> Vec<(String, crate::layers::Trigger, P
         .collect()
 }
 
+/// A sound behind one of the application's own links is read through it, to
+/// the real file; every other path keeps the strict no-symlink rule.
+fn through_app_link(root: &Path, source: &Path) -> io::Result<PathBuf> {
+    if source.starts_with(root.join("links")) {
+        fs::canonicalize(source)
+    } else {
+        Ok(source.to_path_buf())
+    }
+}
+
+/// "Open" bindings whose target is one of the application's links, with the
+/// real target in place of the link.
+fn app_linked_open_targets(
+    layers: &LayerStore,
+    root: &Path,
+) -> Vec<(String, crate::layers::Trigger, Action)> {
+    layers
+        .configurations()
+        .flat_map(|layer| {
+            let name = &layer.name;
+            layer.bindings.iter().filter_map(move |(trigger, action)| {
+                let real = crate::asset_links::unlink_action(root, action);
+                let is_open = matches!(
+                    action,
+                    Action::Feature(FeatureAction::Desktop(DesktopAction::Open { .. }))
+                );
+                (is_open && real != *action).then(|| (name.clone(), trigger.clone(), real))
+            })
+        })
+        .collect()
+}
+
 fn bind_audio(
     layers: &mut LayerStore,
     layer: &str,
@@ -360,6 +392,7 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
             } else {
                 std::env::current_dir()?.join(&path)
             };
+            let source = through_app_link(&root, &source)?;
             if fs::canonicalize(&source)? == destination {
                 return Err(invalid(
                     "export destination is a sound file used by a binding",
@@ -385,6 +418,11 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
                 write_private(&stage.join(&portable), &bytes)?;
             }
             bind_audio(&mut layers, &layer, trigger, portable.into())?;
+        }
+        // A bundle never points into this machine's data directory: file
+        // targets name the real file again, as the user chose it.
+        for (layer, trigger, action) in app_linked_open_targets(&layers, &root) {
+            layers.bind_configuration(&layer, trigger, action)?;
         }
         persist_layers(&layers)?;
         // Strict artwork loading may migrate a legacy manifest in the snapshot.

@@ -97,6 +97,65 @@ fn export_preserves_configuration_and_external_audio_inputs() {
 }
 
 #[test]
+fn audio_and_files_behind_app_links_export_as_real_contents_without_symlinks() {
+    use crate::{
+        asset_links::link_action, desktop_actions::DesktopAction, features::FeatureAction,
+    };
+    let f = Fixture::new();
+    let root = f.root("source");
+    let audio = f.0.join("linked sound.wav");
+    write_private(&audio, b"linked audio").unwrap();
+    let notes = f.0.join("notes.txt");
+    write_private(&notes, b"notes").unwrap();
+    let as_action = |action| Action::Feature(FeatureAction::Desktop(action));
+    let sound = link_action(
+        &root,
+        as_action(DesktopAction::PlayAudio {
+            path: audio.clone(),
+        }),
+    )
+    .unwrap();
+    let open = link_action(
+        &root,
+        as_action(DesktopAction::Open {
+            target: notes.to_string_lossy().into_owned(),
+        }),
+    )
+    .unwrap();
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    layers
+        .bind_configuration("Base", Trigger::KeyPress(1), sound)
+        .unwrap();
+    layers
+        .bind_configuration("Base", Trigger::KeyPress(2), open)
+        .unwrap();
+    layers.persist().unwrap();
+    let bundle = f.0.join("links.sdeck-plus.json");
+    export(&root, &bundle).unwrap();
+    let files = contents(&bundle);
+    let (_, bytes) = files
+        .iter()
+        .find(|(path, _)| path.starts_with("media/"))
+        .expect("the sound travels inside the bundle");
+    assert_eq!(bytes, b"linked audio");
+    let exported = String::from_utf8_lossy(&files["layers.conf"]).into_owned();
+    assert!(
+        !exported.contains("links/"),
+        "no reference into the data directory: {exported}"
+    );
+    // The imported-elsewhere bundle names the real file to open, not our link.
+    let imported = f.root("elsewhere");
+    import(&bundle, &imported).unwrap();
+    let store = LayerStore::open_at(&imported).unwrap();
+    assert_eq!(
+        store.binding("Base", &Trigger::KeyPress(2)),
+        Some(as_action(DesktopAction::Open {
+            target: notes.to_string_lossy().into_owned()
+        }))
+    );
+}
+
+#[test]
 fn relative_audio_uses_the_playback_working_directory() {
     let f = Fixture::new();
     let root = f.root("source");

@@ -176,7 +176,10 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .folder-row-actions button.flat:disabled { background-color: transparent; }
 .folder-empty { padding: 20px 0 12px; }
 .folder-empty image { color: @desk_muted; opacity: 0.6; }
-.field-help > button { min-height: 20px; padding: 0 4px; }
+.field-help > button { min-height: 20px; min-width: 20px; padding: 0 2px; border: none; background: none; box-shadow: none; }
+.field-help > button image { color: @desk_muted; }
+.field-help > button:hover image, .field-help > button:focus-visible image { color: @desk_cyan; }
+.field-help > button:hover, .field-help > button:active { background: none; }
 .page-name-dialog button { margin: 0 6px 16px; }
 .page-name-dialog button:first-child { margin-left: 16px; }
 .page-name-dialog button:last-child { margin-right: 16px; }
@@ -371,6 +374,55 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .control-tile { color: #c2ccdc; font-size: 11px; font-weight: 700; padding: 0; }
 .control-active { background: #174936; color: #9af2c4; }
 .swap-source { opacity: 0.55; }
+.action-catalog { padding: 14px 12px; }
+.action-catalog searchentry { margin: 2px 0 6px 0; }
+.catalog-list { padding: 0 2px; }
+.catalog-section { border-bottom: 1px solid alpha(@desk_edge, 0.6); padding-bottom: 6px; }
+.catalog-section:last-child { border-bottom: none; }
+.catalog-category { padding: 6px 8px; border-radius: 8px; min-height: 32px; border-color: transparent; background-color: transparent; }
+.catalog-category:hover { background-color: @desk_hover; }
+.catalog-category:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.catalog-category-name { font-weight: 700; font-size: 13px; }
+.catalog-count { color: @desk_muted; font-size: 11px; padding: 1px 7px; border-radius: 999px; background-color: @desk_field; }
+.catalog-rows { padding: 2px 0 0 6px; }
+.catalog-action { padding: 4px 8px; border-radius: 8px; border-color: transparent; background-color: transparent; min-height: 36px; }
+.catalog-action:hover { background-color: @desk_hover; border-color: @desk_edge; }
+.catalog-action:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.catalog-icon { padding: 5px; border-radius: 8px; background-color: @desk_field; border: 1px solid @desk_edge; }
+.catalog-action:hover .catalog-icon { border-color: @desk_cyan; }
+.binding-toolbar { padding-bottom: 8px; border-bottom: 1px solid alpha(@desk_edge, 0.8); margin-bottom: 4px; }
+.binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
+button.remove-binding image { color: @desk_error; }
+popover.organize-popover > contents { border-radius: 14px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 14px 34px alpha(black, 0.28); }
+popover.organize-popover .section-label { font-size: 15px; }
+popover.organize-popover .popover-icon { color: @desk_violet; }
+popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; border-radius: 8px; }
+popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
+.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 10px 28px alpha(black, 0.28); }
+.organize-subtitle { color: @desk_muted; margin-top: -8px; }
+.profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
+.profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
+.reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
+.reference-head { background-color: @desk_field; border-radius: 9px 9px 0 0; }
+.reference-head label { color: @desk_muted; font-size: 11px; font-weight: 700; padding: 8px 12px; }
+.reference-row { border-top: 1px solid alpha(@desk_edge, 0.7); }
+.reference-row:nth-child(even) { background-color: alpha(@desk_field, 0.55); }
+.reference-row label { padding: 8px 12px; font-family: monospace; }
+.reference-row label.reference-key { font-weight: 700; border-right: 1px solid alpha(@desk_edge, 0.7); }
+.reference-head label.reference-key { border-right: 1px solid alpha(@desk_edge, 0.7); }
+.reference-chip { font-family: monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; background-color: @desk_field; border: 1px solid @desk_edge; }
+.catalog-subtitle { color: @desk_muted; font-size: 11px; }
+.dial-event-choice button, .key-context-menu button { padding: 6px 10px; }
+.sidebar-tabs, .popover-tabs { margin-bottom: 6px; }
+.sidebar-tabs > button, .popover-tabs > button { padding: 5px 4px; }
+.sidebar-tabs > button:checked, .popover-tabs > button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 700; }
+.catalog-grip { color: @desk_muted; opacity: 0.45; }
+.catalog-action:hover .catalog-grip { opacity: 1; }
+.catalog-empty { padding: 12px 8px; }
+.key-surface.action-drop-target {
+    outline: 3px solid @desk_cyan;
+    outline-offset: -4px;
+}
 .key-surface.swap-target {
     outline: 3px dashed @desk_cyan;
     outline-offset: -4px;

@@ -207,6 +207,9 @@ impl FeatureEditor {
         let audio = self.create_picker(gtk::FileChooserAction::Open);
         assert_eq!(audio.filters().n_items(), 2);
         audio.emit_by_name::<()>("response", &[&gtk::ResponseType::Cancel.into_glib()]);
+        // Exercise the direct-sound cycle as dials do; a key hides the pickers anyway.
+        let key_mode = self.pickers_hidden.get();
+        self.set_pickers_hidden(false);
         self.show_direct_sound(true);
         assert!(!self.selectors.is_visible());
         assert!(self.browse_file.is_visible());
@@ -221,6 +224,7 @@ impl FeatureEditor {
         );
         self.show_direct_sound(false);
         assert!(self.selectors.is_visible());
+        self.set_pickers_hidden(key_mode);
         assert!(self.picker.borrow().is_none());
         self.apply_picker_path(generation, std::path::Path::new("/tmp/stale.wav"));
         assert_eq!(self.first.text(), "/tmp/recorded sound.MP3");

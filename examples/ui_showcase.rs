@@ -93,6 +93,7 @@ fn main() -> glib::ExitCode {
         content.append(&error);
         let help_body = ui::helper("Select a key or dial on the device preview. Save stores the action; Test runs it immediately.");
         let help = ui::popover("Setup help", &ui::panel_body(&help_body));
+        ui::refine_popover_header(&help, "help-about-symbolic", "How to configure a control.");
         content.append(&ui::menu_button("help-browser-symbolic", "Setup help", &help));
         let toast = ui::Toast::new();
         let saved = toast.clone();

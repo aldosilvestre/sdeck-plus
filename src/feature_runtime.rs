@@ -304,6 +304,7 @@ impl FeatureRuntime {
         let profile_application_apply = crate::ui::button("document-save-symbolic", "Save changes");
         profile_application_apply.add_css_class("suggested-action");
         let profile_application_status = Label::new(None);
+        profile_application_status.add_css_class("profile-note");
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
@@ -423,6 +424,8 @@ impl FeatureRuntime {
             .organization_management
             .append(&runtime.profile_application_status);
         let actions = GtkBox::new(Orientation::Horizontal, 12);
+        actions.set_homogeneous(true);
+        actions.add_css_class("profile-actions");
         actions.append(&runtime.profile_application_apply);
         actions.append(&runtime.profile_delete);
         runtime.profile_delete.set_tooltip_text(Some(

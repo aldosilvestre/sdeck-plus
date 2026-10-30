@@ -88,12 +88,14 @@ pub enum BindingIcon {
     MediaIdle,
     /// The "More actions" family as a whole.
     More,
+    /// A sound or file the binding names is gone: a red cross.
+    MissingFile,
     /// Fallback for anything without a dedicated picture.
     Generic,
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 53] = [
+    pub const ALL: [Self; 54] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -146,6 +148,7 @@ impl BindingIcon {
         Self::Play,
         Self::MediaIdle,
         Self::More,
+        Self::MissingFile,
         Self::Generic,
     ];
 
@@ -177,6 +180,16 @@ impl BindingIcon {
             Glyph::Pause => Self::Pause,
             Glyph::MediaIdle => Self::MediaIdle,
         })
+    }
+
+    /// The picture a control shows for a saved binding: the red cross when
+    /// the sound or file it names no longer exists, else [`Self::for_action`].
+    pub fn for_saved_action(action: &Action) -> Self {
+        if crate::asset_links::missing_target(action) {
+            Self::MissingFile
+        } else {
+            Self::for_action(action)
+        }
     }
 
     /// The picture for a saved binding.
@@ -321,6 +334,7 @@ impl BindingIcon {
             Self::Play => "play",
             Self::MediaIdle => "media-idle",
             Self::More => "more",
+            Self::MissingFile => "missing-file",
             Self::Generic => "generic",
         }
     }
@@ -353,6 +367,8 @@ pub enum IconCategory {
     Weather,
     /// Computer load readings: green.
     Monitor,
+    /// Something is wrong with what the control points at: red.
+    Alert,
 }
 
 impl IconCategory {
@@ -368,6 +384,7 @@ impl IconCategory {
             Self::Web => (0.49, 0.70, 0.98, 1.0),
             Self::Weather => (0.72, 0.79, 0.92, 1.0),
             Self::Monitor => (0.49, 0.89, 0.70, 1.0),
+            Self::Alert => (0.98, 0.30, 0.30, 1.0),
         }
     }
 }
@@ -426,6 +443,7 @@ impl BindingIcon {
             | Self::Storm
             | Self::Fog => C::Weather,
             Self::Cpu | Self::Memory | Self::Temperature => C::Monitor,
+            Self::MissingFile => C::Alert,
         }
     }
 
@@ -630,6 +648,11 @@ pub fn compose_key_image(
     caption: &str,
     text: Option<&ButtonText>,
 ) -> Result<Option<Pixbuf>, String> {
+    // A missing file is an error the key must show: the cross sits behind the
+    // user's text wherever it is placed.
+    if icon == BindingIcon::MissingFile {
+        return compose_missing_key_image(caption, text).map(Some);
+    }
     if !key_has_room(text) {
         return Ok(None);
     }
@@ -670,6 +693,46 @@ pub fn compose_key_image(
         KEY,
         KEY * 3,
     )))
+}
+
+/// A key whose sound or file is gone: a large red cross as the background,
+/// with the user's text over it, or a smaller cross and `caption` without text.
+fn compose_missing_key_image(caption: &str, text: Option<&ButtonText>) -> Result<Pixbuf, String> {
+    let text = text.filter(|text| !text.text.is_empty());
+    let default = ButtonText::default();
+    let base = crate::image_output::compose_button_image(None, &default)?;
+    let mut surface = rgb_surface(&base)?;
+    {
+        let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
+        let ink = BindingIcon::MissingFile.accent();
+        let result = match text {
+            Some(_) => paint(&cairo, BindingIcon::MissingFile, (60.0, 60.0), 104.0, ink),
+            None => paint_outlined(&cairo, BindingIcon::MissingFile, (60.0, 39.0), 50.0, ink),
+        };
+        result.map_err(|error| error.to_string())?;
+        if text.is_none() && !caption.is_empty() {
+            let layout = caption_layout(caption, 14.0, KEY - 8, 2);
+            draw_caption(&cairo, &layout, (4.0, 72.0)).map_err(|error| error.to_string())?;
+        }
+    }
+    let data = surface.data().map_err(|error| error.to_string())?;
+    let mut rgb = Vec::with_capacity((KEY * KEY * 3) as usize);
+    for pixel in data.as_chunks::<4>().0 {
+        rgb.extend_from_slice(&u32::from_ne_bytes(*pixel).to_be_bytes()[1..]);
+    }
+    let picture = Pixbuf::from_bytes(
+        &gtk::glib::Bytes::from_owned(rgb),
+        Colorspace::Rgb,
+        false,
+        8,
+        KEY,
+        KEY,
+        KEY * 3,
+    );
+    match text {
+        Some(text) => crate::image_output::compose_button_text_over(picture, text),
+        None => Ok(picture),
+    }
 }
 
 /// Compose a 200x100 touch-section foreground for a section without artwork:
@@ -1024,6 +1087,13 @@ fn crescent(cairo: &Context) {
 
 fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Error> {
     match icon {
+        BindingIcon::MissingFile => {
+            circle(cairo, 0.0, 0.0, 10.5);
+            pen.soft(cairo)?;
+            polyline(cairo, &[(-5.5, -5.5), (5.5, 5.5)]);
+            polyline(cairo, &[(5.5, -5.5), (-5.5, 5.5)]);
+            pen.bold(cairo, 2.6)
+        }
         BindingIcon::NoAction => {
             circle(cairo, 0.0, 0.0, 9.0);
             pen.duo(cairo)?;

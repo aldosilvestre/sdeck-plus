@@ -3,5 +3,7 @@
   <gresource prefix="/dev/streamdeck/EventMonitor/icons">
     <file>scalable/apps/sdeck-plus.svg</file>
     <file>scalable/actions/sdeck-link-symbolic.svg</file>
+    <file>scalable/actions/sdeck-remove-symbolic.svg</file>
+    <file>scalable/actions/sdeck-save-symbolic.svg</file>
   </gresource>
 </gresources>
