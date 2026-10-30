@@ -4,7 +4,11 @@ use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, Verti
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
 use gtk::pango::prelude::*;
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, SystemTime},
+};
 
 pub const REPORT_SIZE: usize = 1024;
 const KEY_OR_FULL_CHUNK: usize = 1016;
@@ -68,7 +72,87 @@ pub(crate) fn prepare_background(size: ImageDimensions, source: &Path) -> Result
     Ok(rgb)
 }
 
+/// A source file at one target size; a changed file no longer matches.
+#[derive(PartialEq)]
+struct BackgroundKey {
+    path: PathBuf,
+    size: ImageDimensions,
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+/// Resized pixels with their layout. Pixbufs are not `Send`, and the HID,
+/// information and GTK threads all draw backgrounds, so keep plain bytes.
+struct CachedBackground {
+    key: BackgroundKey,
+    pixels: Vec<u8>,
+    has_alpha: bool,
+    width: i32,
+    height: i32,
+    rowstride: i32,
+}
+
+/// Enough for every key, section and strip on a page plus a few more.
+const CACHED_BACKGROUNDS: usize = 48;
+
+/// Most recently used last. Scrolling titles redraw about ten times a
+/// second, so decoding the artwork file on every frame dominated CPU use.
+static BACKGROUNDS: Mutex<Vec<CachedBackground>> = Mutex::new(Vec::new());
+
+/// [`decode_background`], reusing the last result for an unchanged file.
+/// Callers get their own pixbuf, so drawing on it never touches the cache.
 pub(crate) fn resize_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
+    let metadata = std::fs::metadata(source).map_err(|error| error.to_string())?;
+    let key = BackgroundKey {
+        path: source.to_path_buf(),
+        size,
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    };
+    let cached = |entry: &CachedBackground| {
+        Pixbuf::from_mut_slice(
+            entry.pixels.clone(),
+            Colorspace::Rgb,
+            entry.has_alpha,
+            8,
+            entry.width,
+            entry.height,
+            entry.rowstride,
+        )
+    };
+    {
+        let mut backgrounds = BACKGROUNDS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(index) = backgrounds.iter().position(|entry| entry.key == key) {
+            let entry = backgrounds.remove(index);
+            let image = cached(&entry);
+            backgrounds.push(entry);
+            return Ok(image);
+        }
+    }
+    let image = decode_background(size, source)?;
+    let entry = CachedBackground {
+        key,
+        pixels: image.read_pixel_bytes().to_vec(),
+        has_alpha: image.has_alpha(),
+        width: image.width(),
+        height: image.height(),
+        rowstride: image.rowstride(),
+    };
+    let mut backgrounds = BACKGROUNDS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    backgrounds.retain(|cached| cached.key.path != entry.key.path || cached.key.size != size);
+    if backgrounds.len() == CACHED_BACKGROUNDS {
+        backgrounds.remove(0);
+    }
+    backgrounds.push(entry);
+    Ok(image)
+}
+
+/// Decode `source`, center-crop it to cover `size`, and resize it.
+fn decode_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
     let image = Pixbuf::from_file(source).map_err(|error| error.to_string())?;
     let width = image.width();
     let height = image.height();
@@ -900,6 +984,30 @@ mod tests {
         let right = pixel(&decoded, 199, 50);
         assert!(left[0] > left[2], "left edge should be red: {left:?}");
         assert!(right[2] > right[0], "right edge should be blue: {right:?}");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn backgrounds_are_reused_until_their_file_changes() {
+        let path = fixture(400, 100);
+        let size = ImageDimensions {
+            width: 200,
+            height: 100,
+        };
+        let first = resize_background(size, &path).unwrap();
+        // Drawing on one caller's copy never reaches the next caller.
+        first.fill(0x00ff00ff);
+        let again = resize_background(size, &path).unwrap();
+        assert_eq!((again.width(), again.height()), (200, 100));
+        assert_eq!(pixel(&again, 0, 50), [255, 0, 0]);
+        assert_eq!(pixel(&again, 199, 50), [0, 0, 255]);
+
+        // A rewritten file (here a different size) is decoded again.
+        let green = Pixbuf::new(Colorspace::Rgb, false, 8, 300, 150).unwrap();
+        green.fill(0x00ff00ff);
+        green.savev(&path, "png", &[]).unwrap();
+        let changed = resize_background(size, &path).unwrap();
+        assert_eq!(pixel(&changed, 100, 50), [0, 255, 0]);
         fs::remove_file(path).unwrap();
     }
 
