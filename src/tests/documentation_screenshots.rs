@@ -713,6 +713,44 @@ fn capture_documentation_screenshots() {
         .unwrap();
     artwork.refresh(true);
 
+    // Timer key: a short Start timer, an optional two-second Cancel timer hold,
+    // and the countdown drawn on the initiating key (no timer is started here).
+    {
+        let mut layers = artwork.layers.borrow_mut();
+        layers
+            .bind(
+                "Base",
+                Trigger::KeyPress(8),
+                Action::Feature(FeatureAction::Timer { seconds: 7200 }),
+            )
+            .unwrap();
+        layers
+            .bind(
+                "Base",
+                Trigger::KeyHold(8),
+                Action::Feature(FeatureAction::CancelTimer),
+            )
+            .unwrap();
+    }
+    artwork.refresh(true);
+    widgets.binding_ui.mark_clean();
+    key_button(&widgets.key_labels[7]).emit_clicked();
+    widgets.root.vadjustment().set_value(0.0);
+    widgets.binding_ui.hold_toggle.set_active(true);
+    wait_for_frame(&widgets.root);
+    capture("key-hold-action");
+    widgets.binding_ui.hold_toggle.set_active(false);
+    artwork.start_key_countdown("Base".into(), 8, 7200);
+    wait_for_frame(&widgets.root);
+    capture("timer-countdown");
+    artwork.clear_countdown();
+    {
+        let mut layers = artwork.layers.borrow_mut();
+        layers.unbind("Base", &Trigger::KeyHold(8)).unwrap();
+        layers.unbind("Base", &Trigger::KeyPress(8)).unwrap();
+    }
+    artwork.refresh(true);
+
     // Then: every documented artifact was rendered, with no dispatched action.
     assert_eq!(widgets.status.text(), "Not connected");
     assert!(commands.try_iter().all(|command| !matches!(

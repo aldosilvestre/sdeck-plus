@@ -8,6 +8,9 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- Documentation site: regenerated all native screenshots for the current interface
+  and added captures of the timer countdown on a key and the Hold 2 seconds editor.
+
 - **Optional exclusive two-second key hold.** Configure a key's short action,
   then select **Hold 2 seconds** and assign a separate catalog action, such as
   **Cancel timer**. A short release runs only the short action; reaching two
