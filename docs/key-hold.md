@@ -6,7 +6,7 @@ A physical keypad key can have a short action and a separate **Hold 2 seconds** 
 
 1. Select a key and choose **Device > Start timer** from the Actions catalog. Set the duration and use **Save binding**.
 2. Select **Hold 2 seconds** beside the action form, then choose **Device > Cancel timer** from the catalog. This parameterless action saves automatically; actions with settings need **Save binding**.
-3. Release before two seconds to start the timer and show the time left on the key. Hold for at least two seconds to cancel it; releasing afterwards does not restart it.
+3. Release before two seconds to start the timer and show the time left on the key. Another short tap while it is running does nothing: it does not restart the countdown. Hold for at least two seconds to cancel it; releasing afterwards does not restart it. Start a new timer only after cancellation or completion.
 
 The hold action is optional and can be any catalog action, not only cancellation. Selecting an action for the same key keeps the current short/hold mode. Opening or toggling the editor does not create or execute a binding. To edit the short action again, clear **Hold 2 seconds**.
 

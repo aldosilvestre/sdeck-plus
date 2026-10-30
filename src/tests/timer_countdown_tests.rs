@@ -110,8 +110,133 @@ impl Drop for CountdownFixture {
     }
 }
 
+fn expected_countdown(time: &str, units: &str) -> InfoValue {
+    InfoValue {
+        detail: units.into(),
+        ..InfoValue::text(Glyph::Timer, time)
+    }
+}
+
 fn timer(seconds: u32) -> Action {
     Action::Feature(FeatureAction::Timer { seconds })
+}
+
+fn await_timer_status(label: &Label, expected: &str) {
+    if label.text() == expected {
+        return;
+    }
+    let loop_ = glib::MainLoop::new(None, false);
+    let done = loop_.clone();
+    let expected = expected.to_owned();
+    let signal = label.connect_label_notify(move |label| {
+        if label.text() == expected {
+            done.quit();
+        }
+    });
+    let expired = Rc::new(Cell::new(false));
+    let flag = expired.clone();
+    let guard_loop = loop_.clone();
+    let guard = glib::timeout_add_local_once(Duration::from_secs(4), move || {
+        flag.set(true);
+        guard_loop.quit();
+    });
+    loop_.run();
+    label.disconnect(signal);
+    if !expired.get() {
+        guard.remove();
+    }
+    assert!(!expired.get(), "timer did not reach expected status");
+}
+
+#[test]
+fn active_timer_ignores_short_taps_until_cancelled_or_complete() {
+    run_gtk_test(|| {
+        let fixture = CountdownFixture::new("countdown-no-restart");
+        let runtime = &fixture.widgets.feature_runtime;
+        fixture
+            .layers
+            .borrow_mut()
+            .bind(
+                "Base",
+                Trigger::KeyHold(2),
+                Action::Feature(FeatureAction::CancelTimer),
+            )
+            .unwrap();
+        let release = || {
+            runtime.execute_input(&protocol::Event::Key {
+                index: 1,
+                pressed: false,
+            })
+        };
+        fixture.press(2, 2);
+        release();
+        await_timer_status(&runtime.timer_status, "Timer: 1s remaining");
+        countdown_commands(&fixture.hardware);
+        let preview = fixture.preview(2);
+        fixture.press(2, 2);
+        release();
+        assert_eq!(
+            runtime.timer_status.text(),
+            "Timer: 1s remaining",
+            "short tap cannot restart the active timer"
+        );
+        assert_eq!(fixture.preview(2), preview);
+        assert!(
+            countdown_commands(&fixture.hardware).is_empty(),
+            "ignored tap cannot reset the key picture"
+        );
+
+        fixture.press(3, 60);
+        runtime.execute("test-start".into(), timer(60));
+        fixture
+            .layers
+            .borrow_mut()
+            .bind("Base", Trigger::EncoderPress(1), timer(60))
+            .unwrap();
+        runtime.execute_input(&protocol::Event::EncoderButton {
+            index: 0,
+            pressed: true,
+        });
+        runtime.execute_with_return(
+            "ignored-start-return".into(),
+            timer(60),
+            Some(sdeck_plus::layers::PageReturn {
+                layer: "Base".into(),
+                seconds: 1,
+            }),
+        );
+        assert_eq!(runtime.timer_status.text(), "Timer: 1s remaining");
+        assert!(
+            !runtime.page_return_active(),
+            "ignored timer start cannot arm a page return"
+        );
+        assert!(
+            countdown_commands(&fixture.hardware).is_empty(),
+            "another start cannot move the active countdown to a different key"
+        );
+        assert_eq!(fixture.preview(2), preview);
+        // A reset to 60 seconds would miss this real completion signal.
+        await_timer_status(&runtime.timer_status, "Timer complete.");
+        assert!(!runtime.timer_active());
+
+        fixture.press(3, 3);
+        assert_eq!(
+            runtime.timer_status.text(),
+            "Timer: 3s remaining",
+            "completion permits a new timer"
+        );
+        assert!(runtime.timer_active());
+        runtime.execute("cancel".into(), Action::Feature(FeatureAction::CancelTimer));
+        assert!(!runtime.timer_active());
+        fixture.press(2, 4);
+        release();
+        assert_eq!(
+            runtime.timer_status.text(),
+            "Timer: 4s remaining",
+            "cancellation permits a new timer"
+        );
+        assert!(runtime.timer_active());
+    });
 }
 
 #[test]
@@ -145,7 +270,7 @@ fn exclusive_tap_starts_countdown_only_on_release() {
             countdown_commands(&fixture.hardware),
             [(
                 ArtworkTarget::Keypad(2),
-                InfoValue::text(Glyph::None, "45s")
+                expected_countdown("00:45", "mm:ss")
             )]
         );
     });
@@ -160,12 +285,14 @@ fn physical_timer_draws_countdown_on_its_key_and_preview() {
             countdown_commands(&fixture.hardware),
             [(
                 ArtworkTarget::Keypad(2),
-                InfoValue::text(Glyph::None, "45s")
+                expected_countdown("00:45", "mm:ss")
             )],
         );
-        let expected =
-            sdeck_plus::info_render::compose_info_image(&InfoValue::text(Glyph::None, "45s"), None)
-                .unwrap();
+        let expected = sdeck_plus::info_render::compose_info_image(
+            &expected_countdown("00:45", "mm:ss"),
+            None,
+        )
+        .unwrap();
         let texture = gtk::gdk::Texture::for_pixbuf(&expected);
         let mut bytes = vec![0; (texture.width() * texture.height() * 4) as usize];
         texture.download(&mut bytes, texture.width() as usize * 4);
@@ -181,27 +308,132 @@ fn physical_timer_draws_countdown_on_its_key_and_preview() {
 fn physical_timer_formats_seconds_minutes_and_hours_boundaries() {
     run_gtk_test(|| {
         let fixture = CountdownFixture::new("countdown-formats");
-        for (seconds, expected) in [
-            (1, "1s"),
-            (45, "45s"),
-            (59, "59s"),
-            (60, "01:00"),
-            (135, "02:15"),
-            (3599, "59:59"),
-            (3600, "01:00:00"),
-            (3735, "01:02:15"),
-            (86400, "24:00:00"),
+        for (seconds, expected, units) in [
+            (7200, "02:00", "hh:mm"),
+            (1, "00:01", "mm:ss"),
+            (45, "00:45", "mm:ss"),
+            (59, "00:59", "mm:ss"),
+            (60, "01:00", "mm:ss"),
+            (135, "02:15", "mm:ss"),
+            (3599, "59:59", "mm:ss"),
+            (3600, "01:00", "hh:mm"),
+            (3601, "01:00", "hh:mm"),
+            (3735, "01:02", "hh:mm"),
+            (7199, "01:59", "hh:mm"),
+            (86400, "24:00", "hh:mm"),
         ] {
+            fixture.widgets.feature_runtime.cancel_timer();
             fixture.press(2, seconds);
             let pictures = countdown_commands(&fixture.hardware);
             assert_eq!(
                 pictures.last(),
                 Some(&(
                     ArtworkTarget::Keypad(2),
-                    InfoValue::text(Glyph::None, expected)
+                    expected_countdown(expected, units)
                 ))
             );
         }
+    });
+}
+
+#[test]
+fn countdown_caption_switches_units_when_crossing_one_hour() {
+    run_gtk_test(|| {
+        let fixture = CountdownFixture::new("countdown-units");
+        fixture.press(2, 3600);
+        assert_eq!(
+            countdown_commands(&fixture.hardware).last(),
+            Some(&(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("01:00", "hh:mm")
+            ))
+        );
+        let hours_preview = fixture.preview(2);
+        fixture.artwork.update_countdown(3599);
+        assert_eq!(
+            countdown_commands(&fixture.hardware).last(),
+            Some(&(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("59:59", "mm:ss")
+            ))
+        );
+        assert_ne!(fixture.preview(2), hours_preview);
+        let minutes_preview = fixture.preview(2);
+        fixture.artwork.refresh(true);
+        assert_eq!(
+            countdown_commands(&fixture.hardware).last(),
+            Some(&(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("59:59", "mm:ss")
+            ))
+        );
+        assert_eq!(fixture.preview(2), minutes_preview);
+    });
+}
+
+#[test]
+fn hours_countdown_redraws_only_when_its_minutes_change() {
+    run_gtk_test(|| {
+        let fixture = CountdownFixture::new("countdown-hours-redraw");
+        fixture.press(2, 7200);
+        assert_eq!(
+            countdown_commands(&fixture.hardware),
+            vec![(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("02:00", "hh:mm")
+            )]
+        );
+        fixture.artwork.update_countdown(7199);
+        assert_eq!(
+            countdown_commands(&fixture.hardware),
+            vec![(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("01:59", "hh:mm")
+            )]
+        );
+        let shown = fixture.preview(2);
+        // Every remaining second of that minute shows the same hh:mm picture.
+        for seconds in (7140..7199).rev() {
+            fixture.artwork.update_countdown(seconds);
+        }
+        assert!(
+            countdown_commands(&fixture.hardware).is_empty(),
+            "an unchanged hh:mm picture must not be re-sent to the device"
+        );
+        assert_eq!(fixture.preview(2), shown);
+        fixture.artwork.refresh(true);
+        assert_eq!(
+            countdown_commands(&fixture.hardware).last(),
+            Some(&(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("01:59", "hh:mm")
+            ))
+        );
+        fixture.artwork.update_countdown(7139);
+        assert_eq!(
+            countdown_commands(&fixture.hardware),
+            vec![(
+                ArtworkTarget::Keypad(2),
+                expected_countdown("01:58", "hh:mm")
+            )]
+        );
+        assert_ne!(fixture.preview(2), shown);
+        // Below one hour every second is visible, so every second is drawn.
+        fixture.artwork.update_countdown(59);
+        fixture.artwork.update_countdown(58);
+        assert_eq!(
+            countdown_commands(&fixture.hardware),
+            vec![
+                (
+                    ArtworkTarget::Keypad(2),
+                    expected_countdown("00:59", "mm:ss")
+                ),
+                (
+                    ArtworkTarget::Keypad(2),
+                    expected_countdown("00:58", "mm:ss")
+                ),
+            ]
+        );
     });
 }
 
@@ -228,6 +460,13 @@ fn test_action_and_non_key_input_keep_timer_without_claiming_a_key() {
             index: 0,
             pressed: true,
         });
+        assert_eq!(runtime.timer_status.text(), "Timer: 45s remaining");
+        assert!(countdown_commands(&fixture.hardware).is_empty());
+        runtime.cancel_timer();
+        runtime.execute_input(&protocol::Event::EncoderButton {
+            index: 0,
+            pressed: true,
+        });
         assert_eq!(runtime.timer_status.text(), "Timer: 60s remaining");
         assert!(countdown_commands(&fixture.hardware).is_empty());
     });
@@ -245,7 +484,7 @@ fn countdown_survives_refresh_reconnect_and_returns_only_to_its_page() {
             countdown_commands(&fixture.hardware),
             [(
                 ArtworkTarget::Keypad(2),
-                InfoValue::text(Glyph::None, "02:15")
+                expected_countdown("02:15", "mm:ss")
             )]
         );
         assert_eq!(fixture.preview(2), preview);
@@ -259,7 +498,7 @@ fn countdown_survives_refresh_reconnect_and_returns_only_to_its_page() {
             countdown_commands(&fixture.hardware),
             [(
                 ArtworkTarget::Keypad(2),
-                InfoValue::text(Glyph::None, "02:15")
+                expected_countdown("02:15", "mm:ss")
             )]
         );
         assert_eq!(fixture.preview(2), preview);
@@ -267,7 +506,7 @@ fn countdown_survives_refresh_reconnect_and_returns_only_to_its_page() {
 }
 
 #[test]
-fn cancellation_replacement_and_test_restart_restore_latest_information() {
+fn cancelling_before_new_starts_restores_latest_information() {
     run_gtk_test(|| {
         let fixture = CountdownFixture::new("countdown-restore");
         fixture
@@ -287,6 +526,7 @@ fn cancellation_replacement_and_test_restart_restore_latest_information() {
             countdown_commands(&fixture.hardware).is_empty(),
             "live readings cannot overwrite the timer"
         );
+        fixture.widgets.feature_runtime.cancel_timer();
         fixture.press(3, 60);
         let restored = countdown_commands(&fixture.hardware);
         assert!(restored.contains(&(ArtworkTarget::Keypad(2), latest.clone())));
@@ -294,9 +534,10 @@ fn cancellation_replacement_and_test_restart_restore_latest_information() {
             restored.last(),
             Some(&(
                 ArtworkTarget::Keypad(3),
-                InfoValue::text(Glyph::None, "01:00")
+                expected_countdown("01:00", "mm:ss")
             ))
         );
+        fixture.widgets.feature_runtime.cancel_timer();
         fixture
             .widgets
             .feature_runtime
@@ -305,8 +546,9 @@ fn cancellation_replacement_and_test_restart_restore_latest_information() {
         assert_eq!(
             restored,
             [(ArtworkTarget::Keypad(2), latest.clone())],
-            "Test action replacement clears the physical origin"
+            "Cancelling before Test action clears the physical origin"
         );
+        fixture.widgets.feature_runtime.cancel_timer();
         fixture.press(2, 45);
         countdown_commands(&fixture.hardware);
         fixture
@@ -338,7 +580,7 @@ fn cancellation_restores_custom_artwork_and_button_text_without_changing_assignm
             let mut images = fixture.artwork.store.borrow_mut();
             let images = images.as_mut().unwrap();
             images
-                .assign_in_layer("Base", target, &fixture.root.join("source.png"))
+                .assign_in_layer("Base", target, fixture.root.join("source.png"))
                 .unwrap();
             images
                 .set_button_text_in_layer("Base", target, text.clone())
@@ -351,7 +593,9 @@ fn cancellation_restores_custom_artwork_and_button_text_without_changing_assignm
         fixture.press(2, 45);
         assert!(countdown_commands(&fixture.hardware)
             .iter()
-            .any(|(target, value)| *target == ArtworkTarget::Keypad(2) && value.headline == "45s"));
+            .any(
+                |(target, value)| *target == ArtworkTarget::Keypad(2) && value.headline == "00:45"
+            ));
         assert!(fixture.preview(2) != normal);
         fixture.widgets.feature_runtime.cancel_timer();
         assert_eq!(fixture.preview(2), normal);
@@ -424,8 +668,14 @@ fn completion_restores_normal_icon_and_ticks_are_deduplicated() {
         assert_eq!(
             countdown_commands(&fixture.hardware),
             [
-                (ArtworkTarget::Keypad(2), InfoValue::text(Glyph::None, "2s")),
-                (ArtworkTarget::Keypad(2), InfoValue::text(Glyph::None, "1s")),
+                (
+                    ArtworkTarget::Keypad(2),
+                    expected_countdown("00:02", "mm:ss")
+                ),
+                (
+                    ArtworkTarget::Keypad(2),
+                    expected_countdown("00:01", "mm:ss")
+                ),
             ],
             "250 ms polling renders once per changed second, never zero"
         );

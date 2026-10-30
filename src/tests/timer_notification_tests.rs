@@ -148,7 +148,18 @@ fn assert_timer_notification() {
     start(60);
     assert_eq!(runtime.timer_status.text(), "Timer: 60s remaining");
     start(1);
+    assert_eq!(
+        runtime.timer_status.text(),
+        "Timer: 60s remaining",
+        "an active timer cannot be replaced"
+    );
+    runtime.execute(
+        "cancel-test".into(),
+        Action::Feature(sdeck_plus::features::FeatureAction::CancelTimer),
+    );
     start(2);
+    start(1);
+    assert_eq!(runtime.timer_status.text(), "Timer: 2s remaining");
     window.close();
     assert!(!window.is_visible());
     assert!(runtime.timer_active());

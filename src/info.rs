@@ -138,6 +138,8 @@ impl InfoSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     None,
+    /// Countdown with a small units caption above its large remaining time.
+    Timer,
     Speaker,
     SpeakerMuted,
     Headphones,

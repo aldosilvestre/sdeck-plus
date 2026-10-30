@@ -239,7 +239,7 @@ fn accent(value: &InfoValue) -> Color {
         _ => calm,
     };
     match value.glyph {
-        Glyph::None => WHITE,
+        Glyph::None | Glyph::Timer => WHITE,
         Glyph::Speaker | Glyph::SpeakerMuted | Glyph::Headphones => CYAN,
         Glyph::Sun | Glyph::PartlyCloudy | Glyph::Storm => AMBER,
         Glyph::Cloud | Glyph::Fog => CLOUD,
@@ -653,14 +653,32 @@ fn key_plan(value: &InfoValue) -> Plan {
     const MIN_ICON: f64 = 32.0;
     const MAX_ICON: f64 = 44.0;
     let column = (4.0, f64::from(SIZE) - 8.0);
-    if value.glyph == Glyph::None {
-        let (headline, bar, details) = text_column(
+    if matches!(value.glyph, Glyph::None | Glyph::Timer) {
+        let caption_size = if value.glyph == Glyph::Timer {
+            let (digits, _) = headline_layout(value, 36.0, column.1, pango::Alignment::Center);
+            let fitted_size = digits.font_description().map_or(36.0, |font| {
+                f64::from(font.size()) / f64::from(pango::SCALE)
+            });
+            fitted_size * 0.6
+        } else {
+            16.0
+        };
+        let (mut headline, bar, mut details) = text_column(
             value,
             column,
             (TOP, BOTTOM),
-            (36.0, 16.0, 10.0),
+            (36.0, caption_size, 10.0),
             pango::Alignment::Center,
         );
+        if value.glyph == Glyph::Timer {
+            if let (Some(headline), Some(caption)) = (headline.as_mut(), details.first_mut()) {
+                // Keep the centered stack, with the small units caption above
+                // the large digits instead of the normal reading's detail below.
+                let top = headline.rect.y;
+                headline.rect.y = top + caption.rect.height + GAP;
+                caption.rect.y = top;
+            }
+        }
         return Plan {
             icon: None,
             headline,
@@ -787,6 +805,55 @@ fn draw_bar(
 mod tests {
     use super::*;
     use crate::info::{parse_volume, InfoSource};
+
+    #[test]
+    fn timer_caption_is_smaller_and_above_the_large_time_without_clipping() {
+        for (time, units) in [
+            ("02:00", "hh:mm"),
+            ("01:00", "hh:mm"),
+            ("59:59", "mm:ss"),
+            ("00:45", "mm:ss"),
+            ("00:01", "mm:ss"),
+        ] {
+            let value = InfoValue {
+                detail: units.into(),
+                ..InfoValue::text(Glyph::Timer, time)
+            };
+            let plan = key_plan(&value);
+            let headline = plan.headline.as_ref().unwrap();
+            let caption = &plan.details[0];
+            assert!(
+                caption.rect.bottom() <= headline.rect.y,
+                "the units caption must be above the time"
+            );
+            let size = |text: &Text| text.layout.font_description().unwrap().size();
+            let ratio = f64::from(size(caption)) / f64::from(size(headline));
+            assert!((ratio - 0.6).abs() < 0.01, "caption/digits ratio: {ratio}");
+            assert!(plan.icon.is_none(), "keep room for large digits");
+            assert_eq!(caption.layout.text(), units);
+            assert_eq!(headline.layout.text(), time);
+            for text in plan.texts() {
+                assert!(!text.layout.is_ellipsized(), "do not shorten time or units");
+                assert!(text.rect.x >= 0.0 && text.rect.right() <= f64::from(SIZE));
+                assert!(text.rect.y >= 0.0 && text.rect.bottom() <= f64::from(SIZE));
+                assert!(f64::from(text.layout.pixel_size().0) <= text.rect.width + 1.0);
+            }
+            let image = compose_info_image(&value, None).unwrap();
+            assert_eq!((image.width(), image.height()), (120, 120));
+        }
+    }
+
+    #[test]
+    fn plain_clock_keeps_its_small_date_below_the_time() {
+        let value = InfoValue {
+            detail: "Fri 16 Oct".into(),
+            ..InfoValue::text(Glyph::None, "10:24")
+        };
+        let plan = key_plan(&value);
+        assert!(plan.headline.as_ref().unwrap().rect.bottom() <= plan.details[0].rect.y);
+        assert!(plan.icon.is_none());
+        assert_eq!(plan.details[0].layout.text(), "Fri 16 Oct");
+    }
 
     fn pixel(image: &Pixbuf, x: usize, y: usize) -> [u8; 3] {
         let bytes = image.read_pixel_bytes();

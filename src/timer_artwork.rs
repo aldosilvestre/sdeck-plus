@@ -9,17 +9,10 @@ pub(crate) struct CountdownArtwork {
 }
 
 fn format_remaining(seconds: u64) -> String {
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
+    if seconds < 3600 {
         format!("{:02}:{:02}", seconds / 60, seconds % 60)
     } else {
-        format!(
-            "{:02}:{:02}:{:02}",
-            seconds / 3600,
-            seconds / 60 % 60,
-            seconds % 60
-        )
+        format!("{:02}:{:02}", seconds / 3600, seconds / 60 % 60)
     }
 }
 
@@ -32,7 +25,15 @@ impl ArtworkUi {
             .filter(|value| value.layer == layer)?;
         Some((
             ArtworkTarget::Keypad(countdown.key),
-            InfoValue::text(Glyph::None, &format_remaining(countdown.seconds)),
+            InfoValue {
+                detail: if countdown.seconds >= 3600 {
+                    "hh:mm"
+                } else {
+                    "mm:ss"
+                }
+                .into(),
+                ..InfoValue::text(Glyph::Timer, &format_remaining(countdown.seconds))
+            },
         ))
     }
 
@@ -50,12 +51,15 @@ impl ArtworkUi {
         let Some(countdown) = info.countdown.as_mut() else {
             return;
         };
-        if countdown.seconds == seconds {
-            return;
-        }
+        // Above one hour the key shows hh:mm: skip rendering and uploading the
+        // same picture for the other 59 seconds of each minute.
+        let unchanged = format_remaining(countdown.seconds) == format_remaining(seconds)
+            && (countdown.seconds >= 3600) == (seconds >= 3600);
         countdown.seconds = seconds;
         drop(info);
-        self.draw_countdown();
+        if !unchanged {
+            self.draw_countdown();
+        }
     }
 
     pub(crate) fn clear_countdown(&self) {

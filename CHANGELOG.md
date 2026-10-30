@@ -17,9 +17,9 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
   immediate key-down behavior. Primary artwork and live information remain independent.
 
 - **Countdown on the initiating key.** A timer started with a physical keypad key
-  shows its remaining time on that key and the GTK preview (`45s`, `02:15`,
-  `01:02:15`). It stays on its original page and survives artwork refreshes and
-  device reconnects. Completion, cancellation or replacement restores normal
+  shows its remaining time on that key and the GTK preview (`mm:ss` below one
+  hour, `hh:mm` from one hour onwards). It stays on its original page and survives
+  artwork refreshes and device reconnects. Completion or cancellation restores normal
   artwork, button text or live information. Test action and non-key controls still
   start timers without claiming a key; completion notifications and chimes are unchanged.
 
@@ -245,9 +245,20 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Fixed
 
+- Starting a timer while one is active no longer restarts or replaces it. Short
+  taps and other Start timer actions leave its deadline, remaining time and key
+  picture unchanged; cancel it or wait for completion before starting another.
+- Timer key countdowns now use compact `hh:mm` from one hour onwards and `mm:ss`
+  below one hour, preventing long durations such as 7200 seconds from being clipped.
+  A `hh:mm` or `mm:ss` label above the digits identifies the current units on
+  both the physical key and its app preview, at approximately 60% of the digits'
+  fitted font size and without an extra Remaining caption.
+- An `hh:mm` countdown now redraws its key and preview once per minute, when the
+  shown time changes, instead of rendering and uploading the same picture every
+  second.
 - Countdown timers now send a native system notification with their duration on
   completion, including while the configuration window is hidden. Cancellation
-  and replacement do not notify or play sound. Completion also plays a theme alarm
+  and ignored starts do not notify or play sound. Completion also plays a theme alarm
   via optional `canberra-gtk-play`, without interrupting Play audio file actions.
   If the helper is missing or fails, the GTK bell is attempted (possibly silent);
   the completion status and notification remain available.

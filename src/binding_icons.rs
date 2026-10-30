@@ -160,6 +160,7 @@ impl BindingIcon {
         use crate::info::Glyph;
         Some(match glyph {
             Glyph::None => return None,
+            Glyph::Timer => Self::Timer,
             Glyph::Speaker => Self::Volume,
             Glyph::SpeakerMuted => Self::Mute,
             Glyph::Headphones => Self::AudioOutput,

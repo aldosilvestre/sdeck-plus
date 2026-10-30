@@ -20,14 +20,14 @@ use std::{
 mod configuration;
 mod folder_panel;
 mod folders;
-mod key_swap;
 mod key_hold;
+mod key_swap;
 mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
-mod touchscreen;
 mod timer_sound;
+mod touchscreen;
 
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
@@ -993,12 +993,16 @@ impl FeatureRuntime {
         }
         if let sdeck_plus::protocol::Event::Key { index, pressed } = event {
             let dispatches = self.key_hold.borrow_mut().update(
-                &self.layers.borrow(), *index, *pressed, self.key_epoch.elapsed(),
+                &self.layers.borrow(),
+                *index,
+                *pressed,
+                self.key_epoch.elapsed(),
             );
             self.dispatch_keys(dispatches);
             return;
         }
-        if let Some((identity, action, page_return)) = crate::matching_binding(&self.layers, event) {
+        if let Some((identity, action, page_return)) = crate::matching_binding(&self.layers, event)
+        {
             self.execute_with_return(identity, action, page_return);
         }
     }
@@ -1089,6 +1093,8 @@ impl FeatureRuntime {
     ) {
         if action == Action::None
             || self.configuration_operation.get() == Some(configuration::Operation::Import)
+            || (matches!(&action, Action::Feature(FeatureAction::Timer { .. }))
+                && self.timer.borrow().is_some())
         {
             return;
         }
@@ -1134,6 +1140,9 @@ impl FeatureRuntime {
     }
 
     fn start_timer(&self, seconds: u32) {
+        if self.timer.borrow().is_some() {
+            return;
+        }
         self.cancel_countdown();
         let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
         self.timer_status
@@ -1168,9 +1177,8 @@ impl FeatureRuntime {
                         .and_then(|window| window.application())
                     {
                         let notification = gtk::gio::Notification::new("Timer complete");
-                        notification.set_body(Some(&format!(
-                            "Your {seconds}-second timer has finished."
-                        )));
+                        notification
+                            .set_body(Some(&format!("Your {seconds}-second timer has finished.")));
                         app.send_notification(Some("timer-complete"), &notification);
                     }
                     glib::ControlFlow::Break

@@ -36,12 +36,13 @@ impl FeatureRuntime {
                 Action::Feature(FeatureAction::Timer { seconds }) => Some(*seconds),
                 _ => None,
             };
+            let timer_was_active = self.timer.borrow().is_some();
             self.execute_with_return(
                 crate::binding_identity(&dispatch.owner, &dispatch.trigger),
                 dispatch.action,
                 dispatch.page_return,
             );
-            if self.timer.borrow().is_some() {
+            if !timer_was_active && self.timer.borrow().is_some() {
                 if let Some(seconds) = seconds {
                     self.artwork
                         .start_key_countdown(dispatch.owner, key, seconds);

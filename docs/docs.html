@@ -390,15 +390,19 @@ cd sdeck-plus
             <article class="card">
               <h4>Countdown timers</h4>
               <p><strong>Device &gt; Start timer</strong> starts a countdown of 1–86400 seconds. Starting it with a physical keypad key temporarily shows
-                 the time left on that key and its app preview: <code>45s</code>, <code>02:15</code> or <code>01:02:15</code>.
+                 the time left on that key and its app preview in five characters: <code>hh:mm</code> from one hour onwards (7200 seconds → <code>02:00</code>),
+                 or <code>mm:ss</code> below one hour (3599 seconds → <code>59:59</code>, 45 seconds → <code>00:45</code>).
+                 A <code>hh:mm</code> or <code>mm:ss</code> label sits above the large digits and changes with the displayed units.
+                 Its font is approximately 60% of the fitted digits' font size, keeping the format readable without adding extra words.
                  The countdown stays on its original page, survives reconnects, and restores the key's artwork, text or live information when it ends or is cancelled.
-                 Starting another timer replaces it; <strong>Test action</strong> and dial or touch input do not claim a keypad key.
+                 While a timer is running, another <strong>Start timer</strong> action is ignored: its deadline, remaining time and key picture stay unchanged.
+                 Cancel it or wait until it finishes before starting another. This also applies to <strong>Test action</strong> and dial or touch input, which do not claim a keypad key.
                  When it finishes, sdeck-plus sends one system notification
                  with the timer duration, even while the configuration window is hidden. Desktop notification settings, including Do Not Disturb, control its presentation;
                  the in-app completion status remains available. Completion also plays the desktop theme's <code>alarm-clock-elapsed</code> sound using optional
                  <code>canberra-gtk-play</code>, independently of notification settings and without stopping a <strong>Play audio file</strong> action.
                  Audio output, volume and theme sound availability still determine audibility. If the helper is missing or playback fails, the GTK bell is attempted
-                 (it may be silent); the notification is still sent. Starting another timer replaces the countdown, <strong>Cancel timer</strong> cancels it
+                 (it may be silent); the notification is still sent. An ignored start does not add a notification or chime. <strong>Cancel timer</strong> cancels the countdown
                  without a completion notification or chime, and <strong>Quit</strong> cancels pending timers. Saving a binding does not start it.</p>
             </article>
             <article class="card">

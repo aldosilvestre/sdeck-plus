@@ -118,7 +118,10 @@ fn physical_channel_tap_then_hold_cancels_countdown_without_second_tap() {
             })
             .any(|command| matches!(command,
             ArtworkCommand::ComposeInfo { target: ArtworkTarget::Keypad(1), value, .. }
-                if value == InfoValue::text(Glyph::None, "45s"))));
+                if value == InfoValue {
+                    detail: "mm:ss".into(),
+                    ..InfoValue::text(Glyph::Timer, "00:45")
+                })));
         await_label(&fixture.runtime.timer_status, "Timer cancelled.", || {
             send(true)
         });

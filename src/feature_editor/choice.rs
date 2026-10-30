@@ -160,7 +160,7 @@ impl Choice {
             Self::GoToPage => "Show this page in the current profile folder. The first page is 1.",
             Self::OpenFolder => "Open an existing profile folder by name. This is not a filesystem path.",
             Self::ParentFolder => "Return to the parent profile folder.",
-            Self::Timer => "Start a countdown in seconds, from 1 to 86400. Completion sends a system notification and plays a theme alarm via optional canberra-gtk-play, even while the window is hidden. If unavailable, the GTK bell is attempted. Starting another timer replaces the countdown.",
+            Self::Timer => "Start a countdown in seconds, from 1 to 86400. Completion sends a system notification and plays a theme alarm via optional canberra-gtk-play, even while the window is hidden. If unavailable, the GTK bell is attempted. While a timer is running, Start timer does nothing. Cancel it or wait for completion before starting another.",
             Self::CancelTimer => "Cancel the running countdown.",
             Self::Brightness => "Set the device brightness from 0% to 100%.",
             Self::AdjustBrightness => "Change brightness by a signed percentage, from -100 to 100. Negative values dim the device.",
