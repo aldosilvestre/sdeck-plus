@@ -8,6 +8,10 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Artwork target picker lists only touch targets.** Appearance now offers the
+  touch-strip background and the four touch zones; key images use the key's
+  right-click popover. The documentation text and its screenshot match.
+
 - Documentation site: regenerated all native screenshots for the current interface
   and added captures of the timer countdown on a key and the Hold 2 seconds editor.
 
