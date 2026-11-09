@@ -161,8 +161,12 @@ if $release_mode; then
     done
     release_temporary=$(mktemp -d)
     # These two overrides are offline test hooks, not user-facing options.
-    release_api=${SDECK_PLUS_RELEASE_API:-https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest}
-    archive_base=${SDECK_PLUS_ARCHIVE_BASE:-https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags}
+    release_api=https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest
+    archive_base=https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags
+    if [[ ${SDECK_PLUS_INSTALL_TEST:-} == 1 ]]; then
+        release_api=${SDECK_PLUS_RELEASE_API:-$release_api}
+        archive_base=${SDECK_PLUS_ARCHIVE_BASE:-$archive_base}
+    fi
     if ! release_json=$(curl -fsSL --proto '=https' --proto-redir '=https' \
         --connect-timeout 15 --max-time 60 "$release_api"); then
         printf 'Could not fetch the latest published release. Check curl, network access and GitHub Releases.\n' >&2
@@ -179,16 +183,23 @@ if $release_mode; then
     fi
     archive="$release_temporary/release.tar.gz"
     if ! curl -fsSL --proto '=https' --proto-redir '=https' \
-        --connect-timeout 15 --max-time 300 \
+        --connect-timeout 15 --max-time 300 --max-filesize 67108864 \
         --output "$archive" "${archive_base%/}/$tag.tar.gz"; then
-        printf 'Could not download release archive for %s.\n' "$tag" >&2
+        printf 'Unsafe release archive: download failed or exceeds the 64 MiB limit for %s.\n' "$tag" >&2
+        exit 1
+    fi
+    # Also enforce the limit locally, including when a server omits its size.
+    archive_size=$(wc -c < "$archive")
+    if (( archive_size > 67108864 )); then
+        printf 'Unsafe release archive: download exceeds 64 MiB.\n' >&2
         exit 1
     fi
     release_root="sdeck-plus-${tag#v}"
     # Inspect before extraction. Reject links/devices as well as traversal, and
     # use escaped names so a newline cannot masquerade as a second safe entry.
     if ! tar --list --gzip --quoting-style=escape --file "$archive" > "$release_temporary/members" ||
-       ! tar --list --verbose --gzip --quoting-style=escape --file "$archive" > "$release_temporary/types"; then
+       ! LC_ALL=C tar --list --verbose --numeric-owner --gzip --quoting-style=escape \
+           --file "$archive" > "$release_temporary/types"; then
         printf 'Unsafe release archive: cannot list contents.\n' >&2
         exit 1
     fi
@@ -199,11 +210,26 @@ if $release_mode; then
             exit 1
         fi
     done < "$release_temporary/members"
-    while IFS= read -r entry; do
-        if [[ $entry != -* && $entry != d* ]]; then
+    expanded_size=0
+    entry_count=0
+    # GNU tar's numeric-owner listing puts the decimal size in field three.
+    # Bound each number before arithmetic to prevent overflow on hostile headers.
+    while read -r permissions owner size remainder; do
+        if [[ $permissions != -* && $permissions != d* ]]; then
             printf 'Unsafe release archive: only regular files and directories are allowed.\n' >&2
             exit 1
         fi
+        entry_count=$((entry_count + 1))
+        if (( entry_count > 5000 )); then
+            printf 'Unsafe release archive: more than 5000 entries.\n' >&2
+            exit 1
+        fi
+        if [[ ! $size =~ ^[0-9]{1,9}$ ]] ||
+           (( 10#$size > 134217728 - expanded_size )); then
+            printf 'Unsafe release archive: expanded size exceeds 128 MiB or is invalid.\n' >&2
+            exit 1
+        fi
+        expanded_size=$((expanded_size + 10#$size))
     done < "$release_temporary/types"
     mkdir -- "$release_temporary/source"
     tar --extract --gzip --file "$archive" --directory "$release_temporary/source" \

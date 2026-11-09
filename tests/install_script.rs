@@ -42,8 +42,8 @@ while (( $# )); do
     esac
 done
 case "$url" in
-    https://fixture.invalid/latest) cat "$FIXTURE/api" ;;
-    https://fixture.invalid/tags/v1.2.3.tar.gz) cp "$FIXTURE/archive.tar.gz" "$out" ;;
+    https://fixture.invalid/latest|https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest) cat "$FIXTURE/api" ;;
+    https://fixture.invalid/tags/v1.2.3.tar.gz|https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.2.3.tar.gz) cp "$FIXTURE/archive.tar.gz" "$out" ;;
     *) echo 'Unexpected URL' >&2; exit 99 ;;
 esac
 "#,
@@ -127,6 +127,7 @@ printf 'binary' > "$dir/test-host/release/sdeck-plus"
             .env("FIXTURE", &self.0)
             .env("CARGO_HOME", self.path("caller-cargo"))
             .env("CARGO_TARGET_DIR", self.path("caller-target"))
+            .env("SDECK_PLUS_INSTALL_TEST", "1")
             .env("SDECK_PLUS_RELEASE_API", "https://fixture.invalid/latest")
             .env("SDECK_PLUS_ARCHIVE_BASE", "https://fixture.invalid/tags")
             .envs(env.iter().copied())
@@ -270,6 +271,109 @@ fn invalid_or_absent_release_tag_is_rejected_without_installing() {
         );
         s.no_install();
     }
+}
+
+#[test]
+fn additional_invalid_release_tags_are_rejected() {
+    for tag in ["v1.2", "v1.2.3/../x", ""] {
+        let s = Sandbox::new();
+        s.write("api", &format!("{{\"tag_name\":\"{tag}\"}}"));
+        let o = s.run(false, &[], &[]);
+        assert_eq!(o.status.code(), Some(1));
+        assert!(o.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&o.stderr),
+            "Latest release must have a tag of the form vX.Y.Z. A published release is required.\n"
+        );
+        s.no_install();
+    }
+}
+
+#[test]
+fn oversized_release_is_rejected_before_building() {
+    let s = Sandbox::new();
+    fs::File::create(s.path("source/sdeck-plus-1.2.3/large"))
+        .unwrap()
+        .set_len(256 * 1024 * 1024)
+        .unwrap();
+    s.archive();
+    let o = s.run(false, &[], &[]);
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(o.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
+    s.no_install();
+}
+
+#[test]
+fn expanded_release_just_under_limit_still_installs() {
+    let s = Sandbox::new();
+    fs::File::create(s.path("source/sdeck-plus-1.2.3/large"))
+        .unwrap()
+        .set_len(128 * 1024 * 1024 - 32 * 1024)
+        .unwrap();
+    s.archive();
+    success(&s.run(false, &[], &[]));
+    s.installed();
+}
+
+#[test]
+fn oversized_download_is_rejected_even_if_curl_ignores_limit() {
+    let s = Sandbox::new();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(s.path("archive.tar.gz"))
+        .unwrap()
+        .set_len(64 * 1024 * 1024 + 1)
+        .unwrap();
+    let o = s.run(false, &[], &[]);
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(o.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
+    s.no_install();
+    let requests = fs::read_to_string(s.path("requests")).unwrap();
+    assert!(requests.contains("--max-filesize 67108864"));
+}
+
+#[test]
+fn too_many_archive_entries_are_rejected_before_building() {
+    let s = Sandbox::new();
+    for index in 0..5000 {
+        s.write(&format!("source/sdeck-plus-1.2.3/entry-{index}"), "");
+    }
+    s.archive();
+    let o = s.run(false, &[], &[]);
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    assert!(o.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
+    s.no_install();
+}
+
+#[test]
+fn desktop_write_failure_removes_all_owned_temporary_files() {
+    let s = Sandbox::new();
+    s.tool("chmod", "#!/bin/bash\nexit 46\n");
+    let o = s.run(false, &[], &[]);
+    assert_eq!(o.status.code(), Some(46));
+    assert!(o.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&o.stdout).starts_with("Building sdeck-plus"));
+    assert_eq!(
+        fs::read_dir(s.path("data/applications")).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn release_overrides_are_ignored_without_explicit_test_mode() {
+    let s = Sandbox::new();
+    success(&s.run(false, &[], &[("SDECK_PLUS_INSTALL_TEST", "")]));
+    s.installed();
+    let requests = fs::read_to_string(s.path("requests")).unwrap();
+    assert!(!requests.contains("fixture.invalid"), "{requests}");
+    assert!(
+        requests.contains("https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest")
+    );
+    assert!(requests
+        .contains("https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.2.3.tar.gz"));
 }
 
 #[test]
