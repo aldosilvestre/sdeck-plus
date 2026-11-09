@@ -35,6 +35,7 @@ mod shortcut_reference;
 mod timer_artwork;
 mod tray;
 mod tray_preference;
+mod tray_startup;
 mod ui;
 // Layout containers live beside ui.rs but are mounted here, because the
 // ui_showcase example includes ui.rs by path.
@@ -151,7 +152,7 @@ fn main() -> glib::ExitCode {
         glib::Char::from(b'b'),
         glib::OptionFlags::NONE,
         glib::OptionArg::None,
-        "Start in the system tray without opening configuration",
+        "Start hidden; wait up to 10 seconds for the tray, otherwise open configuration",
         None,
     );
     let background = Rc::new(Cell::new(false));
@@ -4378,6 +4379,7 @@ mod tests {
     mod timer_countdown_tests;
     mod timer_notification_tests;
     mod touchscreen_tests;
+    mod tray_startup;
     mod ui_refresh_tests;
 
     include!("button_text_editor_tests.rs");

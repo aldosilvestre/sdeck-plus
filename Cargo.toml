@@ -21,6 +21,7 @@ sha2 = "0.10"
 base64 = "0.22"
 async-channel = "2"
 ksni = { version = "0.3", features = ["blocking"] }
+tokio = { version = "1.53.3", features = ["rt", "time"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "=0.2.189"

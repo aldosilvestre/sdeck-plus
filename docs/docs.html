@@ -627,10 +627,13 @@ cd sdeck-plus
               <h4>System tray and login startup</h4>
               <p>Closing the window hides it; the device, bindings, artwork, timers and app-owned playback stay active until <strong>Quit</strong>. Either click on the tray icon opens
                  <strong>Open configuration</strong>, <strong>Start at login</strong>, <strong>Start in tray</strong> (on by default; saved in <code>tray.json</code>), <strong>About</strong> and <strong>Quit</strong>.
-                 A tray supporting StatusNotifierItem is required.</p>
+                 A tray supporting StatusNotifierItem is needed to keep running with the window hidden.</p>
               <p>Autostart writes <code>$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop</code> (or <code>~/.config/autostart/</code>) and starts the current executable with
                  <code>--background</code>; disable and re-enable it after moving the executable. Run <code>cargo run -- --background</code> for a quiet manual start.
-                 Repeated launches reuse the running instance. If the session bus is unreachable, closing the window exits instead of hiding.</p>
+                 Startup waits up to 10 seconds for successful tray registration and an available host, without blocking configuration or device initialization.
+                 If no usable tray appears (including an unreachable session bus), configuration opens with an explanation; closing it exits instead of hiding.
+                 Repeated launches reuse the running instance and open configuration even while tray readiness is pending; late registration never hides that window.
+                 The wait and fallback do not change saved preferences.</p>
             </article>
             <article class="card">
               <h4>Quitting and reconnecting</h4>

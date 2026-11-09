@@ -1,5 +1,5 @@
 use gtk::{gio, glib, prelude::*, Application};
-use ksni::{blocking::TrayMethods, menu::*, MenuItem, Tray};
+use ksni::{menu::*, MenuItem, Tray};
 
 enum Command {
     Configure,
@@ -10,6 +10,7 @@ enum Command {
     Error(String),
 }
 
+#[derive(Clone)]
 struct MonitorTray {
     commands: async_channel::Sender<Command>,
     autostart: bool,
@@ -130,13 +131,10 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
         executable: std::env::current_exe()?,
         icon: crate::app_icon::tray_pixmap()?,
     };
-    let handle = tray.spawn()?;
-    let shutdown_handle = handle.clone();
-    let hold = std::cell::RefCell::new(Some(app.hold()));
-    app.connect_shutdown(move |_| {
-        shutdown_handle.shutdown().wait();
-        hold.borrow_mut().take();
-    });
+    let (service, readiness) =
+        crate::tray_startup::Service::start(tray, crate::tray_startup::GRACE)?;
+    let hold = std::rc::Rc::new(std::cell::RefCell::new(Some(app.hold())));
+    let shutdown_hold = hold.clone();
     let quit = gio::SimpleAction::new("quit", None);
     quit.connect_activate(glib::clone!(
         #[weak]
@@ -144,9 +142,25 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
         move |_, _| app.quit()
     ));
     app.add_action(&quit);
-    let preference_action = install_close_preference(app, keep_running);
-    let app = app.clone();
-    glib::MainContext::default().spawn_local(async move {
+    // Until registration succeeds, closing configuration must remain an exit.
+    let preference_action = install_close_preference(app, false);
+    let application = app.clone();
+    let task = glib::MainContext::default().spawn_local(async move {
+        let app = application;
+        let handle = match readiness.recv().await {
+            Ok(Ok(handle)) => handle,
+            result => {
+                let error = match result {
+                    Ok(Err(error)) => error,
+                    _ => "Tray startup worker stopped".into(),
+                };
+                show_error(&app, &format!("System tray unavailable: {error}. Enable a StatusNotifier tray in your desktop and restart. Closing this window will exit the application."));
+                hold.borrow_mut().take();
+                return;
+            }
+        };
+        // Never re-hide a window opened by an additional activation while pending.
+        apply_close_preference(&app, &preference_action, keep_running);
         let mut start_in_tray = start_in_tray;
         if let Err(error) = autostart {
             show_error(&app, &format!("Could not read start at login: {error}"));
@@ -170,7 +184,7 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
                     };
                     match result {
                         Ok(()) => {
-                            if handle.update(|tray| tray.keep_running = enabled).is_none() {
+                            if handle.update(|tray| tray.keep_running = enabled).await.is_none() {
                                 show_error(&app, "System tray stopped while applying close preference.");
                             }
                         }
@@ -186,7 +200,7 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
                     match result {
                         Ok(()) => {
                             start_in_tray = enabled;
-                            if handle.update(|tray| tray.start_in_tray = enabled).is_none() {
+                            if handle.update(|tray| tray.start_in_tray = enabled).await.is_none() {
                                 show_error(&app, "System tray stopped while applying start preference.");
                             }
                         }
@@ -196,6 +210,12 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
                 Command::Error(message) => show_error(&app, &message),
             }
         }
+    });
+    let service = std::cell::RefCell::new(Some(service));
+    app.connect_shutdown(move |_| {
+        task.abort();
+        service.borrow_mut().take();
+        shutdown_hold.borrow_mut().take();
     });
     Ok(())
 }

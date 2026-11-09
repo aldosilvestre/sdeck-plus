@@ -561,3 +561,19 @@ every action family and all changed popovers in light/dark GTK variants.
 The GTK owner test is the state/geometry harness; fresh native captures and
 independent reviews establish visual quality. Web-only Lighthouse/React
 tooling does not apply. Manual hardware input is reported only if observed.
+
+## 9. Tray startup and recovery
+
+Login startup (`--background`) and the saved **Start in tray** preference keep
+configuration hidden while an owned worker waits up to 10 seconds for successful
+StatusNotifierItem registration and a registered host. GTK, configuration and
+HID initialization continue immediately; watcher ownership alone is not readiness.
+Closing a visible configuration window while pending exits safely. After readiness,
+the saved close preference applies without hiding a window the user has opened.
+An additional launch always opens the existing configuration window.
+
+If the deadline expires without a usable tray, present configuration and the
+existing accessible error explanation, including how to enable a StatusNotifier
+tray and that closing the window exits. Do not change saved preferences or leave
+an inaccessible background process. Shutdown cancels registration, retries and
+GTK callbacks, releases the application hold and joins the owned worker.
