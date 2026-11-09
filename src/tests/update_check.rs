@@ -224,3 +224,30 @@ fn gtk_updates_and_existing_help_content() {
         window.destroy();
     });
 }
+
+#[test]
+fn drop_with_active_check_and_closed_receiver_joins() {
+    let (entered, arrival) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (worker, results) = crate::update_check::Worker::start(move |_, _| {
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(2)).unwrap();
+        Ok(br#"{"tag_name":"v9.0.0","draft":false,"prerelease":false}"#.to_vec())
+    })
+    .unwrap();
+
+    worker.sender.send(()).unwrap();
+    arrival.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(results);
+
+    let (done, finished) = mpsc::channel();
+    let join = std::thread::spawn(move || {
+        drop(worker);
+        done.send(()).unwrap();
+    });
+    release.send(()).unwrap();
+    finished
+        .recv_timeout(Duration::from_secs(2))
+        .expect("shutdown must join an active worker after the GTK receiver closes");
+    join.join().unwrap();
+}
