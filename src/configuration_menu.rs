@@ -10,6 +10,7 @@ struct MenuState {
     button: gtk::MenuButton,
     window: glib::WeakRef<gtk::ApplicationWindow>,
     help: gtk::Dialog,
+    help_body: gtk::Box,
     runtime: RefCell<Option<FeatureRuntime>>,
     chooser: RefCell<Option<gtk::FileChooserNative>>,
     confirmation: RefCell<Option<gtk::Dialog>>,
@@ -70,6 +71,7 @@ impl ConfigurationMenu {
             button,
             window: window.downgrade(),
             help: help_dialog,
+            help_body: help_body.clone(),
             runtime: RefCell::new(None),
             chooser: RefCell::new(None),
             confirmation: RefCell::new(None),
@@ -94,6 +96,24 @@ impl ConfigurationMenu {
             });
         }
         menu
+    }
+
+    pub(crate) fn add_updates(&self, body: &gtk::Box) {
+        self.0.help_body.append(body);
+    }
+
+    pub(crate) fn present_help(&self) {
+        self.0.button.popdown();
+        self.0.help.present();
+    }
+
+    pub(crate) fn bind_help_button(&self, button: &gtk::Button) {
+        let weak = Rc::downgrade(&self.0);
+        button.connect_clicked(move |_| {
+            if let Some(state) = weak.upgrade() {
+                Self(state).present_help();
+            }
+        });
     }
 
     pub(crate) fn button(&self) -> &gtk::MenuButton {

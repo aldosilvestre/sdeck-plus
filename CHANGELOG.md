@@ -8,6 +8,13 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Release update indicator.** Help now includes Updates with a manual check,
+  status and a saved automatic-check setting (on by default). A newer stable
+  GitHub release shows a text indicator beside the connection badge. Checks
+  run on an owned worker with bounded HTTPS responses; automatic checks are
+  suppressed for six hours after completion and can be disabled. Invalid
+  preferences are preserved. No installer runs and no release data is saved.
+
 - **Install without a checkout.** Run
   `curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash`
   to download and build the latest published GitHub release (`vX.Y.Z`; a published

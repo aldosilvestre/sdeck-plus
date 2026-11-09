@@ -37,6 +37,8 @@ mod tray;
 mod tray_preference;
 mod tray_startup;
 mod ui;
+mod update_check;
+mod update_preference;
 // Layout containers live beside ui.rs but are mounted here, because the
 // ui_showcase example includes ui.rs by path.
 #[path = "ui/binding_icon.rs"]
@@ -266,6 +268,7 @@ fn configure_window_close(window: &ApplicationWindow, app: &Application) {
 
 fn build_ui_with_visibility(app: &Application, visible: bool) {
     if let Some(window) = configuration_window(app) {
+        app.activate_action("check-updates-on-open", None);
         if visible {
             window.present();
         }
@@ -365,6 +368,9 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         artwork.clone(),
         layer_sender.clone(),
     );
+    if let Some(panel) = widgets.update_panel.borrow_mut().take() {
+        update_check::install(app, &widgets._configuration_menu, panel);
+    }
     widgets.feature_runtime.configure(
         organization,
         sdeck_plus::obs::ObsConfig::load(),
@@ -435,6 +441,7 @@ struct MonitorWidgets {
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     _configuration_menu: configuration_menu::ConfigurationMenu,
+    update_panel: RefCell<Option<update_check::Panel>>,
 }
 
 fn build_widgets(
@@ -490,6 +497,9 @@ fn build_widgets(
         help_body.append(&step);
     }
     let configuration_menu = configuration_menu::ConfigurationMenu::new(&window, &help_body);
+    let update_panel = update_check::Panel::new();
+    configuration_menu.add_updates(&update_panel.body);
+    header.append(&update_panel.indicator);
     let help_menu = configuration_menu.button().clone();
     header.append(&help_menu);
     root.append(&header);
@@ -1605,6 +1615,7 @@ fn build_widgets(
         organization_writes: vec![create_layer],
         _text_editor: text_editor,
         _configuration_menu: configuration_menu,
+        update_panel: RefCell::new(Some(update_panel)),
     }
 }
 
@@ -4381,6 +4392,7 @@ mod tests {
     mod touchscreen_tests;
     mod tray_startup;
     mod ui_refresh_tests;
+    mod update_check;
 
     include!("button_text_editor_tests.rs");
 

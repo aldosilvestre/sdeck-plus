@@ -640,6 +640,19 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  The wait and fallback do not change saved preferences.</p>
             </article>
             <article class="card">
+              <h4>Release updates</h4>
+              <p>Open <strong>Menu &gt; Help &gt; Updates</strong> to see the release-check status or select <strong>Check for updates</strong>.
+                 A newer stable release shows <strong>Update available: vX.Y.Z</strong> beside the connection badge; clicking it opens Help.
+                 Versions are compared numerically; draft and prerelease versions are ignored. Checking never installs anything.</p>
+              <p><strong>Check for updates automatically</strong> is on by default. It checks on app open (including reopening an existing window),
+                 no more than once per six hours in the running process. Turn it off to prevent automatic network checks; manual checks still work.
+                 This check contacts <code>api.github.com</code> only for release metadata, without telemetry. It uses curl with an eight-second deadline
+                 and a 256 KiB response limit. Offline or failed requests show <strong>Could not check for updates</strong> in Help without interrupting work.</p>
+              <p>The setting lives in <code>$XDG_CONFIG_HOME/sdeck-plus/updates.json</code> (or <code>~/.config/sdeck-plus/updates.json</code>).
+                 No release data is saved. An invalid preference is preserved, automatic checking is disabled and Help shows the error;
+                 repair the file and restart before changing it. A failed save leaves the previous setting active.</p>
+            </article>
+            <article class="card">
               <h4>Quitting and reconnecting</h4>
               <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black, stops the action worker and app-owned playback,
                  cancels timers and releases the device; a blocked driver call can delay exiting. Independently opened applications stay open.

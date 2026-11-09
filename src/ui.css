@@ -21,6 +21,12 @@ window, scrolledwindow, viewport, .app-shell {
 
 .app-shell { font-size: 14px; }
 .title { font-size: 20px; font-weight: 700; }
+.update-indicator {
+    color: @desk_cyan;
+    border-color: @desk_cyan;
+    font-size: 13px;
+    font-weight: 600;
+}
 .section-label { font-size: 14px; font-weight: 600; }
 .control-heading {
     font-size: 18px;

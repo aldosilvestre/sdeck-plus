@@ -492,6 +492,19 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Action choices include existing toggles plus explicit start/stop recording,
   pause/resume recording, and start/stop streaming. Choosing or saving an
   action never executes it.
+- **Release updates:** beside the connection badge, a keyboard-operable text
+  button reads "Update available: vX.Y.Z" only when a newer stable release is
+  known, and opens Help. It uses the shared cyan token in both palettes, never
+  color alone. Help > Updates groups its status, Check for updates button and
+  Check for updates automatically checkbox with 8px gaps. Checking disables
+  the manual button; failures stay in the Help status, never an automatic popup.
+  A known release indicator survives retries and network failures. An owned
+  worker makes one bounded HTTPS request (8 seconds, 256 KiB); shutdown
+  disconnects and joins it. Automatic checks run on opening/re-presenting the
+  configuration window, at most once per six hours after completion in this
+  process. Manual checks bypass that interval, never the single-flight guard.
+  The saved toggle changes behavior only after a successful save; malformed
+  preferences remain untouched, disable writes and show an inline explanation.
 - **Tray close preference:** Keep running when window closes is checked by
   default. Checked closes hide configuration and retain device monitoring;
   unchecked closes quit the application and its workers. Persist the choice,
