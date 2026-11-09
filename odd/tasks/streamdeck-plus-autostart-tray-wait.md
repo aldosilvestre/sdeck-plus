@@ -7,9 +7,9 @@ S1. “necesito que el autostart cuando tenga el autostart activado, que espere 
 S2. “Debe contemplar los casos en donde no exista un tray.”
 
 ## Tasks
-T1 [done] | S1–S2 | Implement bounded, nonblocking tray readiness and regression tests/documentation | route: worker (context backstop) | commit: work-unit commit pending
-T2 [done] | S1–S2 | Independently verify isolated startup, readiness, no-tray fallback and shutdown | route: verify (risk item 4) | commit: work-unit commit pending
-T3 | S1–S2 | Complete native assessment/review if available, record evidence and close | route: parent | commit: pending
+T1 [done] | S1–S2 | Implement bounded, nonblocking tray readiness and regression tests/documentation | route: worker (context backstop) | commit: 83ef6b4
+T2 [done] | S1–S2 | Independently verify isolated startup, readiness, no-tray fallback and shutdown | route: verify (risk item 4) | commit: 83ef6b4
+T3 [done] | S1–S2 | Complete native assessment/review if available, record evidence and close | route: parent | commit: closing evidence commit
 
 ## Log
 L1. User request (verbatim): vamos a hacer una correccion en sdeck, necesito que el autostart cuando tenga el autostart activado, que espere que se cargue el tray. Debe contemplar los casos en donde no exista un tray.
@@ -19,4 +19,5 @@ L4. Human approved direct Tokio dependency via explicit choice approve-direct-to
 L5. Worker RED: 2 failed / 1 passed (exit 101); GREEN: 9/9 focused tests including actual GTK production lifecycle, late watcher/host, unavailable/rejected/stalled registration, pending shutdown and preserved preferences. Headless suite: 397 library + 124 binary + 2 integration passed; graphical bodies skip headless. Clippy all targets passed. Scoped test rustfmt passed after one wrapping correction.
 L6. Global fmt check exit 1: unchanged baseline src/binding_editor.rs:238 and src/feature_persistence_tests.rs:52,128. Parent independently confirmed both baseline files fail rustfmt; preserved unrelated files. This remains a known pre-existing gate failure, not a successful global check.
 L7. Independent verifier: S1 and S2 met, no production blocker; isolated suite/focused/clippy passed, production lifecycle probe passed and was retained in regression test. Initial diagnostic-only synthetic-window probe timed out at 180 seconds (unpresented window); corrected presented-window probe passed. Remote activation transport not directly exercised; existing-window activation path exercised. No real HID or session login test.
-L8. Parent focused spot check exit 0: 9 passed, including displayed GTK lifecycle (12.26 seconds). Final native review/commit evidence pending. One cohesive startup work unit; tests and docs retained together despite exceeding approximately 400 authored lines.
+L8. Parent focused spot check exit 0: 9 passed, including displayed GTK lifecycle (12.26 seconds). Work-unit commit 83ef6b4, 572 additions / 16 deletions (420 lines are public-interface/lifecycle regression tests). One cohesive startup work unit; tests and docs retained together despite exceeding approximately 400 authored lines.
+L9. Final committed-range native assess: nativeRisk medium, concurrency escalation high, reviewDue false (under_budget); self-verification and independent verification both complete, no native review started. Final global formatter remains a known pre-existing failure; not repaired in this task. No installation, real-login/device test, push or PR performed. T1–T3 closed with these explicit limitations.
