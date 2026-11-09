@@ -52,7 +52,9 @@ fn key_hold_storage_reload_swap_and_unbind_preserve_independent_metadata() {
     store
         .bind("Base", hold.clone(), Action::Emit("hold".into()))
         .unwrap();
-    store.bind("Base", Trigger::KeyHold(8), Action::None).unwrap();
+    store
+        .bind("Base", Trigger::KeyHold(8), Action::None)
+        .unwrap();
     store
         .bind("Other", hold.clone(), Action::Emit("other".into()))
         .unwrap();
@@ -128,7 +130,12 @@ fn key_hold_validation_rejects_invalid_input_without_mutating_bindings_or_disk()
             Action::None,
             "key index out of range",
         ),
-        ("Missing", Trigger::KeyHold(1), Action::None, "unknown layer"),
+        (
+            "Missing",
+            Trigger::KeyHold(1),
+            Action::None,
+            "unknown layer",
+        ),
         (
             "Base",
             Trigger::KeyHold(1),

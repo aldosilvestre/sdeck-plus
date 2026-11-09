@@ -238,7 +238,8 @@ pub fn control_summary(
         })
         .collect();
     if control == ControlKind::Button {
-        if let Some(action) = bindings.and_then(|bindings| bindings.get(&Trigger::KeyHold(number))) {
+        if let Some(action) = bindings.and_then(|bindings| bindings.get(&Trigger::KeyHold(number)))
+        {
             lines.push(format!("Hold 2 seconds: {}", action_summary(Some(action))));
         }
     }
