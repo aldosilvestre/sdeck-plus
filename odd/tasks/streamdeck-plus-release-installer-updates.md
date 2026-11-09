@@ -1,0 +1,25 @@
+# Release installer, update indicator and AUR packaging
+
+Three user-requested parts, delivered as four reviewable work units. Decisions confirmed by the human: per-user install under ~/.local; GitHub Releases of aldosilvestre/sdeck-plus; automatic check on open plus manual in Help, user-disablable; update button runs the release installer then asks to restart.
+
+## Specs
+S1. “Modificaremos el install.sh para que pueda ser llamado desde un curl e instale la aplicacion en el sistema.” Contract: `curl -fsSL <raw install.sh> | bash` installs per user (PREFIX default ~/.local); still refuses root and non-Linux; existing flags (--help, --uninstall), checkout mode and every note/safety check in install.sh keep working.
+S2. “Una vez instalado que elimine lo que utilizo para realizar la instalacion y solo quede la app.” Contract: downloaded sources, build target dir and a temporary CARGO_HOME live in one mktemp -d owned by the installer and are removed on success, failure and interrupt; only binary, launcher, icon and license remain. Never delete pre-existing caches, a caller-owned CARGO_TARGET_DIR or a checkout.
+S3. “La aplicación debera tener un indicador que hay una version mas reciente publicada.” Contract: latest published release = GitHub release tag vX.Y.Z (no prerelease), compared numerically with CARGO_PKG_VERSION. Checked on app open and manually from Help; one HTTPS curl call on an owned worker, fixed endpoint, deadlines, bounded response, silent on failure; a persistent visible text indicator (not colour alone) when newer; automatic checking is disablable from Help and saved with the strict-preference pattern of tray_preference (never overwrite a malformed store).
+S4. “El boton para actualizar debera estar en la seccion de ayuda.” Contract: an Updates section in the Help dialog with check, status, automatic-check toggle and an Update button; Update runs the installer of the detected release tag from a fixed upstream URL on an owned worker, reports the real exit status, then asks the user to restart (restart only after the old instance releases the HID device). Installs not owned by the installer (pacman/AUR under /usr, checkouts, unknown paths) only show guidance, never run the installer.
+S5. “Preparar los pkgbuild necesarios para que pueda publicarse a posterior en aur.” Contract: packaging/aur/sdeck-plus (pinned release tarball, sha256) and packaging/aur/sdeck-plus-git (VCS source, pkgver()), each with PKGBUILD and .SRCINFO, correct /usr paths (binary, desktop file, icon, MIT license), dependencies validated in a clean build; nothing is published or pushed.
+
+## Tasks
+T1 | S1–S2 | Piped release installer with owned cleanup, hermetic shell tests, docs | route: worker (context backstop) | Risk: item 5 | commit: pending
+T2 | S3 | Release version parsing/comparison, update preference, asynchronous check, Help status and header indicator, tests | route: worker | Risk: item 4 | commit: pending
+T3 | S4 | Update button, origin guard, installer execution worker, restart lifecycle, tests | route: worker + verify | Risk: items 2, 4 | commit: pending
+T4 | S5 | Two PKGBUILDs + .SRCINFO, shared desktop template, clean-chroot-style validation, docs | route: worker | Risk: item 5 | commit: pending
+
+## Log
+L1. User request (verbatim): ok, antes de eso vamos a hacer un par de cosas en la aplicacion.
+
+Primero: Modificaremos el install.sh para que pueda ser llamado desde un curl e instale la aplicacion en el sistema. Una vez instalado que elimine lo que utilizo para realizar la instalacion y solo quede la app.
+Segundo: La aplicación debera tener un indicador que hay una version mas reciente publicada. El boton para actualizar debera estar en la seccion de ayuda.
+Tercero: Preparar los pkgbuild necesarios para que pueda publicarse a posterior en aur.
+L2. Human choices: install per user in ~/.local; GitHub Releases of aldosilvestre/sdeck-plus; check on open and manually in Help, user-disablable; update button runs installer then restarts, guidance only under pacman/AUR.
+L3. Exploration facts: no tags/releases exist yet (CHANGELOG says unreleased, version 0.1.0), so a first v0.1.0 release must be published by the human before live checks work; no HTTP client crate, curl subprocess precedent in src/info.rs; Help dialog lives in src/configuration_menu.rs; preference pattern src/tray_preference.rs; hidapi default linux-static-hidraw. Branch feat/release-installer-updates from main e46ef9f. Request record: Obsidian memory/requests/sdeck-plus/curl-install-update-indicator-pkgbuild-2026-11-09.md. No callable project Engram: local Markdown/vault continuity only.

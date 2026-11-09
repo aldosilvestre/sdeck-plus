@@ -8,6 +8,16 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Install without a checkout.** Run
+  `curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash`
+  to download and build the latest published GitHub release (`vX.Y.Z`; a published
+  release is required). Downloaded sources, build output and an isolated Cargo
+  cache are removed on success, failure or interruption. Only the per-user
+  binary, launcher, icon and license remain; existing caches and checkouts are
+  preserved. Checkout installation still works. Uninstall with
+  `curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --uninstall`;
+  configuration and profiles are kept.
+
 - **Artwork target picker lists only touch targets.** Appearance now offers the
   touch-strip background and the four touch zones; key images use the key's
   right-click popover. The documentation text and its screenshot match.

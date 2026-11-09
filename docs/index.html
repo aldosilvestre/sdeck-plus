@@ -905,8 +905,8 @@
         <h2 id="install-title" class="install-title">From source, for your user only.</h2>
         <p class="lead" style="margin-top: 1rem">Builds from source with Cargo and installs for the current user only. It never installs system packages or changes device permissions.</p>
         <ol class="steps">
-          <li><div><strong>Install the build requirements</strong>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code>, <code>glib-compile-resources</code>, GTK 4.8 or newer and libudev development files.</div></li>
-          <li><div><strong>Clone and run the installer</strong>Files go under <code>~/.local</code>; no root, no autostart, nothing launched. Remove it with <code>./install.sh --uninstall</code>.</div></li>
+          <li><div><strong>Install the build requirements</strong>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code>, <code>glib-compile-resources</code>, GTK 4.8 or newer and libudev development files, plus <code>curl</code> and GNU <code>tar</code> for release downloads.</div></li>
+          <li><div><strong>Run the release installer</strong>A published GitHub release tagged <code>vX.Y.Z</code> is required. Files go under <code>~/.local</code>; no root, no autostart, nothing launched. Downloaded sources and build caches are removed, including on failure or interruption.</div></li>
           <li><div><strong>Plug in the Stream Deck +</strong>Your user needs permission to open its HID node; the installer prints a udev rule an administrator can install when needed.</div></li>
         </ol>
         <p style="margin-top: 1.8rem"><a class="text-link" href="docs.html#install">Full requirements and installer options <svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
@@ -915,11 +915,12 @@
         <div class="terminal-bar" aria-hidden="true"><i></i><i></i><i></i><span>~/src</span></div>
         <div class="code-block">
 <pre><code>sudo pacman -S gtk4 base-devel
-git clone https://github.com/aldosilvestre/sdeck-plus.git
-cd sdeck-plus
-./install.sh</code></pre>
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash
+
+# Uninstall (configuration is kept):
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --uninstall</code></pre>
         </div>
-        <p class="terminal-note">Or run it directly from the checkout with <code>cargo run</code>.</p>
+        <p class="terminal-note">From a checkout, <code>./install.sh</code> still builds local sources, or try it without installing with <code>cargo run</code>.</p>
       </div>
     </div>
   </section>

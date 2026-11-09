@@ -7,6 +7,8 @@ case ${1:-} in
         printf '%s\n' \
             'Usage: ./install.sh [--uninstall]' \
             'Build and install sdeck-plus for the current Linux user.' \
+            'Without a checkout, downloads the latest published vX.Y.Z release (requires curl and tar).' \
+            'Release sources and build caches are temporary and removed on exit.' \
             '--uninstall removes the installed files; configuration and profiles are kept.' \
             'PREFIX sets the executable prefix (default: $HOME/.local).' \
             'XDG_DATA_HOME sets desktop data (default: $HOME/.local/share).' \
@@ -46,7 +48,16 @@ if [[ $prefix != /* ]]; then
     exit 1
 fi
 
-project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# A script on stdin has no BASH_SOURCE[0], including under set -u.
+project_dir=''
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+    project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+fi
+release_mode=true
+if [[ -n $project_dir && -f $project_dir/Cargo.toml &&
+      -f $project_dir/LICENSE && -d $project_dir/assets ]]; then
+    release_mode=false
+fi
 binary_path="$prefix/bin/sdeck-plus"
 desktop_file="$data_home/applications/dev.streamdeck.EventMonitor.desktop"
 icon_theme_dir="$data_home/icons/hicolor"
@@ -125,6 +136,91 @@ if ! pkg-config --print-errors --exists libudev; then
     exit 1
 fi
 
+# One EXIT handler owns both the atomic desktop temporary and release scratch.
+# Never register a second EXIT trap that could discard either cleanup action.
+release_temporary=''
+desktop_temporary=''
+cleanup() {
+    if [[ -n $desktop_temporary ]]; then
+        rm -f -- "$desktop_temporary"
+    fi
+    if [[ -n $release_temporary ]]; then
+        rm -rf -- "$release_temporary"
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if $release_mode; then
+    for tool in curl tar mktemp; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            printf 'Required release tool not found: %s.\n' "$tool" >&2
+            exit 1
+        fi
+    done
+    release_temporary=$(mktemp -d)
+    # These two overrides are offline test hooks, not user-facing options.
+    release_api=${SDECK_PLUS_RELEASE_API:-https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest}
+    archive_base=${SDECK_PLUS_ARCHIVE_BASE:-https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags}
+    if ! release_json=$(curl -fsSL --proto '=https' --proto-redir '=https' \
+        --connect-timeout 15 --max-time 60 "$release_api"); then
+        printf 'Could not fetch the latest published release. Check curl, network access and GitHub Releases.\n' >&2
+        exit 1
+    fi
+    tag_pattern='"tag_name"[[:space:]]*:[[:space:]]*"([^"]*)"'
+    tag=''
+    if [[ $release_json =~ $tag_pattern ]]; then
+        tag=${BASH_REMATCH[1]}
+    fi
+    if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        printf 'Latest release must have a tag of the form vX.Y.Z. A published release is required.\n' >&2
+        exit 1
+    fi
+    archive="$release_temporary/release.tar.gz"
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' \
+        --connect-timeout 15 --max-time 300 \
+        --output "$archive" "${archive_base%/}/$tag.tar.gz"; then
+        printf 'Could not download release archive for %s.\n' "$tag" >&2
+        exit 1
+    fi
+    release_root="sdeck-plus-${tag#v}"
+    # Inspect before extraction. Reject links/devices as well as traversal, and
+    # use escaped names so a newline cannot masquerade as a second safe entry.
+    if ! tar --list --gzip --quoting-style=escape --file "$archive" > "$release_temporary/members" ||
+       ! tar --list --verbose --gzip --quoting-style=escape --file "$archive" > "$release_temporary/types"; then
+        printf 'Unsafe release archive: cannot list contents.\n' >&2
+        exit 1
+    fi
+    while IFS= read -r member; do
+        if [[ ( $member != "$release_root" && $member != "$release_root/"* ) ||
+              $member == *\\* || $member =~ (^|/)\.\.?(/|$) ]]; then
+            printf 'Unsafe release archive: unexpected path.\n' >&2
+            exit 1
+        fi
+    done < "$release_temporary/members"
+    while IFS= read -r entry; do
+        if [[ $entry != -* && $entry != d* ]]; then
+            printf 'Unsafe release archive: only regular files and directories are allowed.\n' >&2
+            exit 1
+        fi
+    done < "$release_temporary/types"
+    mkdir -- "$release_temporary/source"
+    tar --extract --gzip --file "$archive" --directory "$release_temporary/source" \
+        --no-same-owner --no-same-permissions --keep-old-files --delay-directory-restore
+    project_dir="$release_temporary/source/$release_root"
+    if [[ ! -d $project_dir || ! -f $project_dir/Cargo.toml ||
+          ! -f $project_dir/LICENSE || ! -d $project_dir/assets ]]; then
+        printf 'Unsafe release archive: missing release source tree.\n' >&2
+        exit 1
+    fi
+    # Keep rustup's existing toolchain/RUSTUP_HOME; isolate Cargo downloads and
+    # build output without touching any caller-owned cache or target directory.
+    export CARGO_HOME="$release_temporary/cargo-home"
+    export CARGO_TARGET_DIR="$release_temporary/target"
+    mkdir -- "$CARGO_HOME"
+fi
+
 host_target=$(rustc -vV | while IFS= read -r line; do
     if [[ $line == 'host: '* ]]; then
         printf '%s' "${line#host: }"
@@ -141,7 +237,6 @@ install -Dm644 "$project_dir/assets/icons/scalable/apps/sdeck-plus.svg" "$icon_f
 install -Dm644 "$project_dir/LICENSE" "$license_file"
 install -d "$data_home/applications"
 desktop_temporary="$desktop_file.tmp.$$"
-trap 'rm -f -- "$desktop_temporary"' EXIT
 {
     printf '%s\n' \
         '[Desktop Entry]' \

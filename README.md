@@ -56,13 +56,24 @@ sudo pacman -S gtk4 base-devel
 Install for the current user (no root; files go under `~/.local`):
 
 ```sh
-git clone https://github.com/aldosilvestre/sdeck-plus.git
-cd sdeck-plus
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash
 ```
 
-Remove it with `./install.sh --uninstall`; your configuration is kept. To try it
-without installing, run `cargo run` from the checkout.
+A published GitHub release tagged `vX.Y.Z` is required. With `curl` and GNU
+`tar` available, the installer downloads the latest release and builds it with
+`Cargo.lock`. Sources, build output and the temporary Cargo cache are removed
+on success, failure or interruption; only the binary, launcher, icon and license
+are installed. Existing Cargo caches and checkouts are not removed.
+
+Uninstall using the same prefix/data settings; your configuration is kept:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --uninstall
+```
+
+Alternatively, clone the repository and run `./install.sh` to build that checkout
+(without requiring a published release), or `./install.sh --uninstall` to remove
+it. To try it without installing, run `cargo run` from the checkout.
 
 Your user needs permission to open the device's HID node. If access is denied,
 an administrator can install a udev rule scoped to this VID/PID with

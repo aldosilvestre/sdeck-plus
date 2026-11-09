@@ -205,18 +205,19 @@
               <h4>Build and install</h4>
               <div class="code-block">
 <pre><code>sudo pacman -S gtk4 base-devel
-git clone https://github.com/aldosilvestre/sdeck-plus.git
-cd sdeck-plus
-./install.sh</code></pre>
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash</code></pre>
               </div>
-              <p>Or run it directly from the checkout:</p>
+              <p>A published GitHub release tagged <code>vX.Y.Z</code> is required. Release mode needs <code>curl</code> and GNU <code>tar</code>, downloads the latest published release and builds it locally.
+                 Downloaded sources, build output and a temporary <code>CARGO_HOME</code> live in one installer-owned temporary directory, removed on success, failure or interruption.
+                 Only the binary, launcher, icon and license are installed; existing Cargo caches and checkouts are never removed.</p>
+              <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">
 <pre><code>cargo run</code></pre>
               </div>
               <p>The installer builds the release binary with <code>Cargo.lock</code> and installs <code>~/.local/bin/sdeck-plus</code>, the launcher
                  <code>~/.local/share/applications/dev.streamdeck.EventMonitor.desktop</code>, the icon
                  <code>~/.local/share/icons/hicolor/scalable/apps/sdeck-plus.svg</code> and the license in <code>~/.local/share/doc/sdeck-plus/</code>.
-                 <code>PREFIX</code> overrides the executable prefix, an absolute <code>XDG_DATA_HOME</code> the data directory, and <code>CARGO_TARGET_DIR</code> the build output.
+                 <code>PREFIX</code> overrides the executable prefix, an absolute <code>XDG_DATA_HOME</code> the data directory, and <code>CARGO_TARGET_DIR</code> the build output in checkout mode only. Release mode ignores a caller's <code>CARGO_TARGET_DIR</code> and uses temporary output instead.
                  It runs from any directory, refuses to run as root, does not enable autostart or launch the app, and re-running it updates the files
                  (<code>./install.sh --help</code> for usage).</p>
             </article>
@@ -227,7 +228,10 @@ cd sdeck-plus
             </article>
             <article class="card">
               <h4>Uninstall</h4>
-              <p>Remove it with <code>./install.sh --uninstall</code>, using the same <code>PREFIX</code> and <code>XDG_DATA_HOME</code>. Configuration, profiles, artwork and any
+              <div class="code-block">
+<pre><code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --uninstall</code></pre>
+              </div>
+              <p>Or use <code>./install.sh --uninstall</code> from a checkout. Use the same <code>PREFIX</code> and <code>XDG_DATA_HOME</code> as for installation. Uninstall does not download or build a release. Configuration, profiles, artwork and any
                  <strong>Start at login</strong> entry are kept, and a running instance is not stopped.</p>
             </article>
           </div>
