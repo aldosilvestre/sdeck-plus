@@ -494,10 +494,15 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   action never executes it.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
-  known, and opens Help. It uses the shared cyan token in both palettes, never
-  color alone. Help > Updates groups its status, Check for updates button and
-  Check for updates automatically checkbox with 8px gaps. Checking disables
-  the manual button; failures stay in the Help status, never an automatic popup.
+  known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
+  color alone. The header menu lists Help, Updates, Import configuration... and Export
+  configuration...; Updates opens a modal dialog (same width, margins and Close
+  button as Help) that groups its status, Check for updates button and Check
+  for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
+  scrolled window: text wraps at the shared helper measure and installer output
+  shows at most six lines ending in an ellipsis, with the full text in the
+  tooltip. Help no longer contains update controls. Checking disables
+  the manual button; failures stay in the Updates status, never an automatic popup.
   A known release indicator survives retries and network failures. An owned
   worker makes one bounded HTTPS request (8 seconds, 256 KiB); shutdown
   disconnects and joins it. Automatic checks run on opening/re-presenting the
@@ -505,7 +510,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   process. Manual checks bypass that interval, never the single-flight guard.
   The saved toggle changes behavior only after a successful save; malformed
   preferences remain untouched, disable writes and show an inline explanation.
-  Help shows **Update** only for an available release when the canonical running
+  The Updates dialog shows **Update** only for an available release when the canonical running
   executable is `$HOME/.local/bin/sdeck-plus` and HOME is absolute. Other copies
   show guidance instead: `/usr` copies use their package manager; checkouts,
   custom prefixes and unknown origins must re-run the documented install command.

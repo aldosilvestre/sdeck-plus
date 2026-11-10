@@ -189,7 +189,7 @@ fn gtk_updates_and_existing_help_content() {
         let menu = configuration_menu::ConfigurationMenu::new(&window, &body);
         let updates = crate::update_check::Panel::new();
         menu.add_updates(&updates.body);
-        menu.bind_help_button(&updates.indicator);
+        menu.bind_updates_button(&updates.indicator);
         updates.render(&UpdateState::UpToDate);
         assert_eq!(updates.status.text(), "Up to date (v0.1.0)");
         assert!(!updates.indicator.is_visible());
@@ -215,7 +215,8 @@ fn gtk_updates_and_existing_help_content() {
         assert!(body.first_child().is_some());
         assert!(updates.body.parent().is_some());
         updates.indicator.emit_clicked();
-        assert!(menu.help_for_test().is_visible());
+        assert!(menu.updates_for_test().is_visible());
+        assert!(!menu.help_for_test().is_visible());
         updates.render(&UpdateState::Unavailable);
         assert_eq!(updates.status.text(), "Could not check for updates");
         assert!(updates.manual.is_sensitive());
@@ -316,4 +317,99 @@ fn retain_known_release_transition_table() {
     ] {
         assert_eq!(retain_known(previous, next.clone()), expected, "{next:?}");
     }
+}
+
+fn contains_scroller(widget: &gtk::Widget) -> bool {
+    widget.is::<gtk::ScrolledWindow>()
+        || std::iter::successors(widget.first_child(), |child| child.next_sibling())
+            .any(|child| contains_scroller(&child))
+}
+
+fn labels_in(widget: &gtk::Widget, found: &mut Vec<String>) {
+    if let Some(label) = widget.downcast_ref::<Label>() {
+        found.push(label.text().to_string());
+    }
+    for child in std::iter::successors(widget.first_child(), |child| child.next_sibling()) {
+        labels_in(&child, found);
+    }
+}
+
+#[test]
+fn gtk_updates_dialog_is_unscrolled_live_and_help_has_no_updates() {
+    run_gtk_test(|| {
+        use crate::update_install::{InstallState, Origin};
+        let window = ApplicationWindow::builder().build();
+        let body = GtkBox::new(Orientation::Vertical, 16);
+        body.append(&Label::new(Some("Existing setup help")));
+        let menu = configuration_menu::ConfigurationMenu::new(&window, &body);
+        let updates = crate::update_check::Panel::new();
+        menu.add_updates(&updates.body);
+        menu.bind_updates_button(&updates.indicator);
+        let mut help_labels = Vec::new();
+        labels_in(menu.help_for_test().upcast_ref(), &mut help_labels);
+        assert!(help_labels.iter().all(|text| !text.contains("pdate")));
+        assert!(!menu.updates_for_test().is_visible());
+
+        updates.render_install(
+            &UpdateState::Available("v9.9.9".into()),
+            &InstallState::Idle,
+            Origin::Installer,
+        );
+        updates.indicator.emit_clicked();
+        let dialog = menu.updates_for_test();
+        assert!(dialog.is_visible() && dialog.is_modal());
+        assert_eq!(dialog.title().as_deref(), Some("Updates"));
+        assert!(!contains_scroller(dialog.upcast_ref()));
+        let mut texts = Vec::new();
+        labels_in(dialog.upcast_ref(), &mut texts);
+        assert!(texts.iter().any(|text| text == "Update available: v9.9.9"));
+        // Live changes while open, and the same widgets after closing and re-opening.
+        updates.render(&UpdateState::UpToDate);
+        assert_eq!(updates.status.text(), "Up to date (v0.1.0)");
+        dialog.response(gtk::ResponseType::Close);
+        assert!(!dialog.is_visible());
+        dialog.present();
+        assert!(updates.body.parent().is_some() && contains_updates_body(&dialog, &updates));
+        dialog.response(gtk::ResponseType::Close);
+
+        let long = "installer output line\n".repeat(190);
+        let available = UpdateState::Available("v9.9.9".into());
+        for (check, install, origin) in [
+            (UpdateState::Idle, InstallState::Idle, Origin::Installer),
+            (UpdateState::Checking, InstallState::Idle, Origin::Installer),
+            (UpdateState::UpToDate, InstallState::Idle, Origin::Installer),
+            (available.clone(), InstallState::Idle, Origin::Installer),
+            (available.clone(), InstallState::Running, Origin::Installer),
+            (
+                available.clone(),
+                InstallState::Failed(long),
+                Origin::Installer,
+            ),
+            (
+                available.clone(),
+                InstallState::Succeeded("v9.9.9".into()),
+                Origin::Installer,
+            ),
+            (available.clone(), InstallState::Idle, Origin::Package),
+            (available, InstallState::Idle, Origin::Other),
+        ] {
+            updates.render_install(&check, &install, origin);
+            assert!(!contains_scroller(dialog.upcast_ref()));
+            let (minimum, natural, _, _) = updates.body.measure(gtk::Orientation::Vertical, 440);
+            assert!(
+                natural < 420 && minimum <= natural,
+                "{natural} {:?} {:?}",
+                check,
+                origin
+            );
+        }
+        window.destroy();
+    });
+}
+
+fn contains_updates_body(dialog: &gtk::Dialog, panel: &crate::update_check::Panel) -> bool {
+    panel
+        .body
+        .ancestor(gtk::Dialog::static_type())
+        .is_some_and(|found| found == *dialog.upcast_ref::<gtk::Widget>())
 }

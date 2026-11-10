@@ -26,6 +26,12 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Updates moved to the menu.** The update controls now live in a modal
+  **Menu > Updates** dialog (between Help and Import) instead of the Help dialog,
+  and the header "Update available" indicator opens it. Behavior is unchanged;
+  the dialog is not scrolled, and long installer output is shortened with an
+  ellipsis (full text in the tooltip). Help returns to its setup steps only.
+
 - **Explicit updates from Help.** Default per-user installations now offer Update
   for a detected stable release. The app downloads that tag's installer over
   bounded HTTPS and runs it as a file on an owned worker with a clean environment

@@ -95,7 +95,16 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     let mut entries = Vec::new();
     collect_menu_buttons(panel.upcast_ref(), &mut entries);
     entries.retain(|button| button_caption(button).as_deref() != Some("Close"));
-    assert_eq!(entries.len(), 3);
+    let captions: Vec<_> = entries.iter().filter_map(button_caption).collect();
+    assert_eq!(
+        captions,
+        [
+            "Help",
+            "Updates",
+            "Import configuration...",
+            "Export configuration..."
+        ]
+    );
     menu.button().popdown();
     let click = |caption: &str| {
         entries
@@ -140,6 +149,13 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     capture_themes("help", help.upcast_ref());
     help.response(ResponseType::Close);
     assert!(!help.is_visible());
+    click("Updates");
+    let updates = menu.updates_for_test();
+    assert!(updates.is_visible() && updates.is_modal());
+    assert_eq!(updates.title().as_deref(), Some("Updates"));
+    capture_themes("updates", updates.upcast_ref());
+    updates.response(ResponseType::Close);
+    assert!(!updates.is_visible());
     for import in [true, false] {
         let chooser = menu.chooser_for_test(import).unwrap();
         assert!(chooser.is_modal());

@@ -10,7 +10,8 @@ struct MenuState {
     button: gtk::MenuButton,
     window: glib::WeakRef<gtk::ApplicationWindow>,
     help: gtk::Dialog,
-    help_body: gtk::Box,
+    updates: gtk::Dialog,
+    updates_content: gtk::Box,
     runtime: RefCell<Option<FeatureRuntime>>,
     chooser: RefCell<Option<gtk::FileChooserNative>>,
     confirmation: RefCell<Option<gtk::Dialog>>,
@@ -31,6 +32,7 @@ impl Drop for MenuState {
             dialog.destroy();
         }
         self.help.destroy();
+        self.updates.destroy();
     }
 }
 
@@ -38,9 +40,10 @@ impl ConfigurationMenu {
     pub(crate) fn new(window: &gtk::ApplicationWindow, help_body: &gtk::Box) -> Self {
         let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
         let help = ui::button("help-browser-symbolic", "Help");
+        let updates = ui::button("software-update-available-symbolic", "Updates");
         let import = ui::button("document-open-symbolic", "Import configuration...");
         let export = ui::button("document-save-symbolic", "Export configuration...");
-        for item in [&help, &import, &export] {
+        for item in [&help, &updates, &import, &export] {
             body.append(item);
         }
         let panel = ui::popover("Menu", &body);
@@ -67,11 +70,31 @@ impl ConfigurationMenu {
             dialog.hide();
             glib::Propagation::Stop
         });
+        let updates_dialog = gtk::Dialog::builder()
+            .title("Updates")
+            .transient_for(window)
+            .modal(true)
+            .destroy_with_parent(true)
+            .default_width(480)
+            .build();
+        updates_dialog.add_button("Close", ResponseType::Close);
+        updates_dialog.set_default_response(ResponseType::Close);
+        let updates_content = updates_dialog.content_area();
+        updates_content.set_margin_start(16);
+        updates_content.set_margin_end(16);
+        updates_content.set_margin_top(16);
+        updates_content.set_margin_bottom(16);
+        updates_dialog.connect_response(|dialog, _| dialog.hide());
+        updates_dialog.connect_close_request(|dialog| {
+            dialog.hide();
+            glib::Propagation::Stop
+        });
         let menu = Self(Rc::new(MenuState {
             button,
             window: window.downgrade(),
             help: help_dialog,
-            help_body: help_body.clone(),
+            updates: updates_dialog,
+            updates_content,
             runtime: RefCell::new(None),
             chooser: RefCell::new(None),
             confirmation: RefCell::new(None),
@@ -81,6 +104,12 @@ impl ConfigurationMenu {
             if let Some(state) = weak.upgrade() {
                 state.button.popdown();
                 state.help.present();
+            }
+        });
+        let weak = Rc::downgrade(&menu.0);
+        updates.connect_clicked(move |_| {
+            if let Some(state) = weak.upgrade() {
+                Self(state).present_updates();
             }
         });
         for (item, transfer) in [(import, Transfer::Import), (export, Transfer::Export)] {
@@ -99,19 +128,19 @@ impl ConfigurationMenu {
     }
 
     pub(crate) fn add_updates(&self, body: &gtk::Box) {
-        self.0.help_body.append(body);
+        self.0.updates_content.append(body);
     }
 
-    pub(crate) fn present_help(&self) {
+    pub(crate) fn present_updates(&self) {
         self.0.button.popdown();
-        self.0.help.present();
+        self.0.updates.present();
     }
 
-    pub(crate) fn bind_help_button(&self, button: &gtk::Button) {
+    pub(crate) fn bind_updates_button(&self, button: &gtk::Button) {
         let weak = Rc::downgrade(&self.0);
         button.connect_clicked(move |_| {
             if let Some(state) = weak.upgrade() {
-                Self(state).present_help();
+                Self(state).present_updates();
             }
         });
     }
@@ -280,5 +309,10 @@ impl ConfigurationMenu {
     #[cfg(test)]
     pub(crate) fn help_for_test(&self) -> gtk::Dialog {
         self.0.help.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn updates_for_test(&self) -> gtk::Dialog {
+        self.0.updates.clone()
     }
 }

@@ -644,13 +644,13 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>Release updates</h4>
-              <p>Open <strong>Menu &gt; Help &gt; Updates</strong> to see the release-check status or select <strong>Check for updates</strong>.
-                 A newer stable release shows <strong>Update available: vX.Y.Z</strong> beside the connection badge; clicking it opens Help.
+              <p>Open <strong>Menu &gt; Updates</strong> to see the release-check status or select <strong>Check for updates</strong>.
+                 A newer stable release shows <strong>Update available: vX.Y.Z</strong> beside the connection badge; clicking it opens the Updates dialog.
                  Versions are compared numerically; draft and prerelease versions are ignored. Checking never installs anything.</p>
               <p><strong>Check for updates automatically</strong> is on by default. It checks on app open (including reopening an existing window),
                  no more than once per six hours in the running process. Turn it off to prevent automatic network checks; manual checks still work.
                  This check contacts <code>api.github.com</code> only for release metadata, without telemetry. It uses curl with an eight-second deadline
-                 and a 256 KiB response limit. Offline or failed requests show <strong>Could not check for updates</strong> in Help without interrupting work.</p>
+                 and a 256 KiB response limit. Offline or failed requests show <strong>Could not check for updates</strong> in the Updates dialog without interrupting work.</p>
               <p><strong>Update</strong> appears only after a newer release is found and only when the running executable resolves to
                  <code>$HOME/.local/bin/sdeck-plus</code>, the installer's default location. It never runs on startup, when inspecting settings or when saving bindings.
                  A copy under <code>/usr</code>, including pacman/AUR packages, shows <strong>Installed by your package manager. Update it with your package manager.</strong>
@@ -666,11 +666,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  The overall deadline is 30 minutes. Failures show <strong>Update failed</strong>, the real nonzero exit code when available and the last 4 KiB of output;
                  download, launch and timeout errors are also reported. Closing to the tray keeps the update running. Quitting sends TERM to the process group,
                  waits up to 10 seconds for cleanup, then KILLs remaining processes and joins the worker.</p>
-              <p>After success, Help reads <strong>Updated to vX.Y.Z. Restart to use it.</strong> Select <strong>Restart now</strong> when ready.
+              <p>After success, the Updates dialog reads <strong>Updated to vX.Y.Z. Restart to use it.</strong> Select <strong>Restart now</strong> when ready.
                  Restart is never automatic: the old instance quits normally, releases the device and application bus name, and only then launches the same executable
                  as a normal launch (no forced background flag). A failed replacement launch is printed to stderr.</p>
               <p>The setting lives in <code>$XDG_CONFIG_HOME/sdeck-plus/updates.json</code> (or <code>~/.config/sdeck-plus/updates.json</code>).
-                 No release data is saved. An invalid preference is preserved, automatic checking is disabled and Help shows the error;
+                 No release data is saved. An invalid preference is preserved, automatic checking is disabled and the Updates dialog shows the error;
                  repair the file and restart before changing it. A failed save leaves the previous setting active.</p>
             </article>
             <article class="card">

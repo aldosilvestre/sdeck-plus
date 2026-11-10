@@ -67,7 +67,7 @@ are installed. Existing Cargo caches and checkouts are not removed.
 To pin a release, append `-s -- --tag vX.Y.Z` to `bash` in the command above
 (or use `--tag=vX.Y.Z`); this option is rejected in checkout mode.
 
-For the default `~/.local/bin/sdeck-plus` installation, **Menu > Help > Updates**
+For the default `~/.local/bin/sdeck-plus` installation, **Menu > Updates**
 offers **Update** after finding a newer stable release. Only pressing it runs
 that release's installer from GitHub, pinned to the detected tag. After success,
 choose **Restart now** when ready; the old instance releases the device before

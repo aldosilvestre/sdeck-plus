@@ -160,6 +160,23 @@ impl Gate {
     }
 }
 
+/// Keep a status to a fixed visual size; the full text stays in the tooltip.
+fn compact(text: &str) -> String {
+    const LINES: usize = 6;
+    const CHARS: usize = LINES * 38;
+    let mut lines = text.lines();
+    let mut shown = lines.by_ref().take(LINES).collect::<Vec<_>>().join("\n");
+    let mut cut = lines.next().is_some();
+    if shown.chars().count() > CHARS {
+        shown = shown.chars().take(CHARS - 1).collect();
+        cut = true;
+    }
+    if cut {
+        shown.push('…');
+    }
+    shown
+}
+
 #[derive(Clone)]
 pub(crate) struct Panel {
     pub(crate) body: gtk::Box,
@@ -179,6 +196,9 @@ impl Panel {
         heading.set_xalign(0.0);
         heading.add_css_class("section-label");
         let status = crate::ui::helper("Not checked yet");
+        // Installer output is long; keep the dialog unscrolled and show the rest on hover.
+        status.set_lines(6);
+        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         let manual = gtk::Button::with_label("Check for updates");
         let automatic = gtk::CheckButton::with_label("Check for updates automatically");
         let error = crate::ui::helper("");
@@ -222,12 +242,16 @@ impl Panel {
             UpdateState::Available(tag) => format!("Update available: {tag}"),
             UpdateState::Unavailable => "Could not check for updates".into(),
         };
-        self.status.set_text(&text);
+        self.set_status(&text);
         self.manual.set_sensitive(*state != UpdateState::Checking);
         // A known release remains visible even during a retry or a failed check.
         if let UpdateState::Available(_) = state {
             self.indicator.set_label(&text);
-            self.indicator.set_tooltip_text(Some("Open Help > Updates"));
+            self.indicator.set_tooltip_text(Some("Open Updates"));
+            self.indicator
+                .update_property(&[gtk::accessible::Property::Label(&format!(
+                    "{text}. Open Updates"
+                ))]);
             self.indicator.set_visible(true);
         } else if *state == UpdateState::UpToDate {
             self.indicator.set_visible(false);
@@ -262,13 +286,17 @@ impl Panel {
         self.guidance.set_text(guidance);
         self.guidance.set_visible(true);
         match state {
-            InstallState::Running => self.status.set_text("Updating..."),
-            InstallState::Succeeded(tag) => self
-                .status
-                .set_text(&format!("Updated to {tag}. Restart to use it.")),
-            InstallState::Failed(error) => self.status.set_text(error),
+            InstallState::Running => self.set_status("Updating..."),
+            InstallState::Succeeded(tag) => {
+                self.set_status(&format!("Updated to {tag}. Restart to use it."))
+            }
+            InstallState::Failed(error) => self.set_status(error),
             InstallState::Idle => {}
         }
+    }
+    pub(crate) fn set_status(&self, text: &str) {
+        self.status.set_text(&compact(text));
+        self.status.set_tooltip_text(Some(text));
     }
     fn preference_error(&self, error: &str) {
         self.error.set_text(&format!("Could not save or read update preference: {error}. Original preference preserved; setting unchanged. Repair the preference and restart to enable writes."));
@@ -409,8 +437,7 @@ impl Controller {
             };
             if let Some(note) = note {
                 self.panel
-                    .status
-                    .set_text(&format!("Update available: {tag} ({note})"));
+                    .set_status(&format!("Update available: {tag} ({note})"));
             }
             self.panel
                 .manual
@@ -536,7 +563,7 @@ pub(crate) fn install(
         controller,
         move |_| controller.request(true)
     ));
-    menu.bind_help_button(&controller.panel.indicator);
+    menu.bind_updates_button(&controller.panel.indicator);
     let weak = Rc::downgrade(&controller);
     controller.panel.automatic.connect_toggled(move |button| {
         let Some(c) = weak.upgrade() else {
