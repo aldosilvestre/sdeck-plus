@@ -23,12 +23,19 @@ mod folder_panel;
 mod folders;
 mod key_hold;
 mod key_swap;
+mod model_session;
 mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
 mod timer_sound;
 mod touchscreen;
+
+pub(crate) use model_session::{
+    open_session, ModelSession, OpenError, OpenedSession, SessionRoots,
+};
+#[cfg(test)]
+pub(crate) use model_session::{Outcome, SwitchReason};
 
 /// The root OBS settings live in: the session's, or the Stream Deck + root.
 pub(crate) fn active_root(root: Option<&Path>) -> std::io::Result<PathBuf> {
@@ -56,6 +63,7 @@ pub(crate) fn run_worker_at(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     root: Option<PathBuf>,
 ) {
+    let mut root = root;
     let mut executor = sdeck_plus::layers::ActionExecutor::new(
         sdeck_plus::layers::SystemProcessRunner,
         sdeck_plus::keyboard::Keyboard::new(),
@@ -81,6 +89,10 @@ pub(crate) fn run_worker_at(
         }
         let event = match command {
             LayerCommand::Shutdown => break,
+            LayerCommand::SetRoot(next) => {
+                root = Some(next);
+                None
+            }
             LayerCommand::SwapKeys {
                 store,
                 artwork_root,
@@ -195,6 +207,17 @@ pub(crate) fn run_worker_at(
                 final_store = Some((store, organization))
             }
             LayerCommand::ObsSave(config) => final_obs = Some(config),
+            LayerCommand::SetRoot(next) => {
+                // Settings saved before the switch belong to the root they were saved on.
+                if let Some(config) = final_obs.take() {
+                    if let Err(error) =
+                        active_root(root.as_deref()).and_then(|root| config.save_at(&root))
+                    {
+                        eprintln!("Could not save closing OBS settings: {error}");
+                    }
+                }
+                root = Some(next);
+            }
             LayerCommand::SwapKeys {
                 store,
                 artwork_root,
@@ -803,28 +826,40 @@ impl FeatureRuntime {
         }
     }
 
-    pub(crate) fn configure(
-        &self,
-        organization: std::io::Result<Organization>,
-        config: std::io::Result<ObsConfig>,
-        device: mpsc::Sender<DeviceAction>,
-        events: mpsc::Sender<MonitorEvent>,
-    ) {
-        *self.device.borrow_mut() = Some(device);
-        let info_events = events.clone();
-        *self.events.borrow_mut() = Some(events);
+    /// Start (or restart) the information reader on the current root. Dropping
+    /// the previous sender ends the previous reader.
+    fn start_info_worker(&self) {
+        self.info_watch.borrow_mut().take();
+        let Some(events) = self.events.borrow().clone() else {
+            return;
+        };
         let root = self.layers.borrow().root().to_owned();
-        match sdeck_plus::info::spawn_worker(root, info_events) {
+        match sdeck_plus::info::spawn_worker(root, events) {
             Ok(sender) => *self.info_watch.borrow_mut() = Some(sender),
             Err(error) => eprintln!("Could not start the information reader: {error}"),
         }
-        self.artwork.update_info(
-            InfoSource::Brightness,
-            InfoValue::gauge(Glyph::Sun, 100, "100%".into()),
-        );
-        self.sync_info_from(&self.layers.borrow());
+    }
+
+    /// Organization state of the session; `reenable` also turns writes back on
+    /// after an earlier session had disabled them.
+    fn apply_organization(&self, organization: std::io::Result<Organization>, reenable: bool) {
         match organization {
-            Ok(value) => *self.organization.borrow_mut() = Some(value),
+            Ok(value) => {
+                *self.organization.borrow_mut() = Some(value);
+                if reenable {
+                    self.page_controls.root.set_sensitive(true);
+                    self.page_controls.navigation_group.set_sensitive(true);
+                    self.page_controls.folders.set_sensitive(true);
+                    self.organization_management.set_sensitive(true);
+                    if self
+                        .status
+                        .text()
+                        .starts_with("Organization writes disabled")
+                    {
+                        self.status.set_text("");
+                    }
+                }
+            }
             Err(error) => {
                 *self.organization.borrow_mut() = None;
                 self.page_controls.root.set_sensitive(false);
@@ -835,8 +870,14 @@ impl FeatureRuntime {
                 crate::ui::feedback(&self.status, true);
             }
         }
+    }
+
+    fn apply_obs(&self, config: std::io::Result<ObsConfig>) {
         match config {
             Ok(config) => {
+                self.obs_valid.set(true);
+                self.obs_save.set_sensitive(true);
+                self.obs_test.set_sensitive(true);
                 self.endpoint.set_text(&config.endpoint);
                 self.password.set_text(&config.password);
             }
@@ -850,6 +891,27 @@ impl FeatureRuntime {
                 crate::ui::feedback(&self.obs_status, true);
             }
         }
+    }
+
+    /// Connect the session's stores to the device and the information reader.
+    /// Running it again replaces the reader; none is leaked.
+    pub(crate) fn configure(
+        &self,
+        organization: std::io::Result<Organization>,
+        config: std::io::Result<ObsConfig>,
+        device: mpsc::Sender<DeviceAction>,
+        events: mpsc::Sender<MonitorEvent>,
+    ) {
+        *self.device.borrow_mut() = Some(device);
+        *self.events.borrow_mut() = Some(events);
+        self.start_info_worker();
+        self.artwork.update_info(
+            InfoSource::Brightness,
+            InfoValue::gauge(Glyph::Sun, 100, "100%".into()),
+        );
+        self.sync_info_from(&self.layers.borrow());
+        self.apply_organization(organization, false);
+        self.apply_obs(config);
         self.reconcile_focus();
         self.refresh_indicator();
         self.refresh_application_editor();
@@ -892,16 +954,20 @@ impl FeatureRuntime {
             DeviceAction::Sleep => self.sleeping.set(true),
             DeviceAction::Wake => self.sleeping.set(false),
         }
+        self.artwork
+            .update_info(InfoSource::Brightness, self.brightness_value());
+    }
+
+    fn brightness_value(&self) -> InfoValue {
         let level = self.brightness.get();
-        let value = if self.sleeping.get() {
+        if self.sleeping.get() {
             InfoValue {
                 inactive: true,
                 ..InfoValue::gauge(Glyph::Sun, 0, "OFF".into())
             }
         } else {
             InfoValue::gauge(Glyph::Sun, level, format!("{level}%"))
-        };
-        self.artwork.update_info(InfoSource::Brightness, value);
+        }
     }
 
     pub(crate) fn persist(&self, store: LayerStore) {
@@ -988,6 +1054,12 @@ impl FeatureRuntime {
     }
 
     fn refresh_selection(&self) {
+        self.refresh_selection_for(true);
+    }
+
+    /// Reload the editor and preview; `send_artwork` also pushes the pictures
+    /// to the device.
+    fn refresh_selection_for(&self, send_artwork: bool) {
         let names = self.layers.borrow().names();
         self.updating.set(true);
         crate::replace_string_list(&self.ui.layer_model, &names);
@@ -997,7 +1069,7 @@ impl FeatureRuntime {
         self.updating.set(false);
         self.ui.load_selected_binding(&self.layers);
         self.ui.refresh_summaries(&self.layers);
-        self.artwork.refresh(false);
+        self.artwork.refresh_with(false, send_artwork);
         self.refresh_indicator();
     }
 

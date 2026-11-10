@@ -194,6 +194,23 @@ impl HidController {
         self.stop.request();
     }
 
+    /// A controller with no HID worker, for callers that inject connection
+    /// events themselves. The receivers see everything sent to the device.
+    pub fn detached() -> (Self, Receiver<ArtworkCommand>, Receiver<DeviceAction>) {
+        let (artwork, commands) = std::sync::mpsc::channel();
+        let (controls, control_commands) = std::sync::mpsc::channel();
+        (
+            Self {
+                stop: StopSignal::default(),
+                worker: None,
+                artwork,
+                controls,
+            },
+            commands,
+            control_commands,
+        )
+    }
+
     pub fn shutdown(&mut self) {
         self.request_stop();
         if let Some(worker) = self.worker.take() {

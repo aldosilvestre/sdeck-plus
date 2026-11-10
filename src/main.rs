@@ -80,6 +80,8 @@ enum LayerCommand {
         action: Action,
     },
     ObsSave(sdeck_plus::obs::ObsConfig),
+    /// The model session changed: later commands use this root.
+    SetRoot(std::path::PathBuf),
     ObsProbe(sdeck_plus::obs::ObsConfig),
     ExportConfiguration {
         store: LayerStore,
@@ -299,14 +301,52 @@ fn configure_window_close(window: &ApplicationWindow, app: &Application) {
     ));
 }
 
+/// What the window talks to; tests replace it so neither the real data
+/// directories nor a real device are touched.
+struct AppEnvironment {
+    roots: std::io::Result<feature_runtime::SessionRoots>,
+    /// Starts whatever feeds connection events and receives artwork.
+    start_monitor: Box<dyn FnOnce(mpsc::Sender<MonitorEvent>) -> event_api::HidController>,
+    update_preference: std::io::Result<std::path::PathBuf>,
+    /// Follow the focused application in the compositor.
+    observe_focus: bool,
+}
+
+impl AppEnvironment {
+    fn system() -> Self {
+        Self {
+            roots: feature_runtime::SessionRoots::system(),
+            start_monitor: Box::new(event_api::start_hid_monitor),
+            update_preference: update_preference::path(),
+            observe_focus: true,
+        }
+    }
+}
+
 fn build_ui_with_visibility(app: &Application, visible: bool) {
+    build_ui_in(app, visible, AppEnvironment::system);
+}
+
+/// [`build_ui_with_visibility`] over `environment`, built only when a new
+/// window is needed. Returns the model session of a window that was built.
+fn build_ui_in(
+    app: &Application,
+    visible: bool,
+    environment: impl FnOnce() -> AppEnvironment,
+) -> Option<Rc<feature_runtime::ModelSession>> {
     if let Some(window) = configuration_window(app) {
         app.activate_action("check-updates-on-open", None);
         if visible {
             window.present();
         }
-        return;
+        return None;
     }
+    let AppEnvironment {
+        roots,
+        start_monitor,
+        update_preference,
+        observe_focus,
+    } = environment();
     let window = ApplicationWindow::builder()
         .application(app)
         .name("configuration")
@@ -315,25 +355,55 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         .default_height(DEFAULT_HEIGHT)
         .build();
     configure_window_close(&window, app);
-    // Validate before starting either worker: failure cannot leave an orphan.
-    let layers = match LayerStore::open().and_then(checked_layer_store) {
-        Ok(store) => Rc::new(RefCell::new(store)),
+    let unavailable = |error: &dyn std::fmt::Display| {
+        window.set_child(Some(&Label::new(Some(
+            "Configuration unavailable. Writes are disabled.",
+        ))));
+        window.present();
+        show_artwork_error(&window, &format!("Could not open layer configuration: {error}. Check permissions and repair layers.conf in the app data directory, then restart. No fallback will be saved."));
+    };
+    let roots = match roots {
+        Ok(roots) => roots,
         Err(error) => {
-            window.set_child(Some(&Label::new(Some(
-                "Configuration unavailable. Writes are disabled.",
-            ))));
-            window.present();
-            show_artwork_error(&window, &format!("Could not open layer configuration: {error}. Check permissions and repair layers.conf in the app data directory, then restart. No fallback will be saved."));
-            return;
+            unavailable(&error);
+            return None;
         }
     };
-    // Every launch starts on Base (its first page), whatever was saved last.
-    layers
-        .borrow_mut()
-        .select(sdeck_plus::layers::DEFAULT_LAYER);
+    // The model used last; a damaged preference falls back to the Stream Deck +
+    // and is reported, never replaced.
+    let (model, preference_error) = match device_preference::load_from(&roots.preference) {
+        Ok(model) => (model, None),
+        Err(error) => (
+            sdeck_plus::device_model::DeviceModel::default_model(),
+            Some(error),
+        ),
+    };
+    // Validate before starting either worker: failure cannot leave an orphan.
+    let opened = match feature_runtime::open_session(model, &roots) {
+        Ok(opened) => opened,
+        Err(feature_runtime::OpenError::Layers(error)) => {
+            unavailable(&error);
+            return None;
+        }
+        Err(feature_runtime::OpenError::Touchscreens(error)) => {
+            window.set_child(Some(&Label::new(Some(
+                "Touchscreen configuration unavailable. Writes are disabled.",
+            ))));
+            window.present();
+            show_artwork_error(&window, &format!("Could not initialize touchscreen pages: {error}. Original configurations have been retained; repair the app data directory and restart."));
+            return None;
+        }
+    };
+    let feature_runtime::OpenedSession {
+        layers,
+        artwork: opened_artwork,
+        organization,
+        obs,
+    } = opened;
+    let layers = Rc::new(RefCell::new(layers));
     let (sender, receiver) = mpsc::channel();
     let app_event_sender = sender.clone();
-    let hid = event_api::start_hid_monitor(sender);
+    let hid = start_monitor(sender);
     let artwork_sender = hid.artwork_sender();
     let device_sender = hid.control_sender();
     let lifecycle = Rc::new(RefCell::new(DeviceLifecycle {
@@ -366,15 +436,11 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
                 "Could not start action worker: {error}"
             )))));
             window.present();
-            return;
+            return None;
         }
     }
 
-    let (store, artwork_open_error) = match ArtworkStore::open_at_for_layer_model(
-        layers.borrow().root(),
-        Some(layers.borrow().active()),
-        layers.borrow().model(),
-    ) {
+    let (store, artwork_open_error) = match opened_artwork {
         Ok(store) => (Some(store), None),
         Err(error) => (None, Some(format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Check permissions and repair the artwork manifest/assets in the app data directory, then restart. Original files have not been replaced."))),
     };
@@ -389,22 +455,6 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         info: Rc::default(),
     };
-    let organization =
-        sdeck_plus::organization::Organization::open_at(layers.borrow().root(), &layers.borrow());
-    if let (Ok(organization), Some(store)) = (&organization, artwork.store.borrow_mut().as_mut()) {
-        if let Err(error) = layers
-            .borrow_mut()
-            .initialize_touchscreens(organization, store)
-        {
-            lifecycle.borrow_mut().shutdown();
-            window.set_child(Some(&Label::new(Some(
-                "Touchscreen configuration unavailable. Writes are disabled.",
-            ))));
-            window.present();
-            show_artwork_error(&window, &format!("Could not initialize touchscreen pages: {error}. Original configurations have been retained; repair the app data directory and restart."));
-            return;
-        }
-    }
     let widgets = build_widgets(
         window.clone(),
         layers.clone(),
@@ -412,27 +462,33 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         layer_sender.clone(),
     );
     if let Some(panel) = widgets.update_panel.borrow_mut().take() {
-        update_check::install(app, &widgets._configuration_menu, panel);
+        update_check::install(app, &widgets._configuration_menu, panel, update_preference);
     }
-    widgets.feature_runtime.configure(
-        organization,
-        sdeck_plus::obs::ObsConfig::load_at(layers.borrow().root()),
-        device_sender,
-        app_event_sender.clone(),
-    );
+    widgets
+        .feature_runtime
+        .configure(organization, obs, device_sender, app_event_sender.clone());
     if !widgets.feature_runtime.organization_available() {
         for button in &widgets.organization_writes {
             button.set_sensitive(false);
         }
     }
+    let session = feature_runtime::ModelSession::new(
+        widgets.feature_runtime.clone(),
+        roots,
+        widgets.preview_picker.clone(),
+        widgets.organization_writes.clone(),
+        widgets.toast.clone(),
+    );
     let focus_output = app_event_sender.clone();
-    match sdeck_plus::app_focus::FocusObserver::start(move |result| {
-        let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
-    }) {
-        Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
-        Err(error) => widgets
-            .feature_runtime
-            .focus_changed(Err(error.to_string())),
+    if observe_focus {
+        match sdeck_plus::app_focus::FocusObserver::start(move |result| {
+            let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
+        }) {
+            Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
+            Err(error) => widgets
+                .feature_runtime
+                .focus_changed(Err(error.to_string())),
+        }
     }
     install_style(&window);
     window.set_child(Some(&widgets.toast.wrap(&widgets.root)));
@@ -442,14 +498,49 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
     if let Some(error) = artwork_open_error {
         show_artwork_error(&window, &error);
     }
-    lifecycle.borrow_mut().polling = Some(start_event_updates(
+    if let Some(error) = preference_error {
+        show_artwork_error(&window, &format!("Could not read the last-used device model: {error}. Showing the Stream Deck + instead. The file was not changed; repair or remove device.json in the configuration folder."));
+    }
+    lifecycle.borrow_mut().polling = Some(start_event_updates_with(
         widgets,
         receiver,
         layers,
         artwork,
         layer_sender,
         app_event_sender,
+        Some(session.clone()),
     ));
+    Some(session)
+}
+
+/// 'Preview as': which supported model the window shows while no device is
+/// connected. The session enables, disables and positions it.
+#[derive(Clone)]
+struct PreviewPicker {
+    root: GtkBox,
+    dropdown: gtk::DropDown,
+    models: Rc<Vec<&'static sdeck_plus::device_model::DeviceModel>>,
+}
+
+impl PreviewPicker {
+    fn new() -> Self {
+        let models: Vec<_> = sdeck_plus::device_model::DeviceModel::supported().collect();
+        let names: Vec<&str> = models.iter().map(|model| model.name).collect();
+        let dropdown = gtk::DropDown::from_strings(&names);
+        dropdown.update_property(&[gtk::accessible::Property::Label("Preview as")]);
+        let caption = Label::new(Some("Preview as"));
+        caption.add_css_class("muted");
+        let root = GtkBox::new(Orientation::Horizontal, 6);
+        root.add_css_class("preview-picker");
+        root.set_valign(gtk::Align::Center);
+        root.append(&caption);
+        root.append(&dropdown);
+        Self {
+            root,
+            dropdown,
+            models: Rc::new(models),
+        }
+    }
 }
 
 // Shared production construction: no HID, action workers, disk reads or presentation.
@@ -481,6 +572,7 @@ struct MonitorWidgets {
     zone_widgets: Vec<gtk::Widget>,
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
+    preview_picker: PreviewPicker,
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     _configuration_menu: configuration_menu::ConfigurationMenu,
@@ -527,6 +619,8 @@ fn build_widgets(
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
+    let preview_picker = PreviewPicker::new();
+    header.append(&preview_picker.root);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
@@ -548,7 +642,12 @@ fn build_widgets(
     root.append(&header);
 
     let connection_detail = Label::new(None);
-    show_connection_state(&status, &connection_detail, &ConnectionState::Searching);
+    show_connection_state(
+        &status,
+        &connection_detail,
+        &ConnectionState::Searching,
+        None,
+    );
     connection_detail.add_css_class("muted");
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1637,19 +1736,42 @@ fn build_widgets(
         zone_widgets,
         feature_runtime,
         organization_writes: vec![create_layer],
+        preview_picker,
         _text_editor: text_editor,
         _configuration_menu: configuration_menu,
         update_panel: RefCell::new(Some(update_panel)),
     }
 }
 
+/// [`start_event_updates_with`] for a window whose model never changes.
+#[cfg(test)]
 fn start_event_updates(
+    widgets: MonitorWidgets,
+    receiver: mpsc::Receiver<MonitorEvent>,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    layer_sender: mpsc::Sender<LayerCommand>,
+    app_event_sender: mpsc::Sender<MonitorEvent>,
+) -> glib::SourceId {
+    start_event_updates_with(
+        widgets,
+        receiver,
+        layers,
+        artwork,
+        layer_sender,
+        app_event_sender,
+        None,
+    )
+}
+
+fn start_event_updates_with(
     widgets: MonitorWidgets,
     receiver: mpsc::Receiver<MonitorEvent>,
     layers: Rc<RefCell<LayerStore>>,
     artwork: ArtworkUi,
     _layer_sender: mpsc::Sender<LayerCommand>,
     _app_event_sender: mpsc::Sender<MonitorEvent>,
+    session: Option<Rc<feature_runtime::ModelSession>>,
 ) -> glib::SourceId {
     // One running total per dial of the widest supported model.
     let dials = sdeck_plus::device_model::DeviceModel::supported()
@@ -1673,6 +1795,11 @@ fn start_event_updates(
             ..
         } = &widgets;
         let pending: Vec<_> = receiver.try_iter().collect();
+        let accepts_input = || {
+            session
+                .as_ref()
+                .is_none_or(|session| session.accepts_input())
+        };
         for message in &pending {
             if let MonitorEvent::ApplicationFocus(result) = message {
                 feature_runtime.focus_changed(result.clone());
@@ -1711,12 +1838,26 @@ fn start_event_updates(
                     if !matches!(state, ConnectionState::Connected(_)) {
                         feature_runtime.cancel_key_holds();
                     }
-                    if show_connection_state(status, connection_detail, &state) {
+                    let connected = show_connection_state(
+                        status,
+                        connection_detail,
+                        &state,
+                        session
+                            .as_ref()
+                            .and_then(|session| session.last_connected()),
+                    );
+                    // A model switch has already sent its own pictures.
+                    let resend = session
+                        .as_ref()
+                        .is_none_or(|session| session.connection_changed(&state));
+                    if resend && connected {
                         artwork.refresh(true);
                     }
                 }
                 MonitorEvent::Input(event) => {
-                    feature_runtime.execute_input(&event);
+                    if accepts_input() {
+                        feature_runtime.execute_input(&event);
+                    }
                     match event {
                         protocol::Event::Key { index, pressed } => {
                             if let Some(label) = key_labels.get(index) {
@@ -1828,7 +1969,15 @@ fn start_event_updates(
                 }
             }
         }
-        feature_runtime.poll_key_holds();
+        if session
+            .as_ref()
+            .is_none_or(|session| session.accepts_input())
+        {
+            feature_runtime.poll_key_holds();
+        }
+        if let Some(session) = &session {
+            session.retry_deferred();
+        }
         glib::ControlFlow::Continue
     })
 }
@@ -2915,15 +3064,28 @@ fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
         proceed();
         return;
     };
+    confirm_discard_in(
+        &parent,
+        "You edited this binding without saving it. Selecting another control discards those edits.",
+        proceed,
+        Rc::new(|| {}),
+    );
+}
+
+/// Ask whether to discard unsaved edits: `proceed` on Discard, else `cancel`.
+fn confirm_discard_in(
+    parent: &gtk::Window,
+    explanation: &str,
+    proceed: Rc<dyn Fn()>,
+    cancel: Rc<dyn Fn()>,
+) {
     let dialog = gtk::MessageDialog::builder()
-        .transient_for(&parent)
+        .transient_for(parent)
         .modal(true)
         .destroy_with_parent(true)
         .message_type(gtk::MessageType::Question)
         .text("Discard unsaved changes?")
-        .secondary_text(
-            "You edited this binding without saving it. Selecting another control discards those edits.",
-        )
+        .secondary_text(explanation)
         .build();
     dialog.add_css_class("confirm-dialog");
     let mut child = dialog.message_area().first_child();
@@ -2944,6 +3106,8 @@ fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
         dialog.close();
         if response == gtk::ResponseType::Accept {
             proceed();
+        } else {
+            cancel();
         }
     });
     dialog.present();
@@ -3136,11 +3300,12 @@ impl ArtworkUi {
     /// Keys and touch sections that show live information on `layer`.
     fn info_targets(&self, layer: &str) -> Vec<(ArtworkTarget, sdeck_plus::info::InfoSource)> {
         let store = self.layers.borrow();
-        let keys = (1..=8).filter_map(|key| {
+        let model = store.model();
+        let keys = model.key_numbers().filter_map(|key| {
             let source = store.info_source(layer, &Trigger::KeyPress(key))?;
             Some((ArtworkTarget::Keypad(key), source))
         });
-        let zones = (1..=4).filter_map(|zone| {
+        let zones = model.zone_numbers().filter_map(|zone| {
             let source = store.zone_info_source(layer, zone)?;
             Some((ArtworkTarget::EncoderZone(zone), source))
         });
@@ -3604,6 +3769,11 @@ impl ArtworkUi {
     }
 
     fn refresh(&self, force: bool) {
+        self.refresh_with(force, true);
+    }
+
+    /// Repaint the preview; `send` also pushes the pictures to the device.
+    fn refresh_with(&self, force: bool, send: bool) {
         let layer = self.layers.borrow().active().to_owned();
         let touch_owner = self
             .layers
@@ -3648,7 +3818,9 @@ impl ArtworkUi {
         }
         self.paint_info_previews(&layer);
         self.paint_navigation_previews(&layer);
-        let _ = self.output.send(ArtworkCommand::Replace(commands));
+        if send {
+            let _ = self.output.send(ArtworkCommand::Replace(commands));
+        }
         *self.last_layer.borrow_mut() = Some(cache_key);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
             editor.load_context(false);
@@ -4103,7 +4275,9 @@ fn desired_artwork_commands_for_owners(
     layer: &str,
     touch_owner: &str,
 ) -> Vec<ArtworkCommand> {
-    let mut commands = (1..=8)
+    let mut commands = store
+        .model()
+        .key_numbers()
         .map(|key| {
             let target = ArtworkTarget::Keypad(key);
             if let Some(text) = store.button_text_in_layer(layer, target) {
@@ -4135,7 +4309,7 @@ fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand
             target: ArtworkTarget::TouchStripBackground,
         }),
     }
-    for zone in 1..=4 {
+    for zone in store.model().zone_numbers() {
         let target = ArtworkTarget::EncoderZone(zone);
         if let Some(path) = store.assigned_path_in_layer(layer, target) {
             commands.push(ArtworkCommand::Assign { target, path });
@@ -4144,7 +4318,7 @@ fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand
     commands
 }
 
-fn show_artwork_error(window: &ApplicationWindow, message: &str) {
+fn show_artwork_error(window: &impl IsA<gtk::Window>, message: &str) {
     let dialog = gtk::MessageDialog::builder()
         .transient_for(window)
         .modal(true)
@@ -4158,16 +4332,42 @@ fn show_artwork_error(window: &ApplicationWindow, message: &str) {
 
 /// Presents the device connection in plain language: a semantic badge plus a
 /// short next step. Technical identifiers and worker diagnostics stay in the
-/// tooltip. Returns whether the device is connected.
-fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState) -> bool {
-    const USB_ID: &str = "USB device VID 0FD9 / PID 0084";
-    let not_connected = "Stream Deck + not connected — plug it in";
+/// tooltip. `last` is the model that was connected last, when there was one.
+/// Returns whether the device is connected.
+fn show_connection_state(
+    status: &Label,
+    detail: &Label,
+    state: &ConnectionState,
+    last: Option<&'static sdeck_plus::device_model::DeviceModel>,
+) -> bool {
+    use sdeck_plus::device_model::DeviceModel;
+    let usb_ids = |pids: String| format!("USB device VID 0FD9 / PID {pids}");
+    let every_model = || {
+        usb_ids(
+            DeviceModel::supported()
+                .map(|model| format!("{:04X}", model.pid()))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        )
+    };
+    let usb_id = |model: Option<&DeviceModel>| match model {
+        Some(model) => usb_ids(format!("{:04X}", model.pid())),
+        None => every_model(),
+    };
+    let family = || {
+        DeviceModel::supported()
+            .map(|model| model.name)
+            .collect::<Vec<_>>()
+            .join(" or ")
+    };
+    let name = last.map_or("Stream Deck", |model| model.name);
+    let not_connected = format!("{} not connected — plug one in", family());
     let (badge, tone, text, hint) = match state {
         ConnectionState::Searching => (
             "Not connected",
             "status-idle",
             not_connected,
-            format!("Looking for the {USB_ID}"),
+            format!("Looking for the {}", every_model()),
         ),
         // Discovery reports a missing device as unavailable on every retry.
         ConnectionState::Unavailable(reason) if reason.starts_with("Device not found") => (
@@ -4179,20 +4379,23 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
         ConnectionState::Unavailable(reason) => (
             "Unavailable",
             "status-error",
-            "Stream Deck + found but unavailable — hover for details",
-            format!("{reason}\n{USB_ID}"),
+            format!("{name} found but unavailable — hover for details"),
+            format!("{reason}\n{}", usb_id(last)),
         ),
         ConnectionState::Disconnected(reason) => (
             "Disconnected",
             "status-idle",
-            "Stream Deck + disconnected — plug it back in",
-            format!("{reason}\n{USB_ID}"),
+            format!("{name} disconnected — plug it back in"),
+            format!("{reason}\n{}", usb_id(last)),
         ),
-        ConnectionState::Connected(_) => (
+        ConnectionState::Connected(model) => (
             "Connected",
             "status-online",
-            "Stream Deck + connected — keys, dials and touch strip are live",
-            format!("{USB_ID} · HID input and artwork active"),
+            format!(
+                "{} connected — keys, dials and touch strip are live",
+                model.name
+            ),
+            format!("{} · HID input and artwork active", usb_id(Some(model))),
         ),
     };
     status.set_text(badge);
@@ -4200,7 +4403,7 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
         status.remove_css_class(class);
     }
     status.add_css_class(tone);
-    detail.set_text(text);
+    detail.set_text(&text);
     for label in [status, detail] {
         label.set_tooltip_text(Some(&hint));
     }
@@ -4416,6 +4619,7 @@ mod tests {
     mod key_hold_integration_tests;
     mod key_hold_ui_tests;
     mod live_info_tests;
+    mod model_session_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;
     mod page_return_tests;

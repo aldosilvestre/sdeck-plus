@@ -504,12 +504,15 @@ impl Controller {
     }
 }
 
+/// Install the controller once for the application; `preference` is the file
+/// holding the automatic-check choice.
 pub(crate) fn install(
     app: &gtk::Application,
     menu: &crate::configuration_menu::ConfigurationMenu,
     panel: Panel,
+    preference: io::Result<PathBuf>,
 ) -> Rc<Controller> {
-    let preference = crate::update_preference::path()
+    let preference = preference
         .and_then(|path| crate::update_preference::load(&path).map(|enabled| (path, enabled)));
     let (path, enabled, writable) = match preference {
         Ok((path, enabled)) => (Some(path), enabled, true),

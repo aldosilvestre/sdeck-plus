@@ -3,8 +3,6 @@
 //! The file sits next to `tray.json`. A missing file means the Stream Deck +;
 //! a malformed or unknown original is never replaced, so saving reports the
 //! same error as loading until the user repairs or removes the file.
-// Nothing reads the preference until the session opens stores per model.
-#![allow(dead_code)]
 
 use sdeck_plus::device_model::DeviceModel;
 use serde::{Deserialize, Serialize};
@@ -46,27 +44,20 @@ fn read(path: &Path) -> io::Result<&'static DeviceModel> {
     }
 }
 
-/// The model used last; the Stream Deck + when nothing was saved.
+/// The model used last in the file at `path`; the Stream Deck + when nothing
+/// was saved.
 ///
 /// # Errors
 /// Reports an unreadable, malformed or unknown-model file.
-pub(super) fn load_last_model() -> io::Result<&'static DeviceModel> {
-    load_from(&path()?)
+pub(super) fn load_from(path: &Path) -> io::Result<&'static DeviceModel> {
+    read(path)
 }
 
 /// Remember `model` for the next start without a device.
 ///
 /// # Errors
 /// Refuses to replace an unreadable, malformed or unknown-model original.
-pub(super) fn save_last_model(model: &DeviceModel) -> io::Result<()> {
-    save_to(&path()?, model)
-}
-
-fn load_from(path: &Path) -> io::Result<&'static DeviceModel> {
-    read(path)
-}
-
-fn save_to(path: &Path, model: &DeviceModel) -> io::Result<()> {
+pub(super) fn save_to(path: &Path, model: &DeviceModel) -> io::Result<()> {
     // A repaired original is required first, including damage done after startup.
     read(path)?;
     write(

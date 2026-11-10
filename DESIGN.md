@@ -494,6 +494,19 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Action choices include existing toggles plus explicit start/stop recording,
   pause/resume recording, and start/stop streaming. Choosing or saving an
   action never executes it.
+- **Device model:** the window shows one model at a time and follows the
+  connected hardware without restarting. Beside the connection badge, a
+  "Preview as" drop-down lists the supported models (Stream Deck + and Stream
+  Deck + XL) with that accessible name; it is enabled only while no device is
+  connected and otherwise disabled with the tooltip "Using the connected
+  <model>". The last model stays shown after an unplug and is remembered for
+  the next start. A hardware change switches without asking and discards an
+  unsaved draft with a toast ("Switched to <model>; unsaved changes were
+  discarded."); choosing a model with "Preview as" asks first when the editor
+  has unsaved edits. If the new model's configuration cannot be opened, the
+  previous one stays visible but read-only with a persistent error, and nothing
+  is sent to the device. Until the model-driven preview lands, an XL session
+  reuses the Stream Deck + preview geometry.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
