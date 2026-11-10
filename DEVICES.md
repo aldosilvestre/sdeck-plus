@@ -62,14 +62,20 @@ dispatch point. A handler implements `FamilyProtocol`: `decode` (input report to
    Expanded entry through the simulated device (key/window upload size,
    rotation and chunk headers, input decoding, shutdown blanking). Add
    model-specific checks for anything new.
-5. Verify on hardware if available. Then change `support` to `Supported`, update
-   the pinned sets in `exactly_the_plus_and_the_plus_xl_are_supported_today`
-   (`tests/device_registry.rs`) and `models_are_found_by_pid_and_id`
-   (`tests/device_model.rs`), and
-   update the docs: README, the site (`docs/index.html` Supported devices,
-   `docs/docs.html` Devices), packaging descriptions, `CHANGELOG.md`. The
-   `preview-<id>.png` image appears when the documentation screenshots are
-   regenerated (the generator iterates `DeviceModel::supported()`).
+5. Verify on hardware if available. Then change `support` to `Supported`.
+   Nothing below follows automatically; update each by hand:
+   - the three pinned tests `exactly_the_plus_and_the_plus_xl_are_supported_today`
+     (`tests/device_registry.rs`), `models_are_found_by_pid_and_id`
+     (`tests/device_model.rs`) and `only_the_two_supported_product_ids_are_ever_discovered`;
+   - the `DOCUMENTED` array length in `tests/device_registry.rs`;
+   - one udev rule line per product id in `packaging/70-sdeck-plus.rules`
+     (`tests/packaging.rs` fails when one is missing);
+   - `install.sh`: the hidraw uevent regex and the printed rule;
+   - the desktop file comment;
+   - the model tables in the README, `docs/index.html` (Supported devices) and
+     `docs/docs.html` (Devices), plus `CHANGELOG.md`;
+   - the per-model preview image `docs/screenshots/preview-<id>.png`: the
+     screenshot generator iterates `DeviceModel::supported()`, so regenerate it.
 
 Invariant tests in `tests/device_registry.rs` and `src/event_api/sim_registry.rs`
 run over `DeviceModel::all()`, so a new row is covered automatically: unique and

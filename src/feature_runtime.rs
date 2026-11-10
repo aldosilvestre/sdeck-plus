@@ -284,6 +284,9 @@ pub(crate) struct FeatureRuntime {
     pub(crate) timer_status: Label,
     key_hold: Rc<RefCell<sdeck_plus::key_hold::KeyHoldRecognizer>>,
     key_epoch: Instant,
+    /// Tests move the key clock forward instead of waiting out a hold.
+    #[cfg(test)]
+    key_skew: Rc<Cell<Duration>>,
     key_generation: Rc<Cell<u64>>,
     timer: Rc<RefCell<Option<glib::SourceId>>>,
     timer_sound: Rc<RefCell<timer_sound::TimerSound>>,
@@ -411,6 +414,9 @@ impl FeatureRuntime {
         obs_status.add_css_class("muted");
         fields.append(&obs_status);
         obs_panel.set_child(Some(&fields));
+        let key_hold = Rc::new(RefCell::new(sdeck_plus::key_hold::KeyHoldRecognizer::new(
+            layers.borrow().model(),
+        )));
         let runtime = Self {
             layers,
             organization: Rc::new(RefCell::new(Some(organization))),
@@ -427,8 +433,10 @@ impl FeatureRuntime {
             indicator,
             status,
             timer_status,
-            key_hold: Rc::default(),
+            key_hold,
             key_epoch: Instant::now(),
+            #[cfg(test)]
+            key_skew: Rc::default(),
             key_generation: Rc::new(Cell::new(0)),
             timer: Rc::new(RefCell::new(None)),
             timer_sound: Rc::new(RefCell::new(timer_sound::TimerSound::default())),
@@ -1099,6 +1107,19 @@ impl FeatureRuntime {
         }
     }
 
+    /// Time on the monotonic key clock.
+    pub(crate) fn key_now(&self) -> Duration {
+        #[cfg(test)]
+        return self.key_epoch.elapsed() + self.key_skew.get();
+        #[cfg(not(test))]
+        self.key_epoch.elapsed()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance_key_clock(&self, by: Duration) {
+        self.key_skew.set(self.key_skew.get() + by);
+    }
+
     pub(crate) fn execute_input(&self, event: &sdeck_plus::protocol::Event) {
         if self.configuration_operation.get() == Some(configuration::Operation::Import) {
             return;
@@ -1108,7 +1129,7 @@ impl FeatureRuntime {
                 &self.layers.borrow(),
                 *index,
                 *pressed,
-                self.key_epoch.elapsed(),
+                self.key_now(),
             );
             self.dispatch_keys(dispatches);
             return;

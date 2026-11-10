@@ -190,6 +190,9 @@ impl FeatureRuntime {
             .send(LayerCommand::SetRoot(session.layers.root().to_owned()))
             .map_err(|error| format!("the action worker is unavailable: {error}"))?;
         self.cancel_key_holds();
+        // Sized for the new model, with no held-key state from the old one.
+        *self.key_hold.borrow_mut() =
+            sdeck_plus::key_hold::KeyHoldRecognizer::new(session.layers.model());
         self.drop_timers();
         // The reader ends once its only sender is gone.
         self.info_watch.borrow_mut().take();

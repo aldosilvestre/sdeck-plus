@@ -2,7 +2,7 @@
 //! data each model keeps. No real device, HOME or network is involved: the
 //! window is built over scratch directories and a detached monitor.
 use super::*;
-use feature_runtime::{ModelSession, SessionRoots};
+use feature_runtime::{FeatureRuntime, ModelSession, SessionRoots};
 use sdeck_plus::{
     device_model::{DeviceModel, PLUS, PLUS_XL},
     event_api::{ConnectionState, HidController},
@@ -1149,5 +1149,211 @@ fn picker_session_preview_and_header_agree_at_every_model_change() {
                 detail.text().starts_with(&prefix)
             });
         }
+    });
+}
+
+/// An XL session on disk with `bind` applied to its Base layer (layers A, B, C exist).
+fn xl_bound(tag: &str, bind: impl FnOnce(&mut LayerStore)) -> Option<Harness> {
+    start(tag, |roots| {
+        remember(roots, &PLUS_XL);
+        let xl = roots.root_for(&PLUS_XL);
+        std::fs::create_dir_all(&xl).unwrap();
+        let mut store = LayerStore::open_at_model(&xl, &PLUS_XL).unwrap();
+        for name in ["A", "B", "C"] {
+            store.create(name).unwrap();
+        }
+        bind(&mut store);
+        store.persist().unwrap();
+    })
+}
+
+fn switch_to(layer: &str) -> Action {
+    Action::SwitchLayer(layer.into())
+}
+
+fn active(runtime: &FeatureRuntime) -> String {
+    runtime.layers().borrow().active().to_owned()
+}
+
+fn press_key(runtime: &FeatureRuntime, index: usize) {
+    for pressed in [true, false] {
+        runtime.execute_input(&protocol::Event::Key { index, pressed });
+    }
+}
+
+#[test]
+fn xl_physical_keys_beyond_the_plus_range_run_their_bindings() {
+    run_gtk_test(|| {
+        let Some(harness) = xl_bound("xl-key-dispatch", |store| {
+            for (k, to) in [(1u8, "A"), (9, "B"), (20, "C"), (36, "A")] {
+                store
+                    .bind("Base", Trigger::KeyPress(k), switch_to(to))
+                    .unwrap();
+            }
+        }) else {
+            return;
+        };
+        assert_eq!(harness.model(), &PLUS_XL);
+        let runtime = harness.session.runtime();
+        for (index, expect) in [(0usize, "A"), (8, "B"), (19, "C"), (35, "A")] {
+            runtime.layers().borrow_mut().select("Base");
+            press_key(runtime, index);
+            assert_eq!(active(runtime), expect, "key {}", index + 1);
+        }
+    });
+}
+
+#[test]
+fn keys_beyond_the_plus_range_work_after_switching_from_a_plus_session() {
+    run_gtk_test(|| {
+        let Some(harness) = start("xl-key-after-switch", |roots| {
+            let xl = roots.root_for(&PLUS_XL);
+            std::fs::create_dir_all(&xl).unwrap();
+            let mut store = LayerStore::open_at_model(&xl, &PLUS_XL).unwrap();
+            store.create("A").unwrap();
+            store
+                .bind("Base", Trigger::KeyPress(36), switch_to("A"))
+                .unwrap();
+            store.persist().unwrap();
+        }) else {
+            return;
+        };
+        harness.connect(&PLUS_XL);
+        harness.wait_for_model(&PLUS_XL);
+        press_key(harness.session.runtime(), 35);
+        assert_eq!(active(harness.session.runtime()), "A");
+    });
+}
+
+#[test]
+fn xl_dials_five_and_six_run_rotation_and_press_bindings() {
+    run_gtk_test(|| {
+        let Some(harness) = xl_bound("xl-dials", |store| {
+            for (trigger, to) in [
+                (Trigger::EncoderClockwise(5), "A"),
+                (Trigger::EncoderCounterClockwise(6), "B"),
+                (Trigger::EncoderPress(5), "C"),
+                (Trigger::EncoderPress(6), "A"),
+            ] {
+                store.bind("Base", trigger, switch_to(to)).unwrap();
+            }
+        }) else {
+            return;
+        };
+        let runtime = harness.session.runtime();
+        let events = [
+            (protocol::Event::Rotation { index: 4, ticks: 1 }, "A"),
+            (
+                protocol::Event::Rotation {
+                    index: 5,
+                    ticks: -1,
+                },
+                "B",
+            ),
+            (
+                protocol::Event::EncoderButton {
+                    index: 4,
+                    pressed: true,
+                },
+                "C",
+            ),
+            (
+                protocol::Event::EncoderButton {
+                    index: 5,
+                    pressed: true,
+                },
+                "A",
+            ),
+        ];
+        for (event, expect) in events {
+            runtime.layers().borrow_mut().select("Base");
+            runtime.execute_input(&event);
+            assert_eq!(active(runtime), expect, "{event:?}");
+        }
+    });
+}
+
+#[test]
+fn xl_touch_zones_five_and_six_run_tap_bindings() {
+    run_gtk_test(|| {
+        let Some(harness) = xl_bound("xl-zones", |store| {
+            store
+                .bind("Base", Trigger::ZoneTap(5), switch_to("A"))
+                .unwrap();
+            store
+                .bind("Base", Trigger::ZoneTap(6), switch_to("B"))
+                .unwrap();
+        }) else {
+            return;
+        };
+        let runtime = harness.session.runtime();
+        for (x, expect) in [(900u16, "A"), (1100, "B")] {
+            runtime.layers().borrow_mut().select("Base");
+            runtime.execute_input(&protocol::Event::TouchTap { x, y: 50 });
+            assert_eq!(active(runtime), expect, "x {x}");
+        }
+    });
+}
+
+#[test]
+fn a_plus_session_runs_keys_one_to_eight_and_ignores_key_nine() {
+    run_gtk_test(|| {
+        let Some(harness) = start("plus-keys", |roots| {
+            let mut store = LayerStore::open_at(&roots.data_dir).unwrap();
+            store.create("A").unwrap();
+            for key in [1u8, 8] {
+                store
+                    .bind("Base", Trigger::KeyPress(key), switch_to("A"))
+                    .unwrap();
+            }
+            store.persist().unwrap();
+        }) else {
+            return;
+        };
+        let runtime = harness.session.runtime();
+        for index in [0usize, 7] {
+            runtime.layers().borrow_mut().select("Base");
+            press_key(runtime, index);
+            assert_eq!(active(runtime), "A", "key {}", index + 1);
+        }
+        runtime.layers().borrow_mut().select("Base");
+        press_key(runtime, 8);
+        assert_eq!(active(runtime), "Base", "a + has no key 9");
+    });
+}
+
+#[test]
+fn xl_key_36_taps_run_the_tap_and_a_two_second_hold_fires_once() {
+    run_gtk_test(|| {
+        let Some(harness) = xl_bound("xl-hold", |store| {
+            store
+                .bind("Base", Trigger::KeyPress(36), switch_to("A"))
+                .unwrap();
+            store
+                .bind("Base", Trigger::KeyHold(36), switch_to("B"))
+                .unwrap();
+        }) else {
+            return;
+        };
+        let runtime = harness.session.runtime();
+        let key = |pressed| runtime.execute_input(&protocol::Event::Key { index: 35, pressed });
+        // A short tap runs the tap action once released.
+        key(true);
+        key(false);
+        assert_eq!(active(runtime), "A");
+        // A hold fires at the boundary; the release afterwards does nothing.
+        runtime.layers().borrow_mut().select("Base");
+        key(true);
+        runtime.advance_key_clock(sdeck_plus::key_hold::HOLD_DURATION);
+        runtime.poll_key_holds();
+        assert_eq!(active(runtime), "B");
+        runtime.layers().borrow_mut().select("Base");
+        key(false);
+        runtime.poll_key_holds();
+        assert_eq!(
+            active(runtime),
+            "Base",
+            "the hold fired once; release is silent"
+        );
     });
 }

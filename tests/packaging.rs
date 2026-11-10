@@ -145,12 +145,12 @@ fn udev_rule_matches_the_ids_of_both_models() {
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .collect();
-    assert_eq!(lines.len(), 2, "one rule per model");
-    for (line, pid) in lines.iter().zip(["0084", "00c6"]) {
-        assert!(
-            models.contains(&format!("pids: &[0x{pid}")),
-            "model table: {pid}"
-        );
+    let pids: Vec<String> = sdeck_plus::device_model::DeviceModel::supported()
+        .flat_map(|model| model.pids.iter().map(|pid| format!("{pid:04x}")))
+        .collect();
+    assert_eq!(lines.len(), pids.len(), "one rule per supported product id");
+    for (line, pid) in lines.iter().zip(&pids) {
+        assert!(models.contains(&format!("0x{pid}")), "model table: {pid}");
         assert_eq!(
             *line,
             format!(
@@ -272,6 +272,23 @@ fn srcinfo_matches_its_pkgbuild() {
                 build.contains(&format!("'{name}:")),
                 "{package} optdepends {name}"
             );
+        }
+    }
+}
+
+#[test]
+fn every_supported_model_has_a_udev_rule_and_installer_hint() {
+    let rules = read("packaging/70-sdeck-plus.rules").to_lowercase();
+    let install = read("install.sh").to_lowercase();
+    for model in sdeck_plus::device_model::DeviceModel::supported() {
+        for pid in model.pids {
+            let id = format!("{pid:04x}");
+            assert!(
+                rules.contains(&format!("idproduct}}==\"{id}\"")),
+                "udev rule for {}",
+                model.id
+            );
+            assert!(install.contains(&id), "install.sh mentions {}", model.id);
         }
     }
 }

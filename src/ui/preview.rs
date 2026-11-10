@@ -94,6 +94,15 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
 /// The status line's text before any input arrives.
 pub(crate) const TOUCH_PLACEHOLDER: &str = "Touch strip · waiting for input";
 
+/// [`TOUCH_PLACEHOLDER`] for a touch strip; a display that takes no touch has
+/// nothing to wait for.
+fn placeholder(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
+    match model.strip {
+        Some(strip) if !strip.touch => "Display",
+        _ => TOUCH_PLACEHOLDER,
+    }
+}
+
 /// One model's chassis subtree.
 struct Built {
     layout: PreviewLayout,
@@ -160,6 +169,7 @@ impl PreviewView {
         touch_status.set_hexpand(true);
         touch_status.set_size_request(-1, 16);
         let model = layers.borrow().model();
+        touch_status.set_text(placeholder(model));
         ui.set_model(model);
         let view = Rc::new(Self {
             card,
@@ -333,7 +343,7 @@ impl PreviewView {
         self.ui.apply_control(kind, number, false);
         self.heading.set_text(&control_heading(kind, Some(number)));
         self.set_selected(keep);
-        self.touch_status.set_text(TOUCH_PLACEHOLDER);
+        self.touch_status.set_text(placeholder(model));
         if !self.artwork.selected_target.get().is_valid_for(model) {
             self.artwork.selected_target.set(ArtworkTarget::Keypad(1));
         }
@@ -658,5 +668,18 @@ fn detach_popovers(widget: &gtk::Widget) {
         } else {
             detach_popovers(&current);
         }
+    }
+}
+
+#[cfg(test)]
+mod placeholder_tests {
+    use super::*;
+    use sdeck_plus::device_model::{NEO, PLUS, PLUS_XL};
+
+    #[test]
+    fn touch_strips_keep_their_caption_and_a_display_without_touch_is_neutral() {
+        assert_eq!(placeholder(&PLUS), "Touch strip · waiting for input");
+        assert_eq!(placeholder(&PLUS_XL), "Touch strip · waiting for input");
+        assert_eq!(placeholder(&NEO), "Display");
     }
 }
