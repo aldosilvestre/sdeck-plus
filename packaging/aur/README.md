@@ -13,7 +13,7 @@ and never install per-user files.
 
 ## Why the package ships a udev rule
 
-`packaging/70-sdeck-plus.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) through `uaccess`.
+`packaging/70-sdeck-plus.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the Stream Deck + XL (`0fd9:00c6`) through `uaccess`.
 The app itself never changes permissions, so the package installs the rule to `/usr/lib/udev/rules.d/`.
 
 ## Why `options=('!lto')`

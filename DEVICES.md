@@ -66,7 +66,10 @@ dispatch point. A handler implements `FamilyProtocol`: `decode` (input report to
    the pinned sets in `exactly_the_plus_and_the_plus_xl_are_supported_today`
    (`tests/device_registry.rs`) and `models_are_found_by_pid_and_id`
    (`tests/device_model.rs`), and
-   update the docs (T5-style: README, site, packaging text).
+   update the docs: README, the site (`docs/index.html` Supported devices,
+   `docs/docs.html` Devices), packaging descriptions, `CHANGELOG.md`. The
+   `preview-<id>.png` image appears when the documentation screenshots are
+   regenerated (the generator iterates `DeviceModel::supported()`).
 
 Invariant tests in `tests/device_registry.rs` and `src/event_api/sim_registry.rs`
 run over `DeviceModel::all()`, so a new row is covered automatically: unique and
@@ -120,6 +123,9 @@ were not opened):
   copied from the Expanded family, not read from their pages.
 - Pedal, Studio, Mobile and the original 0x0060 have no HID documentation, so
   they have no entry.
+
+Today the Stream Deck + is the only hardware-tested model; the + XL is
+implemented from Elgato's HID documentation and validated with a simulator.
 
 Never claim hardware testing without hardware. A simulator proves the wire
 format against our reading of the documentation, nothing more; docs must say

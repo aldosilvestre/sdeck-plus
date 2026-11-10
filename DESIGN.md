@@ -3,9 +3,10 @@
 ## 1. Atmosphere and identity
 
 sdeck-plus is a native hardware configuration desk, not a web dashboard. Ink-toned
-surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview: eight
-keys, a touch strip and four circular encoders. Preserve its coordinates,
-artwork and existing functions.
+surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview of the shown model: eight keys, a touch
+strip and four circular encoders on the Stream Deck +; 36 keys, a touch strip and
+six encoders on the Stream Deck + XL. Preserve its coordinates, artwork and
+existing functions.
 
 Configuration follows a short path: choose a profile, drag an action from the
 right-hand searchable catalog onto a keypad button, then complete its fields
@@ -231,6 +232,16 @@ a 46px pitch and a 24px bottom margin, so its four rows still fit the window
 (see below). A Neo's information window is drawn as a
 plain display that cannot be selected, and its two capacitive sensors are not
 drawn because they have no preview control.
+
+**Preview images.** The documentation shows one image per supported model,
+rendered from the real preview widget with no device: `preview-<model id>.png`
+is the device card alone (426x414 for the +, 556x456 for the XL+) and
+`main-window-xl.png` is the whole 1000x700 window previewing the XL+. They are
+written by the documentation screenshot generator, which iterates
+`DeviceModel::supported()`, so a model that becomes supported gets its image
+without editing the generator. The XL+ images are renders of the preview for a
+model that has been validated only with a simulated device; they say nothing
+about hardware behavior.
 
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the XL+) at exactly 1.0x, never scrolls inside itself, and keeps

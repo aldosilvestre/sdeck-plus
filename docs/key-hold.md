@@ -16,7 +16,7 @@ The hold action is optional and can be any catalog action, not only cancellation
 
 - Hold actions do not replace the short action's artwork, button text or live-information binding. Cancelling a countdown restores the normal key image.
 - Short and hold actions can each have their own page-return setting.
-- This applies only to the eight physical keypad keys. Touch-strip hold gestures and dial presses keep their existing behavior.
+- This applies only to the physical keypad keys (eight on the Stream Deck +, 36 on the Stream Deck + XL). Touch-strip hold gestures and dial presses keep their existing behavior.
 - Swapping keys carries their short actions, hold actions and page-return settings together. Export/import retains both bindings without a configuration migration.
 
 ## Verification

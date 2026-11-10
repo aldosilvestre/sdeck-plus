@@ -759,12 +759,137 @@ fn capture_documentation_screenshots() {
     )));
     drop(hardware_commands);
     window.destroy();
+    capture_model_previews(&directory);
     settings.set_gtk_theme_name(original_theme.as_deref());
     settings.set_gtk_application_prefer_dark_theme(original_dark);
     settings.set_gtk_enable_animations(original_animations);
     std::fs::remove_dir_all(root).unwrap();
     eprintln!(
-        "Generated all 33 native documentation screenshots in {}",
+        "Generated all native documentation screenshots in {}",
         directory.display()
     );
+}
+
+/// The preview of every supported model, rendered without a device, plus the
+/// full window for the Stream Deck + XL. A model that becomes supported gets
+/// its `preview-<id>.png` here with no change to this test.
+fn capture_model_previews(directory: &std::path::Path) {
+    use super::preview_model_tests::{model_fixture, preview_of, render_preview};
+    use sdeck_plus::device_model::{DeviceModel, PLUS_XL};
+
+    let colors = [
+        0x254b75ff, 0x5c3566ff, 0x245c58ff, 0x66462cff, 0x702f49ff, 0x3a457aff, 0x3a5b38ff,
+        0x55447aff,
+    ];
+    let labels = [
+        "Play", "Mute", "Scene", "Files", "Record", "Browser", "Next", "Studio", "Mic", "Cam",
+        "Chat", "Lights",
+    ];
+    for model in DeviceModel::supported() {
+        let configured = std::cell::Cell::new(false);
+        let Some(fixture) = model_fixture("documentation-model", model, |store, images| {
+            let source = std::env::temp_dir().join(format!(
+                "documentation-model-{}-{}.png",
+                std::process::id(),
+                model.id
+            ));
+            for (index, label) in labels.iter().enumerate() {
+                let key = u8::try_from(index + 1).unwrap();
+                if key > model.keys() {
+                    break;
+                }
+                // Every third key keeps its binding icon instead of artwork.
+                if key % 3 == 0 {
+                    continue;
+                }
+                let pixbuf = gtk::gdk_pixbuf::Pixbuf::new(
+                    gtk::gdk_pixbuf::Colorspace::Rgb,
+                    false,
+                    8,
+                    120,
+                    120,
+                )
+                .unwrap();
+                pixbuf.fill(colors[index % colors.len()]);
+                pixbuf.savev(&source, "png", &[]).unwrap();
+                images
+                    .assign_in_layer("Base", ArtworkTarget::Keypad(key), &source)
+                    .unwrap();
+                images
+                    .set_button_text_in_layer(
+                        "Base",
+                        ArtworkTarget::Keypad(key),
+                        ButtonText {
+                            text: (*label).into(),
+                            font_size: 22,
+                            ..ButtonText::default()
+                        },
+                    )
+                    .unwrap();
+            }
+            let _ = std::fs::remove_file(&source);
+            let media = |command| {
+                Action::Feature(FeatureAction::Desktop(
+                    sdeck_plus::desktop_actions::DesktopAction::Media(command),
+                ))
+            };
+            use sdeck_plus::desktop_actions::MediaCommand::{Mute, Next, VolumeDown, VolumeUp};
+            for (key, action) in [(3, media(Mute)), (6, media(Next))] {
+                store.bind("Base", Trigger::KeyPress(key), action).unwrap();
+            }
+            // The "Volume" dial preset on the first dial.
+            for (trigger, action) in [
+                (Trigger::EncoderClockwise(1), media(VolumeUp)),
+                (Trigger::EncoderCounterClockwise(1), media(VolumeDown)),
+                (Trigger::EncoderPress(1), media(Mute)),
+                (
+                    Trigger::ZoneTap(2),
+                    Action::Feature(FeatureAction::Obs(ObsAction::Scene("Camera".into()))),
+                ),
+            ] {
+                store.bind("Base", trigger, action).unwrap();
+            }
+            configured.set(true);
+        }) else {
+            return;
+        };
+        assert!(configured.get());
+        fixture.artwork.refresh(true);
+        // The device card alone (chassis plus its frame), without the window around it.
+        let root: gtk::Widget = fixture.widgets.root.clone().upcast();
+        let card = descendants::<gtk::Widget>(&preview_of(&root))
+            .into_iter()
+            .find(|widget| widget.has_css_class("device-canvas"))
+            .expect("the device card");
+        let png = directory.join(format!("preview-{}.png", model.id));
+        let rendered = render_preview(&fixture.window, &card, Some(&png));
+        assert!(!rendered.is_blank(), "{} preview is blank", model.id);
+        eprintln!(
+            "documentation screenshot: preview-{} ({}x{})",
+            model.id, rendered.width, rendered.height
+        );
+        if model.id == PLUS_XL.id {
+            // Dials tab and the strip, as a person configuring the XL sees them.
+            // The header's "Preview as" names the model on show, as after choosing it.
+            let supported: Vec<_> = DeviceModel::supported().collect();
+            let selector = descendants::<gtk::DropDown>(fixture.widgets.root.upcast_ref())
+                .into_iter()
+                .find(|picker| {
+                    picker
+                        .model()
+                        .is_some_and(|m| m.n_items() as usize == supported.len())
+                })
+                .expect("Preview as selector");
+            selector.set_selected(supported.iter().position(|m| m.id == model.id).unwrap() as u32);
+            fixture.widgets.binding_ui.mark_clean();
+            key_button(&fixture.widgets.key_labels[0]).emit_clicked();
+            sidebar_tabs(&fixture.widgets).set_visible_child_name("dials");
+            wait_for_frame(&fixture.widgets.root);
+            save(
+                directory,
+                fixture.widgets.root.upcast_ref(),
+                "main-window-xl",
+            );
+        }
+    }
 }

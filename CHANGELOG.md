@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Stream Deck + XL support** (VID `0x0FD9`, PID `0x00C6`): 36 keys (9x4), 6 dials and a
+  1200x100 touch strip with 6 sections. The app detects the connected model (Stream Deck +
+  or + XL) automatically and swaps stores, preview, editor and pictures when you plug in the
+  other one, without restarting. The XL is implemented from Elgato's HID documentation and
+  validated with a simulated device; **real-hardware validation is pending** because no Stream
+  Deck + XL was available.
+- **Preview as** in the header: view and configure either model while no device is connected
+  (disabled while one is). Each model keeps its own profiles, pages, bindings and artwork; the
+  Stream Deck + keeps its data directory unchanged and the XL uses
+  `<data>/sdeck-plus/devices/plus-xl/`. Only `tray.json`, `updates.json` and the new
+  `device.json` (last model used) are shared.
+- Configuration bundle **format 5** records the model. Importing a bundle made for the other
+  model is refused with a clear message.
+- A model registry (`src/device_model.rs`, guide in `DEVICES.md`) with the Stream Deck Classic,
+  XL, Neo and Mini described from Elgato's HID documentation as *planned*: discovery never
+  matches them and they are not supported yet.
+- Per-model preview images in the documentation (`preview-plus.png`, `preview-plus-xl.png` and
+  `main-window-xl.png`), generated for every
+  supported model by the documentation screenshot generator.
 - **Volume up** and **Volume down** take a step of 1 to 100 percent (default 5%, as before),
   chosen in the action editor and shown in the binding summary when it is not 5. Dial turns
   still apply one step per event. Bindings with the default step are saved exactly as before;
@@ -22,8 +41,22 @@ All notable changes to this project are documented here. The format follows
   replaces.
   Undo refuses, changing nothing, when the control was edited after Remove.
 
+### Compatibility and downgrade
+
+- Bundles exported by this version are format 5; older versions cannot import them. Older bundles
+  (versions 1 to 4) are Stream Deck + bundles and still import into the + configuration.
+- The Stream Deck + data directory is unchanged. The XL keeps its own folder under `devices/`;
+  importing into the + configuration preserves it.
+- The udev rule file gains a `00c6` line for the Stream Deck + XL (the installer and the AUR
+  packages print or install both lines).
+- Real-hardware validation of the Stream Deck + XL is pending.
+
 ### Changed
 
+- The header gains **Preview as**; the connection text names the model ("Stream Deck + XL
+  connected", "Stream Deck + or Stream Deck + XL not connected").
+- README, the site, `DESIGN.md`, package descriptions and the desktop file describe both models and
+  the XL's validation status.
 - The stable AUR PKGBUILD pins the SHA-256 of the published `v0.1.0` tarball instead of `SKIP`.
 
 ## [0.1.0] - 2026-11-09

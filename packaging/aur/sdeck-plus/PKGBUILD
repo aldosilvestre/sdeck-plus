@@ -2,7 +2,7 @@
 pkgname=sdeck-plus
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="GTK4 control desk for the Elgato Stream Deck + (Stream Deck Plus) on Linux"
+pkgdesc="GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux"
 arch=('x86_64' 'aarch64')
 url="https://aldosilvestre.github.io/sdeck-plus/"
 license=('MIT')

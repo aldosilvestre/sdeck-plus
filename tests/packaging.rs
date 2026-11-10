@@ -115,6 +115,26 @@ fn desktop_file_matches_the_application_identity() {
 }
 
 #[test]
+fn descriptions_name_both_supported_models() {
+    let description =
+        "GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux";
+    let manifest = read("Cargo.toml");
+    assert!(manifest.contains(&format!("description = \"{description}\"")));
+    for (package, suffix) in [("sdeck-plus", ""), ("sdeck-plus-git", " (git version)")] {
+        let expected = format!("{description}{suffix}");
+        assert_eq!(
+            scalar(&pkgbuild(package), "pkgdesc"),
+            Some(expected.clone())
+        );
+        assert_eq!(srcinfo_values(&srcinfo(package), "pkgdesc"), [expected]);
+    }
+    let desktop = read("packaging/dev.streamdeck.EventMonitor.desktop");
+    assert!(desktop.lines().any(|line| {
+        line == "Comment=Configure an Elgato Stream Deck + or Stream Deck + XL on Linux"
+    }));
+}
+
+#[test]
 fn udev_rule_matches_the_ids_of_both_models() {
     // The vendor id lives in the HID module and the product ids in the device model table.
     let vendor = read("src/event_api.rs").to_lowercase();

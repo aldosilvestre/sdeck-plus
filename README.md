@@ -7,10 +7,20 @@
 > New features will be released over time.
 
 sdeck-plus is a native GTK4 control desk for the Elgato Stream Deck +
-(Stream Deck Plus; VID `0x0FD9`, PID `0x0084`) on Linux, developed and tested on
-Arch Linux with Hyprland. It configures the eight keys, four dials and touch
+(VID `0x0FD9`, PID `0x0084`) and the Stream Deck + XL (PID `0x00C6`) on Linux,
+developed on Arch Linux with Hyprland. It configures the keys, dials and touch
 strip, shows live information on them and runs desktop, media, audio and OBS
 Studio actions.
+
+| Model | Controls | Status |
+|-------|----------|--------|
+| Stream Deck + | 8 keys, 4 dials, touch strip with 4 sections | Developed and tested on this hardware. |
+| Stream Deck + XL | 36 keys, 6 dials, touch strip with 6 sections | Implemented from [Elgato's HID documentation](https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl) and validated with a simulated device; real-hardware validation is pending. |
+
+The app detects the connected model and shows its preview; **Preview as** lets
+you configure either model without a device, and each model keeps its own
+profiles. Other Elgato models are prepared in the model registry but are not
+supported yet; see [DEVICES.md](DEVICES.md).
 
 **Website and full documentation:** <https://aldosilvestre.github.io/sdeck-plus/>
 
@@ -19,14 +29,15 @@ Studio actions.
 ## Why
 
 Elgato's own software does not run on Linux. sdeck-plus gives Linux desktop
-users a native, local application for every control of the Stream Deck +,
+users a native, local application for every control of the Stream Deck + and
+Stream Deck + XL,
 with no account, cloud service or system-wide changes required. It runs in the
 tray, keeps working with its window closed and never installs packages or changes
 permissions on its own.
 
 ## Features
 
-- **Every control:** eight keys, four dials with press and clockwise/counterclockwise
+- **Every control:** the keys, the dials with press and clockwise/counterclockwise
   bindings, and touch-strip sections with tap, hold, flick and swipes.
 - **Profiles, pages and folders:** profile tabs switched automatically by the
   focused application (Hyprland), plus touchscreen pages navigated by swiping.
@@ -87,8 +98,9 @@ Alternatively, clone the repository and run `./install.sh` to build that checkou
 it. To try it without installing, run `cargo run` from the checkout.
 
 Your user needs permission to open the device's HID node. If access is denied,
-an administrator can install a udev rule scoped to this VID/PID with
-`TAG+="uaccess"` (the installer prints one when needed). Some actions need
+an administrator can install a udev rule scoped to the VID/PID (`0fd9:0084` for
+the Stream Deck +, `0fd9:00c6` for the + XL) with `TAG+="uaccess"` (the installer
+prints both lines when needed). Some actions need
 optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions need
 `/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.
@@ -97,6 +109,9 @@ for the full list and installer options.
 
 - [Features](https://aldosilvestre.github.io/sdeck-plus/#features) and
   [Actions](https://aldosilvestre.github.io/sdeck-plus/#actions): what each part does.
+- [Supported devices](https://aldosilvestre.github.io/sdeck-plus/docs.html#devices): models,
+  detection, **Preview as**, per-model data and validation status; [DEVICES.md](DEVICES.md)
+  explains how models are added.
 - [Configuration](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration): controls,
   touchscreen pages, profiles, artwork, OBS setup, data files, tray and startup.
 - [Development](https://aldosilvestre.github.io/sdeck-plus/docs.html#development): checks,
