@@ -3,7 +3,7 @@
 //! shutdown. No hardware, HOME, network or HID stack is involved; the window
 //! is built over scratch directories.
 use super::model_session_tests::{
-    fs_set_writable, live_threads, roots_in, scratch, stored_binding, tree, wait_until,
+    fs_set_writable, live_threads, remember, roots_in, scratch, stored_binding, tree, wait_until,
 };
 use super::*;
 use feature_runtime::{FeatureRuntime, ModelSession, SessionRoots, SwitchReason};
@@ -103,6 +103,11 @@ fn seed(roots: &SessionRoots) {
 
 /// The window over the real hub and an empty simulated bus; `None` without a display.
 fn start_pair(tag: &str) -> Option<Pair> {
+    start_pair_with(tag, |_| {})
+}
+
+/// [`start_pair`], running `prepare` on the roots after they are seeded.
+fn start_pair_with(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Pair> {
     if !init_gtk_for_test() {
         return None;
     }
@@ -116,6 +121,7 @@ fn start_pair(tag: &str) -> Option<Pair> {
     // Automatic update checks are off: nothing may reach the network.
     std::fs::write(&updates, br#"{"automatic_check":false}"#).unwrap();
     seed(&roots);
+    prepare(&roots);
     // An id of its own: earlier tests may still hold the anonymous application path.
     let app = gtk::Application::new(
         Some("dev.streamdeck.SimulatedPairTest"),
@@ -710,5 +716,544 @@ fn the_menu_and_updates_follow_the_shown_session_and_open_one_dialog() {
                 .count(),
             1
         );
+    });
+}
+
+#[test]
+fn a_pending_import_stays_with_the_session_it_was_started_in() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-import-target") else {
+            return;
+        };
+        let (_plus_device, _xl_device) = pair.plug_both();
+        pair.registry.show(&PLUS_XL, SwitchReason::Device);
+        let (plus, xl) = (pair.runtime(&PLUS), pair.runtime(&PLUS_XL));
+        let plus_before = tree(&pair.roots.root_for(&PLUS));
+        let missing = pair.base.join("missing.sdeck-plus.json");
+        pair.registry.menu().select_path_for_test(true, missing);
+        let dialog = pair
+            .registry
+            .menu()
+            .confirmation_for_test()
+            .expect("confirmation");
+        // The XL goes away: the + becomes the shown session before the answer.
+        pair.bus.unplug(XL_PATH);
+        pair.wait_devices(1);
+        assert_eq!(pair.registry.model().id, "plus");
+        dialog.response(gtk::ResponseType::Accept);
+        let shown = xl.clone();
+        wait_until("the XL import result", move || {
+            !shown.status.text().is_empty()
+        });
+        pair.settle();
+        assert!(plus.status.text().is_empty(), "{}", plus.status.text());
+        assert_eq!(tree(&pair.roots.root_for(&PLUS)), plus_before);
+    });
+}
+
+/// Edit one model's seeded store before the window opens.
+fn edit_store(
+    roots: &SessionRoots,
+    model: &'static DeviceModel,
+    edit: impl FnOnce(&mut LayerStore),
+) {
+    let root = roots.root_for(model);
+    let mut store = LayerStore::open_at_model(&root, model).unwrap();
+    edit(&mut store);
+    store.persist().unwrap();
+}
+
+fn threads_now() -> usize {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("Threads:"))
+        .and_then(|count| count.trim().parse().ok())
+        .unwrap()
+}
+
+/// Both devices in `order` ([plus first] or not), on fresh simulated units.
+fn replug(pair: &Pair, plus_first: bool) -> (SimDevice, SimDevice) {
+    let (plus, xl) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS_XL));
+    if plus_first {
+        pair.bus.plug(PLUS_PATH, &plus);
+        pair.bus.plug(XL_PATH, &xl);
+    } else {
+        pair.bus.plug(XL_PATH, &xl);
+        pair.bus.plug(PLUS_PATH, &plus);
+    }
+    pair.wait_devices(2);
+    (plus, xl)
+}
+
+#[test]
+fn every_control_index_runs_only_its_own_models_binding() {
+    run_gtk_test(|| {
+        let bind_all = |model: &'static DeviceModel, layer: &'static str| {
+            move |roots: &SessionRoots| {
+                edit_store(roots, model, |store| {
+                    let mut triggers: Vec<Trigger> =
+                        (1..=model.keys()).map(Trigger::KeyPress).collect();
+                    for n in 1..=model.dials {
+                        triggers.extend([
+                            Trigger::EncoderPress(n),
+                            Trigger::EncoderClockwise(n),
+                            Trigger::EncoderCounterClockwise(n),
+                        ]);
+                    }
+                    triggers.extend((1..=model.zones()).map(Trigger::ZoneTap));
+                    for trigger in triggers {
+                        store.bind("Base", trigger, switch_to(layer)).unwrap();
+                    }
+                })
+            }
+        };
+        let Some(pair) = start_pair_with("pair-sweep", |roots| {
+            bind_all(&PLUS, "A")(roots);
+            bind_all(&PLUS_XL, "B")(roots);
+        }) else {
+            return;
+        };
+        let (plus_device, xl_device) = pair.plug_both();
+        let (plus, xl) = (pair.runtime(&PLUS), pair.runtime(&PLUS_XL));
+        let mut controls = 0;
+        for (model, device, own, own_layer, other) in [
+            (&PLUS, &plus_device, &plus, "A", &xl),
+            (&PLUS_XL, &xl_device, &xl, "B", &plus),
+        ] {
+            let mut gestures: Vec<Vec<Vec<u8>>> = Vec::new();
+            for key in 0..usize::from(model.keys()) {
+                gestures.push(vec![key_report(model, &[key]), key_report(model, &[])]);
+            }
+            for dial in 0..usize::from(model.dials) {
+                gestures.push(vec![
+                    encoder_button_report(model, &[dial]),
+                    encoder_button_report(model, &[]),
+                ]);
+                gestures.push(vec![rotation_report(model, &[(dial, 1)])]);
+                gestures.push(vec![rotation_report(model, &[(dial, -1)])]);
+            }
+            for zone in 0..model.zones() {
+                let x = (zone as u16) * 200 + 100;
+                gestures.push(vec![touch_report(model, 1, 0x10, &[x, 50])]);
+            }
+            for reports in gestures {
+                for report in reports {
+                    device.send(report);
+                }
+                wait_layer("the bound layer", own, own_layer);
+                // One more pass of the window's polling: a stray copy would show by now.
+                let ticks = Rc::new(Cell::new(0));
+                let counter = ticks.clone();
+                let source = glib::timeout_add_local(Duration::from_millis(40), move || {
+                    counter.set(counter.get() + 1);
+                    glib::ControlFlow::Continue
+                });
+                wait_until("a polling pass", move || ticks.get() >= 2);
+                source.remove();
+                assert_eq!(active(other), "Base", "{} control {controls}", model.name);
+                reset(own);
+                controls += 1;
+            }
+        }
+        assert_eq!(controls, 84);
+    });
+}
+
+#[test]
+fn plug_orders_and_unplug_cycles_lose_nothing() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-orders") else {
+            return;
+        };
+        // XL first, then the +, then the XL again.
+        let xl_first = SimDevice::new(&PLUS_XL);
+        pair.bus.plug(XL_PATH, &xl_first);
+        pair.wait_devices(1);
+        let plus_device = SimDevice::new(&PLUS);
+        pair.bus.plug(PLUS_PATH, &plus_device);
+        pair.wait_devices(2);
+        let (plus, xl) = (pair.runtime(&PLUS), pair.runtime(&PLUS_XL));
+        let level = |wanted: u8| {
+            plus_device
+                .features()
+                .iter()
+                .filter(|report| report[..2] == [0x03, 0x08] && report[2] == wanted)
+                .count()
+        };
+        // Four XL unplug/replug cycles under + input that changes the brightness.
+        for wanted in [90u8, 80, 70, 60] {
+            tap_key(&plus_device, &PLUS, 1);
+            wait_device("the brightness", &plus_device, |_| level(wanted) >= 1);
+            pair.bus.unplug(XL_PATH);
+            pair.wait_devices(1);
+            let again = SimDevice::new(&PLUS_XL);
+            pair.bus.plug(XL_PATH, &again);
+            pair.wait_devices(2);
+            tap_key(&again, &PLUS_XL, 0);
+            wait_layer("the replugged XL", &xl, "B");
+            reset(&xl);
+        }
+        pair.settle();
+        for wanted in [90u8, 80, 70, 60] {
+            assert_eq!(level(wanted), 1, "brightness {wanted} applied once");
+        }
+        assert_eq!(active(&plus), "Base");
+        // Five rounds of both devices out and in, alternating the plug order.
+        pair.bus.unplug(XL_PATH);
+        pair.wait_devices(1);
+        pair.bus.unplug(PLUS_PATH);
+        pair.wait_devices(0);
+        for round in 0..5 {
+            let (plus_device, xl_device) = replug(&pair, round % 2 == 0);
+            wait_device("the + pictures", &plus_device, |d| {
+                d.last_key_jpeg(7).is_some()
+            });
+            wait_device("the XL pictures", &xl_device, |d| {
+                d.last_key_jpeg(35).is_some()
+            });
+            tap_key(&plus_device, &PLUS, 0);
+            tap_key(&xl_device, &PLUS_XL, 0);
+            wait_layer("the + input", &plus, "A");
+            wait_layer("the XL input", &xl, "B");
+            reset(&plus);
+            reset(&xl);
+            for (device, size) in [(&plus_device, 120), (&xl_device, 112)] {
+                let (images, _) = device.assemble();
+                for image in images.iter().filter(|image| image.command == 0x07) {
+                    let decoded = image.decode();
+                    assert_eq!(
+                        (decoded.width(), decoded.height()),
+                        (size, size),
+                        "round {round}"
+                    );
+                }
+            }
+            pair.bus.unplug(XL_PATH);
+            pair.bus.unplug(PLUS_PATH);
+            pair.wait_devices(0);
+        }
+    });
+}
+
+#[test]
+fn a_model_that_fails_to_open_leaves_the_working_one_alone() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair_with("pair-failed-open", |roots| {
+            std::fs::write(
+                roots.root_for(&PLUS_XL).join("layers.conf"),
+                b"this is not a layers file\n",
+            )
+            .unwrap();
+        }) else {
+            return;
+        };
+        let xl_root = pair.roots.root_for(&PLUS_XL);
+        let before = tree(&xl_root);
+        let (plus_device, xl_device) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS_XL));
+        pair.bus.plug(PLUS_PATH, &plus_device);
+        pair.bus.plug(XL_PATH, &xl_device);
+        let opened = xl_device.clone();
+        wait_until("the hub to open the XL", move || opened.opened() >= 1);
+        pair.wait_devices(1);
+        pair.settle();
+        assert_eq!(
+            pair.registry.session_count(),
+            1,
+            "no session for the broken model"
+        );
+        let plus = pair.runtime(&PLUS);
+        tap_key(&plus_device, &PLUS, 0);
+        wait_layer("the + still works", &plus, "A");
+        assert_eq!(tree(&xl_root), before, "the XL root is byte-identical");
+        assert!(xl_device.writes().is_empty(), "no pictures reached the XL");
+    });
+}
+
+fn connected_model_wins(remembered: &'static DeviceModel, connected: &'static DeviceModel) {
+    let Some(pair) = start_pair_with("pair-preference", |roots| remember(roots, remembered)) else {
+        return;
+    };
+    assert_eq!(pair.registry.model(), remembered);
+    let path = if connected == &PLUS {
+        PLUS_PATH
+    } else {
+        XL_PATH
+    };
+    pair.bus.plug(path, &SimDevice::new(connected));
+    pair.wait_devices(1);
+    let registry = pair.registry.clone();
+    wait_until("the connected model to be shown", move || {
+        registry.model() == connected
+    });
+    assert_eq!(
+        std::fs::read_to_string(&pair.roots.preference).unwrap(),
+        format!("{{\"model\":\"{}\"}}\n", connected.id)
+    );
+}
+
+#[test]
+fn a_connected_plus_wins_over_a_remembered_xl() {
+    run_gtk_test(|| connected_model_wins(&PLUS_XL, &PLUS));
+}
+
+#[test]
+fn a_connected_xl_wins_over_a_remembered_plus() {
+    run_gtk_test(|| connected_model_wins(&PLUS, &PLUS_XL));
+}
+
+#[test]
+fn a_hidden_session_keeps_its_timer_hold_and_page_return_while_the_other_is_edited() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair_with("pair-hidden", |roots| {
+            for (model, layer_key) in [(&PLUS, 3u8), (&PLUS_XL, 3)] {
+                edit_store(roots, model, |store| {
+                    store
+                        .bind(
+                            "Base",
+                            Trigger::KeyPress(layer_key),
+                            Action::Feature(FeatureAction::Timer { seconds: 60 }),
+                        )
+                        .unwrap();
+                });
+            }
+            edit_store(roots, &PLUS_XL, |store| {
+                store
+                    .bind("Base", Trigger::KeyPress(4), switch_to("A"))
+                    .unwrap();
+                store
+                    .set_return(
+                        "Base",
+                        &Trigger::KeyPress(4),
+                        Some(sdeck_plus::layers::PageReturn {
+                            layer: "Base".into(),
+                            seconds: 1,
+                        }),
+                    )
+                    .unwrap();
+            });
+        }) else {
+            return;
+        };
+        let (plus_device, xl_device) = pair.plug_both();
+        let (plus, xl) = (pair.runtime(&PLUS), pair.runtime(&PLUS_XL));
+        assert_eq!(pair.registry.model().id, "plus");
+        let edit = |key: u8| {
+            let snapshot = {
+                let mut layers = plus.layers().borrow_mut();
+                layers
+                    .bind(
+                        "Base",
+                        Trigger::KeyPress(key),
+                        Action::Emit(format!("edit-{key}")),
+                    )
+                    .unwrap();
+                layers.clone()
+            };
+            plus.persist(snapshot);
+        };
+        // Timers on both; the XL one is hidden.
+        tap_key(&xl_device, &PLUS_XL, 2);
+        tap_key(&plus_device, &PLUS, 2);
+        let (hidden, shown) = (xl.clone(), plus.clone());
+        wait_until("both timers", move || {
+            hidden.timer_active() && shown.timer_active()
+        });
+        // A page return and a hold of the hidden XL run while the + is edited.
+        tap_key(&xl_device, &PLUS_XL, 3);
+        wait_layer("the XL page", &xl, "A");
+        edit(5);
+        assert!(xl.page_return_active());
+        wait_layer("the page return", &xl, "Base");
+        xl_device.send(key_report(&PLUS_XL, &[35]));
+        edit(6);
+        xl.advance_key_clock(sdeck_plus::key_hold::HOLD_DURATION);
+        wait_layer("the hold", &xl, "B");
+        xl_device.send(key_report(&PLUS_XL, &[]));
+        // Both countdowns keep drawing; a cancelled one stops.
+        let growth = |device: &SimDevice| {
+            let before = device.image_count();
+            let deadline = Instant::now() + Duration::from_millis(1500);
+            while Instant::now() < deadline {
+                glib::MainContext::default().iteration(false);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            device.image_count() - before
+        };
+        assert!(growth(&xl_device) > 0, "the hidden countdown draws");
+        assert!(plus.timer_active() && xl.timer_active());
+        xl.cancel_timer();
+        pair.settle();
+        let plus_before = plus_device.image_count();
+        assert_eq!(growth(&xl_device), 0, "a stopped timer draws nothing");
+        assert!(
+            plus_device.image_count() > plus_before,
+            "the active one keeps drawing"
+        );
+    });
+}
+
+/// A tiny fixed-seed generator: the script must be the same on every run.
+struct Seeded(u64);
+
+impl Seeded {
+    fn next(&mut self, below: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % below
+    }
+}
+
+#[test]
+fn a_random_script_only_ever_changes_the_edited_models_root() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-script") else {
+            return;
+        };
+        let (plus_device, xl_device) = pair.plug_both();
+        let roots = [pair.roots.root_for(&PLUS), pair.roots.root_for(&PLUS_XL)];
+        let models: [&'static DeviceModel; 2] = [&PLUS, &PLUS_XL];
+        let devices = [&plus_device, &xl_device];
+        let mut random = Seeded(0x5DEC_0DE5_1234_ABCD);
+        // Let startup writes land before the first snapshot.
+        pair.settle();
+        let stable = |root: &Path| {
+            let mut last = tree(root);
+            loop {
+                let until = Instant::now() + Duration::from_millis(8);
+                while Instant::now() < until {
+                    glib::MainContext::default().iteration(false);
+                }
+                let now = tree(root);
+                if now == last {
+                    return now;
+                }
+                last = now;
+            }
+        };
+        for step in 0..300u32 {
+            let side = random.next(2) as usize;
+            let (own, other) = (side, 1 - side);
+            let before = [stable(&roots[0]), stable(&roots[1])];
+            let runtime = pair.runtime(models[own]);
+            let writes = match random.next(4) {
+                0 => {
+                    let key = 5 + random.next(3) as u8;
+                    let snapshot = {
+                        let mut layers = runtime.layers().borrow_mut();
+                        layers
+                            .bind(
+                                "Base",
+                                Trigger::KeyPress(key),
+                                Action::Emit(format!("edit-{step}")),
+                            )
+                            .unwrap();
+                        layers.clone()
+                    };
+                    runtime.persist(snapshot);
+                    true
+                }
+                1 => {
+                    let snapshot = {
+                        let mut layers = runtime.layers().borrow_mut();
+                        let next = if layers.active() == "Base" {
+                            "A"
+                        } else {
+                            "Base"
+                        };
+                        layers.select(next);
+                        layers.clone()
+                    };
+                    runtime.persist(snapshot);
+                    true
+                }
+                2 => {
+                    // A tap on a key nothing is bound to.
+                    tap_key(devices[own], models[own], 6);
+                    false
+                }
+                _ => {
+                    pair.registry.show(models[own], SwitchReason::Device);
+                    false
+                }
+            };
+            if writes {
+                let root = roots[own].clone();
+                let unchanged = before[own].clone();
+                wait_until("the write to land", move || tree(&root) != unchanged);
+            }
+            let after = stable(&roots[other]);
+            assert_eq!(
+                after, before[other],
+                "step {step} changed the other model's root"
+            );
+        }
+    });
+}
+
+#[test]
+fn shutdown_keeps_pending_saves_of_both_sessions() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-pending") else {
+            return;
+        };
+        let _devices = pair.plug_both();
+        for model in [&PLUS, &PLUS_XL] {
+            let runtime = pair.runtime(model);
+            let snapshot = {
+                let mut layers = runtime.layers().borrow_mut();
+                layers
+                    .bind("Base", Trigger::KeyPress(7), Action::Emit("pending".into()))
+                    .unwrap();
+                layers.clone()
+            };
+            runtime.persist(snapshot);
+        }
+        pair.app.emit_by_name::<()>("shutdown", &[]);
+        for model in [&PLUS, &PLUS_XL] {
+            assert!(
+                stored_binding(&pair.roots.root_for(model), model, 7),
+                "{} lost its pending save",
+                model.name
+            );
+        }
+    });
+}
+
+#[test]
+fn two_hundred_plug_cycles_leave_threads_widgets_actions_and_sessions_flat() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-long-cycles") else {
+            return;
+        };
+        let (_plus_device, _xl_device) = pair.plug_both();
+        let cycle = |pair: &Pair| {
+            pair.bus.unplug(XL_PATH);
+            pair.wait_devices(1);
+            pair.bus.plug(XL_PATH, &SimDevice::new(&PLUS_XL));
+            pair.wait_devices(2);
+        };
+        // Warm-up: the first cycles build caches that later ones reuse.
+        for _ in 0..10 {
+            cycle(&pair);
+        }
+        pair.settle();
+        let widgets = super::model_session_tests::count_widgets(pair.window.upcast_ref());
+        let threads = threads_now();
+        let mut actions = pair.app.list_actions();
+        actions.sort();
+        for _ in 0..200 {
+            cycle(&pair);
+        }
+        wait_until("the workers to settle", move || threads_now() <= threads);
+        assert_eq!(
+            super::model_session_tests::count_widgets(pair.window.upcast_ref()),
+            widgets
+        );
+        let mut after = pair.app.list_actions();
+        after.sort();
+        assert_eq!(after, actions);
+        assert_eq!(pair.registry.session_count(), 2);
     });
 }
