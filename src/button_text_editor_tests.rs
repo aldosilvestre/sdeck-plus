@@ -518,7 +518,7 @@ fn assert_saved_text_on_streamdeck() {
             .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
             .unwrap()
         {
-            MonitorEvent::Connection(ConnectionState::Connected) => break,
+            MonitorEvent::Connection(ConnectionState::Connected(_)) => break,
             MonitorEvent::Connection(ConnectionState::Unavailable(error)) => {
                 panic!("HID unavailable: {error}")
             }

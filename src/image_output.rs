@@ -1,7 +1,7 @@
 //! Pure artwork preparation and Stream Deck + image-report encoding.
 
 use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
-use crate::device_model::{DeviceModel, PLUS};
+use crate::device_model::{DeviceModel, Rotation, PLUS};
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
 use gtk::pango::prelude::*;
@@ -82,7 +82,11 @@ pub fn prepare_jpeg_for(
     source: impl AsRef<Path>,
 ) -> Result<Vec<u8>, String> {
     let size = dimensions_for(model, target)?;
-    encode_jpeg(&prepare_background(size, source.as_ref())?)
+    encode_jpeg(
+        model,
+        Part::of(target),
+        &prepare_background(size, source.as_ref())?,
+    )
 }
 
 pub(crate) fn prepare_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
@@ -214,7 +218,53 @@ fn decode_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, Str
         .ok_or_else(|| "could not resize source image".to_string())
 }
 
-fn encode_jpeg(image: &Pixbuf) -> Result<Vec<u8>, String> {
+/// Which kind of display an image is for; rotation is per kind.
+#[derive(Clone, Copy)]
+enum Part {
+    Key,
+    Strip,
+    Zone,
+}
+
+impl Part {
+    fn of(target: ArtworkTarget) -> Self {
+        match target {
+            ArtworkTarget::Keypad(_) => Self::Key,
+            ArtworkTarget::TouchStripBackground => Self::Strip,
+            ArtworkTarget::EncoderZone(_) => Self::Zone,
+        }
+    }
+}
+
+/// `image` turned as `rotation` says before upload.
+pub fn rotated(image: &Pixbuf, rotation: Rotation) -> Result<Pixbuf, String> {
+    match rotation {
+        Rotation::None => Ok(image.clone()),
+        Rotation::Ccw90 => image
+            .rotate_simple(gtk::gdk_pixbuf::PixbufRotation::Counterclockwise)
+            .ok_or_else(|| "could not rotate image".to_string()),
+    }
+}
+
+/// The picture as the display of `part` takes it: rotated, then flipped.
+fn orient(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Pixbuf, String> {
+    match part {
+        Part::Key => {
+            let turned = rotated(image, model.key_rotation)?;
+            if model.key_flip_y {
+                turned
+                    .flip(false)
+                    .ok_or_else(|| "could not flip image".to_string())
+            } else {
+                Ok(turned)
+            }
+        }
+        Part::Strip | Part::Zone => rotated(image, model.strip_rotation),
+    }
+}
+
+fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
+    let image = &orient(model, part, image)?;
     // Transparency belongs to the preview/overlay. The device takes JPEG, so
     // flatten only after compositing the overlay onto its existing artwork.
     let flattened;
@@ -389,7 +439,11 @@ pub fn prepare_button_jpeg_for(
     source: Option<&Path>,
     text: &ButtonText,
 ) -> Result<Vec<u8>, String> {
-    encode_jpeg(&compose_button_image_for(model, source, text)?)
+    encode_jpeg(
+        model,
+        Part::Key,
+        &compose_button_image_for(model, source, text)?,
+    )
 }
 
 /// Compose a transparent touch-zone foreground, painting page indicators last.
@@ -565,9 +619,9 @@ pub fn prepare_touchscreen_zone_jpeg_for(
             InterpType::Nearest,
             255,
         );
-        return encode_jpeg(&section);
+        return encode_jpeg(model, Part::Zone, &section);
     }
-    encode_jpeg(&overlay)
+    encode_jpeg(model, Part::Zone, &overlay)
 }
 
 /// Encode a binding icon picture for a key or touch section that has no
@@ -608,7 +662,7 @@ pub fn prepare_icon_jpeg_for(
     match target {
         ArtworkTarget::Keypad(_) => {
             match crate::binding_icons::compose_key_image_for(model, icon, caption, text)? {
-                Some(image) => encode_jpeg(&image),
+                Some(image) => encode_jpeg(model, Part::Key, &image),
                 // No free band beside the user's text: the plain text picture.
                 None => {
                     prepare_button_jpeg_for(model, None, text.unwrap_or(&ButtonText::default()))
@@ -665,7 +719,7 @@ pub fn prepare_icon_jpeg_for(
                 InterpType::Nearest,
                 255,
             );
-            encode_jpeg(&section)
+            encode_jpeg(model, Part::Zone, &section)
         }
         ArtworkTarget::TouchStripBackground => {
             Err("binding icons cannot replace the touch strip background".into())
@@ -711,9 +765,11 @@ pub fn prepare_info_jpeg_for(
 ) -> Result<Vec<u8>, String> {
     let _ = dimensions_for(model, target)?;
     match target {
-        ArtworkTarget::Keypad(_) => encode_jpeg(&crate::info_render::compose_info_image_for(
-            model, value, background, elapsed,
-        )?),
+        ArtworkTarget::Keypad(_) => encode_jpeg(
+            model,
+            Part::Key,
+            &crate::info_render::compose_info_image_for(model, value, background, elapsed)?,
+        ),
         ArtworkTarget::EncoderZone(zone) => {
             let overlay = crate::info_render::compose_zone_image_at(
                 value, background, false, false, elapsed,
@@ -737,9 +793,9 @@ pub fn prepare_info_jpeg_for(
                     InterpType::Nearest,
                     255,
                 );
-                return encode_jpeg(&section);
+                return encode_jpeg(model, Part::Zone, &section);
             }
-            encode_jpeg(&overlay)
+            encode_jpeg(model, Part::Zone, &overlay)
         }
         ArtworkTarget::TouchStripBackground => {
             Err("live information cannot replace the touch strip background".into())
@@ -763,18 +819,28 @@ pub fn prepare_clear_jpeg_for(
     let image = Pixbuf::new(Colorspace::Rgb, false, 8, width, height)
         .ok_or_else(|| "could not allocate clear image".to_string())?;
     image.fill(0x000000ff);
-    let bytes = image
-        .save_to_bufferv("jpeg", &[("quality", "92")])
-        .map_err(|error| error.to_string())?;
-    if bytes.is_empty() {
-        return Err("JPEG encoder returned an empty image".into());
-    }
-    Ok(bytes)
+    encode_jpeg(model, Part::of(target), &image)
 }
 
 /// Encode JPEG bytes into zero-padded, fixed-size output reports for the target.
 pub fn encode_reports(target: ArtworkTarget, jpeg: &[u8]) -> Result<Vec<OutputReport>, String> {
     encode_reports_for(&PLUS, target, jpeg)
+}
+
+/// Where a touch section's partial image goes, as `(x, y, width, height)`.
+/// Logical strip coordinates unless the model wants them in the rotated
+/// portrait frame of the uploaded image.
+pub fn zone_window(model: &DeviceModel, zone: u8) -> (u16, u16, u16, u16) {
+    let (x, width, height) = (
+        model.zone_x(zone) as u16,
+        model.zone_px.0 as u16,
+        model.zone_px.1 as u16,
+    );
+    if model.partial_window_axis_swap {
+        (0, x, height, width)
+    } else {
+        (x, 0, width, height)
+    }
 }
 
 /// [`encode_reports`] with the report layout and image sizes of `model`.
@@ -806,8 +872,8 @@ pub fn encode_reports_for(
         ArtworkTarget::Keypad(n) => Some(n - 1),
         _ => None,
     };
-    let zone_x = match target {
-        ArtworkTarget::EncoderZone(n) => Some(model.zone_x(n) as u16),
+    let window = match target {
+        ArtworkTarget::EncoderZone(n) => Some(zone_window(model, n)),
         _ => None,
     };
     let mut reports = Vec::with_capacity(count);
@@ -818,10 +884,11 @@ pub fn encode_reports_for(
         report[0] = 0x02;
         report[1] = command;
         if matches!(target, ArtworkTarget::EncoderZone(_)) {
-            report[2..4].copy_from_slice(&zone_x.unwrap().to_le_bytes());
-            report[4..6].copy_from_slice(&0u16.to_le_bytes());
-            report[6..8].copy_from_slice(&(model.zone_px.0 as u16).to_le_bytes());
-            report[8..10].copy_from_slice(&(model.zone_px.1 as u16).to_le_bytes());
+            let (x, y, width, height) = window.unwrap_or_default();
+            report[2..4].copy_from_slice(&x.to_le_bytes());
+            report[4..6].copy_from_slice(&y.to_le_bytes());
+            report[6..8].copy_from_slice(&width.to_le_bytes());
+            report[8..10].copy_from_slice(&height.to_le_bytes());
             report[10] = u8::from(index as usize + 1 == count);
             report[11..13].copy_from_slice(&index.to_le_bytes());
             report[13..15].copy_from_slice(&length.to_le_bytes());
@@ -1264,5 +1331,56 @@ mod tests {
             pixel[0] < 8 && pixel[1] < 8 && pixel[2] < 8,
             "expected black pixel, got {pixel:?}"
         );
+    }
+
+    /// 3x2 picture whose pixel (x, y) has red = 10 * x + y.
+    fn numbered() -> Pixbuf {
+        let image = Pixbuf::new(Colorspace::Rgb, false, 8, 3, 2).unwrap();
+        for y in 0..2 {
+            for x in 0..3 {
+                image.put_pixel(x, y, (10 * x + y) as u8, 0, 0, 255);
+            }
+        }
+        image
+    }
+
+    #[test]
+    fn rotating_counterclockwise_moves_the_top_left_pixel_to_the_bottom_left() {
+        let turned = rotated(&numbered(), Rotation::Ccw90).unwrap();
+        assert_eq!((turned.width(), turned.height()), (2, 3));
+        // Source (x, y) lands at (y, width - 1 - x).
+        for (x, y) in [(0, 0), (2, 0), (0, 1), (2, 1)] {
+            assert_eq!(pixel(&turned, y, 2 - x)[0], (10 * x + y) as u8);
+        }
+    }
+
+    #[test]
+    fn no_rotation_leaves_the_pixels_alone() {
+        let same = rotated(&numbered(), Rotation::None).unwrap();
+        assert_eq!((same.width(), same.height()), (3, 2));
+        assert_eq!(pixel(&same, 2, 1)[0], 21);
+    }
+
+    #[test]
+    fn flip_y_mirrors_a_key_after_rotation() {
+        static FLIPPED: DeviceModel = DeviceModel {
+            key_flip_y: true,
+            ..crate::device_model::PLUS_XL
+        };
+        let turned = orient(&crate::device_model::PLUS_XL, Part::Key, &numbered()).unwrap();
+        let flipped = orient(&FLIPPED, Part::Key, &numbered()).unwrap();
+        assert_eq!(pixel(&flipped, 0, 0)[0], pixel(&turned, 0, 2)[0]);
+    }
+
+    #[test]
+    fn zone_window_is_logical_unless_the_axes_swap() {
+        use crate::device_model::PLUS_XL;
+        assert_eq!(zone_window(&PLUS, 4), (600, 0, 200, 100));
+        assert_eq!(zone_window(&PLUS_XL, 6), (1000, 0, 200, 100));
+        let swapped = DeviceModel {
+            partial_window_axis_swap: true,
+            ..PLUS_XL
+        };
+        assert_eq!(zone_window(&swapped, 6), (0, 1000, 100, 200));
     }
 }

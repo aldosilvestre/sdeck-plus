@@ -226,7 +226,7 @@ impl ArtworkStore {
         if !matches!(target, ArtworkTarget::Keypad(n) if self.model.is_valid_key(n)) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "text requires keypad 1..=8",
+                format!("text requires keypad 1..={}", self.model.keys()),
             ));
         }
         text.validate()?;
@@ -489,7 +489,10 @@ fn load_assignments(root: &Path, strict: bool, model: &DeviceModel) -> io::Resul
             };
             let Some(target @ ArtworkTarget::Keypad(_)) = ArtworkTarget::from_id_in(model, id)
             else {
-                return invalid_config(strict, "text requires keypad 1..=8");
+                return invalid_config(
+                    strict,
+                    &format!("text requires keypad 1..={}", model.keys()),
+                );
             };
             let Ok(text) = serde_json::from_str::<ButtonText>(json) else {
                 return invalid_config(strict, "invalid button text configuration");

@@ -633,10 +633,11 @@ fn xl_images_are_composed_at_the_model_sizes() {
     .unwrap()
     .unwrap();
     assert_eq!((icon.width(), icon.height()), (112, 112));
+    // The strip is rotated 90 degrees before upload, so its image is portrait.
     let clear = image_output::prepare_clear_jpeg_for(&PLUS_XL, ArtworkTarget::TouchStripBackground)
         .unwrap();
     let decoded = Pixbuf::from_read(std::io::Cursor::new(clear)).unwrap();
-    assert_eq!((decoded.width(), decoded.height()), (1200, 100));
+    assert_eq!((decoded.width(), decoded.height()), (100, 1200));
     let clear = image_output::prepare_clear_jpeg_for(&PLUS_XL, ArtworkTarget::Keypad(36)).unwrap();
     let decoded = Pixbuf::from_read(std::io::Cursor::new(clear)).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (112, 112));
@@ -965,4 +966,60 @@ fn bundles_are_validated_against_the_model_of_the_target_store() {
         .unwrap()
         .diagnostics()
         .is_empty());
+}
+
+#[test]
+fn plus_open_of_an_xl_root_drops_xl_rows_and_xl_open_keeps_them() {
+    let fixture = Fixture::new("xl-root-hazard");
+    let key_36 = Event::Key {
+        index: 35,
+        pressed: true,
+    };
+    let mut store = xl_store(&fixture);
+    store
+        .bind("Base", Trigger::KeyPress(36), emit("xl"))
+        .unwrap();
+    store.persist().unwrap();
+    drop(store);
+    let conf = fixture.0.join("layers.conf");
+    assert!(fs::read_to_string(&conf).unwrap().contains("k:36"));
+
+    let reopened = xl_store(&fixture);
+    assert_eq!(reopened.matching_action(&key_36), Some(emit("xl")));
+    drop(reopened);
+    assert!(fs::read_to_string(&conf).unwrap().contains("k:36"));
+
+    // Opening an XL root as a Stream Deck + loses the row for good.
+    let plus = LayerStore::open_at(&fixture.0).unwrap();
+    assert_eq!(plus.matching_action(&key_36), None);
+    drop(plus);
+    assert!(!fs::read_to_string(&conf).unwrap().contains("k:36"));
+}
+
+#[test]
+fn xl_touch_tap_with_payload_length_0x10_decodes() {
+    let mut bytes = vec![1, 2, 0x10, 0, 1, 0, 0x4c, 0x04, 0x32, 0];
+    bytes.extend_from_slice(&[0; 10]);
+    assert_eq!(
+        decode_report_for(&PLUS_XL, &bytes),
+        [Event::TouchTap { x: 1100, y: 50 }]
+    );
+}
+
+#[test]
+fn button_text_errors_name_the_keypad_range_of_the_model() {
+    let fixture = Fixture::new("text-errors");
+    let text = sdeck_plus::button_text::ButtonText {
+        text: "Hi".into(),
+        ..Default::default()
+    };
+    for (model, root, range) in [(&PLUS, "plus", "1..=8"), (&PLUS_XL, "xl", "1..=36")] {
+        let mut store =
+            ArtworkStore::open_at_for_layer_model(fixture.0.join(root), Some("Base"), model)
+                .unwrap();
+        let error = store
+            .set_button_text_in_layer("Base", ArtworkTarget::TouchStripBackground, text.clone())
+            .unwrap_err();
+        assert_eq!(error.to_string(), format!("text requires keypad {range}"));
+    }
 }

@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match events.recv_timeout(deadline.saturating_duration_since(Instant::now()))? {
-            MonitorEvent::Connection(ConnectionState::Connected) => {
+            MonitorEvent::Connection(ConnectionState::Connected(_)) => {
                 println!("CONNECTED: Stream Deck + 0FD9:0084, production HID worker");
                 break;
             }

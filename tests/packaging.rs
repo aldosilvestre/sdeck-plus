@@ -115,24 +115,29 @@ fn desktop_file_matches_the_application_identity() {
 }
 
 #[test]
-fn udev_rule_matches_the_stream_deck_plus_ids() {
+fn udev_rule_matches_the_ids_of_both_models() {
     // The vendor id lives in the HID module and the product ids in the device model table.
-    let protocol = format!(
-        "{}{}",
-        read("src/event_api.rs"),
-        read("src/device_model.rs")
-    )
-    .to_lowercase();
-    assert!(protocol.contains("0x0fd9") && protocol.contains("0x0084"));
+    let vendor = read("src/event_api.rs").to_lowercase();
+    assert!(vendor.contains("0x0fd9"));
+    let models = read("src/device_model.rs").to_lowercase();
     let rules = read("packaging/70-sdeck-plus.rules");
-    let rule = rules
+    let lines: Vec<_> = rules
         .lines()
-        .find(|line| !line.starts_with('#') && !line.is_empty())
-        .expect("rule line");
-    assert_eq!(
-        rule,
-        r#"SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0084", TAG+="uaccess""#
-    );
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .collect();
+    assert_eq!(lines.len(), 2, "one rule per model");
+    for (line, pid) in lines.iter().zip(["0084", "00c6"]) {
+        assert!(
+            models.contains(&format!("pid: 0x{pid}")),
+            "model table: {pid}"
+        );
+        assert_eq!(
+            *line,
+            format!(
+                r#"SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="0fd9", ATTRS{{idProduct}}=="{pid}", TAG+="uaccess""#
+            )
+        );
+    }
     assert!(rules.starts_with('#'), "rule needs a header comment");
 }
 

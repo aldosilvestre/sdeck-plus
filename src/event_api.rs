@@ -3,7 +3,7 @@
 
 use crate::{
     device_control::DeviceAction,
-    device_model::{DeviceModel, PLUS},
+    device_model::DeviceModel,
     image_output,
     local_artwork::ArtworkTarget,
     protocol::{decode_report_for, Event},
@@ -29,10 +29,17 @@ mod control_monitor_tests;
 
 mod marquee;
 
+#[cfg(test)]
+mod sim_device;
+
+#[cfg(test)]
+mod sim_tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     Searching,
-    Connected,
+    /// A supported device is open; everything follows its model.
+    Connected(&'static DeviceModel),
     Unavailable(String),
     Disconnected(String),
 }
@@ -192,16 +199,9 @@ impl Drop for HidController {
     }
 }
 
-/// Start the blocking HID producer on a dedicated, owned thread.
+/// Start the blocking HID producer on a dedicated, owned thread. It serves
+/// whichever supported model it finds first, and follows a swap to the other.
 pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
-    start_hid_monitor_for(&PLUS, sender)
-}
-
-/// [`start_hid_monitor`] for a device of `model`.
-pub fn start_hid_monitor_for(
-    model: &'static DeviceModel,
-    sender: Sender<MonitorEvent>,
-) -> HidController {
     let (artwork, commands) = std::sync::mpsc::channel();
     let (controls, control_commands) = std::sync::mpsc::channel();
     let stop = StopSignal::default();
@@ -210,12 +210,11 @@ pub fn start_hid_monitor_for(
         .name("streamdeck-hid".into())
         .spawn(move || {
             monitor_for(
-                model,
                 sender,
                 (commands, control_commands),
                 worker_stop,
-                |stop| discover_device(model, stop),
-                |command| prepare_artwork_for(model, command),
+                discover_device,
+                prepare_artwork_for,
             )
         })
         .expect("failed to start HID reader thread");
@@ -283,27 +282,51 @@ impl Device for hidapi::HidDevice {
     }
 }
 
-fn discover_device(model: &DeviceModel, stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
+/// The first supported device among `(vendor, product)` ids, with its model.
+fn first_supported(
+    ids: impl IntoIterator<Item = (u16, u16)>,
+) -> Option<(usize, &'static DeviceModel)> {
+    ids.into_iter()
+        .enumerate()
+        .find_map(|(position, (vendor, product))| {
+            (vendor == VID)
+                .then(|| DeviceModel::by_pid(product))
+                .flatten()
+                .map(|model| (position, model))
+        })
+}
+
+fn discover_device(stop: &StopSignal) -> Result<(hidapi::HidDevice, &'static DeviceModel), String> {
     if !stop.live() {
         return Err("HID discovery cancelled".into());
     }
     let api =
         hidapi::HidApi::new().map_err(|error| format!("HID initialization failed: {error}"))?;
-    let info = api
-        .device_list()
-        .find(|device| device.vendor_id() == VID && device.product_id() == model.pid)
-        .ok_or_else(|| {
-            format!(
-                "Device not found · connect {} (VID 0FD9 / PID {:04X})",
-                model.name, model.pid
-            )
-        })?;
+    let infos: Vec<_> = api.device_list().collect();
+    let (position, model) = first_supported(
+        infos
+            .iter()
+            .map(|device| (device.vendor_id(), device.product_id())),
+    )
+    .ok_or_else(|| {
+        let wanted = DeviceModel::all()
+            .iter()
+            .map(|model| format!("{} PID {:04X}", model.name, model.pid))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
+    })?;
     if !stop.live() {
         return Err("HID discovery cancelled".into());
     }
-    info.open_device(&api)
+    infos[position]
+        .open_device(&api)
+        .map(|device| (device, model))
         .map_err(|error| format!("Device found but could not open: {error}"))
 }
+
+#[cfg(test)]
+use crate::device_model::PLUS;
 
 #[cfg(test)]
 fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String> {
@@ -499,25 +522,37 @@ fn send_marquee_frames(
     }
 }
 
+/// [`monitor_for`] on a Stream Deck + device.
 #[cfg(test)]
 fn monitor<D: Device>(
-    sender: Sender<MonitorEvent>,
-    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
-    stop: StopSignal,
-    discover: impl FnMut(&StopSignal) -> Result<D, String>,
-    prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
-) {
-    monitor_for(&PLUS, sender, commands, stop, discover, prepare)
-}
-
-fn monitor_for<D: Device>(
-    model: &'static DeviceModel,
     sender: Sender<MonitorEvent>,
     commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
     stop: StopSignal,
     mut discover: impl FnMut(&StopSignal) -> Result<D, String>,
     mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
 ) {
+    monitor_for(
+        sender,
+        commands,
+        stop,
+        move |stop| discover(stop).map(|device| (device, &PLUS)),
+        move |_, command| prepare(command),
+    )
+}
+
+/// The HID owner: discover a device, serve it as its own model until it goes,
+/// then search again, possibly finding the other model.
+fn monitor_for<D: Device>(
+    sender: Sender<MonitorEvent>,
+    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
+    stop: StopSignal,
+    mut discover: impl FnMut(&StopSignal) -> Result<(D, &'static DeviceModel), String>,
+    mut prepare: impl FnMut(
+        &DeviceModel,
+        ArtworkCommand,
+    ) -> Result<Vec<image_output::OutputReport>, String>,
+) {
+    let mut served: Option<&'static DeviceModel> = None;
     let (commands, controls) = commands;
     let mut controls = device_controls::Controls::new(controls);
     while stop.live() {
@@ -531,8 +566,8 @@ fn monitor_for<D: Device>(
         {
             return;
         }
-        let device = match discover(&stop) {
-            Ok(device) => device,
+        let (device, model) = match discover(&stop) {
+            Ok(found) => found,
             Err(error) => {
                 if sender
                     .send(MonitorEvent::Connection(ConnectionState::Unavailable(
@@ -554,8 +589,14 @@ fn monitor_for<D: Device>(
             if !stop.live() {
                 return;
             }
+            // Work queued for the other model is meaningless on this one; the
+            // consumer redraws from the Connected report.
+            if served.is_some_and(|previous| previous != model) {
+                pending_artwork(&commands);
+            }
+            served = Some(model);
             if sender
-                .send(MonitorEvent::Connection(ConnectionState::Connected))
+                .send(MonitorEvent::Connection(ConnectionState::Connected(model)))
                 .is_err()
             {
                 stop.request();
@@ -576,7 +617,7 @@ fn monitor_for<D: Device>(
                     &commands,
                     &stop,
                     &sender,
-                    &mut prepare,
+                    |command| prepare(model, command),
                     |report| device.write(report),
                     &mut marquees,
                 );

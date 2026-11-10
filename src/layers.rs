@@ -304,12 +304,12 @@ impl LayerStore {
     pub fn active(&self) -> &str {
         &self.active
     }
-    /// Shared storage root for organization and integration settings.
     /// The device model whose controls this store accepts.
     pub fn model(&self) -> &'static DeviceModel {
         self.model
     }
 
+    /// Shared storage root for organization and integration settings.
     pub fn root(&self) -> &Path {
         &self.root
     }

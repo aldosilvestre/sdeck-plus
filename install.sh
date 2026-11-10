@@ -351,14 +351,21 @@ if (( ${#missing_tools[@]} > 0 )); then
     printf '  - %s\n' "${missing_tools[@]}"
 fi
 
-for uevent in /sys/class/hidraw/hidraw*/device/uevent; do
-    if [[ -r $uevent ]] && grep -qi '^HID_ID=[0-9A-F]*:00000FD9:00000084$' "$uevent"; then
-        node=${uevent#/sys/class/hidraw/}
+# Stream Deck + (0084) and Stream Deck + XL (00C6), as the kernel prints them.
+hidraw_root=/sys/class/hidraw
+if [[ ${SDECK_PLUS_INSTALL_TEST:-} == 1 ]]; then
+    hidraw_root=${SDECK_PLUS_HIDRAW_ROOT:-$hidraw_root}
+fi
+for uevent in "$hidraw_root"/hidraw*/device/uevent; do
+    if [[ -r $uevent ]] && grep -qiE '^HID_ID=[0-9A-F]*:00000FD9:0000(0084|00C6)$' "$uevent"; then
+        node=${uevent#"$hidraw_root"/}
         node="/dev/${node%/device/uevent}"
         if [[ ! -r $node || ! -w $node ]]; then
-            note "your user cannot open the Stream Deck + at $node. An administrator can grant access with:"
+            rules=/etc/udev/rules.d/70-sdeck-plus.rules
+            note "your user cannot open the Stream Deck at $node. An administrator can grant access with:"
             printf '%s\n' \
-                "  echo 'SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0fd9\", ATTRS{idProduct}==\"0084\", TAG+=\"uaccess\"' | sudo tee /etc/udev/rules.d/70-sdeck-plus.rules" \
+                "  echo 'SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0fd9\", ATTRS{idProduct}==\"0084\", TAG+=\"uaccess\"' | sudo tee $rules" \
+                "  echo 'SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0fd9\", ATTRS{idProduct}==\"00c6\", TAG+=\"uaccess\"' | sudo tee -a $rules" \
                 '  sudo udevadm control --reload-rules' \
                 '  Then reconnect the device.'
         fi

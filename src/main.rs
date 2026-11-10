@@ -1690,7 +1690,7 @@ fn start_event_updates(
                     feature_runtime.complete_key_swap(&layer, first, second, result);
                 }
                 MonitorEvent::Connection(state) => {
-                    if !matches!(state, ConnectionState::Connected) {
+                    if !matches!(state, ConnectionState::Connected(_)) {
                         feature_runtime.cancel_key_holds();
                     }
                     if show_connection_state(status, connection_detail, &state) {
@@ -4167,7 +4167,7 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
             "Stream Deck + disconnected — plug it back in",
             format!("{reason}\n{USB_ID}"),
         ),
-        ConnectionState::Connected => (
+        ConnectionState::Connected(_) => (
             "Connected",
             "status-online",
             "Stream Deck + connected — keys, dials and touch strip are live",
@@ -4183,7 +4183,7 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
     for label in [status, detail] {
         label.set_tooltip_text(Some(&hint));
     }
-    matches!(state, ConnectionState::Connected)
+    matches!(state, ConnectionState::Connected(_))
 }
 
 fn set_pressed(widget: &gtk::Widget, pressed: bool) {

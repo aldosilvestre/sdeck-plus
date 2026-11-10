@@ -206,7 +206,7 @@ fn assert_header_connection_states() {
             "HID read ended: gone",
         ),
         (
-            ConnectionState::Connected,
+            ConnectionState::Connected(&sdeck_plus::device_model::PLUS),
             "Connected",
             "status-online",
             "Stream Deck + connected — keys, dials and touch strip are live",
@@ -215,7 +215,7 @@ fn assert_header_connection_states() {
     ] {
         assert_eq!(
             show_connection_state(status, detail, &state),
-            state == ConnectionState::Connected
+            matches!(state, ConnectionState::Connected(_))
         );
         assert_state(badge, tone, text, tooltip);
     }
