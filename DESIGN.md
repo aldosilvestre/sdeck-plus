@@ -235,12 +235,14 @@ drawn because they have no preview control.
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
 is the device card alone (426x414 for the +, 556x456 for the + XL) and
-`main-window-xl.png` is the whole 1000x700 window previewing the + XL. They are
-written by the documentation screenshot generator, which iterates
-`DeviceModel::supported()`, so a model that becomes supported gets its image
-without editing the generator. The + XL images are renders of the preview for a
-model that has been validated only with a simulated device; they say nothing
-about hardware behavior.
+`main-window-xl.png` is the 1000x700 window content configuring the + XL (no
+selector: one model). `main-window-two-devices.png` (1000x700, scrolled to the
+header) shows the "Current" selector with a simulated + and + XL connected through
+the real hub. They are written by the documentation screenshot generator, which
+iterates `DeviceModel::supported()` for the per-model images, so a model that
+becomes supported gets its image without editing the generator. The + XL images
+and the two-device image come from simulated devices only; they say nothing about
+hardware behavior.
 
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps

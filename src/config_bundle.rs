@@ -599,7 +599,7 @@ pub fn import_for(
     };
     if bundle_model.id != model.id {
         return Err(invalid(format!(
-            "This configuration is for {}; connect or preview that model to import it.",
+            "This configuration is for {}; connect that model to import it.",
             bundle_model.name
         )));
     }

@@ -4961,6 +4961,7 @@ mod tests {
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
+    mod simulated_device_tests;
     mod timer_countdown_tests;
     mod timer_notification_tests;
     mod touchscreen_tests;

@@ -170,7 +170,7 @@
         <li><a href="#devices">Supported devices</a>
           <ol>
             <li><a href="#device-models">Models and validation status</a></li>
-            <li><a href="#device-detection">Detection and Preview as</a></li>
+            <li><a href="#device-detection">Detection and several devices</a></li>
             <li><a href="#device-data">Data per model</a></li>
             <li><a href="#device-registry">Future models</a></li>
           </ol>
@@ -190,6 +190,7 @@
           <ol>
             <li><a href="#dev-checks">Checks</a></li>
             <li><a href="#dev-screenshots">Documentation screenshots</a></li>
+            <li><a href="#dev-simulated">Simulated devices</a></li>
             <li><a href="#dev-device-checks">Real-device checks</a></li>
             <li><a href="#dev-event-api">In-process event API</a></li>
             <li><a href="#dev-code">Code organization</a></li>
@@ -277,7 +278,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
         <header>
           <p class="eyebrow">Hardware</p>
           <h2 id="devices-title">Supported devices</h2>
-          <p>sdeck-plus drives the Elgato Stream Deck + and the Stream Deck + XL, one device at a time. The window, stores, editor and previews follow the model in use.</p>
+          <p>sdeck-plus drives the Elgato Stream Deck + and the Stream Deck + XL, and several can be connected at the same time. Each model has its own window content, stores, editor and previews; the window shows the one you are configuring. Neither the XL nor running several devices at once has been tested on real hardware (see below).</p>
         </header>
 
         <div class="doc-group" id="device-models" style="--c: var(--fam-media)">
@@ -298,31 +299,52 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Stream Deck + XL: the simulator checks the report formats against that documentation, not the hardware. Details that the documentation leaves open are separate fields in the registry,
                  so they can be corrected once a real unit is available.</p>
               <figure style="margin: 1rem 0 0">
-                <a href="screenshots/main-window-xl.png"><img width="1000" height="700" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window previewing the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
-                <figcaption>The window previewing the Stream Deck + XL (rendered with no device).</figcaption>
+                <a href="screenshots/main-window-xl.png"><img width="1000" height="700" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window configuring the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
+                <figcaption>The window configuring the Stream Deck + XL (rendered by the screenshot generator, with no device).</figcaption>
               </figure>
             </article>
           </div>
         </div>
 
         <div class="doc-group" id="device-detection" style="--c: var(--fam-system)">
-          <h3>Detection and Preview as</h3>
+          <h3>Detection and several devices</h3>
           <div class="cards">
             <article class="card">
               <h4>Detection</h4>
-              <p>The app looks for vendor id <code>0x0FD9</code> with product id <code>0x0084</code> (Stream Deck +) or <code>0x00C6</code> (Stream Deck + XL) and uses the first match; only one device is driven at a time.
-                 The header names the connected model. If you unplug one model and plug in the other while the app runs, it swaps stores, preview and editor without restarting.</p>
-              <p>Other Elgato models are never matched, even if plugged in.</p>
+              <p>The app looks for vendor id <code>0x0FD9</code> with product id <code>0x0084</code> (Stream Deck +) or <code>0x00C6</code> (Stream Deck + XL). Every match is driven, so you can plug in both models, or two of one model.
+                 Other Elgato models are never matched, even if plugged in. The header lists what is connected, for example "Stream Deck + and Stream Deck + XL connected".</p>
             </article>
             <article class="card">
-              <h4>Preview as</h4>
-              <p>The selector in the header chooses which model the window shows while no device is connected, so you can prepare either model's configuration without hardware. With nothing connected the app shows the last model used.
-                 While a device is connected the selector is disabled (tooltip: "Using the connected Stream Deck + XL") and the window follows the device. Changing the preview asks before discarding an unsaved draft and sends nothing to a device.</p>
+              <h4>Each device runs its own configuration</h4>
+              <p>One hub serves all connected devices. Each model has its own session: its pictures, its key, dial and touch actions, its timers and its profiles. A device receives only the pictures of its own model, and input on one never runs the other's actions.</p>
+            </article>
+            <article class="card">
+              <h4>The Current selector</h4>
+              <p><strong>Current</strong> appears in the header only while two or more different models are connected; choosing a model makes the window show and edit that model. With one model, or none, there is no selector and the window looks the same as with a single device; with no device it shows the last model you used.
+                 The selector only chooses what the window edits: every connected device keeps running. Switching never asks about unsaved edits, because the other model keeps its draft.</p>
+              <p>With one model connected the window shows it. When several are, it shows the last model used if it is connected, else the first connected one (Stream Deck +, then + XL). Your choice stays until that model has no device left. The last model shown is remembered for the next start.</p>
+            </article>
+            <article class="card">
+              <h4>Two devices of one model</h4>
+              <p>Two Stream Decks of the same model share that model's profiles and mirror each other: same pictures, same active page and timers, and a key on either runs the same action. Brightness and sleep follow the model.</p>
+            </article>
+            <article class="card">
+              <h4>Unplugging</h4>
+              <p>Unplugging one device leaves the others running. If it was the last device of the model on screen, the window shows the remaining model; with none left it keeps showing the current one and reconnecting retries automatically. Quitting clears every connected device.
+                 The OBS menu and <strong>Test action</strong> act on the model shown; focus-based profile switching reaches every model.</p>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Running several devices at once has been validated only with simulated devices, through the real hub into the real window. It has not been tested with two physical Stream Decks, and the Stream Deck + XL has not been tested on real hardware; only the Stream Deck + alone has.</p>
             </article>
             <article class="card wide">
               <h4>Preview of each model</h4>
-              <p>The preview draws the shown model: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials.
+              <p>The window draws the shown model: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials.
                  Control pickers, accessible names and keyboard order describe the same model.</p>
+              <figure style="margin: 1rem 0 0">
+                <a href="screenshots/main-window-two-devices.png"><img width="1000" height="700" src="screenshots/main-window-two-devices.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window with a Stream Deck + and a Stream Deck + XL connected: the header shows the Current selector set to Stream Deck +"></a>
+                <figcaption>Two models connected: the header shows <strong>Current</strong> (simulated devices; not tested on two real units).</figcaption>
+              </figure>
             </article>
           </div>
         </div>
@@ -338,7 +360,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>Backups</h4>
-              <p>Export format 5 records the model. Importing a bundle made for the other model is refused with "This configuration is for Stream Deck + XL; connect or preview that model to import it." (or "...for Stream Deck +...").
+              <p>Export format 5 records the model. Importing a bundle made for the other model is refused with "This configuration is for Stream Deck + XL; connect that model to import it." (or "...for Stream Deck +...").
                  Import into the + keeps the <code>devices/</code> folder. Format 5 bundles cannot be imported by older versions of sdeck-plus.</p>
             </article>
           </div>
@@ -810,7 +832,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-screenshots">
               <h4>Documentation screenshots</h4>
               <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
-                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> (1000 × 700):</p>
+                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (both 1000 × 700; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
   cargo test --offline --bin sdeck-plus \
@@ -820,9 +842,19 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
               <p>The model previews alone can be written with <code>STREAMDECK_PREVIEW_PNG_DIR=&lt;dir&gt;</code> set for the test
                  <code>tests::preview_model_tests::previews_render_to_images_for_every_supported_model_without_a_device</code>; the list of models comes from the registry, so a newly supported model gets its image automatically.</p>
             </article>
+            <article class="card wide" id="dev-simulated">
+              <h4>Simulated devices</h4>
+              <p>A manual launcher opens the real window over scratch directories, with simulated Stream Decks plugged into the real hub, so no hardware, real data or network is involved. It is ignored by the test suite and runs until you close the window.
+                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
+            </article>
             <article class="card wide" id="dev-device-checks">
               <h4>Opt-in real-device checks</h4>
-              <p>These need a real device and have been run on a Stream Deck + only; nothing was run on a Stream Deck + XL. Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
+              <p>These need a real device and have been run on a single Stream Deck + only; nothing was run on a Stream Deck + XL or with two devices connected. Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
                  brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture.</p>
               <div class="code-block">
 <pre><code>cargo run --offline --example verify_streamdeck -- --device-controls

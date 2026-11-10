@@ -369,12 +369,12 @@ fn a_bundle_for_another_model_is_refused_before_anything_is_staged() {
     let error = config_bundle::import_for(&xl_bundle, &plus, &PLUS).unwrap_err();
     assert_eq!(
         error.to_string(),
-        "This configuration is for Stream Deck + XL; connect or preview that model to import it."
+        "This configuration is for Stream Deck + XL; connect that model to import it."
     );
     let error = config_bundle::import_for(&plus_bundle, &xl, &PLUS_XL).unwrap_err();
     assert_eq!(
         error.to_string(),
-        "This configuration is for Stream Deck +; connect or preview that model to import it."
+        "This configuration is for Stream Deck +; connect that model to import it."
     );
     assert_eq!(
         tree(&f.0),

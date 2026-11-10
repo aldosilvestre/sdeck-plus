@@ -17,10 +17,14 @@ Studio actions.
 | Stream Deck + | 8 keys, 4 dials, touch strip with 4 sections | Developed and tested on this hardware. |
 | Stream Deck + XL | 36 keys, 6 dials, touch strip with 6 sections | Implemented from [Elgato's HID documentation](https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl) and validated with a simulated device; real-hardware validation is pending. |
 
-The app detects the connected model and shows its preview; **Preview as** lets
-you configure either model without a device, and each model keeps its own
-profiles. Other Elgato models are prepared in the model registry but are not
-supported yet; see [DEVICES.md](DEVICES.md).
+The app detects the connected models and shows the preview of the one you are
+configuring; each model keeps its own profiles. Several Stream Decks can be
+connected at once and each runs its own configuration live. A **Current**
+selector in the header appears only while two or more different models are
+connected and chooses which one the window edits. Simultaneous operation, like
+the XL, has been validated only with simulated devices, not on real hardware.
+Other Elgato models are prepared in the model registry but are not supported
+yet; see [DEVICES.md](DEVICES.md).
 
 **Website and full documentation:** <https://aldosilvestre.github.io/sdeck-plus/>
 
@@ -136,7 +140,8 @@ for the full list and installer options.
 - [Features](https://aldosilvestre.github.io/sdeck-plus/#features) and
   [Actions](https://aldosilvestre.github.io/sdeck-plus/#actions): what each part does.
 - [Supported devices](https://aldosilvestre.github.io/sdeck-plus/docs.html#devices): models,
-  detection, **Preview as**, per-model data and validation status; [DEVICES.md](DEVICES.md)
+  detection, several devices at once and the **Current** selector, per-model data and
+  validation status; [DEVICES.md](DEVICES.md)
   explains how models are added.
 - [Configuration](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration): controls,
   touchscreen pages, profiles, artwork, OBS setup, data files, tray and startup.

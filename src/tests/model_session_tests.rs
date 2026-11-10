@@ -732,7 +732,7 @@ fn an_xl_session_imports_an_xl_bundle_and_refuses_a_plus_bundle() {
         assert!(runtime
             .status
             .text()
-            .contains("Stream Deck +; connect or preview that model"));
+            .contains("Stream Deck +; connect that model"));
         assert!(runtime.editing_enabled());
 
         // The XL bundle imports into the XL root and reloads there.
@@ -802,7 +802,7 @@ fn a_plus_session_refuses_an_xl_bundle_and_keeps_its_files() {
                 .starts_with("Could not import configuration:")
         });
         assert!(runtime.status.text().contains(
-            "This configuration is for Stream Deck + XL; connect or preview that model to import it."
+            "This configuration is for Stream Deck + XL; connect that model to import it."
         ));
         assert_eq!(tree(&h.roots.data_dir), before);
         assert_eq!(

@@ -24,11 +24,39 @@ information window) has a size but no sections.
 
 ## Support status
 
-- `Supported`: detected by discovery, driven, offered in "Preview as". Today
+- `Supported`: detected by discovery, driven and offered in the "Current" selector
+  while connected. Today
   exactly `plus` and `plus-xl` (pinned by a test).
 - `Planned`: described from Elgato's documentation. Discovery never matches its
   product ids (`by_pid` / `by_pid_supported` skip it; `by_pid_any` finds it for
   information only). Nothing is created on disk for it unless a store is opened.
+
+## Several devices at once
+
+The HID hub drives every connected supported device, one worker per device
+(`DeviceKey { path, serial, model }`), and the window keeps one complete session
+per **model**. Consequences for a new model:
+
+- Profiles, artwork, brightness and sleep belong to the model, so two units of
+  one model mirror each other; nothing is per unit.
+- Artwork and controls are addressed to a model and fanned out to every device of
+  it; a device only ever receives its own model's pictures.
+- The header "Current" selector lists the connected supported models and appears
+  only with two or more. It needs no per-model code: entries come from
+  `DeviceModel::supported()` filtered by what is connected.
+- Neither the + XL nor running several devices at once has been tested on real
+  hardware; both are validated with simulated devices (`event_api::test_support`).
+
+To try it without hardware, run the manual launcher, which plugs simulated devices
+into the real hub and opens the real window over scratch directories:
+
+```bash
+SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1
+```
+
+`SDECK_SIMULATE_MODEL` is a comma list of supported model ids (default `plus-xl`).
 
 ## Protocol families
 
@@ -130,8 +158,9 @@ were not opened):
 - Pedal, Studio, Mobile and the original 0x0060 have no HID documentation, so
   they have no entry.
 
-Today the Stream Deck + is the only hardware-tested model; the + XL is
-implemented from Elgato's HID documentation and validated with a simulator.
+Today the Stream Deck + is the only hardware-tested model, and only on its own;
+the + XL and several devices at once are implemented from Elgato's HID
+documentation and validated with a simulator.
 
 Never claim hardware testing without hardware. A simulator proves the wire
 format against our reading of the documentation, nothing more; docs must say

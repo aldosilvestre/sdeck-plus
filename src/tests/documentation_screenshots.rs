@@ -760,6 +760,7 @@ fn capture_documentation_screenshots() {
     drop(hardware_commands);
     window.destroy();
     capture_model_previews(&directory);
+    capture_two_device_window(&directory);
     settings.set_gtk_theme_name(original_theme.as_deref());
     settings.set_gtk_application_prefer_dark_theme(original_dark);
     settings.set_gtk_enable_animations(original_animations);
@@ -881,4 +882,49 @@ fn capture_model_previews(directory: &std::path::Path) {
             );
         }
     }
+}
+
+/// The window with a Stream Deck + and a + XL connected, so the header shows
+/// the "Current" selector. Both devices are simulated and run through the real
+/// hub, as in the two-device tests; nothing reads or writes real data.
+fn capture_two_device_window(directory: &std::path::Path) {
+    use super::two_device_tests::start_pair_with;
+    use sdeck_plus::desktop_actions::{DesktopAction, MediaCommand};
+    use sdeck_plus::device_model::{PLUS, PLUS_XL};
+
+    let Some(pair) = start_pair_with("documentation-two-devices", |roots| {
+        for model in [&PLUS, &PLUS_XL] {
+            let mut store = LayerStore::open_at_model(roots.root_for(model), model).unwrap();
+            for (key, command) in [
+                (3, MediaCommand::Mute),
+                (4, MediaCommand::Next),
+                (5, MediaCommand::PlayPause),
+            ] {
+                let action = Action::Feature(FeatureAction::Desktop(DesktopAction::Media(command)));
+                store.bind("Base", Trigger::KeyPress(key), action).unwrap();
+            }
+            store.persist().unwrap();
+        }
+    }) else {
+        return;
+    };
+    // A tiling compositor decides the window size; the content is pinned to the
+    // documented 1000 x 700 instead, as for the other model captures.
+    let content = pair.window.child().expect("the window content");
+    pair.window.set_child(gtk::Widget::NONE);
+    content.set_size_request(1000, 700);
+    let stage = gtk::Fixed::new();
+    stage.put(&content, 0.0, 0.0);
+    pair.window.set_child(Some(&stage));
+    pair.plug_both();
+    pair.window.present();
+    pair.settle();
+    // The 700 px page scrolls; show it from the header down.
+    let page = descendants::<gtk::ScrolledWindow>(&content)
+        .into_iter()
+        .next()
+        .expect("the page viewport");
+    page.vadjustment().set_value(0.0);
+    wait_for_frame(&content);
+    save(directory, &content, "main-window-two-devices");
 }
