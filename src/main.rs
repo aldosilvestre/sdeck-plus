@@ -38,6 +38,7 @@ mod tray_preference;
 mod tray_startup;
 mod ui;
 mod update_check;
+mod update_install;
 mod update_preference;
 // Layout containers live beside ui.rs but are mounted here, because the
 // ui_showcase example includes ui.rs by path.
@@ -185,7 +186,36 @@ fn main() -> glib::ExitCode {
             }
         }
     });
-    app.run()
+    let restart = Rc::new(Cell::new(false));
+    let requested = restart.clone();
+    let action = gtk::gio::SimpleAction::new("restart-after-update", None);
+    action.set_enabled(false);
+    action.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            requested.set(true);
+            app.quit();
+        }
+    ));
+    app.add_action(&action);
+    let executable = std::env::current_exe();
+    update_install::after_run(
+        &restart,
+        move || {
+            let result = app.run();
+            // Shutdown handlers have joined HID and update workers. Drop the application
+            // before launching, so the replacement cannot attach to this bus owner.
+            drop(app);
+            result
+        },
+        || {
+            let result = executable.and_then(|path| update_install::spawn_replacement(&path));
+            if let Err(error) = result {
+                eprintln!("Could not restart sdeck-plus: {error}");
+            }
+        },
+    )
 }
 
 #[derive(Default)]
@@ -4393,6 +4423,7 @@ mod tests {
     mod tray_startup;
     mod ui_refresh_tests;
     mod update_check;
+    mod update_install;
 
     include!("button_text_editor_tests.rs");
 

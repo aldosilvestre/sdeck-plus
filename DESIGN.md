@@ -505,6 +505,30 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   process. Manual checks bypass that interval, never the single-flight guard.
   The saved toggle changes behavior only after a successful save; malformed
   preferences remain untouched, disable writes and show an inline explanation.
+  Help shows **Update** only for an available release when the canonical running
+  executable is `$HOME/.local/bin/sdeck-plus` and HOME is absolute. Other copies
+  show guidance instead: `/usr` copies use their package manager; checkouts,
+  custom prefixes and unknown origins must re-run the documented install command.
+  Update explicitly downloads the detected tag's `install.sh` from the fixed
+  upstream GitHub URL (HTTPS, 30 seconds, 512 KiB), then runs it as a file with
+  system bash and `--tag vX.Y.Z`; it is never piped into a shell. The private
+  script directory is removed on every exit path. Only essential PATH, HOME,
+  XDG and locale environment entries survive; display and installer override
+  variables do not. The owned worker captures the final 4 KiB of merged output
+  and allows 30 minutes overall. While **Updating...**, Update and both check
+  controls are disabled; repeated automatic/manual requests do nothing.
+  Failure reads **Update failed**, with the real nonzero exit code and output
+  tail when available; launch errors and deadlines explain the failure instead.
+  Success reads **Updated to vX.Y.Z. Restart to use it.** and reveals the
+  keyboard-operable **Restart now** button. No automatic restart or popup occurs.
+  Restart requests normal quit, joins workers and releases HID and the
+  GApplication bus name before spawning the same executable after `app.run()`
+  returns, with null stdio and its own process group; no `--background` is added.
+  Existing close behavior is unchanged: hide-to-tray keeps updating; Quit sends
+  TERM to the owned process group, allows 10 seconds for installer cleanup,
+  then KILLs remaining processes and joins before exit. Result callbacks hold
+  weak references and cannot render into shutdown widgets. All controls use
+  shared native spacing, visible English labels and existing theme tokens.
 - **Tray close preference:** Keep running when window closes is checked by
   default. Checked closes hide configuration and retain device monitoring;
   unchecked closes quit the application and its workers. Persist the choice,

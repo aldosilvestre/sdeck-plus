@@ -210,6 +210,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>A published GitHub release tagged <code>vX.Y.Z</code> is required. Release mode needs <code>curl</code> and GNU <code>tar</code>, downloads the latest published release and builds it locally.
                  Downloaded sources, build output and a temporary <code>CARGO_HOME</code> live in one installer-owned temporary directory, removed on success, failure or interruption.
                  Only the binary, launcher, icon and license are installed; existing Cargo caches and checkouts are never removed.</p>
+              <p>To install a particular release, use <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --tag vX.Y.Z</code>
+                 (also accepts <code>--tag=vX.Y.Z</code>). This skips the latest-release lookup and downloads exactly that tag's archive with the same safety limits and cleanup.
+                 Invalid, missing or repeated tags exit with a usage error before downloading or creating files. The option is rejected in checkout mode.</p>
               <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">
 <pre><code>cargo run</code></pre>
@@ -648,6 +651,24 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  no more than once per six hours in the running process. Turn it off to prevent automatic network checks; manual checks still work.
                  This check contacts <code>api.github.com</code> only for release metadata, without telemetry. It uses curl with an eight-second deadline
                  and a 256 KiB response limit. Offline or failed requests show <strong>Could not check for updates</strong> in Help without interrupting work.</p>
+              <p><strong>Update</strong> appears only after a newer release is found and only when the running executable resolves to
+                 <code>$HOME/.local/bin/sdeck-plus</code>, the installer's default location. It never runs on startup, when inspecting settings or when saving bindings.
+                 A copy under <code>/usr</code>, including pacman/AUR packages, shows <strong>Installed by your package manager. Update it with your package manager.</strong>
+                 Checkouts, custom prefixes, symlinks resolving elsewhere and unknown origins show guidance to re-run the documented install command; they have no Update button.</p>
+              <p>Pressing <strong>Update</strong> downloads <code>https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/vX.Y.Z/install.sh</code>
+                 for the detected stable tag with system curl (HTTPS only, 30-second download deadline, 512 KiB maximum).
+                 It runs the downloaded file with system bash and <code>--tag vX.Y.Z</code>, never a shell command string or a pipe.
+                 The release installer builds exactly that version locally with the usual prerequisites and archive safety checks.
+                 The downloaded script lives in a private temporary directory removed on success, failure or cancellation.</p>
+              <p>The installer runs on an owned worker, not the interface thread, with null stdin and only PATH, HOME, selected XDG and locale variables inherited.
+                 Display, Cargo customization, shell startup and installer test/URL override variables are not inherited. No telemetry is added.
+                 One update can run at a time; <strong>Update</strong> and both check controls are disabled while updating.
+                 The overall deadline is 30 minutes. Failures show <strong>Update failed</strong>, the real nonzero exit code when available and the last 4 KiB of output;
+                 download, launch and timeout errors are also reported. Closing to the tray keeps the update running. Quitting sends TERM to the process group,
+                 waits up to 10 seconds for cleanup, then KILLs remaining processes and joins the worker.</p>
+              <p>After success, Help reads <strong>Updated to vX.Y.Z. Restart to use it.</strong> Select <strong>Restart now</strong> when ready.
+                 Restart is never automatic: the old instance quits normally, releases the device and application bus name, and only then launches the same executable
+                 as a normal launch (no forced background flag). A failed replacement launch is printed to stderr.</p>
               <p>The setting lives in <code>$XDG_CONFIG_HOME/sdeck-plus/updates.json</code> (or <code>~/.config/sdeck-plus/updates.json</code>).
                  No release data is saved. An invalid preference is preserved, automatic checking is disabled and Help shows the error;
                  repair the file and restart before changing it. A failed save leaves the previous setting active.</p>

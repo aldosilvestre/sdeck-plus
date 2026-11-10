@@ -149,6 +149,7 @@ impl Gate {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Panel {
     pub(crate) body: gtk::Box,
     pub(crate) status: gtk::Label,
@@ -156,6 +157,9 @@ pub(crate) struct Panel {
     pub(crate) automatic: gtk::CheckButton,
     pub(crate) indicator: gtk::Button,
     error: gtk::Label,
+    pub(crate) update: gtk::Button,
+    pub(crate) restart: gtk::Button,
+    pub(crate) guidance: gtk::Label,
 }
 impl Panel {
     pub(crate) fn new() -> Self {
@@ -174,6 +178,16 @@ impl Panel {
         body.append(&manual);
         body.append(&automatic);
         body.append(&error);
+        let update = gtk::Button::with_label("Update");
+        update.set_tooltip_text(Some("Download and run the release installer from GitHub"));
+        update.set_visible(false);
+        let restart = gtk::Button::with_label("Restart now");
+        restart.set_visible(false);
+        let guidance = crate::ui::helper("");
+        guidance.set_visible(false);
+        body.append(&guidance);
+        body.append(&update);
+        body.append(&restart);
         let indicator = gtk::Button::new();
         indicator.add_css_class("update-indicator");
         indicator.set_visible(false);
@@ -184,6 +198,9 @@ impl Panel {
             automatic,
             indicator,
             error,
+            update,
+            restart,
+            guidance,
         }
     }
     pub(crate) fn render(&self, state: &UpdateState) {
@@ -203,6 +220,43 @@ impl Panel {
             self.indicator.set_visible(true);
         } else if *state == UpdateState::UpToDate {
             self.indicator.set_visible(false);
+        }
+    }
+    pub(crate) fn render_install(
+        &self,
+        check: &UpdateState,
+        state: &crate::update_install::InstallState,
+        origin: crate::update_install::Origin,
+    ) {
+        use crate::update_install::{InstallState, Origin};
+        self.render(check);
+        let running = *state == InstallState::Running;
+        self.update.set_visible(
+            origin == Origin::Installer
+                && (matches!(check, UpdateState::Available(_)) || running)
+                && !matches!(state, InstallState::Succeeded(_)),
+        );
+        self.update
+            .set_sensitive(crate::update_install::can_begin(check, state, origin));
+        self.restart
+            .set_visible(matches!(state, InstallState::Succeeded(_)));
+        self.manual
+            .set_sensitive(!running && *check != UpdateState::Checking);
+        self.automatic.set_sensitive(!running);
+        let guidance = match origin {
+            Origin::Installer => "Updates download and run the release installer from GitHub. Restart is your choice after installation.",
+            Origin::Package => "Installed by your package manager. Update it with your package manager.",
+            Origin::Other => "This copy was not installed by the sdeck-plus installer. Re-run the install command from the documentation to update.",
+        };
+        self.guidance.set_text(guidance);
+        self.guidance.set_visible(true);
+        match state {
+            InstallState::Running => self.status.set_text("Updating..."),
+            InstallState::Succeeded(tag) => self
+                .status
+                .set_text(&format!("Updated to {tag}. Restart to use it.")),
+            InstallState::Failed(error) => self.status.set_text(error),
+            InstallState::Idle => {}
         }
     }
     fn preference_error(&self, error: &str) {
@@ -262,14 +316,39 @@ pub(crate) struct Controller {
     writable: Cell<bool>,
     epoch: Instant,
     worker: RefCell<Option<Worker>>,
+    installer: RefCell<Option<crate::update_install::Worker>>,
+    installation: RefCell<crate::update_install::InstallState>,
+    origin: crate::update_install::Origin,
 }
 impl Controller {
-    /// Stable state seam for the subsequent Help update/install action.
+    pub(crate) fn new(
+        panel: Panel,
+        preference: (Option<PathBuf>, bool, bool),
+        worker: Option<Worker>,
+        origin: crate::update_install::Origin,
+    ) -> Rc<Self> {
+        let (path, enabled, writable) = preference;
+        Rc::new(Self {
+            panel,
+            state: RefCell::new(UpdateState::Idle),
+            gate: RefCell::new(Gate::default()),
+            enabled: Cell::new(enabled),
+            path,
+            writable: Cell::new(writable),
+            epoch: Instant::now(),
+            worker: RefCell::new(worker),
+            installer: RefCell::new(None),
+            installation: RefCell::new(crate::update_install::InstallState::Idle),
+            origin,
+        })
+    }
+    /// Current release-check state; installation has its own single-flight state.
     pub(crate) fn state(&self) -> UpdateState {
         self.state.borrow().clone()
     }
     pub(crate) fn request(&self, manual: bool) {
-        if self.worker.borrow().is_none()
+        if *self.installation.borrow() == crate::update_install::InstallState::Running
+            || self.worker.borrow().is_none()
             || !self
                 .gate
                 .borrow_mut()
@@ -278,7 +357,7 @@ impl Controller {
             return;
         }
         self.state.replace(UpdateState::Checking);
-        self.panel.render(&self.state());
+        self.render();
         let sent = self
             .worker
             .borrow()
@@ -288,10 +367,76 @@ impl Controller {
             self.complete(UpdateState::Unavailable);
         }
     }
-    fn complete(&self, result: UpdateState) {
+    pub(crate) fn complete(&self, result: UpdateState) {
         self.gate.borrow_mut().complete(self.epoch.elapsed());
-        self.panel.render(&result);
         self.state.replace(result);
+        self.render();
+    }
+    pub(crate) fn shutdown(&self) {
+        self.installer.borrow_mut().take();
+        self.worker.borrow_mut().take();
+    }
+    fn render(&self) {
+        self.panel
+            .render_install(&self.state(), &self.installation.borrow(), self.origin);
+        if !self.writable.get() {
+            self.panel.automatic.set_sensitive(false);
+        }
+    }
+    fn begin_install(self: &Rc<Self>) {
+        self.begin_install_with(crate::update_install::Worker::start);
+    }
+    pub(crate) fn begin_install_with(
+        self: &Rc<Self>,
+        start: impl FnOnce(
+            String,
+        ) -> io::Result<(
+            crate::update_install::Worker,
+            async_channel::Receiver<Result<(), String>>,
+        )>,
+    ) {
+        if !crate::update_install::can_begin(
+            &self.state(),
+            &self.installation.borrow(),
+            self.origin,
+        ) {
+            return;
+        }
+        let UpdateState::Available(tag) = self.state() else {
+            return;
+        };
+        self.installation
+            .replace(crate::update_install::InstallState::Running);
+        self.render();
+        match start(tag.clone()) {
+            Ok((worker, received)) => {
+                self.installer.replace(Some(worker));
+                let weak = Rc::downgrade(self);
+                glib::MainContext::default().spawn_local(async move {
+                    if let Ok(result) = received.recv().await {
+                        if let Some(c) = weak.upgrade() {
+                            // Shutdown takes the worker first; never touch destroyed widgets.
+                            if c.installer.borrow().is_none() {
+                                return;
+                            }
+                            c.installer.borrow_mut().take();
+                            c.installation.replace(match result {
+                                Ok(()) => crate::update_install::InstallState::Succeeded(tag),
+                                Err(error) => crate::update_install::InstallState::Failed(error),
+                            });
+                            c.render();
+                        }
+                    }
+                });
+            }
+            Err(error) => {
+                self.installation
+                    .replace(crate::update_install::InstallState::Failed(format!(
+                        "Update failed: {error}"
+                    )));
+                self.render();
+            }
+        }
     }
 }
 
@@ -319,16 +464,36 @@ pub(crate) fn install(
             (None, received)
         }
     };
-    let controller = Rc::new(Controller {
+    let controller = Controller::new(
         panel,
-        state: RefCell::new(UpdateState::Idle),
-        gate: RefCell::new(Gate::default()),
-        enabled: Cell::new(enabled),
-        path,
-        writable: Cell::new(writable),
-        epoch: Instant::now(),
-        worker: RefCell::new(worker),
-    });
+        (path, enabled, writable),
+        worker,
+        crate::update_install::current_origin(),
+    );
+    controller.render();
+    controller.panel.update.connect_clicked(glib::clone!(
+        #[weak]
+        controller,
+        move |_| controller.begin_install()
+    ));
+    controller.panel.restart.connect_clicked(glib::clone!(
+        #[weak]
+        controller,
+        #[weak]
+        app,
+        move |_| {
+            let flag = Cell::new(false);
+            if crate::update_install::request_restart(&controller.installation.borrow(), &flag) {
+                if let Some(action) = app
+                    .lookup_action("restart-after-update")
+                    .and_then(|a| a.downcast::<gio::SimpleAction>().ok())
+                {
+                    action.set_enabled(true);
+                    action.activate(None);
+                }
+            }
+        }
+    ));
     controller.panel.manual.connect_clicked(glib::clone!(
         #[weak]
         controller,
@@ -377,7 +542,7 @@ pub(crate) fn install(
     let shutdown = controller.clone();
     app.connect_shutdown(move |_| {
         task.abort();
-        shutdown.worker.borrow_mut().take();
+        shutdown.shutdown();
     });
     controller
 }

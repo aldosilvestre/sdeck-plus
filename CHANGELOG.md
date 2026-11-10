@@ -8,12 +8,24 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ### Changed
 
+- **Explicit updates from Help.** Default per-user installations now offer Update
+  for a detected stable release. The app downloads that tag's installer over
+  bounded HTTPS and runs it as a file on an owned worker with a clean environment
+  and a pinned `--tag` argument. Checks and duplicate updates are blocked while
+  running; failures report the real exit code and bounded output. Quit terminates
+  and joins the process group, allowing ten seconds for cleanup. Success offers
+  Restart now; the replacement starts only after normal shutdown releases HID
+  and the application bus name. Package-manager, checkout and unknown copies
+  show guidance instead. Nothing installs or restarts automatically.
+  The standalone installer accepts `--tag vX.Y.Z` or `--tag=vX.Y.Z` in release
+  mode only; its default latest-release and checkout behavior remain unchanged.
+
 - **Release update indicator.** Help now includes Updates with a manual check,
   status and a saved automatic-check setting (on by default). A newer stable
   GitHub release shows a text indicator beside the connection badge. Checks
   run on an owned worker with bounded HTTPS responses; automatic checks are
   suppressed for six hours after completion and can be disabled. Invalid
-  preferences are preserved. No installer runs and no release data is saved.
+  preferences are preserved. Checking never runs an installer and no release data is saved.
 
 - **Install without a checkout.** Run
   `curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash`

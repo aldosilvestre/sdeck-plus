@@ -64,6 +64,17 @@ A published GitHub release tagged `vX.Y.Z` is required. With `curl` and GNU
 `Cargo.lock`. Sources, build output and the temporary Cargo cache are removed
 on success, failure or interruption; only the binary, launcher, icon and license
 are installed. Existing Cargo caches and checkouts are not removed.
+To pin a release, append `-s -- --tag vX.Y.Z` to `bash` in the command above
+(or use `--tag=vX.Y.Z`); this option is rejected in checkout mode.
+
+For the default `~/.local/bin/sdeck-plus` installation, **Menu > Help > Updates**
+offers **Update** after finding a newer stable release. Only pressing it runs
+that release's installer from GitHub, pinned to the detected tag. After success,
+choose **Restart now** when ready; the old instance releases the device before
+its replacement starts. Packages under `/usr` (including pacman/AUR installs)
+must be updated with their package manager; checkouts and custom prefixes show
+manual-install guidance instead. See the [update documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration)
+for execution limits and failure handling.
 
 Uninstall using the same prefix/data settings; your configuration is kept:
 
