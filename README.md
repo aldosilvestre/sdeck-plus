@@ -59,7 +59,7 @@ Install for the current user (no root; files go under `~/.local`):
 curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash
 ```
 
-A published GitHub release tagged `vX.Y.Z` is required. With `curl` and GNU
+A published GitHub release tagged `vX.Y.Z` is required, and the `version` in that release's `Cargo.toml` must equal `X.Y.Z` (otherwise the installer stops before building). With `curl` and GNU
 `tar` available, the installer downloads the latest release and builds it with
 `Cargo.lock`. Sources, build output and the temporary Cargo cache are removed
 on success, failure or interruption; only the binary, launcher, icon and license

@@ -186,6 +186,8 @@ fn installer_environment_is_allowlisted_not_inherited() {
         "XDG_DATA_HOME",
         "XDG_CONFIG_HOME",
         "LANG",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
         "DISPLAY",
         "WAYLAND_DISPLAY",
         "PREFIX",
@@ -207,7 +209,14 @@ fn installer_environment_is_allowlisted_not_inherited() {
         env.iter()
             .map(|(key, _)| key.to_str().unwrap())
             .collect::<Vec<_>>(),
-        ["PATH", "HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "LANG"]
+        [
+            "PATH",
+            "HOME",
+            "XDG_DATA_HOME",
+            "XDG_CONFIG_HOME",
+            "LANG",
+            "RUSTUP_HOME"
+        ]
     );
 }
 

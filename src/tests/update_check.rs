@@ -251,3 +251,69 @@ fn drop_with_active_check_and_closed_receiver_joins() {
         .expect("shutdown must join an active worker after the GTK receiver closes");
     join.join().unwrap();
 }
+
+#[test]
+fn known_release_survives_later_retry_and_failure() {
+    run_gtk_test(|| {
+        use crate::update_check::{Controller, Panel};
+        let (called, calls) = mpsc::channel();
+        let (worker, results) = crate::update_check::Worker::start(move |_, _| {
+            called.send(()).unwrap();
+            Err(std::io::Error::other("offline"))
+        })
+        .unwrap();
+        let panel = Panel::new();
+        let c = Controller::new(
+            panel.clone(),
+            (None, true, true),
+            Some(worker),
+            crate::update_install::Origin::Installer,
+        );
+        let tag = UpdateState::Available("v9.0.0".into());
+        c.complete(tag.clone());
+        c.request(true);
+        calls.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(c.state(), tag);
+        assert!(panel.update.is_visible());
+        assert!(panel.indicator.is_visible());
+        assert!(panel.status.text().contains("v9.0.0"));
+        assert!(panel.status.text().contains("Checking"));
+        assert!(!panel.manual.is_sensitive());
+        c.complete(results.recv_blocking().unwrap());
+        assert_eq!(c.state(), tag);
+        assert!(panel.update.is_visible());
+        assert!(panel.indicator.is_visible());
+        assert!(panel.status.text().contains("v9.0.0"));
+        assert!(panel.status.text().contains("could not"));
+        assert!(panel.manual.is_sensitive());
+        c.complete(UpdateState::UpToDate);
+        assert_eq!(c.state(), UpdateState::UpToDate);
+        assert!(!panel.indicator.is_visible());
+        c.shutdown();
+    });
+}
+
+#[test]
+fn retain_known_release_transition_table() {
+    use crate::update_check::retain_known;
+    let old = UpdateState::Available("v1.0.0".into());
+    let newer = UpdateState::Available("v2.0.0".into());
+    for (previous, next, expected) in [
+        (&old, UpdateState::Checking, old.clone()),
+        (&old, UpdateState::Unavailable, old.clone()),
+        (&old, UpdateState::UpToDate, UpdateState::UpToDate),
+        (&old, newer.clone(), newer.clone()),
+        (
+            &UpdateState::UpToDate,
+            UpdateState::Checking,
+            UpdateState::Checking,
+        ),
+        (
+            &UpdateState::Idle,
+            UpdateState::Unavailable,
+            UpdateState::Unavailable,
+        ),
+    ] {
+        assert_eq!(retain_known(previous, next.clone()), expected, "{next:?}");
+    }
+}

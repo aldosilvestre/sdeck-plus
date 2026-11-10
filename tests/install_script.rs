@@ -93,7 +93,10 @@ printf 'binary' > "$dir/test-host/release/sdeck-plus"
         fs::set_permissions(self.path(&p), fs::Permissions::from_mode(0o755)).unwrap();
     }
     fn tree(&self, root: &str) {
-        self.write(&format!("{root}/Cargo.toml"), "fixture");
+        self.write(
+            &format!("{root}/Cargo.toml"),
+            "[package]\nname = \"sdeck-plus\"\nversion = \"1.2.3\"\nedition = \"2021\"\n",
+        );
         self.write(&format!("{root}/LICENSE"), "license");
         self.write(
             &format!("{root}/assets/icons/scalable/apps/sdeck-plus.svg"),
@@ -339,6 +342,23 @@ fn additional_invalid_release_tags_are_rejected() {
             String::from_utf8_lossy(&o.stderr),
             "Latest release must have a tag of the form vX.Y.Z. A published release is required.\n"
         );
+        s.no_install();
+    }
+}
+
+#[test]
+fn release_whose_cargo_version_differs_from_tag_is_rejected_before_building() {
+    for version in ["9.9.9", "1.2.30"] {
+        let s = Sandbox::new();
+        s.write(
+            "source/sdeck-plus-1.2.3/Cargo.toml",
+            &format!("[package]\nname = \"sdeck-plus\"\nversion = \"{version}\"\n"),
+        );
+        s.archive();
+        let o = s.run(false, &[], &[]);
+        assert_eq!(o.status.code(), Some(1), "{o:?}");
+        assert!(o.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
         s.no_install();
     }
 }

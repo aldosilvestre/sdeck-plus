@@ -263,6 +263,22 @@ if $release_mode; then
         printf 'Unsafe release archive: missing release source tree.\n' >&2
         exit 1
     fi
+    # The archive must be the tagged release: its package version is the tag's.
+    package_version=''
+    in_package=false
+    while IFS= read -r line || [[ -n $line ]]; do
+        if [[ $line =~ ^[[:space:]]*\[([^]]*)\][[:space:]]*$ ]]; then
+            [[ ${BASH_REMATCH[1]} == package ]] && in_package=true || in_package=false
+        elif $in_package &&
+             [[ $line =~ ^[[:space:]]*version[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
+            package_version=${BASH_REMATCH[1]}
+            break
+        fi
+    done < "$project_dir/Cargo.toml"
+    if [[ $package_version != "${tag#v}" ]]; then
+        printf 'Unsafe release archive: Cargo.toml version does not match %s.\n' "$tag" >&2
+        exit 1
+    fi
     # Keep rustup's existing toolchain/RUSTUP_HOME; isolate Cargo downloads and
     # build output without touching any caller-owned cache or target directory.
     export CARGO_HOME="$release_temporary/cargo-home"

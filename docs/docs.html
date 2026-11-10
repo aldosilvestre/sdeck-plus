@@ -207,7 +207,7 @@
 <pre><code>sudo pacman -S gtk4 base-devel
 curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash</code></pre>
               </div>
-              <p>A published GitHub release tagged <code>vX.Y.Z</code> is required. Release mode needs <code>curl</code> and GNU <code>tar</code>, downloads the latest published release and builds it locally.
+              <p>A published GitHub release tagged <code>vX.Y.Z</code> is required, and the <code>version</code> in that release's <code>Cargo.toml</code> must equal <code>X.Y.Z</code> (otherwise the installer stops before building). Release mode needs <code>curl</code> and GNU <code>tar</code>, downloads the latest published release and builds it locally.
                  Downloaded sources, build output and a temporary <code>CARGO_HOME</code> live in one installer-owned temporary directory, removed on success, failure or interruption.
                  Only the binary, launcher, icon and license are installed; existing Cargo caches and checkouts are never removed.</p>
               <p>To install a particular release, use <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --tag vX.Y.Z</code>

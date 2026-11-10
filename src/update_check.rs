@@ -25,6 +25,17 @@ pub(crate) enum UpdateState {
     Unavailable,
 }
 
+/// A known newer release is only replaced by a completed check, never by an
+/// in-flight or failed one.
+pub(crate) fn retain_known(previous: &UpdateState, next: UpdateState) -> UpdateState {
+    match (previous, &next) {
+        (UpdateState::Available(_), UpdateState::Checking | UpdateState::Unavailable) => {
+            previous.clone()
+        }
+        _ => next,
+    }
+}
+
 pub(crate) fn parse_tag(tag: &str) -> Option<(u64, u64, u64)> {
     let mut parts = tag.strip_prefix('v')?.split('.');
     let mut number = || {
@@ -310,6 +321,8 @@ impl Drop for Worker {
 pub(crate) struct Controller {
     panel: Panel,
     state: RefCell<UpdateState>,
+    // The latest check outcome, which may be Checking/Unavailable behind a retained release.
+    activity: RefCell<UpdateState>,
     gate: RefCell<Gate>,
     enabled: Cell<bool>,
     path: Option<PathBuf>,
@@ -331,6 +344,7 @@ impl Controller {
         Rc::new(Self {
             panel,
             state: RefCell::new(UpdateState::Idle),
+            activity: RefCell::new(UpdateState::Idle),
             gate: RefCell::new(Gate::default()),
             enabled: Cell::new(enabled),
             path,
@@ -356,7 +370,7 @@ impl Controller {
         {
             return;
         }
-        self.state.replace(UpdateState::Checking);
+        self.record(UpdateState::Checking);
         self.render();
         let sent = self
             .worker
@@ -369,8 +383,13 @@ impl Controller {
     }
     pub(crate) fn complete(&self, result: UpdateState) {
         self.gate.borrow_mut().complete(self.epoch.elapsed());
-        self.state.replace(result);
+        self.record(result);
         self.render();
+    }
+    fn record(&self, result: UpdateState) {
+        let kept = retain_known(&self.state.borrow(), result.clone());
+        self.state.replace(kept);
+        self.activity.replace(result);
     }
     pub(crate) fn shutdown(&self) {
         self.installer.borrow_mut().take();
@@ -379,6 +398,24 @@ impl Controller {
     fn render(&self) {
         self.panel
             .render_install(&self.state(), &self.installation.borrow(), self.origin);
+        let idle = *self.installation.borrow() == crate::update_install::InstallState::Idle;
+        if let (true, UpdateState::Available(tag), activity) =
+            (idle, self.state(), self.activity.borrow())
+        {
+            let note = match *activity {
+                UpdateState::Checking => Some("Checking again..."),
+                UpdateState::Unavailable => Some("could not check again"),
+                _ => None,
+            };
+            if let Some(note) = note {
+                self.panel
+                    .status
+                    .set_text(&format!("Update available: {tag} ({note})"));
+            }
+            self.panel
+                .manual
+                .set_sensitive(*activity != UpdateState::Checking);
+        }
         if !self.writable.get() {
             self.panel.automatic.set_sensitive(false);
         }
