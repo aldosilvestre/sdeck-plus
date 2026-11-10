@@ -456,23 +456,23 @@ fn emit(text: &str) -> Action {
 
 #[test]
 fn model_tables_describe_both_devices() {
-    assert_eq!((PLUS.keys(), PLUS.dials, PLUS.zones), (8, 4, 4));
-    assert_eq!((PLUS_XL.keys(), PLUS_XL.dials, PLUS_XL.zones), (36, 6, 6));
+    assert_eq!((PLUS.keys(), PLUS.dials, PLUS.zones()), (8, 4, 4));
+    assert_eq!((PLUS_XL.keys(), PLUS_XL.dials, PLUS_XL.zones()), (36, 6, 6));
     assert_eq!(
-        (PLUS.key_px, PLUS.strip_px, PLUS.zone_px),
+        (PLUS.key_px, PLUS.strip_px(), PLUS.zone_px()),
         (120, (800, 100), (200, 100))
     );
     assert_eq!(
-        (PLUS_XL.key_px, PLUS_XL.strip_px, PLUS_XL.zone_px),
+        (PLUS_XL.key_px, PLUS_XL.strip_px(), PLUS_XL.zone_px()),
         (112, (1200, 100), (200, 100))
     );
     assert_eq!(
         (PLUS.key_rotation, PLUS_XL.key_rotation),
         (Rotation::None, Rotation::Ccw90)
     );
-    assert_eq!(PLUS_XL.strip_rotation, Rotation::Ccw90);
+    assert_eq!(PLUS_XL.strip_rotation(), Rotation::Ccw90);
     assert_eq!((PLUS.id, PLUS_XL.id), ("plus", "plus-xl"));
-    assert_eq!((PLUS.pid, PLUS_XL.pid), (0x0084, 0x00C6));
+    assert_eq!((PLUS.pid(), PLUS_XL.pid()), (0x0084, 0x00C6));
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn models_are_found_by_pid_and_id() {
     assert_eq!(DeviceModel::by_id("plus-xl"), Some(&PLUS_XL));
     assert_eq!(DeviceModel::by_id("XL"), None);
     assert_eq!(DeviceModel::default_model(), &PLUS);
-    assert_eq!(DeviceModel::all().len(), 2);
+    assert_eq!(DeviceModel::supported().count(), 2);
 }
 
 #[test]

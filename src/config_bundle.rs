@@ -14,7 +14,7 @@
 use crate::{
     desktop_actions::DesktopAction,
     device_model::{DeviceModel, PLUS},
-    device_roots::DEVICES_DIR,
+    device_roots::{self, DEVICES_DIR},
     features::FeatureAction,
     layers::{Action, LayerStore},
     local_artwork::ArtworkStore,
@@ -558,8 +558,16 @@ fn validate_portable_audio(layers: &LayerStore, stage: &Path) -> io::Result<()> 
 ///
 /// Returns `None` for a first install. A failed install restores the old root;
 /// if rollback itself fails, the error names the retained recovery backup.
+///
+/// The model is the owner of `root` (a `devices/<id>` folder), or the Stream
+/// Deck + for any other folder, so this wrapper can never put a Stream Deck +
+/// bundle over another model's configuration.
 pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
-    import_for(source, root, &PLUS)
+    import_for(
+        source,
+        root,
+        device_roots::owner_of_root(root).unwrap_or(&PLUS),
+    )
 }
 
 /// [`import`] into a configuration root of `model`. Bundles of versions 1 to
@@ -573,6 +581,7 @@ pub fn import_for(
     root: &Path,
     model: &'static DeviceModel,
 ) -> io::Result<Option<PathBuf>> {
+    device_roots::ensure_root_fits(root, model)?;
     let bytes = read_regular(source, MAX_BUNDLE)?;
     let bundle: Bundle =
         serde_json::from_slice(&bytes).map_err(|_| invalid("invalid configuration bundle JSON"))?;

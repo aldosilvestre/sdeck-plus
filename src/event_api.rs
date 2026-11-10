@@ -39,6 +39,9 @@ mod sim_tests;
 mod sim_xl_probes;
 
 #[cfg(test)]
+mod sim_registry;
+
+#[cfg(test)]
 mod rotation_probes;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,7 +299,7 @@ fn first_supported(
         .enumerate()
         .find_map(|(position, (vendor, product))| {
             (vendor == VID)
-                .then(|| DeviceModel::by_pid(product))
+                .then(|| DeviceModel::by_pid_supported(product))
                 .flatten()
                 .map(|model| (position, model))
         })
@@ -315,9 +318,8 @@ fn discover_device(stop: &StopSignal) -> Result<(hidapi::HidDevice, &'static Dev
             .map(|device| (device.vendor_id(), device.product_id())),
     )
     .ok_or_else(|| {
-        let wanted = DeviceModel::all()
-            .iter()
-            .map(|model| format!("{} PID {:04X}", model.name, model.pid))
+        let wanted = DeviceModel::supported()
+            .map(|model| format!("{} PID {:04X}", model.name, model.pid()))
             .collect::<Vec<_>>()
             .join(" or ");
         format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
@@ -573,7 +575,23 @@ fn monitor_for<D: Device>(
             return;
         }
         let (device, model) = match discover(&stop) {
-            Ok(found) => found,
+            Ok((device, model)) => match model.ensure_protocol() {
+                Ok(()) => (device, model),
+                Err(error) => {
+                    // Never drive a family without a handler.
+                    drop(device);
+                    if sender
+                        .send(MonitorEvent::Connection(ConnectionState::Unavailable(
+                            error,
+                        )))
+                        .is_err()
+                        || !stop.wait(Duration::from_secs(2))
+                    {
+                        return;
+                    }
+                    continue;
+                }
+            },
             Err(error) => {
                 if sender
                     .send(MonitorEvent::Connection(ConnectionState::Unavailable(
@@ -678,11 +696,11 @@ fn blank_device(model: &DeviceModel, device: &impl Device) {
         Err(error) => eprintln!("Could not turn off Stream Deck displays: {error}"),
     }
     // Clearing the full strip also replaces all the overlaid touch zones.
-    for target in model
-        .key_numbers()
-        .map(ArtworkTarget::Keypad)
-        .chain(std::iter::once(ArtworkTarget::TouchStripBackground))
-    {
+    for target in model.key_numbers().map(ArtworkTarget::Keypad).chain(
+        model
+            .has_strip()
+            .then_some(ArtworkTarget::TouchStripBackground),
+    ) {
         let result =
             prepare_artwork_for(model, ArtworkCommand::Clear { target }).and_then(|reports| {
                 for report in reports {

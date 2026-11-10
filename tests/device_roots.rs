@@ -522,3 +522,48 @@ fn the_data_directory_helper_is_the_plus_root() {
         assert_eq!(data_root_in(&dir, &PLUS), dir);
     }
 }
+
+#[test]
+fn the_guard_resolves_dot_dot_and_symlink_aliases_of_a_model_root() {
+    let f = Fixture::new("alias");
+    let xl = data_root_in(&f.plus(), &PLUS_XL);
+    let mut layers = LayerStore::open_at_model(&xl, &PLUS_XL).unwrap();
+    layers
+        .bind("Base", Trigger::KeyPress(36), command())
+        .unwrap();
+    layers.persist().unwrap();
+    let before = tree(&xl);
+
+    let dotted = f.plus().join("devices/plus-xl/../plus-xl");
+    let alias = f.0.join("innocent");
+    std::os::unix::fs::symlink(&xl, &alias).unwrap();
+    let sideways = f.plus().join("devices/../devices/plus-xl");
+    for path in [&dotted, &alias, &sideways] {
+        assert_eq!(owner_of_root(path).map(|model| model.id), Some("plus-xl"));
+        assert!(ensure_root_fits(path, &PLUS).is_err(), "{}", path.display());
+        assert!(ensure_root_fits(path, &PLUS_XL).is_ok());
+        assert!(LayerStore::open_at_model(path, &PLUS).is_err());
+        assert!(LayerStore::open_at(path).is_err());
+        assert!(ArtworkStore::open_at_for_layer(path, None).is_err());
+    }
+    assert_eq!(tree(&xl), before);
+}
+
+#[test]
+fn the_model_less_import_cannot_overwrite_the_configuration_of_another_model() {
+    let f = Fixture::new("import-guard");
+    let plus = f.plus();
+    let xl = data_root_in(&plus, &PLUS_XL);
+    use_with_model_apis(&plus, &PLUS);
+    use_with_model_apis(&xl, &PLUS_XL);
+    let bundle = f.0.join("plus.sdeck-plus.json");
+    export_for_model(&plus, &bundle, &PLUS);
+    let before = tree(&xl);
+    let alias = f.0.join("alias");
+    std::os::unix::fs::symlink(&xl, &alias).unwrap();
+    for target in [&xl, &alias, &f.plus().join("devices/plus-xl/../plus-xl")] {
+        assert!(config_bundle::import(&bundle, target).is_err());
+    }
+    assert_eq!(tree(&xl), before);
+    config_bundle::import(&bundle, &f.0.join("fresh")).unwrap();
+}

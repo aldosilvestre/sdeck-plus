@@ -55,14 +55,16 @@ impl ArtworkTarget {
         model
             .key_numbers()
             .map(Self::Keypad)
-            .chain(std::iter::once(Self::TouchStripBackground))
-            .chain(model.zone_numbers().map(Self::EncoderZone))
+            .chain(Self::touch_for(model))
             .collect()
     }
 
     /// The Appearance picker destinations of `model`: the strip, then its sections.
     pub fn touch_for(model: &DeviceModel) -> Vec<Self> {
-        std::iter::once(Self::TouchStripBackground)
+        model
+            .has_strip()
+            .then_some(Self::TouchStripBackground)
+            .into_iter()
             .chain(model.zone_numbers().map(Self::EncoderZone))
             .collect()
     }
@@ -71,7 +73,7 @@ impl ArtworkTarget {
     pub fn is_valid_for(self, model: &DeviceModel) -> bool {
         match self {
             Self::Keypad(n) => model.is_valid_key(n),
-            Self::TouchStripBackground => true,
+            Self::TouchStripBackground => model.has_strip(),
             Self::EncoderZone(n) => model.is_valid_zone(n),
         }
     }
@@ -80,7 +82,9 @@ impl ArtworkTarget {
     pub fn id_in(self, model: &DeviceModel) -> String {
         match self {
             Self::Keypad(n) if self.is_valid_for(model) => format!("keypad-{n}"),
-            Self::TouchStripBackground => "touch-strip-background".into(),
+            Self::TouchStripBackground if self.is_valid_for(model) => {
+                "touch-strip-background".into()
+            }
             Self::EncoderZone(n) if self.is_valid_for(model) => format!("encoder-zone-{n}"),
             _ => String::new(),
         }

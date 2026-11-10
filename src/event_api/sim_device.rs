@@ -220,7 +220,8 @@ fn input_report(model: &DeviceModel, command: u8, payload: &[u8]) -> Vec<u8> {
 
 /// Key states, one byte per key, for the zero-based keys in `down`.
 pub(super) fn key_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
-    let mut states = vec![0; usize::from(model.keys())];
+    // Sensors a model appends after its keys are the last entries.
+    let mut states = vec![0; usize::from(model.key_inputs())];
     for key in down {
         states[*key] = 1;
     }

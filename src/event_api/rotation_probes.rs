@@ -119,7 +119,7 @@ fn partial_window_headers_are_logical_or_swapped_by_the_model_field() {
 #[test]
 fn plus_composition_is_never_rotated() {
     assert_eq!(
-        (PLUS.key_rotation, PLUS.strip_rotation, PLUS.key_flip_y),
+        (PLUS.key_rotation, PLUS.strip_rotation(), PLUS.key_flip_y),
         (Rotation::None, Rotation::None, false)
     );
 }

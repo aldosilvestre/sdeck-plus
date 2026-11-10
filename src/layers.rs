@@ -757,6 +757,11 @@ fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
         Trigger::ZoneTap(n) | Trigger::ZonePress(n) if !model.is_valid_zone(*n) => {
             Err(invalid("touch section out of range"))
         }
+        Trigger::TouchTap | Trigger::TouchPress | Trigger::TouchFlick | Trigger::TouchSwipe(_)
+            if !model.has_touch() =>
+        {
+            Err(invalid("this device has no touch strip"))
+        }
         Trigger::Rotation(_, 0) => Err(invalid("rotation ticks cannot be zero")),
         _ => Ok(()),
     }

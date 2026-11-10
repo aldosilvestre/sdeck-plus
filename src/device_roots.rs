@@ -8,7 +8,7 @@
 use crate::device_model::DeviceModel;
 use std::{
     io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 /// Directory, inside the Stream Deck + root, that holds the other models' roots.
@@ -45,13 +45,60 @@ pub fn data_root_in(plus_root: &Path, model: &DeviceModel) -> PathBuf {
 }
 
 /// The model whose private root is exactly `root`, if it is one.
+///
+/// `root` is compared both as written (with `.` and `..` folded away) and with
+/// every existing symlink resolved, so an alias of `devices/<id>` is still that
+/// model's root.
 pub fn owner_of_root(root: &Path) -> Option<&'static DeviceModel> {
+    owner_of_resolved(&fold(root)).or_else(|| owner_of_resolved(&resolve(root)))
+}
+
+fn owner_of_resolved(root: &Path) -> Option<&'static DeviceModel> {
     let id = root.file_name()?.to_str()?;
     let parent = root.parent()?.file_name()?;
     if parent != DEVICES_DIR {
         return None;
     }
     DeviceModel::by_id(id).filter(|model| model.id != DeviceModel::default_model().id)
+}
+
+/// `path` without `.` and `..` components, without touching the filesystem.
+fn fold(path: &Path) -> PathBuf {
+    let mut folded = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !folded.pop() {
+                    folded.push("..");
+                }
+            }
+            other => folded.push(other),
+        }
+    }
+    folded
+}
+
+/// `path` with every existing part canonicalized; a part that does not exist
+/// yet keeps its folded spelling.
+fn resolve(path: &Path) -> PathBuf {
+    let mut head = fold(path);
+    let mut tail = Vec::new();
+    loop {
+        if let Ok(real) = head.canonicalize() {
+            return tail
+                .into_iter()
+                .rev()
+                .fold(real, |base, part| base.join(part));
+        }
+        match head.file_name().map(|name| name.to_owned()) {
+            Some(name) => {
+                tail.push(name);
+                head.pop();
+            }
+            None => return fold(path),
+        }
+    }
 }
 
 /// Refuse to open the private root of one model as another model.

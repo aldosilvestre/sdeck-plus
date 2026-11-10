@@ -1652,8 +1652,7 @@ fn start_event_updates(
     _app_event_sender: mpsc::Sender<MonitorEvent>,
 ) -> glib::SourceId {
     // One running total per dial of the widest supported model.
-    let dials = sdeck_plus::device_model::DeviceModel::all()
-        .iter()
+    let dials = sdeck_plus::device_model::DeviceModel::supported()
         .map(|model| usize::from(model.dials))
         .max()
         .unwrap_or_default();

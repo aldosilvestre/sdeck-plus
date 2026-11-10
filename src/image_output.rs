@@ -1,7 +1,7 @@
 //! Pure artwork preparation and Stream Deck + image-report encoding.
 
 use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
-use crate::device_model::{DeviceModel, Rotation, PLUS};
+use crate::device_model::{DeviceModel, ImageFormat, Rotation, PLUS};
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
 use gtk::pango::prelude::*;
@@ -37,13 +37,13 @@ pub fn dimensions_for(
             width: model.key_px,
             height: model.key_px,
         }),
-        ArtworkTarget::TouchStripBackground => Ok(ImageDimensions {
-            width: model.strip_px.0,
-            height: model.strip_px.1,
+        ArtworkTarget::TouchStripBackground if model.has_strip() => Ok(ImageDimensions {
+            width: model.strip_px().0,
+            height: model.strip_px().1,
         }),
         ArtworkTarget::EncoderZone(n) if model.is_valid_zone(n) => Ok(ImageDimensions {
-            width: model.zone_px.0,
-            height: model.zone_px.1,
+            width: model.zone_px().0,
+            height: model.zone_px().1,
         }),
         _ => Err("unsupported artwork target".into()),
     }
@@ -54,8 +54,8 @@ fn zone_section(model: &DeviceModel, strip: &Pixbuf, zone: u8) -> Pixbuf {
     strip.new_subpixbuf(
         model.zone_x(zone) as i32,
         0,
-        model.zone_px.0 as i32,
-        model.zone_px.1 as i32,
+        model.zone_px().0 as i32,
+        model.zone_px().1 as i32,
     )
 }
 
@@ -64,8 +64,8 @@ fn zone_canvas(model: &DeviceModel, alpha: bool, what: &str) -> Result<Pixbuf, S
         Colorspace::Rgb,
         alpha,
         8,
-        model.zone_px.0 as i32,
-        model.zone_px.1 as i32,
+        model.zone_px().0 as i32,
+        model.zone_px().1 as i32,
     )
     .ok_or_else(|| format!("could not allocate {what}"))
 }
@@ -240,10 +240,16 @@ impl Part {
 pub fn rotated(image: &Pixbuf, rotation: Rotation) -> Result<Pixbuf, String> {
     match rotation {
         Rotation::None => Ok(image.clone()),
-        Rotation::Ccw90 => image
-            .rotate_simple(gtk::gdk_pixbuf::PixbufRotation::Counterclockwise)
-            .ok_or_else(|| "could not rotate image".to_string()),
+        Rotation::Cw90 => turn(image, gtk::gdk_pixbuf::PixbufRotation::Clockwise),
+        Rotation::Ccw90 => turn(image, gtk::gdk_pixbuf::PixbufRotation::Counterclockwise),
+        Rotation::Rot180 => turn(image, gtk::gdk_pixbuf::PixbufRotation::Upsidedown),
     }
+}
+
+fn turn(image: &Pixbuf, rotation: gtk::gdk_pixbuf::PixbufRotation) -> Result<Pixbuf, String> {
+    image
+        .rotate_simple(rotation)
+        .ok_or_else(|| "could not rotate image".to_string())
 }
 
 /// The picture as the display of `part` takes it: rotated, then flipped.
@@ -259,11 +265,18 @@ fn orient(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Pixbuf, Str
                 Ok(turned)
             }
         }
-        Part::Strip | Part::Zone => rotated(image, model.strip_rotation),
+        Part::Strip | Part::Zone => rotated(image, model.strip_rotation()),
     }
 }
 
 fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
+    if model.image_format != ImageFormat::Jpeg {
+        return Err(format!(
+            "{} takes {} images, which are not implemented",
+            model.name,
+            model.image_format.name()
+        ));
+    }
     let image = &orient(model, part, image)?;
     // Transparency belongs to the preview/overlay. The device takes JPEG, so
     // flatten only after compositing the overlay onto its existing artwork.
@@ -480,7 +493,7 @@ pub fn compose_touchscreen_zone_for(
     elapsed: Duration,
 ) -> Result<Pixbuf, String> {
     let size = dimensions_for(model, ArtworkTarget::EncoderZone(zone))?;
-    let (width, height) = (model.zone_px.0 as i32, model.zone_px.1 as i32);
+    let (width, height) = (model.zone_px().0 as i32, model.zone_px().1 as i32);
     let previous = model.is_first_zone(zone) && previous;
     let next = model.is_last_zone(zone) && next;
     let image = if let Some(value) = value {
@@ -610,8 +623,8 @@ pub fn prepare_touchscreen_zone_jpeg_for(
             &section,
             0,
             0,
-            model.zone_px.0 as i32,
-            model.zone_px.1 as i32,
+            model.zone_px().0 as i32,
+            model.zone_px().1 as i32,
             0.0,
             0.0,
             1.0,
@@ -658,7 +671,7 @@ pub fn prepare_icon_jpeg_for(
     strip_background: Option<&Path>,
     (previous, next): (bool, bool),
 ) -> Result<Vec<u8>, String> {
-    let (width, height) = (model.zone_px.0 as i32, model.zone_px.1 as i32);
+    let (width, height) = (model.zone_px().0 as i32, model.zone_px().1 as i32);
     match target {
         ArtworkTarget::Keypad(_) => {
             match crate::binding_icons::compose_key_image_for(model, icon, caption, text)? {
@@ -784,8 +797,8 @@ pub fn prepare_info_jpeg_for(
                     &section,
                     0,
                     0,
-                    model.zone_px.0 as i32,
-                    model.zone_px.1 as i32,
+                    model.zone_px().0 as i32,
+                    model.zone_px().1 as i32,
                     0.0,
                     0.0,
                     1.0,
@@ -833,8 +846,8 @@ pub fn encode_reports(target: ArtworkTarget, jpeg: &[u8]) -> Result<Vec<OutputRe
 pub fn zone_window(model: &DeviceModel, zone: u8) -> (u16, u16, u16, u16) {
     let (x, width, height) = (
         model.zone_x(zone) as u16,
-        model.zone_px.0 as u16,
-        model.zone_px.1 as u16,
+        model.zone_px().0 as u16,
+        model.zone_px().1 as u16,
     );
     if model.partial_window_axis_swap {
         (0, x, height, width)
@@ -843,8 +856,19 @@ pub fn zone_window(model: &DeviceModel, zone: u8) -> (u16, u16, u16, u16) {
     }
 }
 
-/// [`encode_reports`] with the report layout and image sizes of `model`.
+/// [`encode_reports`] with the report layout and image sizes of `model`,
+/// through the handler of its protocol family.
 pub fn encode_reports_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    jpeg: &[u8],
+) -> Result<Vec<OutputReport>, String> {
+    crate::protocol::protocol_for(model.family).encode_reports(model, target, jpeg)
+}
+
+/// The Expanded family's image reports: 0x02, then 0x07 for a key or
+/// 0x0B / 0x0C for the strip window and its sections.
+pub(crate) fn encode_expanded_reports(
     model: &DeviceModel,
     target: ArtworkTarget,
     jpeg: &[u8],

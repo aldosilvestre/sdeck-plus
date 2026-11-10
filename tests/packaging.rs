@@ -128,7 +128,7 @@ fn udev_rule_matches_the_ids_of_both_models() {
     assert_eq!(lines.len(), 2, "one rule per model");
     for (line, pid) in lines.iter().zip(["0084", "00c6"]) {
         assert!(
-            models.contains(&format!("pid: 0x{pid}")),
+            models.contains(&format!("pids: &[0x{pid}")),
             "model table: {pid}"
         );
         assert_eq!(

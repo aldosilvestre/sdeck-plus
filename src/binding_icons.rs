@@ -689,7 +689,7 @@ pub fn paint_target_for(
     // Fractions of the Stream Deck + grid (4 columns, 2 rows), exactly 1 for it.
     let across = 4.0 / f64::from(model.key_cols);
     let down = 2.0 / f64::from(model.key_rows);
-    let zones_across = 4.0 / f64::from(model.zones);
+    let zones_across = 4.0 / f64::from(model.zones().max(1));
     cairo.save()?;
     cairo.translate(center.0, center.1);
     cairo.scale(size / 24.0, size / 24.0);

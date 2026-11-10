@@ -44,6 +44,18 @@ pub enum ActionKind {
     Extended,
 }
 
+/// The control kinds `model` has: its keys, plus dials and touch strip when present.
+pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
+    let mut controls = vec![ControlKind::Button];
+    if model.dials > 0 {
+        controls.push(ControlKind::Encoder);
+    }
+    if model.has_touch() {
+        controls.push(ControlKind::Touch);
+    }
+    controls
+}
+
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
         ControlKind::Button => vec![EventKind::ButtonPress],
@@ -82,6 +94,9 @@ pub fn trigger_from_selection_for(
     if !events_for_control(control).contains(&event) {
         return Err("event does not match selected control".into());
     }
+    if control == ControlKind::Touch && !model.has_touch() {
+        return Err("this device has no touch strip".into());
+    }
     match (control, event) {
         (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
             Ok(Trigger::KeyPress(control_number))
@@ -100,19 +115,23 @@ pub fn trigger_from_selection_for(
             Ok(Trigger::EncoderCounterClockwise(control_number))
         }
         // Number 0 is the whole strip; 1 up to the model's last are its sections.
-        (ControlKind::Touch, EventKind::TouchTap) if control_number <= model.zones => {
+        (ControlKind::Touch, EventKind::TouchTap)
+            if model.has_touch() && control_number <= model.zones() =>
+        {
             Ok(match control_number {
                 0 => Trigger::TouchTap,
                 zone => Trigger::ZoneTap(zone),
             })
         }
-        (ControlKind::Touch, EventKind::TouchPress) if control_number <= model.zones => {
+        (ControlKind::Touch, EventKind::TouchPress)
+            if model.has_touch() && control_number <= model.zones() =>
+        {
             Ok(match control_number {
                 0 => Trigger::TouchPress,
                 zone => Trigger::ZonePress(zone),
             })
         }
-        (ControlKind::Touch, EventKind::TouchFlick) => Ok(Trigger::TouchFlick),
+        (ControlKind::Touch, EventKind::TouchFlick) if model.has_touch() => Ok(Trigger::TouchFlick),
         (ControlKind::Touch, EventKind::TouchSwipeLeft) => {
             Ok(Trigger::TouchSwipe(SwipeDirection::Left))
         }
