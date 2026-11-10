@@ -65,7 +65,7 @@ fn every_installed_source_file_exists_in_the_repository() {
         "packaging/dev.streamdeck.EventMonitor.desktop",
         "assets/icons/scalable/apps/sdeck-plus.svg",
         "LICENSE",
-        "packaging/70-sdeck-plus.rules",
+        "udev/70-sdeck.rules",
     ];
     for package in PACKAGES {
         let text = pkgbuild(package);
@@ -78,7 +78,7 @@ fn every_installed_source_file_exists_in_the_repository() {
             "/usr/share/applications/dev.streamdeck.EventMonitor.desktop",
             "/usr/share/icons/hicolor/scalable/apps/sdeck-plus.svg",
             "/usr/share/licenses/$pkgname/LICENSE",
-            "/usr/lib/udev/rules.d/70-sdeck-plus.rules",
+            "/usr/lib/udev/rules.d/70-sdeck.rules",
         ] {
             assert!(text.contains(target), "{package} must install to {target}");
         }
@@ -140,7 +140,7 @@ fn udev_rule_matches_the_ids_of_both_models() {
     let vendor = read("src/event_api.rs").to_lowercase();
     assert!(vendor.contains("0x0fd9"));
     let models = read("src/device_model.rs").to_lowercase();
-    let rules = read("packaging/70-sdeck-plus.rules");
+    let rules = read("udev/70-sdeck.rules");
     let lines: Vec<_> = rules
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
@@ -278,7 +278,7 @@ fn srcinfo_matches_its_pkgbuild() {
 
 #[test]
 fn every_supported_model_has_a_udev_rule_and_installer_hint() {
-    let rules = read("packaging/70-sdeck-plus.rules").to_lowercase();
+    let rules = read("udev/70-sdeck.rules").to_lowercase();
     let install = read("install.sh").to_lowercase();
     for model in sdeck_plus::device_model::DeviceModel::supported() {
         for pid in model.pids {

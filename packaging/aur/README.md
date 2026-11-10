@@ -13,8 +13,10 @@ and never install per-user files.
 
 ## Why the package ships a udev rule
 
-`packaging/70-sdeck-plus.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the Stream Deck + XL (`0fd9:00c6`) through `uaccess`.
-The app itself never changes permissions, so the package installs the rule to `/usr/lib/udev/rules.d/`.
+`udev/70-sdeck.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the Stream Deck + XL (`0fd9:00c6`) through `uaccess`.
+The app itself never changes permissions, so the package installs the rule to `/usr/lib/udev/rules.d/70-sdeck.rules`.
+
+The stable PKGBUILD pins the `v0.1.0` tarball, which still has the rule at `packaging/70-sdeck-plus.rules`: bump `pkgver` to the next release and run `updpkgsums` before publishing it.
 
 ## Why `options=('!lto')`
 

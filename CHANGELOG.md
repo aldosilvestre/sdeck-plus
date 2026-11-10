@@ -47,8 +47,11 @@ All notable changes to this project are documented here. The format follows
   (versions 1 to 4) are Stream Deck + bundles and still import into the + configuration.
 - The Stream Deck + data directory is unchanged. The XL keeps its own folder under `devices/`;
   importing into the + configuration preserves it.
-- The udev rule file gains a `00c6` line for the Stream Deck + XL (the installer and the AUR
-  packages print or install both lines).
+- The udev rule gains a `00c6` line for the Stream Deck + XL and now lives at `udev/70-sdeck.rules`
+  (renamed from `packaging/70-sdeck-plus.rules`; the name no longer mentions a model). The installer prints one
+  command that installs that file from the repository, and the AUR packages install it as
+  `/usr/lib/udev/rules.d/70-sdeck.rules`. A rule installed by hand as `70-sdeck-plus.rules` keeps working; remove
+  it when adding the new file to avoid a duplicate.
 - Real-hardware validation of the Stream Deck + XL is pending.
 
 ### Changed

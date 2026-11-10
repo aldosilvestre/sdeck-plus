@@ -1,0 +1,11 @@
+# udev rule for sdeck-plus: lets the logged-in user open the hidraw node of the
+# supported Elgato Stream Deck models (vendor 0fd9) through the "uaccess" tag.
+# Install it as /etc/udev/rules.d/70-sdeck.rules (a package ships it under
+# /usr/lib/udev/rules.d/), reload with `udevadm control --reload-rules`, then
+# reconnect the device. sdeck-plus itself never changes permissions.
+# One rule per supported product id: keep this list in step with
+# src/device_model.rs (see DEVICES.md).
+# Stream Deck +
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0084", TAG+="uaccess"
+# Stream Deck + XL
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="00c6", TAG+="uaccess"

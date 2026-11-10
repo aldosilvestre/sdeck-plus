@@ -98,9 +98,15 @@ Alternatively, clone the repository and run `./install.sh` to build that checkou
 it. To try it without installing, run `cargo run` from the checkout.
 
 Your user needs permission to open the device's HID node. If access is denied,
-an administrator can install a udev rule scoped to the VID/PID (`0fd9:0084` for
-the Stream Deck +, `0fd9:00c6` for the + XL) with `TAG+="uaccess"` (the installer
-prints both lines when needed). Some actions need
+an administrator can install the repository's rule file
+[`udev/70-sdeck.rules`](udev/70-sdeck.rules), which grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the + XL (`0fd9:00c6`) with `TAG+="uaccess"`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules >/dev/null
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Reconnect the device afterwards (the installer prints these commands when needed; the AUR packages ship the rule). Some actions need
 optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions need
 `/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.

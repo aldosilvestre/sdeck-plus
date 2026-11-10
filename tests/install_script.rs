@@ -650,19 +650,21 @@ fn run_with_hidraw(nodes: &[(&str, &str)]) -> String {
 }
 
 #[test]
-fn unreadable_stream_deck_nodes_print_one_udev_rule_per_model() {
+fn unreadable_stream_deck_nodes_print_the_command_that_installs_the_rule_file() {
     for id in ["0003:00000FD9:00000084", "0003:00000fd9:000000c6"] {
         let out = run_with_hidraw(&[("hidraw-sdeck-fixture", id)]);
         assert!(out.contains("cannot open the Stream Deck at /dev/hidraw-sdeck-fixture"));
-        let rules: Vec<_> = out.lines().filter(|l| l.contains("SUBSYSTEM==")).collect();
-        assert_eq!(rules.len(), 2, "{out}");
+        // One command installs the repository's rule file, which covers every model.
         assert!(
-            rules[0].contains(r#"ATTRS{idProduct}=="0084""#)
-                && rules[0].ends_with("| sudo tee /etc/udev/rules.d/70-sdeck-plus.rules")
+            out.contains(
+                "curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules >/dev/null"
+            ),
+            "{out}"
         );
+        assert!(out.contains("sudo udevadm control --reload-rules && sudo udevadm trigger"));
         assert!(
-            rules[1].contains(r#"ATTRS{idProduct}=="00c6""#)
-                && rules[1].contains("sudo tee -a /etc/udev/rules.d/70-sdeck-plus.rules")
+            !out.contains("SUBSYSTEM=="),
+            "the rule text lives in the file: {out}"
         );
     }
 }

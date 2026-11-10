@@ -1,5 +1,0 @@
-# Lets the logged-in user open the Elgato Stream Deck + (VID 0fd9, PID 0084) and
-# Stream Deck + XL (VID 0fd9, PID 00c6) hidraw nodes.
-# Shipped by the package because sdeck-plus itself never changes permissions.
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0084", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="00c6", TAG+="uaccess"

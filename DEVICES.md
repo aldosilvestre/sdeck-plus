@@ -68,7 +68,7 @@ dispatch point. A handler implements `FamilyProtocol`: `decode` (input report to
      (`tests/device_registry.rs`), `models_are_found_by_pid_and_id`
      (`tests/device_model.rs`) and `only_the_two_supported_product_ids_are_ever_discovered`;
    - the `DOCUMENTED` array length in `tests/device_registry.rs`;
-   - one udev rule line per product id in `packaging/70-sdeck-plus.rules`
+   - one udev rule line per product id in `udev/70-sdeck.rules`
      (`tests/packaging.rs` fails when one is missing);
    - `install.sh`: the hidraw uevent regex and the printed rule;
    - the desktop file comment;

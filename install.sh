@@ -361,12 +361,11 @@ for uevent in "$hidraw_root"/hidraw*/device/uevent; do
         node=${uevent#"$hidraw_root"/}
         node="/dev/${node%/device/uevent}"
         if [[ ! -r $node || ! -w $node ]]; then
-            rules=/etc/udev/rules.d/70-sdeck-plus.rules
-            note "your user cannot open the Stream Deck at $node. An administrator can grant access with:"
+            rules=/etc/udev/rules.d/70-sdeck.rules
+            note "your user cannot open the Stream Deck at $node. An administrator can grant access with the udev rule in udev/70-sdeck.rules:"
             printf '%s\n' \
-                "  echo 'SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0fd9\", ATTRS{idProduct}==\"0084\", TAG+=\"uaccess\"' | sudo tee $rules" \
-                "  echo 'SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0fd9\", ATTRS{idProduct}==\"00c6\", TAG+=\"uaccess\"' | sudo tee -a $rules" \
-                '  sudo udevadm control --reload-rules' \
+                "  curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee $rules >/dev/null" \
+                '  sudo udevadm control --reload-rules && sudo udevadm trigger' \
                 '  Then reconnect the device.'
         fi
         break

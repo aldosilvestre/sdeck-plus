@@ -265,8 +265,8 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
                  <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
-              <p>If opening the device is denied, use your distribution's supported mechanism, for example an administrator-installed udev rule scoped to the VID and product id (<code>0fd9:0084</code> for the Stream Deck +, <code>0fd9:00c6</code> for the + XL) with
-                 <code>TAG+="uaccess"</code> (one rule line per model; the installer prints both), then reconnect the device. Missing tools or access are reported; the app never installs packages or changes permissions.</p>
+              <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
+                 <code>TAG+="uaccess"</code>: <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules</code>, then <code>sudo udevadm control --reload-rules</code> and reconnect the device (the installer prints these commands when needed). Missing tools or access are reported; the app never installs packages or changes permissions.</p>
               <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
             </article>
           </div>
