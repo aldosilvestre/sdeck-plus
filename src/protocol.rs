@@ -1,3 +1,5 @@
+use crate::device_model::{DeviceModel, PLUS};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Key {
@@ -28,7 +30,15 @@ pub enum Event {
     },
 }
 
+/// Decode one Stream Deck + input report.
 pub fn decode_report(report: &[u8]) -> Vec<Event> {
+    decode_report_for(&PLUS, report)
+}
+
+/// Decode one input report of `model`, whose key and dial counts size the payloads.
+pub fn decode_report_for(model: &DeviceModel, report: &[u8]) -> Vec<Event> {
+    let keys = usize::from(model.keys());
+    let dials = usize::from(model.dials);
     if report.len() < 4 || report[0] != 0x01 {
         return Vec::new();
     }
@@ -40,7 +50,7 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
     match report[1] {
         0x00 => payload
             .iter()
-            .take(8)
+            .take(keys)
             .enumerate()
             .filter_map(|(index, &state)| {
                 (state <= 1).then_some(Event::Key {
@@ -49,8 +59,8 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
                 })
             })
             .collect(),
-        0x03 if payload.len() >= 5 => match payload[0] {
-            0x00 => payload[1..5]
+        0x03 if payload.len() > dials => match payload[0] {
+            0x00 => payload[1..=dials]
                 .iter()
                 .enumerate()
                 .filter_map(|(index, &state)| {
@@ -60,7 +70,7 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
                     })
                 })
                 .collect(),
-            0x01 => payload[1..5]
+            0x01 => payload[1..=dials]
                 .iter()
                 .enumerate()
                 .filter_map(|(index, &ticks)| {

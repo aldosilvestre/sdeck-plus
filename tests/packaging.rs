@@ -116,7 +116,13 @@ fn desktop_file_matches_the_application_identity() {
 
 #[test]
 fn udev_rule_matches_the_stream_deck_plus_ids() {
-    let protocol = read("src/event_api.rs").to_lowercase();
+    // The vendor id lives in the HID module and the product ids in the device model table.
+    let protocol = format!(
+        "{}{}",
+        read("src/event_api.rs"),
+        read("src/device_model.rs")
+    )
+    .to_lowercase();
     assert!(protocol.contains("0x0fd9") && protocol.contains("0x0084"));
     let rules = read("packaging/70-sdeck-plus.rules");
     let rule = rules

@@ -11,6 +11,7 @@
 
 use crate::{
     desktop_actions::DesktopAction,
+    device_model::{DeviceModel, PLUS},
     features::FeatureAction,
     layers::{Action, LayerStore},
     local_artwork::ArtworkStore,
@@ -221,16 +222,16 @@ fn materialize(stage: &Path, files: &BTreeMap<String, Vec<u8>>) -> io::Result<()
     Ok(())
 }
 
-fn validate(stage: &Path) -> io::Result<LayerStore> {
+fn validate(stage: &Path, model: &'static DeviceModel) -> io::Result<LayerStore> {
     if !stage.join("layers.conf").is_file() {
         return Err(invalid("bundle requires layers.conf"));
     }
-    let mut layers = LayerStore::open_at(stage)?;
+    let mut layers = LayerStore::open_at_model(stage, model)?;
     if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
         return Err(invalid("invalid or recovered layer configuration"));
     }
     let organization = Organization::open_at(stage, &layers)?;
-    let mut artwork = ArtworkStore::open_at_for_layer(stage, Some(layers.active()))?;
+    let mut artwork = ArtworkStore::open_at_for_layer_model(stage, Some(layers.active()), model)?;
     layers.initialize_touchscreens(&organization, &mut artwork)?;
     ObsConfig::load_at(stage)?;
     if stage.join("info.json").exists() {
@@ -426,6 +427,11 @@ fn persist_layers(layers: &LayerStore) -> io::Result<()> {
 /// All validation happens on an isolated snapshot. The destination is replaced
 /// only after validation, serialization and staging cleanup have succeeded.
 pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
+    export_for(root, destination, &PLUS)
+}
+
+/// [`export`] for a configuration root of `model`.
+pub fn export_for(root: &Path, destination: &Path, model: &'static DeviceModel) -> io::Result<()> {
     no_symlinks(root)?;
     if !fs::metadata(root)?.is_dir() {
         return Err(invalid("configuration root is not a directory"));
@@ -455,7 +461,7 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
             *manifest = portable_artwork(manifest)?;
         }
         materialize(&stage, &files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         transform_files(&mut layers, &root, Some(&destination))?;
         persist_layers(&layers)?;
         // Strict artwork loading may migrate a legacy manifest in the snapshot.
@@ -544,6 +550,16 @@ fn validate_portable_audio(layers: &LayerStore, stage: &Path) -> io::Result<()> 
 /// Returns `None` for a first install. A failed install restores the old root;
 /// if rollback itself fails, the error names the retained recovery backup.
 pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
+    import_for(source, root, &PLUS)
+}
+
+/// [`import`] into a configuration root of `model`. Bundles of versions 1 to
+/// 4 describe the Stream Deck + and are validated against `model` as is.
+pub fn import_for(
+    source: &Path,
+    root: &Path,
+    model: &'static DeviceModel,
+) -> io::Result<Option<PathBuf>> {
     let bytes = read_regular(source, MAX_BUNDLE)?;
     let bundle: Bundle =
         serde_json::from_slice(&bytes).map_err(|_| invalid("invalid configuration bundle JSON"))?;
@@ -594,12 +610,12 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
         Err(error) => return Err(error),
     }
     if bundle.version >= 3 {
-        return import_references(&root, &files);
+        return import_references(&root, &files, model);
     }
     let stage = stage_for(&root)?;
     let result = (|| {
         materialize(&stage, &files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         validate_portable_audio(&layers, &stage)?;
         for (layer, trigger, path) in audio_bindings(&layers) {
             bind_audio(&mut layers, &layer, trigger, root.join(path))?;
@@ -620,12 +636,13 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
 fn import_references(
     root: &Path,
     files: &BTreeMap<String, Vec<u8>>,
+    model: &'static DeviceModel,
 ) -> io::Result<Option<PathBuf>> {
     let stage = stage_for(root)?;
     let mut moved = Vec::new();
     let result = (|| {
         materialize(&stage, files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         transform_files(&mut layers, root, None)?;
         persist_layers(&layers)?;
         for name in [
@@ -653,7 +670,7 @@ fn import_references(
                 Err(error) => return Err(error),
             }
         }
-        validate(&stage)?;
+        validate(&stage, model)?;
         for name in CONFIGS {
             if stage.join(name).exists() {
                 fs::set_permissions(stage.join(name), fs::Permissions::from_mode(0o600))?;

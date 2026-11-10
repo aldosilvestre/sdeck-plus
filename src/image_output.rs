@@ -1,6 +1,7 @@
 //! Pure artwork preparation and Stream Deck + image-report encoding.
 
 use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
+use crate::device_model::{DeviceModel, PLUS};
 use crate::local_artwork::ArtworkTarget;
 use gtk::gdk_pixbuf::{Colorspace, InterpType, Pixbuf};
 use gtk::pango::prelude::*;
@@ -11,8 +12,6 @@ use std::{
 };
 
 pub const REPORT_SIZE: usize = 1024;
-const KEY_OR_FULL_CHUNK: usize = 1016;
-const PARTIAL_CHUNK: usize = 1008;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageDimensions {
@@ -25,26 +24,64 @@ pub struct OutputReport(pub Vec<u8>);
 
 /// Return the required native pixel dimensions for a supported artwork target.
 pub fn dimensions(target: ArtworkTarget) -> Result<ImageDimensions, String> {
+    dimensions_for(&PLUS, target)
+}
+
+/// [`dimensions`] for the controls and image sizes of `model`.
+pub fn dimensions_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+) -> Result<ImageDimensions, String> {
     match target {
-        ArtworkTarget::Keypad(n) if (1..=8).contains(&n) => Ok(ImageDimensions {
-            width: 120,
-            height: 120,
+        ArtworkTarget::Keypad(n) if model.is_valid_key(n) => Ok(ImageDimensions {
+            width: model.key_px,
+            height: model.key_px,
         }),
         ArtworkTarget::TouchStripBackground => Ok(ImageDimensions {
-            width: 800,
-            height: 100,
+            width: model.strip_px.0,
+            height: model.strip_px.1,
         }),
-        ArtworkTarget::EncoderZone(n) if (1..=4).contains(&n) => Ok(ImageDimensions {
-            width: 200,
-            height: 100,
+        ArtworkTarget::EncoderZone(n) if model.is_valid_zone(n) => Ok(ImageDimensions {
+            width: model.zone_px.0,
+            height: model.zone_px.1,
         }),
         _ => Err("unsupported artwork target".into()),
     }
 }
 
+/// The section of a strip background that lies under touch section `zone`.
+fn zone_section(model: &DeviceModel, strip: &Pixbuf, zone: u8) -> Pixbuf {
+    strip.new_subpixbuf(
+        model.zone_x(zone) as i32,
+        0,
+        model.zone_px.0 as i32,
+        model.zone_px.1 as i32,
+    )
+}
+
+fn zone_canvas(model: &DeviceModel, alpha: bool, what: &str) -> Result<Pixbuf, String> {
+    Pixbuf::new(
+        Colorspace::Rgb,
+        alpha,
+        8,
+        model.zone_px.0 as i32,
+        model.zone_px.1 as i32,
+    )
+    .ok_or_else(|| format!("could not allocate {what}"))
+}
+
 /// Decode an image, center-crop to cover, resize, and encode as an in-memory JPEG.
 pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<Vec<u8>, String> {
-    let size = dimensions(target)?;
+    prepare_jpeg_for(&PLUS, target, source)
+}
+
+/// [`prepare_jpeg`] at the image sizes of `model`.
+pub fn prepare_jpeg_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    source: impl AsRef<Path>,
+) -> Result<Vec<u8>, String> {
+    let size = dimensions_for(model, target)?;
     encode_jpeg(&prepare_background(size, source.as_ref())?)
 }
 
@@ -214,17 +251,27 @@ fn encode_jpeg(image: &Pixbuf) -> Result<Vec<u8>, String> {
 /// Compose one physical 120x120 keypad image, without initializing GTK.
 /// Text is clipped to the button, with a thin black outline.
 pub fn compose_button_image(source: Option<&Path>, text: &ButtonText) -> Result<Pixbuf, String> {
+    compose_button_image_for(&PLUS, source, text)
+}
+
+/// [`compose_button_image`] at the key size of `model`.
+pub fn compose_button_image_for(
+    model: &DeviceModel,
+    source: Option<&Path>,
+    text: &ButtonText,
+) -> Result<Pixbuf, String> {
     text.validate().map_err(|error| error.to_string())?;
+    let side = model.key_px;
     let background = match source {
         Some(source) => prepare_background(
             ImageDimensions {
-                width: 120,
-                height: 120,
+                width: side,
+                height: side,
             },
             source,
         )?,
         None => {
-            let image = Pixbuf::new(Colorspace::Rgb, false, 8, 120, 120)
+            let image = Pixbuf::new(Colorspace::Rgb, false, 8, side as i32, side as i32)
                 .ok_or_else(|| "could not allocate button image".to_string())?;
             image.fill(0x000000ff);
             image
@@ -233,7 +280,7 @@ pub fn compose_button_image(source: Option<&Path>, text: &ButtonText) -> Result<
     compose_button_text_over(background, text)
 }
 
-/// Draw the button text, with its thin black outline, over a 120x120
+/// Draw the button text, with its thin black outline, over a square key-sized
 /// `background` that is already prepared (for example a picture with a cross).
 pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result<Pixbuf, String> {
     text.validate().map_err(|error| error.to_string())?;
@@ -242,11 +289,12 @@ pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result
     }
     // RGB24 is native-endian 0x00RRGGBB. Work through safe owned bytes rather
     // than GDK Cairo helpers, which require GTK's initialized main thread.
+    let side = background.width();
     let bytes = background.read_pixel_bytes();
     let stride = usize::try_from(background.rowstride()).map_err(|error| error.to_string())?;
-    let mut canvas = Vec::with_capacity(120 * 120 * 4);
-    for y in 0..120 {
-        for x in 0..120 {
+    let mut canvas = Vec::with_capacity((side * side * 4) as usize);
+    for y in 0..side as usize {
+        for x in 0..side as usize {
             let offset = y * stride + x * 3;
             let pixel = u32::from(bytes[offset]) << 16
                 | u32::from(bytes[offset + 1]) << 8
@@ -254,9 +302,14 @@ pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result
             canvas.extend_from_slice(&pixel.to_ne_bytes());
         }
     }
-    let mut surface =
-        gtk::cairo::ImageSurface::create_for_data(canvas, gtk::cairo::Format::Rgb24, 120, 120, 480)
-            .map_err(|error| error.to_string())?;
+    let mut surface = gtk::cairo::ImageSurface::create_for_data(
+        canvas,
+        gtk::cairo::Format::Rgb24,
+        side,
+        side,
+        side * 4,
+    )
+    .map_err(|error| error.to_string())?;
     let cairo = gtk::cairo::Context::new(&surface).map_err(|error| error.to_string())?;
     // PangoCairo's default font map is per-thread; no display or GTK init is used.
     let context = pangocairo::FontMap::default().create_context();
@@ -282,13 +335,13 @@ pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result
     };
     let x = match text.horizontal_alignment {
         HorizontalAlignment::Left => 2.0,
-        HorizontalAlignment::Center => (120.0 - output_width) / 2.0,
-        HorizontalAlignment::Right => 118.0 - output_width,
+        HorizontalAlignment::Center => (f64::from(side) - output_width) / 2.0,
+        HorizontalAlignment::Right => f64::from(side) - 2.0 - output_width,
     };
     let y = match text.vertical_alignment {
         VerticalAlignment::Top => 2.0,
-        VerticalAlignment::Center => (120.0 - output_height) / 2.0,
-        VerticalAlignment::Bottom => 118.0 - output_height,
+        VerticalAlignment::Center => (f64::from(side) - output_height) / 2.0,
+        VerticalAlignment::Bottom => f64::from(side) - 2.0 - output_height,
     };
     cairo.translate(x, y);
     match text.orientation {
@@ -308,7 +361,7 @@ pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result
     cairo.fill().map_err(|error| error.to_string())?;
     drop(cairo);
     let data = surface.data().map_err(|error| error.to_string())?;
-    let mut rgb = Vec::with_capacity(120 * 120 * 3);
+    let mut rgb = Vec::with_capacity((side * side * 3) as usize);
     for pixel in data.as_chunks::<4>().0 {
         let value = u32::from_ne_bytes(*pixel);
         let channels = value.to_be_bytes();
@@ -319,15 +372,24 @@ pub fn compose_button_text_over(background: Pixbuf, text: &ButtonText) -> Result
         Colorspace::Rgb,
         false,
         8,
-        120,
-        120,
-        360,
+        side,
+        side,
+        side * 3,
     ))
 }
 
 /// Encode the same composed pixels used by GTK preview as a device-ready JPEG.
 pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<Vec<u8>, String> {
-    encode_jpeg(&compose_button_image(source, text)?)
+    prepare_button_jpeg_for(&PLUS, source, text)
+}
+
+/// [`prepare_button_jpeg`] at the key size of `model`.
+pub fn prepare_button_jpeg_for(
+    model: &DeviceModel,
+    source: Option<&Path>,
+    text: &ButtonText,
+) -> Result<Vec<u8>, String> {
+    encode_jpeg(&compose_button_image_for(model, source, text)?)
 }
 
 /// Compose a transparent touch-zone foreground, painting page indicators last.
@@ -351,37 +413,42 @@ pub fn compose_touchscreen_zone_at(
     next: bool,
     elapsed: Duration,
 ) -> Result<Pixbuf, String> {
-    let size = dimensions(ArtworkTarget::EncoderZone(zone))?;
+    compose_touchscreen_zone_for(&PLUS, zone, background, value, (previous, next), elapsed)
+}
+
+/// [`compose_touchscreen_zone_at`] for the touch sections of `model`.
+pub fn compose_touchscreen_zone_for(
+    model: &DeviceModel,
+    zone: u8,
+    background: Option<&Path>,
+    value: Option<&crate::info::InfoValue>,
+    (previous, next): (bool, bool),
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
+    let size = dimensions_for(model, ArtworkTarget::EncoderZone(zone))?;
+    let (width, height) = (model.zone_px.0 as i32, model.zone_px.1 as i32);
+    let previous = model.is_first_zone(zone) && previous;
+    let next = model.is_last_zone(zone) && next;
     let image = if let Some(value) = value {
-        crate::info_render::compose_zone_image_at(
-            value,
-            background,
-            zone == 1 && previous,
-            zone == 4 && next,
-            elapsed,
-        )?
+        crate::info_render::compose_zone_image_at(value, background, previous, next, elapsed)?
     } else if let Some(background) = background {
         resize_background(size, background)?
     } else {
-        let image = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
-            .ok_or("could not allocate touchscreen foreground")?;
+        let image = zone_canvas(model, true, "touchscreen foreground")?;
         image.fill(0);
         image
     };
-    let previous = zone == 1 && previous;
-    let next = zone == 4 && next;
     if !previous && !next {
         return Ok(image);
     }
-    let result = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
-        .ok_or("could not allocate touchscreen indicators")?;
+    let result = zone_canvas(model, true, "touchscreen indicators")?;
     result.fill(0);
     image.composite(
         &result,
         0,
         0,
-        200,
-        100,
+        width,
+        height,
         0.0,
         0.0,
         1.0,
@@ -389,10 +456,9 @@ pub fn compose_touchscreen_zone_at(
         InterpType::Nearest,
         255,
     );
-    let overlay = Pixbuf::new(Colorspace::Rgb, true, 8, 200, 100)
-        .ok_or("could not allocate touchscreen indicator overlay")?;
+    let overlay = zone_canvas(model, true, "touchscreen indicator overlay")?;
     overlay.fill(0);
-    for (show, center, left) in [(previous, 16i32, true), (next, 184, false)] {
+    for (show, center, left) in [(previous, 16i32, true), (next, width - 16, false)] {
         if !show {
             continue;
         }
@@ -407,7 +473,7 @@ pub fn compose_touchscreen_zone_at(
             let x = if left {
                 8 + dy.abs() * 3 / 4
             } else {
-                192 - dy.abs() * 3 / 4
+                width - 8 - dy.abs() * 3 / 4
             };
             for dx in -1..=1 {
                 overlay.put_pixel((x + dx) as u32, (50 + dy) as u32, 255, 255, 255, 255);
@@ -418,8 +484,8 @@ pub fn compose_touchscreen_zone_at(
         &result,
         0,
         0,
-        200,
-        100,
+        width,
+        height,
         0.0,
         0.0,
         1.0,
@@ -458,16 +524,40 @@ pub fn prepare_touchscreen_zone_jpeg_at(
     (previous, next): (bool, bool),
     elapsed: Duration,
 ) -> Result<Vec<u8>, String> {
-    let overlay = compose_touchscreen_zone_at(zone, background, value, previous, next, elapsed)?;
+    prepare_touchscreen_zone_jpeg_for(
+        &PLUS,
+        zone,
+        (background, strip_background),
+        value,
+        (previous, next),
+        elapsed,
+    )
+}
+
+/// [`prepare_touchscreen_zone_jpeg_at`] for the touch sections of `model`;
+/// `images` is the section's own artwork and the strip background.
+pub fn prepare_touchscreen_zone_jpeg_for(
+    model: &DeviceModel,
+    zone: u8,
+    (background, strip_background): (Option<&Path>, Option<&Path>),
+    value: Option<&crate::info::InfoValue>,
+    (previous, next): (bool, bool),
+    elapsed: Duration,
+) -> Result<Vec<u8>, String> {
+    let overlay =
+        compose_touchscreen_zone_for(model, zone, background, value, (previous, next), elapsed)?;
     if let Some(strip) = strip_background {
-        let strip = prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
-        let section = strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100);
+        let strip = prepare_background(
+            dimensions_for(model, ArtworkTarget::TouchStripBackground)?,
+            strip,
+        )?;
+        let section = zone_section(model, &strip, zone);
         overlay.composite(
             &section,
             0,
             0,
-            200,
-            100,
+            model.zone_px.0 as i32,
+            model.zone_px.1 as i32,
             0.0,
             0.0,
             1.0,
@@ -493,23 +583,54 @@ pub fn prepare_icon_jpeg(
     previous: bool,
     next: bool,
 ) -> Result<Vec<u8>, String> {
+    prepare_icon_jpeg_for(
+        &PLUS,
+        target,
+        icon,
+        caption,
+        text,
+        strip_background,
+        (previous, next),
+    )
+}
+
+/// [`prepare_icon_jpeg`] for the controls and image sizes of `model`.
+pub fn prepare_icon_jpeg_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    icon: crate::binding_icons::BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+    strip_background: Option<&Path>,
+    (previous, next): (bool, bool),
+) -> Result<Vec<u8>, String> {
+    let (width, height) = (model.zone_px.0 as i32, model.zone_px.1 as i32);
     match target {
         ArtworkTarget::Keypad(_) => {
-            match crate::binding_icons::compose_key_image(icon, caption, text)? {
+            match crate::binding_icons::compose_key_image_for(model, icon, caption, text)? {
                 Some(image) => encode_jpeg(&image),
                 // No free band beside the user's text: the plain text picture.
-                None => prepare_button_jpeg(None, text.unwrap_or(&ButtonText::default())),
+                None => {
+                    prepare_button_jpeg_for(model, None, text.unwrap_or(&ButtonText::default()))
+                }
             }
         }
         ArtworkTarget::EncoderZone(zone) => {
             let overlay = crate::binding_icons::compose_zone_image(icon, caption, previous, next)?;
-            let indicators = compose_touchscreen_zone(zone, None, None, previous, next)?;
+            let indicators = compose_touchscreen_zone_for(
+                model,
+                zone,
+                None,
+                None,
+                (previous, next),
+                Duration::ZERO,
+            )?;
             indicators.composite(
                 &overlay,
                 0,
                 0,
-                200,
-                100,
+                width,
+                height,
                 0.0,
                 0.0,
                 1.0,
@@ -520,14 +641,13 @@ pub fn prepare_icon_jpeg(
             let section = match strip_background {
                 Some(strip) => {
                     let strip = prepare_background(
-                        dimensions(ArtworkTarget::TouchStripBackground)?,
+                        dimensions_for(model, ArtworkTarget::TouchStripBackground)?,
                         strip,
                     )?;
-                    strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100)
+                    zone_section(model, &strip, zone)
                 }
                 None => {
-                    let black = Pixbuf::new(Colorspace::Rgb, false, 8, 200, 100)
-                        .ok_or("could not allocate touchscreen section")?;
+                    let black = zone_canvas(model, false, "touchscreen section")?;
                     black.fill(0x000000ff);
                     black
                 }
@@ -536,8 +656,8 @@ pub fn prepare_icon_jpeg(
                 &section,
                 0,
                 0,
-                200,
-                100,
+                width,
+                height,
                 0.0,
                 0.0,
                 1.0,
@@ -572,25 +692,44 @@ pub fn prepare_info_jpeg_at(
     strip_background: Option<&Path>,
     elapsed: Duration,
 ) -> Result<Vec<u8>, String> {
-    let _ = dimensions(target)?;
+    prepare_info_jpeg_for(
+        &PLUS,
+        target,
+        value,
+        (background, strip_background),
+        elapsed,
+    )
+}
+
+/// [`prepare_info_jpeg_at`] for the controls and image sizes of `model`.
+pub fn prepare_info_jpeg_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    value: &crate::info::InfoValue,
+    (background, strip_background): (Option<&Path>, Option<&Path>),
+    elapsed: Duration,
+) -> Result<Vec<u8>, String> {
+    let _ = dimensions_for(model, target)?;
     match target {
-        ArtworkTarget::Keypad(_) => encode_jpeg(&crate::info_render::compose_info_image_at(
-            value, background, elapsed,
+        ArtworkTarget::Keypad(_) => encode_jpeg(&crate::info_render::compose_info_image_for(
+            model, value, background, elapsed,
         )?),
         ArtworkTarget::EncoderZone(zone) => {
             let overlay = crate::info_render::compose_zone_image_at(
                 value, background, false, false, elapsed,
             )?;
             if let Some(strip) = strip_background {
-                let strip =
-                    prepare_background(dimensions(ArtworkTarget::TouchStripBackground)?, strip)?;
-                let section = strip.new_subpixbuf(i32::from(zone - 1) * 200, 0, 200, 100);
+                let strip = prepare_background(
+                    dimensions_for(model, ArtworkTarget::TouchStripBackground)?,
+                    strip,
+                )?;
+                let section = zone_section(model, &strip, zone);
                 overlay.composite(
                     &section,
                     0,
                     0,
-                    200,
-                    100,
+                    model.zone_px.0 as i32,
+                    model.zone_px.1 as i32,
                     0.0,
                     0.0,
                     1.0,
@@ -610,7 +749,15 @@ pub fn prepare_info_jpeg_at(
 
 /// Prepare a black JPEG for the target, suitable for the same image command as artwork.
 pub fn prepare_clear_jpeg(target: ArtworkTarget) -> Result<Vec<u8>, String> {
-    let size = dimensions(target)?;
+    prepare_clear_jpeg_for(&PLUS, target)
+}
+
+/// [`prepare_clear_jpeg`] at the image sizes of `model`.
+pub fn prepare_clear_jpeg_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+) -> Result<Vec<u8>, String> {
+    let size = dimensions_for(model, target)?;
     let width = i32::try_from(size.width).map_err(|error| error.to_string())?;
     let height = i32::try_from(size.height).map_err(|error| error.to_string())?;
     let image = Pixbuf::new(Colorspace::Rgb, false, 8, width, height)
@@ -627,15 +774,26 @@ pub fn prepare_clear_jpeg(target: ArtworkTarget) -> Result<Vec<u8>, String> {
 
 /// Encode JPEG bytes into zero-padded, fixed-size output reports for the target.
 pub fn encode_reports(target: ArtworkTarget, jpeg: &[u8]) -> Result<Vec<OutputReport>, String> {
-    let _ = dimensions(target)?;
+    encode_reports_for(&PLUS, target, jpeg)
+}
+
+/// [`encode_reports`] with the report layout and image sizes of `model`.
+pub fn encode_reports_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    jpeg: &[u8],
+) -> Result<Vec<OutputReport>, String> {
+    let _ = dimensions_for(model, target)?;
     if jpeg.is_empty() {
         return Err("JPEG payload must not be empty".into());
     }
-    let (command, chunk_capacity, header_size) = match target {
-        ArtworkTarget::Keypad(_) => (0x07, KEY_OR_FULL_CHUNK, 8),
-        ArtworkTarget::TouchStripBackground => (0x0b, KEY_OR_FULL_CHUNK, 8),
-        ArtworkTarget::EncoderZone(_) => (0x0c, PARTIAL_CHUNK, 16),
+    let report_size = model.image_report_len;
+    let (command, header_size) = match target {
+        ArtworkTarget::Keypad(_) => (0x07, model.key_header_len),
+        ArtworkTarget::TouchStripBackground => (0x0b, model.key_header_len),
+        ArtworkTarget::EncoderZone(_) => (0x0c, model.zone_header_len),
     };
+    let chunk_capacity = report_size - header_size;
     let count = jpeg
         .len()
         .checked_add(chunk_capacity - 1)
@@ -649,21 +807,21 @@ pub fn encode_reports(target: ArtworkTarget, jpeg: &[u8]) -> Result<Vec<OutputRe
         _ => None,
     };
     let zone_x = match target {
-        ArtworkTarget::EncoderZone(n) => Some(u16::from(n - 1) * 200),
+        ArtworkTarget::EncoderZone(n) => Some(model.zone_x(n) as u16),
         _ => None,
     };
     let mut reports = Vec::with_capacity(count);
     for (index, chunk) in jpeg.chunks(chunk_capacity).enumerate() {
         let index = u16::try_from(index).map_err(|error| error.to_string())?;
         let length = u16::try_from(chunk.len()).map_err(|error| error.to_string())?;
-        let mut report = vec![0; REPORT_SIZE];
+        let mut report = vec![0; report_size];
         report[0] = 0x02;
         report[1] = command;
-        if header_size == 16 {
+        if matches!(target, ArtworkTarget::EncoderZone(_)) {
             report[2..4].copy_from_slice(&zone_x.unwrap().to_le_bytes());
             report[4..6].copy_from_slice(&0u16.to_le_bytes());
-            report[6..8].copy_from_slice(&200u16.to_le_bytes());
-            report[8..10].copy_from_slice(&100u16.to_le_bytes());
+            report[6..8].copy_from_slice(&(model.zone_px.0 as u16).to_le_bytes());
+            report[8..10].copy_from_slice(&(model.zone_px.1 as u16).to_le_bytes());
             report[10] = u8::from(index as usize + 1 == count);
             report[11..13].copy_from_slice(&index.to_le_bytes());
             report[13..15].copy_from_slice(&length.to_le_bytes());

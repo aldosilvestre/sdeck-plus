@@ -240,7 +240,10 @@ pub(crate) fn connect(
         let assign = assign.clone();
         row.connect_clicked(
             move |_| match ui.control_number().and_then(|n| n.checked_sub(1)) {
-                Some(dial) if ui.control_kind() == ControlKind::Encoder && dial < 4 => {
+                Some(dial)
+                    if ui.control_kind() == ControlKind::Encoder
+                        && dial < sdeck_plus::device_model::PLUS.dials =>
+                {
                     assign(index, usize::from(dial));
                 }
                 _ => ui.error("Select a dial before assigning a preset."),
@@ -250,7 +253,13 @@ pub(crate) fn connect(
     }
     page.append(&list);
 
-    for (dial, control) in selected.iter().skip(9).take(4).enumerate() {
+    let model = &sdeck_plus::device_model::PLUS;
+    for (dial, control) in selected
+        .iter()
+        .skip(usize::from(model.keys()) + 1)
+        .take(usize::from(model.dials))
+        .enumerate()
+    {
         // A distinct boxed type keeps presets apart from keys and key swapping.
         let target = gtk::DropTarget::new(DialPreset::static_type(), gtk::gdk::DragAction::COPY);
         let weak = control.downgrade();

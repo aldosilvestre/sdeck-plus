@@ -8,6 +8,7 @@
 //! foreground in the window).
 
 use crate::button_text::{ButtonText, TextOrientation, VerticalAlignment};
+use crate::device_model::{DeviceModel, PLUS};
 use crate::local_artwork::ArtworkTarget;
 use crate::{
     desktop_actions::{DesktopAction, MediaCommand, VolumeDirection},
@@ -666,32 +667,57 @@ pub fn paint_target(
     size: f64,
     ink: Ink,
 ) -> Result<(), cairo::Error> {
+    paint_target_for(&PLUS, cairo, target, center, size, ink)
+}
+
+/// [`paint_target`] for the key grid and touch sections of `model`. The map
+/// keeps the Stream Deck +'s width, so larger grids get smaller cells.
+///
+/// # Errors
+/// Returns cairo drawing failures.
+pub fn paint_target_for(
+    model: &DeviceModel,
+    cairo: &Context,
+    target: ArtworkTarget,
+    center: (f64, f64),
+    size: f64,
+    ink: Ink,
+) -> Result<(), cairo::Error> {
     const CELL: f64 = 4.6;
     const GAP: f64 = 1.33;
     const LEFT: f64 = -11.5;
+    // Fractions of the Stream Deck + grid (4 columns, 2 rows), exactly 1 for it.
+    let across = 4.0 / f64::from(model.key_cols);
+    let down = 2.0 / f64::from(model.key_rows);
+    let zones_across = 4.0 / f64::from(model.zones);
     cairo.save()?;
     cairo.translate(center.0, center.1);
     cairo.scale(size / 24.0, size / 24.0);
     cairo.set_line_width(1.0);
     let mut elements = Vec::new();
-    for key in 1..=8u8 {
-        let column = f64::from((key - 1) % 4);
-        let row = f64::from((key - 1) / 4);
+    for key in model.key_numbers() {
+        let column = f64::from((key - 1) % model.key_cols);
+        let row = f64::from((key - 1) / model.key_cols);
         elements.push((
             ArtworkTarget::Keypad(key),
             (
-                LEFT + column * (CELL + GAP),
-                -10.0 + row * (CELL + GAP),
-                CELL,
-                CELL,
+                LEFT + column * (CELL + GAP) * across,
+                -10.0 + row * (CELL + GAP) * down,
+                CELL * across,
+                CELL * down,
             ),
         ));
     }
-    for zone in 1..=4u8 {
+    for zone in model.zone_numbers() {
         let column = f64::from(zone - 1);
         elements.push((
             ArtworkTarget::EncoderZone(zone),
-            (LEFT + column * (CELL + GAP), 4.0, CELL, 6.0),
+            (
+                LEFT + column * (CELL + GAP) * zones_across,
+                4.0,
+                CELL * zones_across,
+                6.0,
+            ),
         ));
     }
     let strip = target == ArtworkTarget::TouchStripBackground;
@@ -749,10 +775,24 @@ pub fn compose_key_image(
     caption: &str,
     text: Option<&ButtonText>,
 ) -> Result<Option<Pixbuf>, String> {
+    compose_key_image_for(&PLUS, icon, caption, text)
+}
+
+/// [`compose_key_image`] at the key size of `model`: the 120 px layout scaled
+/// to the model's key, unchanged for the Stream Deck +.
+///
+/// # Errors
+/// Returns text validation, cairo or allocation failures.
+pub fn compose_key_image_for(
+    model: &DeviceModel,
+    icon: BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+) -> Result<Option<Pixbuf>, String> {
     // A missing file is an error the key must show: the cross sits behind the
     // user's text wherever it is placed.
     if icon == BindingIcon::MissingFile {
-        return compose_missing_key_image(caption, text).map(Some);
+        return compose_missing_key_image(model, caption, text).map(Some);
     }
     if !key_has_room(text) {
         return Ok(None);
@@ -769,10 +809,14 @@ pub fn compose_key_image(
         },
     };
     let default = ButtonText::default();
-    let base = crate::image_output::compose_button_image(None, text.unwrap_or(&default))?;
+    let base =
+        crate::image_output::compose_button_image_for(model, None, text.unwrap_or(&default))?;
+    let side = base.width();
+    let scale = f64::from(side) / f64::from(KEY);
     let mut surface = rgb_surface(&base)?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
+        cairo.scale(scale, scale);
         paint_outlined(&cairo, icon, (60.0, center_y), size, icon.accent())
             .map_err(|error| error.to_string())?;
         if let Some(caption) = caption.filter(|caption| !caption.is_empty()) {
@@ -781,7 +825,7 @@ pub fn compose_key_image(
         }
     }
     let data = surface.data().map_err(|error| error.to_string())?;
-    let mut rgb = Vec::with_capacity((KEY * KEY * 3) as usize);
+    let mut rgb = Vec::with_capacity((side * side * 3) as usize);
     for pixel in data.as_chunks::<4>().0 {
         rgb.extend_from_slice(&u32::from_ne_bytes(*pixel).to_be_bytes()[1..]);
     }
@@ -790,21 +834,28 @@ pub fn compose_key_image(
         Colorspace::Rgb,
         false,
         8,
-        KEY,
-        KEY,
-        KEY * 3,
+        side,
+        side,
+        side * 3,
     )))
 }
 
 /// A key whose sound or file is gone: a large red cross as the background,
 /// with the user's text over it, or a smaller cross and `caption` without text.
-fn compose_missing_key_image(caption: &str, text: Option<&ButtonText>) -> Result<Pixbuf, String> {
+fn compose_missing_key_image(
+    model: &DeviceModel,
+    caption: &str,
+    text: Option<&ButtonText>,
+) -> Result<Pixbuf, String> {
     let text = text.filter(|text| !text.text.is_empty());
     let default = ButtonText::default();
-    let base = crate::image_output::compose_button_image(None, &default)?;
+    let base = crate::image_output::compose_button_image_for(model, None, &default)?;
+    let side = base.width();
+    let scale = f64::from(side) / f64::from(KEY);
     let mut surface = rgb_surface(&base)?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
+        cairo.scale(scale, scale);
         let ink = BindingIcon::MissingFile.accent();
         let result = match text {
             Some(_) => paint(&cairo, BindingIcon::MissingFile, (60.0, 60.0), 104.0, ink),
@@ -817,7 +868,7 @@ fn compose_missing_key_image(caption: &str, text: Option<&ButtonText>) -> Result
         }
     }
     let data = surface.data().map_err(|error| error.to_string())?;
-    let mut rgb = Vec::with_capacity((KEY * KEY * 3) as usize);
+    let mut rgb = Vec::with_capacity((side * side * 3) as usize);
     for pixel in data.as_chunks::<4>().0 {
         rgb.extend_from_slice(&u32::from_ne_bytes(*pixel).to_be_bytes()[1..]);
     }
@@ -826,9 +877,9 @@ fn compose_missing_key_image(caption: &str, text: Option<&ButtonText>) -> Result
         Colorspace::Rgb,
         false,
         8,
-        KEY,
-        KEY,
-        KEY * 3,
+        side,
+        side,
+        side * 3,
     );
     match text {
         Some(text) => crate::image_output::compose_button_text_over(picture, text),

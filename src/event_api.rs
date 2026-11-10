@@ -3,9 +3,10 @@
 
 use crate::{
     device_control::DeviceAction,
+    device_model::{DeviceModel, PLUS},
     image_output,
     local_artwork::ArtworkTarget,
-    protocol::{decode_report, Event},
+    protocol::{decode_report_for, Event},
 };
 use std::{
     path::PathBuf,
@@ -18,7 +19,6 @@ use std::{
 };
 
 const VID: u16 = 0x0FD9;
-const PID: u16 = 0x0084;
 
 #[path = "device_control/worker.rs"]
 mod device_controls;
@@ -194,6 +194,14 @@ impl Drop for HidController {
 
 /// Start the blocking HID producer on a dedicated, owned thread.
 pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
+    start_hid_monitor_for(&PLUS, sender)
+}
+
+/// [`start_hid_monitor`] for a device of `model`.
+pub fn start_hid_monitor_for(
+    model: &'static DeviceModel,
+    sender: Sender<MonitorEvent>,
+) -> HidController {
     let (artwork, commands) = std::sync::mpsc::channel();
     let (controls, control_commands) = std::sync::mpsc::channel();
     let stop = StopSignal::default();
@@ -201,12 +209,13 @@ pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
     let worker = thread::Builder::new()
         .name("streamdeck-hid".into())
         .spawn(move || {
-            monitor(
+            monitor_for(
+                model,
                 sender,
                 (commands, control_commands),
                 worker_stop,
-                discover_device,
-                prepare_artwork,
+                |stop| discover_device(model, stop),
+                |command| prepare_artwork_for(model, command),
             )
         })
         .expect("failed to start HID reader thread");
@@ -274,7 +283,7 @@ impl Device for hidapi::HidDevice {
     }
 }
 
-fn discover_device(stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
+fn discover_device(model: &DeviceModel, stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
     if !stop.live() {
         return Err("HID discovery cancelled".into());
     }
@@ -282,9 +291,12 @@ fn discover_device(stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
         hidapi::HidApi::new().map_err(|error| format!("HID initialization failed: {error}"))?;
     let info = api
         .device_list()
-        .find(|device| device.vendor_id() == VID && device.product_id() == PID)
+        .find(|device| device.vendor_id() == VID && device.product_id() == model.pid)
         .ok_or_else(|| {
-            "Device not found · connect Stream Deck + (VID 0FD9 / PID 0084)".to_string()
+            format!(
+                "Device not found · connect {} (VID 0FD9 / PID {:04X})",
+                model.name, model.pid
+            )
         })?;
     if !stop.live() {
         return Err("HID discovery cancelled".into());
@@ -293,23 +305,42 @@ fn discover_device(stop: &StopSignal) -> Result<hidapi::HidDevice, String> {
         .map_err(|error| format!("Device found but could not open: {error}"))
 }
 
+#[cfg(test)]
 fn prepare_artwork(command: ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String> {
-    prepare_artwork_at(command, Duration::ZERO)
+    prepare_artwork_for(&PLUS, command)
+}
+
+fn prepare_artwork_for(
+    model: &DeviceModel,
+    command: ArtworkCommand,
+) -> Result<Vec<image_output::OutputReport>, String> {
+    prepare_artwork_at_for(model, command, Duration::ZERO)
+}
+
+#[cfg(test)]
+fn prepare_artwork_at(
+    command: ArtworkCommand,
+    elapsed: Duration,
+) -> Result<Vec<image_output::OutputReport>, String> {
+    prepare_artwork_at_for(&PLUS, command, elapsed)
 }
 
 /// Device reports for a command, with a scrolling title `elapsed` into its marquee.
-fn prepare_artwork_at(
+fn prepare_artwork_at_for(
+    model: &DeviceModel,
     command: ArtworkCommand,
     elapsed: Duration,
 ) -> Result<Vec<image_output::OutputReport>, String> {
     let (target, jpeg) = match command {
         ArtworkCommand::Assign { target, path } => {
-            (target, image_output::prepare_jpeg(target, path)?)
+            (target, image_output::prepare_jpeg_for(model, target, path)?)
         }
-        ArtworkCommand::Clear { target } => (target, image_output::prepare_clear_jpeg(target)?),
+        ArtworkCommand::Clear { target } => {
+            (target, image_output::prepare_clear_jpeg_for(model, target)?)
+        }
         ArtworkCommand::ComposeButton { key, path, text } => (
             ArtworkTarget::Keypad(key),
-            image_output::prepare_button_jpeg(path.as_deref(), &text)?,
+            image_output::prepare_button_jpeg_for(model, path.as_deref(), &text)?,
         ),
         ArtworkCommand::ComposeTouchscreenZone {
             zone,
@@ -320,10 +351,10 @@ fn prepare_artwork_at(
             next,
         } => (
             ArtworkTarget::EncoderZone(zone),
-            image_output::prepare_touchscreen_zone_jpeg_at(
+            image_output::prepare_touchscreen_zone_jpeg_for(
+                model,
                 zone,
-                path.as_deref(),
-                strip_path.as_deref(),
+                (path.as_deref(), strip_path.as_deref()),
                 value.as_ref(),
                 (previous, next),
                 elapsed,
@@ -336,11 +367,11 @@ fn prepare_artwork_at(
             value,
         } => (
             target,
-            image_output::prepare_info_jpeg_at(
+            image_output::prepare_info_jpeg_for(
+                model,
                 target,
                 &value,
-                path.as_deref(),
-                strip_path.as_deref(),
+                (path.as_deref(), strip_path.as_deref()),
                 elapsed,
             )?,
         ),
@@ -354,19 +385,19 @@ fn prepare_artwork_at(
             next,
         } => (
             target,
-            image_output::prepare_icon_jpeg(
+            image_output::prepare_icon_jpeg_for(
+                model,
                 target,
                 icon,
                 &caption,
                 text.as_ref(),
                 strip_path.as_deref(),
-                previous,
-                next,
+                (previous, next),
             )?,
         ),
         ArtworkCommand::Replace(_) => unreachable!("snapshots contain target commands"),
     };
-    image_output::encode_reports(target, &jpeg)
+    image_output::encode_reports_for(model, target, &jpeg)
 }
 
 #[cfg(test)]
@@ -377,7 +408,7 @@ fn process_artwork(
     prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
     write: impl FnMut(&[u8]) -> Result<usize, String>,
 ) {
-    let mut marquees = marquee::Marquees::default();
+    let mut marquees = marquee::Marquees::new(&PLUS);
     process_artwork_with(commands, stop, sender, prepare, write, &mut marquees);
 }
 
@@ -468,7 +499,19 @@ fn send_marquee_frames(
     }
 }
 
+#[cfg(test)]
 fn monitor<D: Device>(
+    sender: Sender<MonitorEvent>,
+    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
+    stop: StopSignal,
+    discover: impl FnMut(&StopSignal) -> Result<D, String>,
+    prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
+) {
+    monitor_for(&PLUS, sender, commands, stop, discover, prepare)
+}
+
+fn monitor_for<D: Device>(
+    model: &'static DeviceModel,
     sender: Sender<MonitorEvent>,
     commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
     stop: StopSignal,
@@ -518,9 +561,9 @@ fn monitor<D: Device>(
                 stop.request();
                 return;
             }
-            let mut buffer = [0u8; 64];
+            let mut buffer = vec![0u8; model.input_report_len];
             // Scrolling titles belong to this connection; a reconnect redraws.
-            let mut marquees = marquee::Marquees::default();
+            let mut marquees = marquee::Marquees::new(model);
             controls.replay(&stop, &sender, &device);
             while stop.live() {
                 // A heartbeat detects consumer loss even when there is no input.
@@ -542,7 +585,7 @@ fn monitor<D: Device>(
                     Instant::now(),
                     &stop,
                     &sender,
-                    prepare_artwork_at,
+                    |command, elapsed| prepare_artwork_at_for(model, command, elapsed),
                     |report| device.write(report),
                 );
                 if !stop.live() {
@@ -551,7 +594,7 @@ fn monitor<D: Device>(
                 match device.read(&mut buffer) {
                     Ok(0) => {}
                     Ok(size) => {
-                        for event in decode_report(&buffer[..size]) {
+                        for event in decode_report_for(model, &buffer[..size]) {
                             if sender.send(MonitorEvent::Input(event)).is_err() {
                                 stop.request();
                                 return;
@@ -568,7 +611,7 @@ fn monitor<D: Device>(
             }
         })();
         if !stop.live() {
-            blank_device(&device);
+            blank_device(model, &device);
             return;
         }
         drop(device);
@@ -578,7 +621,7 @@ fn monitor<D: Device>(
     }
 }
 
-fn blank_device(device: &impl Device) {
+fn blank_device(model: &DeviceModel, device: &impl Device) {
     let mut sleep = [0; 32];
     sleep[0] = 0x03;
     sleep[1] = 0x08;
@@ -587,20 +630,22 @@ fn blank_device(device: &impl Device) {
         Ok(size) => eprintln!("HID shutdown brightness write was short: {size} of 32 bytes"),
         Err(error) => eprintln!("Could not turn off Stream Deck displays: {error}"),
     }
-    // Clearing the full strip also replaces all four overlaid touch zones.
-    for target in (1..=8)
+    // Clearing the full strip also replaces all the overlaid touch zones.
+    for target in model
+        .key_numbers()
         .map(ArtworkTarget::Keypad)
         .chain(std::iter::once(ArtworkTarget::TouchStripBackground))
     {
-        let result = prepare_artwork(ArtworkCommand::Clear { target }).and_then(|reports| {
-            for report in reports {
-                let size = device.write(&report.0)?;
-                if size != report.0.len() {
-                    return Err(format!("short HID shutdown image write: {size} bytes"));
+        let result =
+            prepare_artwork_for(model, ArtworkCommand::Clear { target }).and_then(|reports| {
+                for report in reports {
+                    let size = device.write(&report.0)?;
+                    if size != report.0.len() {
+                        return Err(format!("short HID shutdown image write: {size} bytes"));
+                    }
                 }
-            }
-            Ok(())
-        });
+                Ok(())
+            });
         if let Err(error) = result {
             eprintln!("Could not clear Stream Deck {target:?} during shutdown: {error}");
         }
@@ -1021,5 +1066,46 @@ mod tests {
                 .unwrap_err()
                 .contains("device gone")
         );
+    }
+
+    #[derive(Default)]
+    struct Recorder(std::cell::RefCell<Vec<Vec<u8>>>);
+
+    impl Device for Recorder {
+        fn read(&self, _: &mut [u8]) -> Result<usize, String> {
+            Ok(0)
+        }
+        fn write(&self, report: &[u8]) -> Result<usize, String> {
+            self.0.borrow_mut().push(report.to_vec());
+            Ok(report.len())
+        }
+        fn write_feature(&self, report: &[u8]) -> Result<usize, String> {
+            Ok(report.len())
+        }
+    }
+
+    fn cleared_commands(model: &DeviceModel) -> (usize, Vec<u8>) {
+        let device = Recorder::default();
+        blank_device(model, &device);
+        let writes = device.0.borrow();
+        let keys = writes
+            .iter()
+            .filter(|report| report[1] == 0x07 && report[3] == 1)
+            .map(|report| report[2])
+            .collect();
+        (
+            writes.iter().filter(|report| report[1] == 0x0b).count(),
+            keys,
+        )
+    }
+
+    #[test]
+    fn shutdown_clears_every_key_and_the_strip_of_the_model() {
+        let (strips, keys) = cleared_commands(&PLUS);
+        assert_eq!(keys, (0..8).collect::<Vec<u8>>());
+        assert!(strips >= 1);
+        let (strips, keys) = cleared_commands(&crate::device_model::PLUS_XL);
+        assert_eq!(keys, (0..36).collect::<Vec<u8>>());
+        assert!(strips >= 1);
     }
 }

@@ -2,6 +2,7 @@
 
 use crate::{
     binding_icons::{self, BindingIcon},
+    device_model::{DeviceModel, PLUS},
     image_output::{resize_background, ImageDimensions},
     info::{Glyph, InfoValue},
 };
@@ -48,7 +49,25 @@ pub fn compose_info_image_at(
     background: Option<&Path>,
     elapsed: Duration,
 ) -> Result<Pixbuf, String> {
-    compose(value, SIZE, SIZE, background, None, elapsed)
+    compose_info_image_for(&PLUS, value, background, elapsed)
+}
+
+/// [`compose_info_image_at`] for the key size of `model`.
+///
+/// # Errors
+/// Returns background decoding, cairo or surface allocation failures.
+pub fn compose_info_image_for(
+    model: &DeviceModel,
+    value: &InfoValue,
+    background: Option<&Path>,
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
+    let size = key_size(model);
+    compose(value, size, size, background, None, elapsed)
+}
+
+fn key_size(model: &DeviceModel) -> i32 {
+    i32::try_from(model.key_px).unwrap_or(SIZE)
 }
 
 /// Compose one 200x100 touch-strip section: the section's own artwork (or
@@ -119,8 +138,17 @@ pub fn marquee_offset(text_width: f64, column_width: f64, elapsed: Duration) -> 
 /// its column's width. Only a playing Now playing title that does not fit at
 /// its floor size scrolls.
 pub fn marquee_extent(value: &InfoValue, section: Option<(bool, bool)>) -> Option<(f64, f64)> {
+    marquee_extent_for(&PLUS, value, section)
+}
+
+/// [`marquee_extent`] for the key size of `model`.
+pub fn marquee_extent_for(
+    model: &DeviceModel,
+    value: &InfoValue,
+    section: Option<(bool, bool)>,
+) -> Option<(f64, f64)> {
     let plan = match section {
-        None => key_plan(value),
+        None => key_plan(value, key_size(model)),
         Some((previous, next)) => zone_plan(value, previous, next),
     };
     let headline = plan.headline?;
@@ -195,7 +223,7 @@ fn compose(
                     draw_parts(&cairo, value, &zone_plan(value, previous, next), elapsed)
                 })
             }
-            None => draw_parts(&cairo, value, &key_plan(value), elapsed),
+            None => draw_parts(&cairo, value, &key_plan(value, width), elapsed),
         }
         .map_err(|error| error.to_string())?;
     }
@@ -647,12 +675,12 @@ fn zone_plan(value: &InfoValue, previous: bool, next: bool) -> Plan {
 /// Square key layout: icon, value, bar and detail stacked and centered, all
 /// inside the key. The icon gives up size first; detail lines that still do
 /// not fit are left out, so nothing is cut at the bottom edge.
-fn key_plan(value: &InfoValue) -> Plan {
+fn key_plan(value: &InfoValue, side: i32) -> Plan {
     const TOP: f64 = 4.0;
-    const BOTTOM: f64 = SIZE as f64 - 4.0;
+    let bottom = f64::from(side) - 4.0;
     const MIN_ICON: f64 = 32.0;
     const MAX_ICON: f64 = 44.0;
-    let column = (4.0, f64::from(SIZE) - 8.0);
+    let column = (4.0, f64::from(side) - 8.0);
     if matches!(value.glyph, Glyph::None | Glyph::Timer) {
         let caption_size = if value.glyph == Glyph::Timer {
             let (digits, _) = headline_layout(value, 36.0, column.1, pango::Alignment::Center);
@@ -666,7 +694,7 @@ fn key_plan(value: &InfoValue) -> Plan {
         let (mut headline, bar, mut details) = text_column(
             value,
             column,
-            (TOP, BOTTOM),
+            (TOP, bottom),
             (36.0, caption_size, 10.0),
             pango::Alignment::Center,
         );
@@ -689,7 +717,7 @@ fn key_plan(value: &InfoValue) -> Plan {
     let (headline, bar, details) = text_column(
         value,
         column,
-        (TOP + MIN_ICON + GAP, BOTTOM),
+        (TOP + MIN_ICON + GAP, bottom),
         (24.0, 14.0, 8.0),
         pango::Alignment::Center,
     );
@@ -713,10 +741,10 @@ fn key_plan(value: &InfoValue) -> Plan {
     } else {
         0.0
     };
-    let size = (BOTTOM - TOP - used).clamp(MIN_ICON, MAX_ICON);
-    let top = TOP + (BOTTOM - TOP - size - used) / 2.0;
+    let size = (bottom - TOP - used).clamp(MIN_ICON, MAX_ICON);
+    let top = TOP + (bottom - TOP - size - used) / 2.0;
     plan.icon = Some(Rect {
-        x: f64::from(SIZE) / 2.0 - size / 2.0,
+        x: f64::from(side) / 2.0 - size / 2.0,
         y: top,
         width: size,
         height: size,
@@ -819,7 +847,7 @@ mod tests {
                 detail: units.into(),
                 ..InfoValue::text(Glyph::Timer, time)
             };
-            let plan = key_plan(&value);
+            let plan = key_plan(&value, SIZE);
             let headline = plan.headline.as_ref().unwrap();
             let caption = &plan.details[0];
             assert!(
@@ -849,7 +877,7 @@ mod tests {
             detail: "Fri 16 Oct".into(),
             ..InfoValue::text(Glyph::None, "10:24")
         };
-        let plan = key_plan(&value);
+        let plan = key_plan(&value, SIZE);
         assert!(plan.headline.as_ref().unwrap().rect.bottom() <= plan.details[0].rect.y);
         assert!(plan.icon.is_none());
         assert_eq!(plan.details[0].layout.text(), "Fri 16 Oct");
@@ -875,7 +903,7 @@ mod tests {
 
     /// A point a quarter and three quarters along the key's bar.
     fn bar_points(value: &InfoValue) -> ((usize, usize), (usize, usize)) {
-        let bar = key_plan(value).bar.unwrap();
+        let bar = key_plan(value, SIZE).bar.unwrap();
         let y = (bar.y + bar.height / 2.0) as usize;
         let at = |share: f64| (bar.x + bar.width * share) as usize;
         ((at(0.25), y), (at(0.75), y))
@@ -898,7 +926,7 @@ mod tests {
     fn muted_speaker_gets_a_red_cross_and_a_grey_bar() {
         let value = volume("Volume: 0.50 [MUTED]");
         let muted = compose_info_image(&value, None).unwrap();
-        let icon = key_plan(&value).icon.unwrap();
+        let icon = key_plan(&value, SIZE).icon.unwrap();
         let cross = (
             (icon.x + icon.width * (0.5 + 7.5 / 24.0)) as usize,
             (icon.y + icon.height / 2.0) as usize,
@@ -1018,7 +1046,7 @@ mod tests {
                 assert!(violet == 0 && grey > 100, "{value:?}: {violet} {grey}");
             }
             // Every state keeps its icon and text inside the key.
-            let plan = key_plan(value);
+            let plan = key_plan(value, SIZE);
             assert!(plan.icon.is_some(), "{value:?} draws its icon");
             assert_eq!(plan.headline.is_some(), !value.headline.is_empty());
             for text in plan.texts() {
@@ -1030,16 +1058,16 @@ mod tests {
             headline: "Bohemian Rhapsody (Remastered 2011)".into(),
             ..playing.clone()
         };
-        for plan in [key_plan(&long), zone_plan(&long, false, true)] {
+        for plan in [key_plan(&long, SIZE), zone_plan(&long, false, true)] {
             assert!(
                 plan.headline.unwrap().scroll.is_some(),
                 "long titles scroll"
             );
         }
         // Nothing playing shows its whole caption on keys and sections.
-        assert_eq!(key_plan(idle).details.len(), 2);
+        assert_eq!(key_plan(idle, SIZE).details.len(), 2);
         assert_eq!(zone_plan(idle, true, true).details.len(), 2);
-        assert!(key_plan(idle)
+        assert!(key_plan(idle, SIZE)
             .details
             .iter()
             .all(|detail| !detail.layout.is_ellipsized()));
@@ -1088,7 +1116,7 @@ mod tests {
         let (full, column) = marquee_extent(&playing, None).unwrap();
         assert!(full > column, "{full} > {column}");
         // On keys the title scrolls at the readable 18px floor.
-        let headline = key_plan(&playing).headline.unwrap();
+        let headline = key_plan(&playing, SIZE).headline.unwrap();
         let size =
             f64::from(headline.layout.font_description().unwrap().size()) / f64::from(pango::SCALE);
         assert!((size - 18.0).abs() < 0.01, "{size}");
@@ -1100,7 +1128,7 @@ mod tests {
         let paused = long_title(Glyph::Pause, true);
         assert_eq!(marquee_extent(&paused, None), None);
         assert_eq!(marquee_extent(&paused, Some((true, true))), None);
-        let headline = key_plan(&paused).headline.unwrap();
+        let headline = key_plan(&paused, SIZE).headline.unwrap();
         assert!(headline.layout.is_ellipsized());
         assert!(f64::from(headline.layout.pixel_size().0) <= headline.rect.width + 0.5);
         // Other readings keep the existing shrink-then-ellipsize rule.
@@ -1127,7 +1155,7 @@ mod tests {
             (
                 compose_info_image(&short(Glyph::Play, false), None).unwrap(),
                 compose_info_image(&short(Glyph::Pause, true), None).unwrap(),
-                key_plan(&short(Glyph::Play, false)),
+                key_plan(&short(Glyph::Play, false), SIZE),
                 compose_info_image(
                     &InfoValue {
                         app_icon: None,
@@ -1210,7 +1238,7 @@ mod tests {
             (
                 compose_info_image_at(&playing, None, Duration::ZERO).unwrap(),
                 compose_info_image_at(&playing, None, later).unwrap(),
-                key_plan(&playing),
+                key_plan(&playing, SIZE),
             ),
             (
                 compose_zone_image_at(&playing, None, false, true, Duration::ZERO).unwrap(),
@@ -1312,7 +1340,7 @@ mod tests {
             f64::from(text.layout.font_description().unwrap().size()) / f64::from(pango::SCALE)
         };
         for value in samples() {
-            let plan = key_plan(&value);
+            let plan = key_plan(&value, SIZE);
             assert_eq!(plan.headline.is_some(), !value.headline.is_empty());
             assert_eq!(plan.bar.is_some(), value.level.is_some());
             assert_eq!(plan.icon.is_some(), value.glyph != Glyph::None);

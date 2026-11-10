@@ -219,7 +219,8 @@ pub(crate) fn connect(
         .child(&list)
         .build();
     catalog.append(&scroll);
-    for (index, key) in keys.iter().take(8).enumerate() {
+    let model = &sdeck_plus::device_model::PLUS;
+    for (index, key) in keys.iter().take(usize::from(model.keys())).enumerate() {
         // A distinct boxed GType keeps COPY assignment separate from MOVE key swapping.
         let target = gtk::DropTarget::new(CatalogAction::static_type(), gtk::gdk::DragAction::COPY);
         let weak = key.downgrade();
@@ -247,7 +248,12 @@ pub(crate) fn connect(
         });
         key.add_controller(target);
     }
-    for (index, dial) in keys.iter().skip(9).take(4).enumerate() {
+    for (index, dial) in keys
+        .iter()
+        .skip(usize::from(model.keys()) + 1)
+        .take(usize::from(model.dials))
+        .enumerate()
+    {
         let target = gtk::DropTarget::new(CatalogAction::static_type(), gtk::gdk::DragAction::COPY);
         let weak = dial.downgrade();
         target.connect_enter(move |_, _, _| {
@@ -434,10 +440,14 @@ fn add_row(
             .and_then(|n| n.checked_sub(1))
             .map(usize::from);
         match (ui.control_kind(), number) {
-            (ControlKind::Button, Some(index)) if index < 8 => {
+            (ControlKind::Button, Some(index))
+                if index < usize::from(sdeck_plus::device_model::PLUS.keys()) =>
+            {
                 assign(action, Target::Key(index));
             }
-            (ControlKind::Encoder, Some(index)) if index < 4 => {
+            (ControlKind::Encoder, Some(index))
+                if index < usize::from(sdeck_plus::device_model::PLUS.dials) =>
+            {
                 assign(action, Target::Dial(index, ui.event_kind()));
             }
             _ => ui.error("Select a key or a dial before assigning an action."),

@@ -1,3 +1,4 @@
+use crate::device_model::{DeviceModel, PLUS};
 use crate::layers::{Action, LayerStore, SwipeDirection, Trigger};
 use std::path::PathBuf;
 
@@ -68,34 +69,44 @@ pub fn trigger_from_selection(
     control_number: u8,
     event: EventKind,
 ) -> Result<Trigger, EditorError> {
+    trigger_from_selection_for(&PLUS, control, control_number, event)
+}
+
+/// [`trigger_from_selection`] for the control counts of `model`.
+pub fn trigger_from_selection_for(
+    model: &DeviceModel,
+    control: ControlKind,
+    control_number: u8,
+    event: EventKind,
+) -> Result<Trigger, EditorError> {
     if !events_for_control(control).contains(&event) {
         return Err("event does not match selected control".into());
     }
     match (control, event) {
-        (ControlKind::Button, EventKind::ButtonPress) if (1..=8).contains(&control_number) => {
+        (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
             Ok(Trigger::KeyPress(control_number))
         }
-        (ControlKind::Encoder, EventKind::EncoderPress) if (1..=4).contains(&control_number) => {
+        (ControlKind::Encoder, EventKind::EncoderPress) if model.is_valid_dial(control_number) => {
             Ok(Trigger::EncoderPress(control_number))
         }
         (ControlKind::Encoder, EventKind::EncoderClockwise)
-            if (1..=4).contains(&control_number) =>
+            if model.is_valid_dial(control_number) =>
         {
             Ok(Trigger::EncoderClockwise(control_number))
         }
         (ControlKind::Encoder, EventKind::EncoderCounterClockwise)
-            if (1..=4).contains(&control_number) =>
+            if model.is_valid_dial(control_number) =>
         {
             Ok(Trigger::EncoderCounterClockwise(control_number))
         }
-        // Number 0 is the whole strip; 1 through 4 are its sections.
-        (ControlKind::Touch, EventKind::TouchTap) if control_number <= 4 => {
+        // Number 0 is the whole strip; 1 up to the model's last are its sections.
+        (ControlKind::Touch, EventKind::TouchTap) if control_number <= model.zones => {
             Ok(match control_number {
                 0 => Trigger::TouchTap,
                 zone => Trigger::ZoneTap(zone),
             })
         }
-        (ControlKind::Touch, EventKind::TouchPress) if control_number <= 4 => {
+        (ControlKind::Touch, EventKind::TouchPress) if control_number <= model.zones => {
             Ok(match control_number {
                 0 => Trigger::TouchPress,
                 zone => Trigger::ZonePress(zone),
@@ -226,7 +237,7 @@ pub fn control_triggers(
 ) -> Result<Vec<Trigger>, EditorError> {
     let mut triggers = Vec::new();
     for event in events_for_control(control) {
-        let trigger = trigger_from_selection(control, number, event)?;
+        let trigger = trigger_from_selection_for(store.model(), control, number, event)?;
         let section_only = control == ControlKind::Touch
             && number > 0
             && !matches!(trigger, Trigger::ZoneTap(_) | Trigger::ZonePress(_));
@@ -267,7 +278,7 @@ pub fn control_summary(
     let mut lines: Vec<String> = events_for_control(control)
         .into_iter()
         .map(|event| {
-            let action = trigger_from_selection(control, number, event)
+            let action = trigger_from_selection_for(store.model(), control, number, event)
                 .ok()
                 .and_then(|trigger| bindings.and_then(|bindings| bindings.get(&trigger)));
             format!("{}: {}", summary_event_label(event), action_summary(action))
@@ -281,7 +292,7 @@ pub fn control_summary(
     }
     if control == ControlKind::Touch {
         if let Some(bindings) = bindings {
-            for zone in 1..=4 {
+            for zone in store.model().zone_numbers() {
                 for (trigger, label) in [
                     (Trigger::ZoneTap(zone), "Tap"),
                     (Trigger::ZonePress(zone), "Hold"),

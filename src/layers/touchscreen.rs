@@ -56,7 +56,11 @@ struct StoredBinding {
 }
 
 impl Touchscreens {
-    pub(super) fn load(root: &Path, layers: &BTreeMap<String, Layer>) -> io::Result<Self> {
+    pub(super) fn load(
+        root: &Path,
+        layers: &BTreeMap<String, Layer>,
+        model: &DeviceModel,
+    ) -> io::Result<Self> {
         let path = root.join(FILE);
         let metadata = match fs::metadata(&path) {
             Ok(metadata) => metadata,
@@ -98,7 +102,7 @@ impl Touchscreens {
                 let mut data = empty_page(page.owner);
                 for binding in page.bindings {
                     let trigger =
-                        decode_trigger(&binding.trigger).map_err(|error| invalid(&error))?;
+                        decode_trigger(model, &binding.trigger).map_err(|error| invalid(&error))?;
                     let action = decode_action(&binding.action).map_err(|error| invalid(&error))?;
                     validate_binding_action(&trigger, &action)?;
                     if !(trigger.is_touchscreen()
@@ -476,7 +480,7 @@ impl LayerStore {
                     returns,
                     displays,
                 };
-                let images = ArtworkTarget::ALL
+                let images = ArtworkTarget::all_for(self.model)
                     .into_iter()
                     .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
                     .map(|target| artwork.assigned_path_in_layer(&key, target))
