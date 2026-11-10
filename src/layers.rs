@@ -1,6 +1,7 @@
 //! Persistent app-local input layers and action planning.
 
 use crate::{
+    binding_editor::{control_triggers, ControlKind},
     keyboard::{parse_chord, supported_key_names, Chord, Keyboard, Modifier},
     protocol::Event,
 };
@@ -203,6 +204,17 @@ impl PageReturn {
     }
 }
 
+/// A binding taken out by [`LayerStore::unbind_control`], with its metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemovedBinding {
+    /// The configuration that owned it: the layer, or the touchscreen page.
+    pub layer: String,
+    pub trigger: Trigger,
+    pub action: Action,
+    pub page_return: Option<PageReturn>,
+    pub info: Option<crate::info::InfoSource>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Layer {
     pub name: String,
@@ -379,6 +391,62 @@ impl LayerStore {
         data.returns.remove(trigger);
         data.displays.remove(trigger);
         Ok(data.bindings.remove(trigger).is_some())
+    }
+    /// Remove every trigger of one control, with its page returns and live
+    /// information, and return what was removed so it can be restored.
+    ///
+    /// Nothing is changed when the layer is unknown or the control is invalid.
+    ///
+    /// # Errors
+    /// Unknown layers and control numbers outside the hardware range.
+    pub fn unbind_control(
+        &mut self,
+        layer: &str,
+        control: ControlKind,
+        number: u8,
+    ) -> io::Result<Vec<RemovedBinding>> {
+        let triggers =
+            control_triggers(self, layer, control, number).map_err(|error| invalid(&error.0))?;
+        for trigger in &triggers {
+            validate_trigger(trigger)?;
+            if self.binding_layer(layer, trigger).is_none() {
+                return Err(invalid("unknown layer"));
+            }
+        }
+        // Everything is validated: the removal below cannot fail halfway.
+        let mut removed = Vec::new();
+        for trigger in triggers {
+            let Some(data) = self.binding_layer_mut(layer, &trigger) else {
+                continue;
+            };
+            let page_return = data.returns.remove(&trigger);
+            let info = data.displays.remove(&trigger);
+            if let Some(action) = data.bindings.remove(&trigger) {
+                removed.push(RemovedBinding {
+                    layer: data.name.clone(),
+                    trigger,
+                    action,
+                    page_return,
+                    info,
+                });
+            }
+        }
+        Ok(removed)
+    }
+    /// Put back what [`LayerStore::unbind_control`] removed. All or nothing:
+    /// a failure leaves the store as it was.
+    ///
+    /// # Errors
+    /// Owners, pages or actions that no longer validate.
+    pub fn restore_removed(&mut self, removed: &[RemovedBinding]) -> io::Result<()> {
+        let mut next = self.clone();
+        for item in removed {
+            next.bind(&item.layer, item.trigger.clone(), item.action.clone())?;
+            next.set_return(&item.layer, &item.trigger, item.page_return.clone())?;
+            next.set_info(&item.layer, &item.trigger, item.info)?;
+        }
+        *self = next;
+        Ok(())
     }
     /// Set or clear the page return that follows an existing binding.
     ///
@@ -1325,6 +1393,10 @@ fn action_argv(action: &Action) -> io::Result<Vec<String>> {
 #[cfg(test)]
 #[path = "launch_tests.rs"]
 mod launch_tests;
+
+#[cfg(test)]
+#[path = "layers_tests.rs"]
+mod layers_tests;
 
 #[cfg(test)]
 mod tests {

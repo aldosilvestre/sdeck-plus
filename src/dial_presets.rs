@@ -141,7 +141,13 @@ pub(crate) fn connect(
             // Bind on a copy so a failure never leaves a half-applied preset.
             let mut next = layers.borrow().clone();
             for (event, action) in &preset.events {
-                if let Err(error) = next.bind(&layer, event.trigger(number), action.clone()) {
+                // A replaced event keeps no page return or live information.
+                let trigger = event.trigger(number);
+                if let Err(error) = next
+                    .set_return(&layer, &trigger, None)
+                    .and_then(|_| next.set_info(&layer, &trigger, None))
+                    .and_then(|_| next.bind(&layer, trigger, action.clone()))
+                {
                     ui.error(&format!("Could not assign {}: {error}", preset.label));
                     return false;
                 }

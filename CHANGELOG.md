@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Remove binding** clears the whole control (a key's press and hold, a dial's press, turns
+  and exact ticks, a touch area's gestures) with its page returns and live information, so a
+  dial no longer looks configured after Remove; one **Undo remove** restores all of it.
+  Applying a dial preset also drops the page return and live information of the events it
+  replaces.
+
 ### Changed
 
 - The stable AUR PKGBUILD pins the SHA-256 of the published `v0.1.0` tarball instead of `SKIP`.

@@ -4,7 +4,7 @@ use sdeck_plus::{
         format_application_args, trigger_from_selection, ActionKind, ControlKind, EventKind,
     },
     binding_icons::BindingIcon,
-    layers::{Action, LayerStore, Trigger},
+    layers::{Action, LayerStore, RemovedBinding, Trigger},
     local_artwork::{ArtworkStore, ArtworkTarget},
     protocol,
 };
@@ -647,7 +647,7 @@ fn build_widgets(
     let remove_binding = binding_tool(
         "sdeck-remove-symbolic",
         "Remove binding",
-        "Deletes this control's binding. You can undo it right after.",
+        "Deletes the whole control's configuration: every event, page return and live information. You can undo it right after.",
     );
     remove_binding.add_css_class("destructive-action");
     remove_binding.add_css_class("remove-binding");
@@ -1110,41 +1110,28 @@ fn build_widgets(
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
-        remove_binding.connect_clicked(move |_| match ui.selected_layer_and_trigger(&layers) {
-            Ok((layer, trigger)) => {
-                let previous = {
-                    let store = layers.borrow();
-                    store
-                        .binding(&layer, &trigger)
-                        .map(|action| RemovedBinding {
-                            layer: layer.clone(),
-                            trigger: trigger.clone(),
-                            action,
-                            page_return: store.page_return(&layer, &trigger),
-                            info: store.info_source(&layer, &trigger),
-                        })
-                };
-                let snapshot = {
+        remove_binding.connect_clicked(move |_| match ui.selected_layer_and_control(&layers) {
+            Ok((layer, control, number)) => {
+                // The whole control goes, whichever of its events is selected.
+                let result = {
                     let mut store = layers.borrow_mut();
                     store
-                        .unbind(&layer, &trigger)
+                        .unbind_control(&layer, control, number)
                         .map(|removed| (removed, store.clone()))
                 };
-                match snapshot {
-                    Ok((true, snapshot)) => {
+                match result {
+                    Ok((removed, snapshot)) if !removed.is_empty() => {
                         runtime.persist(snapshot);
                         ui.clear_action_fields();
-                        ui.status.set_text("Binding removed.");
+                        ui.status.set_text("Control configuration removed.");
                         ui.mark_clean();
-                        *ui.removed.borrow_mut() = previous;
-                        ui.undo_remove.set_visible(ui.removed.borrow().is_some());
+                        *ui.removed.borrow_mut() = Some(removed);
+                        ui.undo_remove.set_visible(true);
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
                     }
-                    Ok((false, _)) => ui
-                        .status
-                        .set_text("No binding exists for that control event."),
+                    Ok(_) => ui.status.set_text("No binding exists for that control."),
                     Err(error) => ui.error(&format!("Could not remove binding: {error}")),
                 }
             }
@@ -1164,21 +1151,7 @@ fn build_widgets(
             ui.undo_remove.set_visible(false);
             let snapshot = {
                 let mut store = layers.borrow_mut();
-                store
-                    .bind(
-                        &removed.layer,
-                        removed.trigger.clone(),
-                        removed.action.clone(),
-                    )
-                    .and_then(|_| {
-                        store.set_return(
-                            &removed.layer,
-                            &removed.trigger,
-                            removed.page_return.clone(),
-                        )
-                    })
-                    .and_then(|_| store.set_info(&removed.layer, &removed.trigger, removed.info))
-                    .map(|_| store.clone())
+                store.restore_removed(&removed).map(|_| store.clone())
             };
             match snapshot {
                 Ok(snapshot) => {
@@ -1193,6 +1166,8 @@ fn build_widgets(
                     }
                 }
                 Err(error) => {
+                    *ui.removed.borrow_mut() = Some(removed);
+                    ui.undo_remove.set_visible(true);
                     let message = format!("Could not restore binding: {error}");
                     ui.error(&message);
                     toast.show(&message, true);
@@ -1883,17 +1858,7 @@ struct BindingUi {
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
     undo_remove: Button,
-    removed: Rc<RefCell<Option<RemovedBinding>>>,
-}
-
-/// What `Remove` deleted, kept so the feedback line can offer to bring it back.
-#[derive(Clone)]
-struct RemovedBinding {
-    layer: String,
-    trigger: Trigger,
-    action: Action,
-    page_return: Option<sdeck_plus::layers::PageReturn>,
-    info: Option<sdeck_plus::info::InfoSource>,
+    removed: Rc<RefCell<Option<Vec<RemovedBinding>>>>,
 }
 
 impl BindingUi {
@@ -2003,7 +1968,7 @@ impl BindingUi {
         info_toggle.connect_toggled(move |_| refresh());
         info_source.connect_selected_notify(move |_| refresh_info());
         let undo_remove = ui::button("edit-undo-symbolic", "Undo remove");
-        undo_remove.set_tooltip_text(Some("Restore the binding you just removed"));
+        undo_remove.set_tooltip_text(Some("Restore the control you just removed"));
         undo_remove.set_halign(gtk::Align::Start);
         undo_remove.set_visible(false);
         let shortcut_preview = Label::new(None);
@@ -2387,8 +2352,6 @@ impl BindingUi {
     }
 
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
-        self.undo_remove.set_visible(false);
-        *self.removed.borrow_mut() = None;
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
@@ -2539,6 +2502,21 @@ impl BindingUi {
         } else {
             value.parse().ok()
         }
+    }
+
+    fn selected_layer_and_control(
+        &self,
+        layers: &RefCell<LayerStore>,
+    ) -> Result<(String, ControlKind, u8), String> {
+        let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
+            .ok_or_else(|| "Select a profile or page.".to_string())?;
+        if !layers.borrow().layers().contains_key(&layer) {
+            return Err("Selected profile or page no longer exists.".into());
+        }
+        let number = self
+            .control_number()
+            .ok_or_else(|| "Select a control number.".to_string())?;
+        Ok((layer, self.control_kind(), number))
     }
 
     fn selected_layer_and_trigger(
@@ -4399,6 +4377,7 @@ mod tests {
     mod catalog_overwrite_tests;
     mod configuration_transfer_tests;
     mod control_feedback_tests;
+    mod control_remove_tests;
     mod dial_action_tests;
     mod dial_preset_tests;
     mod documentation_screenshots;

@@ -171,12 +171,18 @@ fn hold_editor_saves_reloads_removes_and_undoes_independently() {
             .borrow()
             .binding("Base", &Trigger::KeyHold(1))
             .is_none());
+        // Remove clears the whole key, so the short action goes with the hold.
+        assert!(fixture
+            .layers
+            .borrow()
+            .binding("Base", &Trigger::KeyPress(1))
+            .is_none());
+        ui.undo_remove.emit_clicked();
         assert!(fixture
             .layers
             .borrow()
             .binding("Base", &Trigger::KeyPress(1))
             .is_some());
-        ui.undo_remove.emit_clicked();
         assert_eq!(
             fixture
                 .layers

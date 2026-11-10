@@ -1,0 +1,20 @@
+# Volume step and whole-control Remove
+
+Two requested changes, two reviewable work units. Decisions confirmed by the human: Remove clears the WHOLE control (one Undo restores everything).
+
+## Specs
+S1. “Mejora: Cuando se asigne subir o bajar el volumen, deberiamos poder elegir las cantidad de incrementos o decrementos del volumen. Seria como el 'paso'” Contract: the volume up and volume down actions take a step of 1 to 100 percent chosen in the action editor (a numeric field shown for those two actions); the default is 5, which is exactly today's behavior; a saved binding with step 5 keeps the legacy serialized shape byte for byte and every legacy binding still loads as 5; the action summary/tooltip/legend shows the step when it is not the default; execution passes the step to wpctl (up keeps --limit 1.0); dial turns do NOT scale with ticks (unchanged).
+S2. “Correjir: Cuando se le asigna un valor a un deal de una funcion especificada, supongamos la de track, y luego le asigno otra de volumen por ejemplo, y a posteriori elimino la configuración del boton, sigue figurando como que tendria algo configurado.” Contract: Remove on a control (key, dial, touch strip, touch section) clears every gesture/event binding of that control (keys: press and hold; dials: press, clockwise, counterclockwise and any rotation tick bindings; strip and sections: all their gestures) together with their page returns and live-info displays, leaves the preview showing it as unassigned, and a single Undo restores all of it. Applying a dial preset also clears the page return and live-info display of the triggers it replaces (no stale records). Other controls and layers are untouched; the paired layers.conf + touchscreen.json save rules are respected.
+
+## Tasks
+T1 | S2 | Control-wide unbind in LayerStore, toolbar Remove + multi-binding Undo, preset apply clears stale returns/displays, lib + GTK regression tests, docs/CHANGELOG | route: worker | Risk: item 1 (deletes stored bindings; mitigated by Undo) | commit: pending
+T2 | S1 | Volume step: model with legacy-compatible serialization, validation, wpctl argv, summary, editor numeric field, catalog/preset defaults, tests, docs/CHANGELOG | route: worker | Risk: none named (additive format; compat pinned by tests) | commit: pending
+
+## Log
+L1. User request (verbatim): vamos a hacer una mejora y corregir un bug.
+
+Mejora: Cuando se asigne subir o bajar el volumen, deberiamos poder elegir las cantidad de incrementos o decrementos del volumen. Seria como el 'paso' 
+
+Correjir: Cuando se le asigna un valor a un deal de una funcion especificada, supongamos la de track, y luego le asigno otra de volumen por ejemplo, y a posteriori elimino la configuración del boton, sigue figurando como que tendria algo configurado.
+L2. Exploration (path:line): VolumeUp/VolumeDown are unit variants, hard-coded 5% (src/desktop_actions.rs:64-73, 309-322); layers.conf stores feature actions as feature-v1:<hex JSON> (src/layers.rs:863-873), JSON <=4096 bytes (src/features.rs:57-74); bundles copy layers.conf verbatim so the bundle format needs no change; precedent for a signed step: DeviceAction::AdjustBrightness(i8). Bug root cause: Remove unbinds only the selected trigger (src/main.rs:1113-1148, LayerStore::unbind src/layers.rs:373-382) while the dial legend counts any event (src/binding_editor.rs:288-305); after a preset the event picker resets to Press (src/dial_presets.rs:143-147), so only Mute is removed and the turn bindings stay. Keys have the same problem with KeyHold; presets bind without clearing set_return/set_info.
+L3. Human decision: Remove clears the whole control. Decided by the parent (engineering): step range 1-100 percent, default 5, new serialized variant only for non-default steps, no tick scaling. Downgrade note: a layers.conf saved with a custom step is not readable by older builds; document it. Branch fix/remove-control-and-volume-step from main c4fc924. Request record: Obsidian memory/requests/sdeck-plus/volume-step-and-stale-binding-bug-2026-11-10.md. No callable project Engram: local Markdown/vault only.

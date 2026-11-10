@@ -657,3 +657,65 @@ fn malformed_touch_storage_is_not_replaced_and_rejected_changes_do_not_mutate_st
     assert_eq!(fs::read(fixture.0.join("touchscreen.json")).unwrap(), bad);
     assert!(!fixture.0.join("layers.conf").exists());
 }
+
+#[test]
+fn control_removal_clears_the_selected_touch_page_and_undo_restores_it_after_a_restart() {
+    use crate::binding_editor::ControlKind;
+    let fixture = Fixture::new();
+    let (mut layers, mut organization, mut artwork) = fixture.stores();
+    layers.create("Studio").unwrap();
+    organization.sync(&layers);
+    layers
+        .initialize_touchscreens(&organization, &mut artwork)
+        .unwrap();
+    let first = layers.touchscreen_owner("Base").unwrap().to_owned();
+    let second = layers.create_touchscreen_page("Base").unwrap();
+    layers.select_touchscreen_page("Base", &first);
+    for trigger in [
+        Trigger::EncoderPress(1),
+        Trigger::EncoderClockwise(1),
+        Trigger::Rotation(1, 2),
+        Trigger::ZoneTap(1),
+    ] {
+        layers
+            .bind("Base", trigger, Action::Emit("first".into()))
+            .unwrap();
+    }
+    layers
+        .set_info(
+            "Base",
+            &Trigger::EncoderClockwise(1),
+            Some(InfoSource::Clock),
+        )
+        .unwrap();
+    layers.select_touchscreen_page("Base", &second);
+    layers
+        .bind(
+            "Base",
+            Trigger::EncoderPress(1),
+            Action::Emit("second".into()),
+        )
+        .unwrap();
+    layers.select_touchscreen_page("Base", &first);
+    let removed = layers
+        .unbind_control("Base", ControlKind::Encoder, 1)
+        .unwrap();
+    assert_eq!(removed.len(), 3);
+    assert!(removed.iter().all(|item| item.layer == first));
+    assert!(layers.binding("Base", &Trigger::ZoneTap(1)).is_some());
+    assert_eq!(layers.zone_info_source("Base", 1), None);
+    layers.select_touchscreen_page("Base", &second);
+    assert!(layers.binding("Base", &Trigger::EncoderPress(1)).is_some());
+    layers.select_touchscreen_page("Base", &first);
+    layers.restore_removed(&removed).unwrap();
+    layers.persist().unwrap();
+    let reopened = LayerStore::open_at(&fixture.0).unwrap();
+    assert_eq!(
+        reopened.binding(&first, &Trigger::Rotation(1, 2)),
+        Some(Action::Emit("first".into()))
+    );
+    assert_eq!(
+        reopened.info_source(&first, &Trigger::EncoderClockwise(1)),
+        Some(InfoSource::Clock)
+    );
+}

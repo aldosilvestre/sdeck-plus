@@ -212,6 +212,42 @@ pub fn action_from_fields(
     crate::layers::normalize_keyboard_action(action).map_err(|error| EditorError(error.to_string()))
 }
 
+/// Every trigger one control owns on a layer: its editable events, a key's
+/// hold, and a dial's exact-tick overrides. A touch section owns only its own
+/// tap and hold; the strip (number 0) owns the whole-strip gestures.
+///
+/// # Errors
+/// A control number outside the hardware range.
+pub fn control_triggers(
+    store: &LayerStore,
+    layer: &str,
+    control: ControlKind,
+    number: u8,
+) -> Result<Vec<Trigger>, EditorError> {
+    let mut triggers = Vec::new();
+    for event in events_for_control(control) {
+        let trigger = trigger_from_selection(control, number, event)?;
+        let section_only = control == ControlKind::Touch
+            && number > 0
+            && !matches!(trigger, Trigger::ZoneTap(_) | Trigger::ZonePress(_));
+        if !section_only && !triggers.contains(&trigger) {
+            triggers.push(trigger);
+        }
+    }
+    match control {
+        ControlKind::Button => triggers.push(Trigger::KeyHold(number)),
+        ControlKind::Encoder => {
+            if let Some(data) = store.binding_layer(layer, &Trigger::EncoderPress(number)) {
+                triggers.extend(data.bindings.keys().filter(|trigger| {
+                    matches!(trigger, Trigger::Rotation(index, _) if *index == number)
+                }).cloned());
+            }
+        }
+        ControlKind::Touch => {}
+    }
+    Ok(triggers)
+}
+
 /// Display every editable event, plus legacy exact rotations that can override it.
 /// Summaries are presentation only: lookup and execution semantics stay in LayerStore.
 pub fn control_summary(

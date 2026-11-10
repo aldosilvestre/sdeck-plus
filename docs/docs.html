@@ -300,7 +300,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
                 <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key's Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below. Select <strong>Hold 2 seconds</strong> to configure its optional secondary action without replacing the short action.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
-                <li>The three icon buttons at the top of the right-hand panel act on the selected control: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears it. Hover any of them for a tooltip that explains what it does; the result message appears right below them.</li>
+                <li>The three icon buttons at the top of the right-hand panel act on the selected control: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. <strong>Undo remove</strong>, right below, brings all of it back. Hover any of them for a tooltip that explains what it does; the result message appears right below them.</li>
               </ol>
               <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
                  Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
@@ -391,8 +391,8 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Release before two seconds to run only the short action; hold for two seconds to run only the secondary action. Releasing afterwards does nothing.
                  For example, assign <strong>Start timer</strong> to the short action and <strong>Cancel timer</strong> to the hold action.</p>
               <a href="screenshots/key-hold-action.png"><img width="1000" height="950" src="screenshots/key-hold-action.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Hold 2 seconds selected for key 8 with Cancel timer as its secondary action."></a>
-              <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> in hold mode removes only the secondary action;
-                 without one, keys run immediately on key-down. Hold actions keep independent page returns and do not replace primary artwork or live information.
+              <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> removes the whole key, the short and the hold action together (<strong>Undo remove</strong> restores both);
+                 without a hold action, keys run immediately on key-down. Hold actions keep independent page returns and do not replace primary artwork or live information.
                  Dial presses and touch-strip gestures are unchanged.</p>
             </article>
             <article class="card">

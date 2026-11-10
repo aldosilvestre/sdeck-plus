@@ -167,9 +167,11 @@ editor field differs from the loaded or saved binding; loading, saving or
 removing resets it.
 Selecting another preview control while edits are unsaved asks first with the
 compact confirmation style (Keep editing is the default, Discard changes is
-destructive). Remove leaves an Undo remove button under that status line until
-another control is loaded; it re-saves the binding, its page return and its
-live information.
+destructive). Remove clears the whole selected control (a key's press and hold,
+a dial's press, turns and exact ticks, a touch area's gestures) with their page
+returns and live information, whichever event is selected. It leaves an Undo
+remove button under that status line until it is used or another Remove
+replaces it; one Undo re-saves everything that was removed.
 The related controls inside Appearance use 4px gaps to keep expanded artwork
 and the taller shortcut/argument fields compact within the scrolling workspace.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
