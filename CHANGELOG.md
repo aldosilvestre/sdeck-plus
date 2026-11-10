@@ -6,6 +6,14 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 ## [Unreleased]
 
+### Added
+
+- **AUR packaging, prepared but not published.** `packaging/aur/sdeck-plus` (pinned
+  release tarball, checksum `SKIP` until the `v0.1.0` tag exists) and
+  `packaging/aur/sdeck-plus-git` (VCS source) each carry a PKGBUILD and `.SRCINFO`,
+  plus a shared desktop file and a `uaccess` udev rule for the Stream Deck +.
+  Nothing was uploaded; `packaging/aur/README.md` lists the release-time steps.
+
 ### Changed
 
 - **Explicit updates from Help.** Default per-user installations now offer Update

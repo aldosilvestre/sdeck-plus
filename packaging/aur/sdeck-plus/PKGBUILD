@@ -1,0 +1,49 @@
+# Maintainer: Your Name <your-email>
+# TODO(human): replace the Maintainer line above with your own name and address before publishing.
+pkgname=sdeck-plus
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="GTK4 control desk for the Elgato Stream Deck + (Stream Deck Plus) on Linux"
+arch=('x86_64' 'aarch64')
+url="https://aldosilvestre.github.io/sdeck-plus/"
+license=('MIT')
+depends=('gtk4' 'systemd-libs')
+makedepends=('cargo' 'pkgconf' 'glib2')
+# hidapi's bundled C code is built with -flto by makepkg; rust-lld cannot link it (undefined hid_* symbols).
+options=('!lto')
+optdepends=('mpv: sound playback'
+            'wireplumber: volume and mute (wpctl)'
+            'pipewire: audio output discovery (pw-dump)'
+            'wl-clipboard: text pasting (wl-copy)'
+            'xdg-utils: opening files and websites (xdg-open)'
+            'curl: weather information')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v$pkgver.tar.gz")
+# REPLACE with `updpkgsums` after the v0.1.0 tag is published (no release exists yet, so no checksum is known).
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  cargo fetch --locked --target "$(rustc --print host-tuple)"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  CARGO_TARGET_DIR=target cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  # Only core tests: the GTK binary tests need a display and silently pass without one.
+  CARGO_TARGET_DIR=target cargo test --frozen --lib
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/sdeck-plus "$pkgdir/usr/bin/sdeck-plus"
+  install -Dm644 packaging/dev.streamdeck.EventMonitor.desktop \
+    "$pkgdir/usr/share/applications/dev.streamdeck.EventMonitor.desktop"
+  install -Dm644 assets/icons/scalable/apps/sdeck-plus.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/sdeck-plus.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 packaging/70-sdeck-plus.rules "$pkgdir/usr/lib/udev/rules.d/70-sdeck-plus.rules"
+}

@@ -1,0 +1,27 @@
+pkgbase = sdeck-plus-git
+	pkgdesc = GTK4 control desk for the Elgato Stream Deck + (Stream Deck Plus) on Linux (git version)
+	pkgver = 0.1.0.r0.g0000000
+	pkgrel = 1
+	url = https://aldosilvestre.github.io/sdeck-plus/
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = pkgconf
+	makedepends = glib2
+	makedepends = git
+	depends = gtk4
+	depends = systemd-libs
+	optdepends = mpv: sound playback
+	optdepends = wireplumber: volume and mute (wpctl)
+	optdepends = pipewire: audio output discovery (pw-dump)
+	optdepends = wl-clipboard: text pasting (wl-copy)
+	optdepends = xdg-utils: opening files and websites (xdg-open)
+	optdepends = curl: weather information
+	provides = sdeck-plus
+	conflicts = sdeck-plus
+	options = !lto
+	source = sdeck-plus::git+https://github.com/aldosilvestre/sdeck-plus.git
+	sha256sums = SKIP
+
+pkgname = sdeck-plus-git
