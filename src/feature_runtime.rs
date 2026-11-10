@@ -34,8 +34,6 @@ mod touchscreen;
 pub(crate) use model_session::{
     open_session, ModelSession, OpenError, OpenedSession, SessionRoots,
 };
-#[cfg(test)]
-pub(crate) use model_session::{Outcome, SwitchReason};
 
 /// The root OBS settings live in: the session's, or the Stream Deck + root.
 pub(crate) fn active_root(root: Option<&Path>) -> std::io::Result<PathBuf> {

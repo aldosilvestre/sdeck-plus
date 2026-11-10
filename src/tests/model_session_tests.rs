@@ -255,10 +255,9 @@ fn remember(roots: &SessionRoots, model: &DeviceModel) {
 }
 
 fn stored_binding(root: &Path, model: &'static DeviceModel, key: u8) -> bool {
+    // A save in flight can briefly hide a file; the caller polls until it settles.
     LayerStore::open_at_model(root, model)
-        .unwrap()
-        .binding("Base", &Trigger::KeyPress(key))
-        .is_some()
+        .is_ok_and(|store| store.binding("Base", &Trigger::KeyPress(key)).is_some())
 }
 
 fn header_label(window: &ApplicationWindow, class: &str) -> Label {
@@ -731,10 +730,11 @@ fn a_switch_waits_for_a_running_configuration_operation() {
         let bundle = harness.base.join("plus.sdeck-plus.json");
         runtime.export_configuration(bundle.clone());
         assert!(!runtime.can_switch_model());
-        let outcome = harness
+        // The device announces itself first, as it does in production.
+        harness
             .session
-            .switch_model(&PLUS_XL, feature_runtime::SwitchReason::Device);
-        assert_eq!(outcome, feature_runtime::Outcome::Blocked);
+            .connection_changed(&ConnectionState::Connected(&PLUS_XL));
+        assert_eq!(harness.model().id, "plus");
         assert_eq!(harness.model().id, "plus");
         // Once the export finishes the deferred switch runs.
         harness.wait_for_model(&PLUS_XL);
@@ -895,5 +895,166 @@ fn the_header_uses_the_connected_models_own_wording() {
             detail.tooltip_text().as_deref(),
             Some("USB device VID 0FD9 / PID 00C6 · HID input and artwork active")
         );
+    });
+}
+
+#[test]
+fn a_deferred_device_switch_is_dropped_when_the_device_flips_back() {
+    run_gtk_test(|| {
+        let Some(h) = start("stale-deferred", |_| {}) else {
+            return;
+        };
+        let runtime = h.session.runtime();
+        runtime.export_configuration(h.base.join("p.sdeck-plus.json"));
+        assert!(!runtime.can_switch_model());
+        h.session
+            .connection_changed(&ConnectionState::Connected(&PLUS_XL));
+        h.session
+            .connection_changed(&ConnectionState::Connected(&PLUS));
+        let s = h.session.clone();
+        wait_until("export", move || {
+            s.runtime()
+                .status
+                .text()
+                .starts_with("Configuration exported to")
+        });
+        // Let the polling tick run retry_deferred; the signal is its pass count.
+        let ticks = Rc::new(Cell::new(0));
+        let counter = ticks.clone();
+        let source = glib::timeout_add_local(Duration::from_millis(40), move || {
+            counter.set(counter.get() + 1);
+            glib::ControlFlow::Continue
+        });
+        wait_until("two polling ticks", {
+            let ticks = ticks.clone();
+            move || ticks.get() >= 3
+        });
+        source.remove();
+        assert_eq!(h.model().id, "plus");
+        assert!(h.session.accepts_input());
+    });
+}
+
+#[test]
+fn a_plus_session_refuses_an_xl_bundle_and_keeps_its_files() {
+    run_gtk_test(|| {
+        let Some(h) = start("plus-refuses-xl", |roots| {
+            std::fs::create_dir_all(roots.data_dir.join("devices/plus-xl")).unwrap();
+            std::fs::write(roots.data_dir.join("devices/plus-xl/marker"), b"keep").unwrap();
+        }) else {
+            return;
+        };
+        let xl_root = h.base.join("scratch-xl");
+        LayerStore::open_at_model(&xl_root, &PLUS_XL)
+            .unwrap()
+            .persist()
+            .unwrap();
+        let bundle = h.base.join("xl.sdeck-plus.json");
+        sdeck_plus::config_bundle::export_for(&xl_root, &bundle, &PLUS_XL).unwrap();
+        let before = tree(&h.roots.data_dir);
+        let runtime = h.session.runtime();
+        runtime.import_configuration(bundle);
+        let s = h.session.clone();
+        wait_until("the refusal", move || {
+            s.runtime()
+                .status
+                .text()
+                .starts_with("Could not import configuration:")
+        });
+        assert!(runtime.status.text().contains(
+            "This configuration is for Stream Deck + XL; connect or preview that model to import it."
+        ));
+        assert_eq!(tree(&h.roots.data_dir), before);
+        assert_eq!(
+            std::fs::read(h.roots.data_dir.join("devices/plus-xl/marker")).unwrap(),
+            b"keep"
+        );
+    });
+}
+
+#[test]
+fn a_plus_import_preserves_the_devices_directory() {
+    run_gtk_test(|| {
+        let Some(h) = start("plus-import-devices", |roots| {
+            std::fs::create_dir_all(roots.data_dir.join("devices/plus-xl")).unwrap();
+            std::fs::write(roots.data_dir.join("devices/plus-xl/marker"), b"keep").unwrap();
+        }) else {
+            return;
+        };
+        let source = h.base.join("scratch-plus");
+        LayerStore::open_at(&source).unwrap().persist().unwrap();
+        let bundle = h.base.join("plus.sdeck-plus.json");
+        sdeck_plus::config_bundle::export_for(&source, &bundle, &PLUS).unwrap();
+        let runtime = h.session.runtime();
+        runtime.import_configuration(bundle);
+        let s = h.session.clone();
+        wait_until("the import", move || {
+            s.runtime()
+                .status
+                .text()
+                .starts_with("Configuration imported")
+        });
+        assert_eq!(
+            std::fs::read(h.roots.data_dir.join("devices/plus-xl/marker")).unwrap(),
+            b"keep"
+        );
+    });
+}
+
+#[test]
+fn the_updates_entry_opens_exactly_one_dialog_even_after_switches() {
+    run_gtk_test(|| {
+        let Some(h) = start("one-updates", |_| {}) else {
+            return;
+        };
+        fn find_button_named(widget: &gtk::Widget, caption: &str) -> Option<Button> {
+            if let Some(button) = widget.downcast_ref::<Button>() {
+                if button_caption(button).as_deref() == Some(caption) {
+                    return Some(button.clone());
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                if let Some(found) = find_button_named(&current, caption) {
+                    return Some(found);
+                }
+                child = current.next_sibling();
+            }
+            None
+        }
+        fn find_updates(widget: &gtk::Widget) -> Option<Button> {
+            if let Some(menu) = widget.downcast_ref::<gtk::MenuButton>() {
+                if let Some(popover) = menu.popover() {
+                    if let Some(found) = find_button_named(&popover.child()?, "Updates") {
+                        return Some(found);
+                    }
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                if let Some(found) = find_updates(&current) {
+                    return Some(found);
+                }
+                child = current.next_sibling();
+            }
+            None
+        }
+        let entry = find_updates(h.window.upcast_ref()).expect("Updates menu entry");
+        let open = || {
+            gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk::Dialog>().ok())
+                .filter(|d| d.is_visible() && d.title().as_deref() == Some("Updates"))
+                .count()
+        };
+        for round in 0..3 {
+            entry.emit_clicked();
+            entry.emit_clicked();
+            assert_eq!(open(), 1, "round {round}");
+            h.connect(if round % 2 == 0 { &PLUS_XL } else { &PLUS });
+            h.wait_for_model(if round % 2 == 0 { &PLUS_XL } else { &PLUS });
+        }
+        entry.emit_clicked();
+        assert_eq!(open(), 1);
     });
 }

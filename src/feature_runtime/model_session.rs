@@ -346,8 +346,12 @@ impl ModelSession {
     pub(crate) fn retry_deferred(self: &Rc<Self>) {
         if self.runtime.can_switch_model() {
             if let Some((model, reason)) = self.deferred.take() {
-                // A device that appeared meanwhile has already decided.
-                if reason == SwitchReason::Device || self.connected.get().is_none() {
+                // The connection may have moved on while the operation ran.
+                let current = match reason {
+                    SwitchReason::Device => self.connected.get() == Some(model),
+                    SwitchReason::Preview => self.connected.get().is_none(),
+                };
+                if current {
                     self.switch_model(model, reason);
                     self.sync_picker();
                 }
@@ -360,6 +364,8 @@ impl ModelSession {
         model: &'static DeviceModel,
         reason: SwitchReason,
     ) -> Outcome {
+        // The newest request supersedes any switch that was waiting.
+        self.deferred.set(None);
         let current = self.runtime.session_model();
         if model == current && self.failed.get().is_none() {
             return Outcome::Unchanged;
