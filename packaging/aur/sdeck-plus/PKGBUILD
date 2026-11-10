@@ -1,6 +1,6 @@
 # Maintainer: Aldo Silvestre <aldosilvestre89@gmail.com>
 pkgname=sdeck-plus
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux"
 arch=('x86_64' 'aarch64')
@@ -16,8 +16,6 @@ optdepends=('mpv: sound playback'
             'wl-clipboard: text pasting (wl-copy)'
             'xdg-utils: opening files and websites (xdg-open)'
             'curl: weather information')
-# NOTE: udev/70-sdeck.rules is not in the v0.1.0 tarball (it was packaging/70-sdeck-plus.rules): bump pkgver
-# to the next release and run `updpkgsums` before publishing this package.
 source=("$pkgname-$pkgver.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('d6daef0a001bec91e3b50783bdde5b18f40f9026de69b59483df6ebde9d8930d')
 

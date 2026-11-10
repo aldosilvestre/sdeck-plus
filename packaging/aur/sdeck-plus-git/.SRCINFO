@@ -1,6 +1,6 @@
 pkgbase = sdeck-plus-git
 	pkgdesc = GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux (git version)
-	pkgver = 0.1.0.r0.g0000000
+	pkgver = 0.2.0.r0.g0000000
 	pkgrel = 1
 	url = https://aldosilvestre.github.io/sdeck-plus/
 	arch = x86_64

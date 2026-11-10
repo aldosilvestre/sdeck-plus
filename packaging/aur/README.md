@@ -16,8 +16,6 @@ and never install per-user files.
 `udev/70-sdeck.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the Stream Deck + XL (`0fd9:00c6`) through `uaccess`.
 The app itself never changes permissions, so the package installs the rule to `/usr/lib/udev/rules.d/70-sdeck.rules`.
 
-The stable PKGBUILD pins the `v0.1.0` tarball, which still has the rule at `packaging/70-sdeck-plus.rules`: bump `pkgver` to the next release and run `updpkgsums` before publishing it.
-
 ## Why `options=('!lto')`
 
 makepkg builds C code with `-flto`. The bundled hidapi object then cannot be linked by `rust-lld`
@@ -26,7 +24,7 @@ makepkg builds C code with `-flto`. The bundled hidapi object then cannot be lin
 ## Before publishing (human steps)
 
 1. Both PKGBUILDs already name the maintainer on their first line; change it there if the maintainer changes.
-2. Release `v0.1.0` is published and the stable PKGBUILD already carries its checksum. For a later
+2. Release `v0.2.0` is published and the stable PKGBUILD already carries its checksum. For a later
    release, set `pkgver`, reset `pkgrel=1` and run `updpkgsums` in `sdeck-plus/`.
 3. Check the pinned source: `makepkg --verifysource` in `sdeck-plus/` (downloads the tag's tarball and
    compares it with `sha256sums`).

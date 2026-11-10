@@ -1,6 +1,6 @@
 [package]
 name = "sdeck-plus"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux"

@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
+Support for the Stream Deck + XL and for several Stream Decks at once (package version `0.2.0`).
+
 ### Added
 
 - **Stream Deck + XL support** (VID `0x0FD9`, PID `0x00C6`): 36 keys (9x4), 6 dials and a
@@ -63,7 +67,7 @@ All notable changes to this project are documented here. The format follows
   and Stream Deck + XL connected", "Stream Deck + or Stream Deck + XL not connected").
 - README, the site, `DESIGN.md`, package descriptions and the desktop file describe both models and
   the XL's validation status.
-- The stable AUR PKGBUILD pins the SHA-256 of the published `v0.1.0` tarball instead of `SKIP`.
+- The stable AUR PKGBUILD pins the SHA-256 of the published release tarball instead of `SKIP`.
 
 ## [0.1.0] - 2026-11-09
 
