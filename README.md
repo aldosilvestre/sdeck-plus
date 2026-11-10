@@ -97,18 +97,38 @@ Alternatively, clone the repository and run `./install.sh` to build that checkou
 (without requiring a published release), or `./install.sh --uninstall` to remove
 it. To try it without installing, run `cargo run` from the checkout.
 
-Your user needs permission to open the device's HID node. If access is denied,
-an administrator can install the repository's rule file
-[`udev/70-sdeck.rules`](udev/70-sdeck.rules), which grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the + XL (`0fd9:00c6`) with `TAG+="uaccess"`:
+### Device access (udev rule)
+
+Your user needs permission to open the device's HID node. If access is denied, an
+administrator has to install the repository's rule file,
+[`udev/70-sdeck.rules`](udev/70-sdeck.rules). It grants the logged-in user access
+to the Stream Deck + (`0fd9:0084`) and the + XL (`0fd9:00c6`) with `TAG+="uaccess"`
+and nothing else. It can be installed in either of two ways:
+
+**With one command (downloads the file and writes it with `sudo`):**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules >/dev/null
+```
+
+**Or copy it by hand:** read [`udev/70-sdeck.rules`](udev/70-sdeck.rules) first, then copy
+it to `/etc/udev/rules.d/70-sdeck.rules`, for example from a checkout of the repository:
+
+```sh
+sudo install -Dm644 udev/70-sdeck.rules /etc/udev/rules.d/70-sdeck.rules
+```
+
+Either way, reload the rules and reconnect the device afterwards:
+
+```sh
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Reconnect the device afterwards (the installer prints these commands when needed; the AUR packages ship the rule). Some actions need
-optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions need
-`/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
+The installer prints these commands when it finds a device your user cannot open, and the
+AUR packages ship the rule (no manual step). sdeck-plus itself never changes permissions.
+
+Some actions need optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions
+need `/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.
 
 ## Documentation
