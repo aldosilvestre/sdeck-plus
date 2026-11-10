@@ -268,17 +268,21 @@ const PLUS_GOLDEN_HASH: u64 = 0x9d8dea7cc9a97e57;
 /// The look settings the golden is rendered with, so the picture does not
 /// depend on the host's theme, font or display settings (nor on HOME).
 /// Restores what it replaced when dropped.
-struct ExplicitLook {
+pub(super) struct ExplicitLook {
     settings: gtk::Settings,
     saved: Vec<(&'static str, glib::Value)>,
 }
 
 impl ExplicitLook {
-    fn apply() -> Self {
+    pub(super) fn apply() -> Self {
+        Self::apply_with(false)
+    }
+
+    pub(super) fn apply_with(dark: bool) -> Self {
         let settings = gtk::Settings::default().unwrap();
         let wanted: [(&'static str, glib::Value); 9] = [
             ("gtk-theme-name", "Adwaita".to_value()),
-            ("gtk-application-prefer-dark-theme", false.to_value()),
+            ("gtk-application-prefer-dark-theme", dark.to_value()),
             ("gtk-font-name", "Sans 10".to_value()),
             ("gtk-xft-dpi", (96 * 1024).to_value()),
             ("gtk-xft-antialias", 1.to_value()),
@@ -653,7 +657,7 @@ fn each_models_session_keeps_its_own_preview_and_selection() {
         let shipped = render_preview(&h.window, &preview_of(&root), None);
 
         activate(&plus_preview, ControlRef::Dial(2));
-        h.preview_as(&PLUS_XL);
+        h.show_model(&PLUS_XL);
         assert_eq!(h.model().id, "plus-xl");
         assert_eq!(shown_shape(&root), xl);
         let xl_runtime = h.session.runtime();
@@ -685,11 +689,11 @@ fn each_models_session_keeps_its_own_preview_and_selection() {
         ] {
             activate(&xl_preview, control);
             assert_eq!(xl_ui.selected_control(), Some(control));
-            h.preview_as(&PLUS);
+            h.show_model(&PLUS);
             assert_eq!(shown_shape(&root), plus);
             assert_eq!(plus_preview.selected(), ControlRef::Dial(2));
             assert_eq!(plus_ui.selected_control(), Some(ControlRef::Dial(2)));
-            h.preview_as(&PLUS_XL);
+            h.show_model(&PLUS_XL);
             assert_eq!(
                 xl_preview.selected(),
                 control,
@@ -698,7 +702,7 @@ fn each_models_session_keeps_its_own_preview_and_selection() {
         }
         activate(&xl_preview, ControlRef::Dial(2));
         assert_eq!(xl_ui.control_number_model.n_items(), 6, "dials 1-6");
-        h.preview_as(&PLUS);
+        h.show_model(&PLUS);
         activate(&plus_preview, ControlRef::Zone(3));
         assert_eq!(
             plus_ui.control_number_model.n_items(),
@@ -1049,7 +1053,7 @@ fn the_artwork_target_picker_and_clicks_follow_the_models_sections() {
         };
         assert_eq!(names(&shown_picker()).len(), 5);
         let plus_artwork = h.session.runtime().artwork_ui().clone();
-        h.preview_as(&PLUS_XL);
+        h.show_model(&PLUS_XL);
         let picker = shown_picker();
         let preview = h.session.runtime().preview().unwrap();
         let artwork = h.session.runtime().artwork_ui().clone();
@@ -1074,7 +1078,7 @@ fn the_artwork_target_picker_and_clicks_follow_the_models_sections() {
             .emit_clicked();
         assert_eq!(artwork.selected_target.get(), ArtworkTarget::Keypad(30));
         // The + session has its own picker and target, untouched by the XL's.
-        h.preview_as(&PLUS);
+        h.show_model(&PLUS);
         assert_eq!(names(&shown_picker()).len(), 5);
         assert!(plus_artwork.selected_target.get().is_valid_for(&PLUS));
         assert_eq!(artwork.selected_target.get(), ArtworkTarget::Keypad(30));

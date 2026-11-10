@@ -473,7 +473,7 @@ fn build_ui_in(
         feature_runtime::SharedHeader {
             status: header.status.clone(),
             detail: header.connection_detail.clone(),
-            picker: header.preview_picker.clone(),
+            selector: header.selector.clone(),
             menu: header.configuration_menu.clone(),
         },
         stack,
@@ -607,33 +607,58 @@ fn build_session(
     })
 }
 
-/// 'Preview as': which supported model the window shows while no device is
-/// connected. The session enables, disables and positions it.
+/// The 'Current' selector: which connected Stream Deck the window configures.
+/// It is only there while two or more models are connected; the session lists
+/// the models and positions it.
 #[derive(Clone)]
-struct PreviewPicker {
+struct ModelSelector {
     root: GtkBox,
     dropdown: gtk::DropDown,
-    models: Rc<Vec<&'static sdeck_plus::device_model::DeviceModel>>,
+    names: gtk::StringList,
+    /// The models the drop-down lists, in order.
+    entries: Rc<RefCell<Vec<&'static sdeck_plus::device_model::DeviceModel>>>,
 }
 
-impl PreviewPicker {
+impl ModelSelector {
     fn new() -> Self {
-        let models: Vec<_> = sdeck_plus::device_model::DeviceModel::supported().collect();
-        let names: Vec<&str> = models.iter().map(|model| model.name).collect();
-        let dropdown = gtk::DropDown::from_strings(&names);
-        dropdown.update_property(&[gtk::accessible::Property::Label("Preview as")]);
-        let caption = Label::new(Some("Preview as"));
+        let names = gtk::StringList::new(&[]);
+        let dropdown = gtk::DropDown::new(Some(names.clone()), gtk::Expression::NONE);
+        dropdown.update_property(&[gtk::accessible::Property::Label("Current device")]);
+        dropdown.set_tooltip_text(Some("Choose the Stream Deck to configure"));
+        let caption = Label::new(Some("Current"));
         caption.add_css_class("muted");
         let root = GtkBox::new(Orientation::Horizontal, 6);
-        root.add_css_class("preview-picker");
+        root.add_css_class("model-selector");
         root.set_valign(gtk::Align::Center);
         root.append(&caption);
         root.append(&dropdown);
+        root.set_visible(false);
+        dropdown.set_focusable(false);
         Self {
             root,
             dropdown,
-            models: Rc::new(models),
+            names,
+            entries: Rc::default(),
         }
+    }
+
+    /// List `connected`, select `shown` and appear only with a choice to make.
+    fn set_entries(
+        &self,
+        connected: &[&'static sdeck_plus::device_model::DeviceModel],
+        shown: &sdeck_plus::device_model::DeviceModel,
+    ) {
+        if *self.entries.borrow() != connected {
+            let names: Vec<&str> = connected.iter().map(|model| model.name).collect();
+            self.names.splice(0, self.names.n_items(), &names);
+            *self.entries.borrow_mut() = connected.to_vec();
+        }
+        if let Some(index) = connected.iter().position(|model| *model == shown) {
+            self.dropdown.set_selected(index as u32);
+        }
+        let visible = connected.len() >= 2;
+        self.root.set_visible(visible);
+        self.dropdown.set_focusable(visible);
     }
 }
 
@@ -682,12 +707,12 @@ struct MonitorWidgets {
 }
 
 /// What belongs to the window rather than to a model: the title, the
-/// connection status, 'Preview as', the update indicator and the menus.
+/// connection status, the 'Current' selector, the update indicator and the menus.
 struct Header {
     root: GtkBox,
     status: Label,
     connection_detail: Label,
-    preview_picker: PreviewPicker,
+    selector: ModelSelector,
     configuration_menu: configuration_menu::ConfigurationMenu,
     update_panel: RefCell<Option<update_check::Panel>>,
     #[cfg(test)]
@@ -707,8 +732,8 @@ fn build_header(window: &ApplicationWindow) -> Header {
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
-    let preview_picker = PreviewPicker::new();
-    header.append(&preview_picker.root);
+    let selector = ModelSelector::new();
+    header.append(&selector.root);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
@@ -744,7 +769,7 @@ fn build_header(window: &ApplicationWindow) -> Header {
         root: header,
         status,
         connection_detail,
-        preview_picker,
+        selector,
         configuration_menu,
         update_panel: RefCell::new(Some(update_panel)),
         #[cfg(test)]
@@ -4925,6 +4950,7 @@ mod tests {
     mod key_hold_integration_tests;
     mod key_hold_ui_tests;
     mod live_info_tests;
+    mod model_selector_tests;
     mod model_session_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;

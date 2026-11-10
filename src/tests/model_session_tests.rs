@@ -1,4 +1,4 @@
-//! In-process model sessions: startup, hardware changes, 'Preview as' and the
+//! In-process model sessions: startup, hardware changes, the 'Current' selector and the
 //! data each model keeps. No real device, HOME or network is involved: the
 //! window is built over scratch directories and a detached monitor.
 use super::*;
@@ -186,24 +186,13 @@ impl Harness {
         runtime.persist(snapshot);
     }
 
-    fn picker_models(&self) -> Vec<&'static str> {
-        self.session
-            .picker()
-            .models
-            .iter()
-            .map(|model| model.name)
-            .collect()
-    }
-
-    pub(super) fn preview_as(&self, model: &DeviceModel) {
-        let index = self
-            .session
-            .picker()
-            .models
-            .iter()
-            .position(|candidate| candidate.id == model.id)
-            .unwrap();
-        self.session.picker().dropdown.set_selected(index as u32);
+    /// Show `model` as a device of it connects: the only way a model is shown.
+    pub(super) fn show_model(&self, model: &'static DeviceModel) {
+        self.connect(model);
+        let session = self.session.clone();
+        wait_until(model.name, move || {
+            session.runtime().session_model() == model && session.live_devices(model) == 1
+        });
     }
 
     fn dialogs(&self) -> Vec<gtk::MessageDialog> {
@@ -264,7 +253,7 @@ pub(super) fn stored_binding(root: &Path, model: &'static DeviceModel, key: u8) 
         .is_ok_and(|store| store.binding("Base", &Trigger::KeyPress(key)).is_some())
 }
 
-fn header_label(window: &ApplicationWindow, class: &str) -> Label {
+pub(super) fn header_label(window: &ApplicationWindow, class: &str) -> Label {
     fn find(widget: &gtk::Widget, class: &str) -> Option<Label> {
         // Sessions the window is not showing are not the header's business.
         if super::preview_model_tests::is_hidden_session(widget) {
@@ -318,13 +307,10 @@ fn startup_without_a_device_shows_the_stream_deck_plus_by_default() {
             harness.session.runtime().layers().borrow().root(),
             harness.roots.data_dir
         );
-        let picker = harness.session.picker();
-        assert_eq!(
-            harness.picker_models(),
-            ["Stream Deck +", "Stream Deck + XL"]
+        assert!(
+            !harness.session.selector().root.is_visible(),
+            "no device, no selector"
         );
-        assert_eq!(picker.dropdown.selected(), 0);
-        assert!(picker.dropdown.is_sensitive());
     });
 }
 
@@ -339,10 +325,9 @@ fn startup_opens_the_model_remembered_from_the_last_run() {
             harness.session.runtime().layers().borrow().root(),
             harness.root(&PLUS_XL)
         );
-        assert_eq!(harness.session.picker().dropdown.selected(), 1);
         assert!(
             !harness.roots.data_dir.join("layers.conf").exists(),
-            "the Stream Deck + root is not touched while previewing the XL"
+            "the Stream Deck + root is not touched while showing the XL"
         );
     });
 }
@@ -472,114 +457,7 @@ fn connecting_the_model_already_shown_changes_nothing_and_resends_pictures() {
             harness.artwork_sent().first(),
             Some(ArtworkCommand::Replace(_))
         ));
-        assert!(!harness.session.picker().dropdown.is_sensitive());
-    });
-}
-
-#[test]
-fn preview_as_is_enabled_without_a_device_and_switches_the_model() {
-    run_gtk_test(|| {
-        let Some(harness) = start("preview", |_| {}) else {
-            return;
-        };
-        let dropdown = harness.session.picker().dropdown.clone();
-        assert!(dropdown.is_sensitive());
-        assert_eq!(
-            dropdown.tooltip_text().as_deref(),
-            Some("Show the configuration of another Stream Deck model while none is connected")
-        );
-        harness.preview_as(&PLUS_XL);
-        assert_eq!(harness.model().id, "plus-xl");
-        assert_eq!(
-            std::fs::read_to_string(&harness.roots.preference).unwrap(),
-            r#"{"model":"plus-xl"}"#.to_owned() + "\n",
-            "the choice is remembered once the session opened"
-        );
-        harness.preview_as(&PLUS);
-        assert_eq!(harness.model().id, "plus");
-    });
-}
-
-#[test]
-fn preview_as_sends_no_pictures_to_a_device_that_is_not_there() {
-    run_gtk_test(|| {
-        let Some(harness) = start("preview-quiet", |_| {}) else {
-            return;
-        };
-        harness.artwork_sent();
-        harness.preview_as(&PLUS_XL);
-        assert!(harness.artwork_sent().is_empty());
-    });
-}
-
-#[test]
-fn preview_as_is_disabled_with_an_explanation_while_a_device_is_connected() {
-    run_gtk_test(|| {
-        let Some(harness) = start("preview-locked", |_| {}) else {
-            return;
-        };
-        harness.connect(&PLUS_XL);
-        harness.wait_for_model(&PLUS_XL);
-        let dropdown = harness.session.picker().dropdown.clone();
-        assert!(!dropdown.is_sensitive());
-        assert_eq!(
-            dropdown.tooltip_text().as_deref(),
-            Some("Using the connected Stream Deck + XL")
-        );
-        // Even a programmatic choice cannot override the hardware.
-        harness.preview_as(&PLUS);
-        assert_eq!(harness.model().id, "plus-xl");
-        assert_eq!(dropdown.selected(), 1);
-        // Unplugging keeps the last model shown and unlocks the choice.
-        harness
-            .events
-            .send(MonitorEvent::Connection(ConnectionState::Disconnected {
-                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
-                model: harness.model(),
-                reason: "unplugged".into(),
-            }))
-            .unwrap();
-        let unlocked = dropdown.clone();
-        wait_until("the picker to unlock", move || unlocked.is_sensitive());
-        assert_eq!(harness.model().id, "plus-xl");
-        let status = header_label(&harness.window, "status");
-        assert_eq!(status.text(), "Disconnected");
-        let detail = header_label(&harness.window, "muted");
-        assert!(detail.text().contains("Stream Deck + XL disconnected"));
-    });
-}
-
-#[test]
-fn preview_as_asks_before_discarding_a_dirty_draft() {
-    run_gtk_test(|| {
-        let Some(harness) = start("preview-dirty", |_| {}) else {
-            return;
-        };
-        harness.make_editor_dirty();
-        harness.preview_as(&PLUS_XL);
-        assert_eq!(
-            harness.model().id,
-            "plus",
-            "nothing changes before the answer"
-        );
-        let dialogs = harness.dialogs();
-        assert_eq!(dialogs.len(), 1);
-        assert_eq!(
-            dialogs[0].text().as_deref(),
-            Some("Discard unsaved changes?")
-        );
-        // Keeping the edits puts the picker back on the shown model.
-        dialogs[0].response(gtk::ResponseType::Cancel);
-        assert_eq!(harness.model().id, "plus");
-        assert_eq!(harness.session.picker().dropdown.selected(), 0);
-        assert!(harness.session.runtime().binding_ui().is_dirty());
-
-        harness.preview_as(&PLUS_XL);
-        let dialogs = harness.dialogs();
-        assert_eq!(dialogs.len(), 1);
-        dialogs[0].response(gtk::ResponseType::Accept);
-        assert_eq!(harness.model().id, "plus-xl");
-        assert!(!harness.session.runtime().binding_ui().is_dirty());
+        assert!(!harness.session.selector().root.is_visible());
     });
 }
 
@@ -706,34 +584,6 @@ fn a_failed_open_keeps_the_previous_session_and_sends_nothing_to_the_device() {
             std::fs::read_to_string(&harness.roots.preference).unwrap(),
             r#"{"model":"plus-xl"}"#.to_owned() + "\n"
         );
-    });
-}
-
-#[test]
-fn a_failed_preview_keeps_the_session_and_does_not_remember_the_choice() {
-    run_gtk_test(|| {
-        let Some(harness) = start("failed-preview", |roots| {
-            std::fs::create_dir_all(roots.data_dir.join("devices")).unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                roots.data_dir.join("devices"),
-                std::fs::Permissions::from_mode(0o500),
-            )
-            .unwrap();
-        }) else {
-            return;
-        };
-        harness.preview_as(&PLUS_XL);
-        assert_eq!(harness.model().id, "plus");
-        assert_eq!(harness.session.picker().dropdown.selected(), 0);
-        assert!(harness.session.runtime().editing_enabled());
-        assert!(!harness.roots.preference.exists());
-        assert!(harness
-            .session
-            .toast()
-            .label
-            .text()
-            .starts_with("Could not open the configuration for Stream Deck + XL:"));
     });
 }
 
@@ -1101,7 +951,7 @@ fn an_xl_session_saves_xl_keys_through_the_layer_worker_into_the_xl_root_only() 
 }
 
 #[test]
-fn picker_session_preview_and_header_agree_at_every_model_change() {
+fn session_preview_and_header_agree_at_every_model_change() {
     run_gtk_test(|| {
         let Some(harness) = start("consistency", |roots| remember(roots, &PLUS_XL)) else {
             return;
@@ -1112,26 +962,14 @@ fn picker_session_preview_and_header_agree_at_every_model_change() {
                 .to_string()
         };
         let agree = |harness: &Harness, model: &'static DeviceModel| {
-            let picker = harness.session.picker();
             assert_eq!(harness.model(), model);
-            assert_eq!(
-                picker.models[picker.dropdown.selected() as usize].id,
-                model.id,
-                "picker"
-            );
             assert_eq!(brand(harness), model.name.to_uppercase(), "preview brand");
             assert_eq!(harness.session.runtime().preview().unwrap().model(), model);
+            assert!(!harness.session.selector().root.is_visible());
         };
         agree(&harness, &PLUS_XL);
-        harness.preview_as(&PLUS);
-        harness.wait_for_model(&PLUS);
-        agree(&harness, &PLUS);
-        harness.preview_as(&PLUS_XL);
-        harness.wait_for_model(&PLUS_XL);
-        agree(&harness, &PLUS_XL);
-        for model in [&PLUS, &PLUS_XL] {
-            harness.connect(model);
-            harness.wait_for_model(model);
+        for model in [&PLUS, &PLUS_XL, &PLUS] {
+            harness.show_model(model);
             agree(&harness, model);
             let detail = header_label(&harness.window, "muted");
             let prefix = format!("{} connected", model.name);

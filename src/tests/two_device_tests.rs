@@ -22,18 +22,18 @@ use std::{
     time::Instant,
 };
 
-const PLUS_PATH: &str = "/dev/hidraw1";
-const XL_PATH: &str = "/dev/hidraw2";
+pub(super) const PLUS_PATH: &str = "/dev/hidraw1";
+pub(super) const XL_PATH: &str = "/dev/hidraw2";
 
-struct Pair {
-    base: PathBuf,
-    roots: SessionRoots,
+pub(super) struct Pair {
+    pub(super) base: PathBuf,
+    pub(super) roots: SessionRoots,
     app: gtk::Application,
-    window: ApplicationWindow,
-    registry: Rc<ModelSession>,
-    bus: SimBus,
+    pub(super) window: ApplicationWindow,
+    pub(super) registry: Rc<ModelSession>,
+    pub(super) bus: SimBus,
     /// The channel the hub reports through, for events that come from outside.
-    events: mpsc::Sender<MonitorEvent>,
+    pub(super) events: mpsc::Sender<MonitorEvent>,
 }
 
 impl Drop for Pair {
@@ -102,12 +102,12 @@ fn seed(roots: &SessionRoots) {
 }
 
 /// The window over the real hub and an empty simulated bus; `None` without a display.
-fn start_pair(tag: &str) -> Option<Pair> {
+pub(super) fn start_pair(tag: &str) -> Option<Pair> {
     start_pair_with(tag, |_| {})
 }
 
 /// [`start_pair`], running `prepare` on the roots after they are seeded.
-fn start_pair_with(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Pair> {
+pub(super) fn start_pair_with(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Pair> {
     if !init_gtk_for_test() {
         return None;
     }
@@ -156,7 +156,7 @@ fn start_pair_with(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Pai
 
 impl Pair {
     /// A + and a + XL, both plugged in and both connected to the window.
-    fn plug_both(&self) -> (SimDevice, SimDevice) {
+    pub(super) fn plug_both(&self) -> (SimDevice, SimDevice) {
         let (plus, xl) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS_XL));
         self.bus.plug(PLUS_PATH, &plus);
         self.bus.plug(XL_PATH, &xl);
@@ -164,14 +164,14 @@ impl Pair {
         (plus, xl)
     }
 
-    fn wait_devices(&self, count: usize) {
+    pub(super) fn wait_devices(&self, count: usize) {
         let registry = self.registry.clone();
         wait_until("the devices to connect", move || {
             registry.device_count() == count
         });
     }
 
-    fn runtime(&self, model: &DeviceModel) -> FeatureRuntime {
+    pub(super) fn runtime(&self, model: &DeviceModel) -> FeatureRuntime {
         self.registry
             .runtime_of(model)
             .unwrap_or_else(|| panic!("{} has a session", model.name))
@@ -179,7 +179,7 @@ impl Pair {
 
     /// Let the window's polling run a few times, so anything an event was
     /// going to do has been done.
-    fn settle(&self) {
+    pub(super) fn settle(&self) {
         let ticks = Rc::new(Cell::new(0));
         let counter = ticks.clone();
         let source = glib::timeout_add_local(Duration::from_millis(40), move || {

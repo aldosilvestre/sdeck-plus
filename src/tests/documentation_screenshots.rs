@@ -870,17 +870,6 @@ fn capture_model_previews(directory: &std::path::Path) {
         );
         if model.id == PLUS_XL.id {
             // Dials tab and the strip, as a person configuring the XL sees them.
-            // The header's "Preview as" names the model on show, as after choosing it.
-            let supported: Vec<_> = DeviceModel::supported().collect();
-            let selector = descendants::<gtk::DropDown>(fixture.widgets.root.upcast_ref())
-                .into_iter()
-                .find(|picker| {
-                    picker
-                        .model()
-                        .is_some_and(|m| m.n_items() as usize == supported.len())
-                })
-                .expect("Preview as selector");
-            selector.set_selected(supported.iter().position(|m| m.id == model.id).unwrap() as u32);
             fixture.widgets.binding_ui.mark_clean();
             key_button(&fixture.widgets.key_labels[0]).emit_clicked();
             sidebar_tabs(&fixture.widgets).set_visible_child_name("dials");

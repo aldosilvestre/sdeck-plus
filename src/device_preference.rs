@@ -1,4 +1,4 @@
-//! Strict, private record of the device model used last, shared by every model.
+//! Strict, private record of the model the window showed last, shared by every model.
 //!
 //! The file sits next to `tray.json`. A missing file means the Stream Deck +;
 //! a malformed or unknown original is never replaced, so saving reports the
@@ -44,7 +44,7 @@ fn read(path: &Path) -> io::Result<&'static DeviceModel> {
     }
 }
 
-/// The model used last in the file at `path`; the Stream Deck + when nothing
+/// The model shown last in the file at `path`; the Stream Deck + when nothing
 /// was saved.
 ///
 /// # Errors
@@ -53,7 +53,7 @@ pub(super) fn load_from(path: &Path) -> io::Result<&'static DeviceModel> {
     read(path)
 }
 
-/// Remember `model` for the next start without a device.
+/// Remember `model` as the one shown last, for the next start.
 ///
 /// # Errors
 /// Refuses to replace an unreadable, malformed or unknown-model original.

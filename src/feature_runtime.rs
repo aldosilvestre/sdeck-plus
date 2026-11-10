@@ -32,6 +32,8 @@ mod timer_sound;
 mod touchscreen;
 
 #[cfg(test)]
+pub(crate) use model_session::choose_shown;
+#[cfg(test)]
 pub(crate) use model_session::SwitchReason;
 pub(crate) use model_session::{
     open_session, Created, ModelSession, OpenError, OpenedSession, Session, SessionFactory,
@@ -835,11 +837,6 @@ impl FeatureRuntime {
             Ok(sender) => *self.info_watch.borrow_mut() = Some(sender),
             Err(error) => eprintln!("Could not start the information reader: {error}"),
         }
-    }
-
-    /// Reload the selected control, dropping an unsaved draft.
-    pub(crate) fn discard_draft(&self) {
-        self.ui.load_selected_binding(&self.layers);
     }
 
     /// Organization state of the session; `reenable` also turns writes back on

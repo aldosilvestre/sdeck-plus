@@ -50,7 +50,7 @@ impl ProtocolFamily {
 /// Whether the application detects and drives a model.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Support {
-    /// Detected, driven and offered in "Preview as".
+    /// Detected, driven and offered in the Current selector while connected.
     Supported,
     /// Described from Elgato's documentation only; discovery never matches it.
     Planned,

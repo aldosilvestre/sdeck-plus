@@ -137,22 +137,10 @@ impl FeatureRuntime {
         self.key_generation.get()
     }
 
-    pub(crate) fn editor_dirty(&self) -> bool {
-        self.ui.is_dirty()
-    }
-
     pub(crate) fn set_editing_enabled(&self, enabled: bool) {
         if let Some(root) = self.configuration_root.borrow().upgrade() {
             root.set_sensitive(enabled);
         }
-    }
-
-    pub(crate) fn window(&self) -> Option<gtk::Window> {
-        self.configuration_root
-            .borrow()
-            .upgrade()
-            .and_then(|root| root.root())
-            .and_then(|root| root.downcast::<gtk::Window>().ok())
     }
 
     /// Resend the session's complete picture to its devices.
@@ -216,8 +204,30 @@ pub(crate) type SessionFactory =
 pub(crate) enum SwitchReason {
     /// The connected hardware decides which model is shown.
     Device,
-    /// The user picked a model with 'Preview as'.
-    Preview,
+    /// The user picked a model in the header's 'Current' selector.
+    Selector,
+}
+
+/// Which model the window shows. `connected` lists the distinct connected
+/// models in `DeviceModel::supported()` order.
+///
+/// Automatic (`user_chose` false): the last used model when it is connected,
+/// else the first connected one. After a pick (`user_chose` true) the choice
+/// sticks while the shown model still has a device, then it is automatic
+/// again. With no device the window keeps what it shows.
+pub(crate) fn choose_shown(
+    connected: &[&'static DeviceModel],
+    last_used: &'static DeviceModel,
+    current: &'static DeviceModel,
+    user_chose: bool,
+) -> &'static DeviceModel {
+    if user_chose && connected.contains(&current) {
+        current
+    } else if connected.contains(&last_used) {
+        last_used
+    } else {
+        connected.first().copied().unwrap_or(current)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,13 +238,13 @@ pub(crate) enum Outcome {
     Blocked,
 }
 
-/// The window's connection labels, 'Preview as' and menu: shared by every
-/// session, bound to the shown one.
+/// The window's connection labels, 'Current' selector and menu: shared by
+/// every session, bound to the shown one.
 #[derive(Clone)]
 pub(crate) struct SharedHeader {
     pub(crate) status: Label,
     pub(crate) detail: Label,
-    pub(crate) picker: crate::PreviewPicker,
+    pub(crate) selector: crate::ModelSelector,
     pub(crate) menu: crate::configuration_menu::ConfigurationMenu,
 }
 
@@ -249,6 +259,11 @@ pub(crate) struct ModelSession {
     factory: SessionFactory,
     sessions: RefCell<Vec<Rc<Session>>>,
     shown: Cell<&'static DeviceModel>,
+    /// The model used last as the run began or the user left it; what the
+    /// window prefers to show while it is connected.
+    last_used: Cell<&'static DeviceModel>,
+    /// The user picked the shown model in the selector.
+    user_chose: Cell<bool>,
     /// Connected devices in the order they connected.
     devices: RefCell<Vec<(DeviceId, &'static DeviceModel)>>,
     last_connected: Cell<Option<&'static DeviceModel>>,
@@ -287,6 +302,8 @@ impl ModelSession {
             factory,
             sessions: RefCell::new(vec![first]),
             shown: Cell::new(shown),
+            last_used: Cell::new(shown),
+            user_chose: Cell::new(false),
             devices: RefCell::new(Vec::new()),
             last_connected: Cell::new(None),
             last_state: RefCell::new(ConnectionState::Searching),
@@ -297,7 +314,7 @@ impl ModelSession {
         let weak = Rc::downgrade(&registry);
         registry
             .header
-            .picker
+            .selector
             .dropdown
             .connect_selected_notify(move |dropdown| {
                 let Some(registry) = weak.upgrade() else {
@@ -308,18 +325,16 @@ impl ModelSession {
                 }
                 let model = registry
                     .header
-                    .picker
-                    .models
+                    .selector
+                    .entries
+                    .borrow()
                     .get(dropdown.selected() as usize)
                     .copied();
-                match model {
-                    Some(model) if registry.devices.borrow().is_empty() => {
-                        registry.show(model, SwitchReason::Preview);
-                    }
-                    _ => registry.sync_picker(),
+                if let Some(model) = model {
+                    registry.choose(model);
                 }
             });
-        registry.sync_picker();
+        registry.sync_selector();
         registry
     }
 
@@ -336,8 +351,8 @@ impl ModelSession {
     }
 
     #[cfg(test)]
-    pub(crate) fn picker(&self) -> &crate::PreviewPicker {
-        &self.header.picker
+    pub(crate) fn selector(&self) -> &crate::ModelSelector {
+        &self.header.selector
     }
 
     #[cfg(test)]
@@ -478,7 +493,9 @@ impl ModelSession {
                     self.release(device);
                 }
                 *self.last_state.borrow_mut() = state.clone();
+                self.reevaluate(true);
                 self.refresh_header();
+                self.sync_selector();
             }
         }
     }
@@ -517,14 +534,10 @@ impl ModelSession {
             session.live.set(session.live.get() + 1);
         }
         self.refresh_header();
-        // The only device decides what the window shows; with several, the
-        // window keeps what it shows until the user (or an unplug) changes it.
-        if self.devices.borrow().len() == 1 && self.shown.get() != model {
-            self.show(model, SwitchReason::Device);
-        }
+        self.reevaluate(false);
         session.runtime.resend_artwork();
         self.apply_read_only();
-        self.sync_picker();
+        self.sync_selector();
     }
 
     fn device_gone(self: &Rc<Self>, device: DeviceId, state: &ConnectionState) {
@@ -532,16 +545,50 @@ impl ModelSession {
         if self.devices.borrow().is_empty() {
             *self.last_state.borrow_mut() = state.clone();
         }
-        let shown = self.shown_session();
-        let next = self.devices.borrow().first().map(|(_, model)| *model);
-        if shown.live.get() == 0 {
-            if let Some(next) = next {
-                self.show(next, SwitchReason::Device);
-            }
-        }
+        self.reevaluate(true);
         self.refresh_header();
         self.apply_read_only();
-        self.sync_picker();
+        self.sync_selector();
+    }
+
+    /// The distinct models with a connected device, in `supported()` order.
+    fn connected_models(&self) -> Vec<&'static DeviceModel> {
+        let devices = self.devices.borrow();
+        DeviceModel::supported()
+            .filter(|model| devices.iter().any(|(_, connected)| connected == model))
+            .collect()
+    }
+
+    /// Apply the selection rules after the connected devices changed.
+    /// `unplugged` makes a model the window falls back to the one used last.
+    fn reevaluate(self: &Rc<Self>, unplugged: bool) {
+        let connected = self.connected_models();
+        let shown = self.shown.get();
+        if !connected.contains(&shown) {
+            // A pick holds only while its model has a device.
+            self.user_chose.set(false);
+        }
+        let target = choose_shown(
+            &connected,
+            self.last_used.get(),
+            shown,
+            self.user_chose.get(),
+        );
+        if target != shown
+            && self.show(target, SwitchReason::Device) == Outcome::Switched
+            && unplugged
+        {
+            self.last_used.set(target);
+        }
+    }
+
+    /// The user picked `model` in the selector.
+    fn choose(self: &Rc<Self>, model: &'static DeviceModel) {
+        if self.show(model, SwitchReason::Selector) == Outcome::Switched {
+            self.user_chose.set(true);
+            self.last_used.set(model);
+        }
+        self.sync_selector();
     }
 
     /// Forget a device; its model's session stops holding keys down when no
@@ -597,40 +644,7 @@ impl ModelSession {
         if model == self.shown.get() {
             return Outcome::Unchanged;
         }
-        if reason == SwitchReason::Preview && self.shown_session().runtime.editor_dirty() {
-            self.confirm_preview(model);
-            return Outcome::Blocked;
-        }
         self.commit(model, reason)
-    }
-
-    fn confirm_preview(self: &Rc<Self>, model: &'static DeviceModel) {
-        let Some(window) = self.shown_session().runtime.window() else {
-            self.commit(model, SwitchReason::Preview);
-            return;
-        };
-        let accepted = Rc::downgrade(self);
-        let declined = Rc::downgrade(self);
-        crate::confirm_discard_in(
-            &window,
-            "You edited this binding without saving it. Showing another Stream Deck model discards those edits.",
-            Rc::new(move || {
-                if let Some(registry) = accepted.upgrade() {
-                    // A device that connected while the question was open decides.
-                    if registry.devices.borrow().is_empty() {
-                        // The draft belongs to the model being left, which keeps its session.
-                        registry.shown_session().runtime.discard_draft();
-                        registry.commit(model, SwitchReason::Preview);
-                    }
-                    registry.sync_picker();
-                }
-            }),
-            Rc::new(move || {
-                if let Some(registry) = declined.upgrade() {
-                    registry.sync_picker();
-                }
-            }),
-        );
     }
 
     fn commit(self: &Rc<Self>, model: &'static DeviceModel, reason: SwitchReason) -> Outcome {
@@ -652,7 +666,7 @@ impl ModelSession {
                 true,
             );
         }
-        self.sync_picker();
+        self.sync_selector();
         self.toast
             .show(&format!("Switched to {}.", model.name), false);
         Outcome::Switched
@@ -675,7 +689,7 @@ impl ModelSession {
         if let Some(window) = self.window.upgrade() {
             crate::show_artwork_error(&window, &message);
         }
-        self.sync_picker();
+        self.sync_selector();
     }
 
     /// Editing is off while the window can only show a model that failed.
@@ -720,22 +734,14 @@ impl ModelSession {
         }
     }
 
-    /// Show the shown model in the picker; it is only usable without a device.
-    pub(crate) fn sync_picker(&self) {
+    /// List the connected models in the selector, show the shown one in it and
+    /// reveal it only when there is a choice to make.
+    pub(crate) fn sync_selector(&self) {
         let shown = self.shown.get();
-        let picker = &self.header.picker;
+        let selector = &self.header.selector;
+        let connected = self.connected_models();
         self.syncing.set(true);
-        if let Some(index) = picker.models.iter().position(|model| *model == shown) {
-            picker.dropdown.set_selected(index as u32);
-        }
+        selector.set_entries(&connected, shown);
         self.syncing.set(false);
-        let connected = self.devices.borrow().first().map(|(_, model)| *model);
-        let tooltip = match connected {
-            Some(model) => format!("Using the connected {}", model.name),
-            None => "Show the configuration of another Stream Deck model while none is connected"
-                .to_owned(),
-        };
-        picker.dropdown.set_sensitive(connected.is_none());
-        picker.dropdown.set_tooltip_text(Some(&tooltip));
     }
 }

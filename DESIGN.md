@@ -554,26 +554,40 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   connected Stream Decks of different models run live at the same time, each
   with its own configuration, artwork and timers; two devices of one model
   share that model's session and mirror each other. The window is a shared
-  header (title, connection status, "Preview as", update indicator and menu)
-  over a stack whose pages are the sessions' editors; the stack takes the
-  size of the shown page only. The window shows one session: the last used
-  model at startup; the model of a device that connects when no other device
-  is connected; the other connected model when the shown model's last device
-  is unplugged; otherwise it keeps what it shows. The header lists what is
-  connected (each model once, "x2" for two units of one). Beside the
-  connection badge, a "Preview as" drop-down lists the supported models
-  (Stream Deck + and Stream Deck + XL) with that accessible name; it is
-  enabled only while no device is connected and otherwise disabled with the
-  tooltip "Using the connected <model>". Changing the shown model toasts
-  "Switched to <model>." and is remembered for the next start only once the
-  session opened; "Preview as" asks first when the shown editor has unsaved
-  edits, a hardware change never asks and leaves each session's draft in
-  place. If a connected model's configuration cannot be opened, the shown
-  session stays visible, read-only while none of its own devices is
-  connected, with a persistent error, and nothing is sent to that device. The
-  menu's import and export, OBS and Test action act on the shown session; the
-  focused application reaches every session. Each preview's brand line reads
-  "STREAM DECK +" or "STREAM DECK + XL".
+  header (title, connection status, "Current" selector, update indicator and
+  menu) over a stack whose pages are the sessions' editors; the stack takes the
+  size of the shown page only. The window shows one session. Automatically
+  (until the user picks a model in this run) it shows the last used model when
+  that model is connected, else the first connected model in the order Stream
+  Deck +, Stream Deck + XL; this is re-evaluated whenever a device connects or
+  is unplugged, so a last used model that connects second is shown as soon as
+  it connects, and the other connected model is shown when the shown model's
+  last device is unplugged. With no device the window keeps what it shows (the
+  last used model; the XL cannot be shown without a device). The header lists
+  what is connected: one model reads exactly "<model> connected — keys, dials
+  and touch strip are live", two models "Stream Deck + and Stream Deck + XL
+  connected — ...", two units of one model "<model> x2 connected".
+  The **Current selector** sits beside the connection badge: the caption
+  "Current" (muted, 12px) and a drop-down named "Current device" with the
+  tooltip "Choose the Stream Deck to configure". It is visible only while two
+  or more distinct models are connected; with none, one, or several units of
+  one model it is not in the layout at all (not focusable either), so a
+  window with one model looks exactly as it did before the selector existed.
+  Its entries are the connected models, plain names, in the order Stream Deck
+  +, Stream Deck + XL, and it shows the shown model. Choosing an entry shows
+  that model's session, rebinds the menu, toasts "Switched to <model>." and
+  remembers the model for the next start only once the session opened; it
+  never asks about unsaved edits, because the session left behind stays alive
+  and keeps its draft. A pick sticks until the shown model has no connected
+  device left, then the automatic rule applies again. The last shown model
+  (device.json) follows every successful change of the shown model, whether
+  automatic or picked. If a connected model's configuration cannot be opened,
+  the shown session stays visible, read-only while none of its own devices is
+  connected, with a persistent error, nothing is sent to that device and it is
+  not offered in the selector. The menu's import and export, OBS and Test
+  action act on the shown session; the focused application reaches every
+  session. Each preview's brand line reads "STREAM DECK +" or "STREAM DECK +
+  XL".
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
