@@ -222,7 +222,8 @@ pub(super) fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
-        for entry in entries.map(Result::unwrap) {
+        // An atomic save can rename or remove a temp file between listing and reading.
+        for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
             if path.is_dir() {
                 if path.file_name().is_some_and(|name| name == "devices") {
@@ -230,10 +231,13 @@ pub(super) fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
                 }
                 walk(root, &path, found);
             } else {
-                found.insert(
-                    path.strip_prefix(root).unwrap().to_owned(),
-                    std::fs::read(&path).unwrap(),
-                );
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        found.insert(path.strip_prefix(root).unwrap().to_owned(), bytes);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("{path:?}: {error}"),
+                }
             }
         }
     }
