@@ -48,6 +48,9 @@ mod sim_registry;
 mod sim_hub;
 
 #[cfg(test)]
+mod sim_multi_probes;
+
+#[cfg(test)]
 mod rotation_probes;
 
 /// Opaque identity of one attached device, derived from its HID path: the same
@@ -315,7 +318,7 @@ impl HidHandle {
     /// Send a brightness or sleep action to every live device of `model`.
     pub fn send_control(&self, model: &DeviceModel, action: DeviceAction) -> Result<(), HubClosed> {
         match &self.shared {
-            Some(shared) => shared.send_control(model.pid(), action),
+            Some(shared) => shared.send_control(Some(model.pid()), action),
             None => self.controls.send(action).map_err(|_| HubClosed),
         }
     }

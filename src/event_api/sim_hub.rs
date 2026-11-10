@@ -486,3 +486,83 @@ fn plugging_and_unplugging_two_devices_under_concurrent_artwork_stays_consistent
     assert_eq!(plus.assemble().1, 0);
     assert_eq!(xl.assemble().1, 0);
 }
+
+fn retained_result(rig: &mut Rig, wanted: DeviceAction) {
+    let result = rig.wait_event(|event| match event {
+        MonitorEvent::DeviceResult {
+            device: None,
+            action,
+            result,
+        } if *action == wanted => Some(result.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        result,
+        Err("HID device disconnected; control intent retained".to_owned())
+    );
+}
+
+#[test]
+fn a_control_sent_before_any_device_is_retained_and_applied_on_the_first_connect() {
+    for (action, level) in [(DeviceAction::Brightness(50), 50), (DeviceAction::Sleep, 0)] {
+        let mut rig = Rig::empty();
+        rig.controls.send(action.clone()).unwrap();
+        retained_result(&mut rig, action);
+        let device = SimDevice::new(&PLUS);
+        rig.bus.plug("/dev/hidraw1", &device);
+        device.wait_until(|device| !device.features().is_empty());
+        assert_eq!(device.features()[0][..3], [0x03, 0x08, level]);
+    }
+}
+
+#[test]
+fn held_work_of_a_departed_model_neither_leaks_nor_replays_stale() {
+    let scratch = Scratch::new("hub-departed");
+    let (mut rig, _plus, xl) = pair();
+    rig.bus.unplug("/dev/hidraw2");
+    rig.wait_event(|event| {
+        matches!(
+            event,
+            MonitorEvent::Connection(ConnectionState::Disconnected { .. })
+        )
+        .then_some(())
+    });
+    rig.send_artwork(&PLUS_XL, assign_key(&scratch, "held.png", 112));
+    rig.send_control(&PLUS_XL, DeviceAction::Brightness(20));
+    // The port comes back as a +: nothing meant for the XL reaches it.
+    let swapped = SimDevice::new(&PLUS);
+    rig.bus.plug("/dev/hidraw2", &swapped);
+    rig.wait_connection(connected_as("/dev/hidraw2", &PLUS));
+    swapped.wait_until(|device| !device.features().is_empty());
+    assert!(swapped.features().iter().all(|report| report[2] == 100));
+    // The XL returns elsewhere much later: no stale picture or brightness.
+    rig.bus.unplug("/dev/hidraw2");
+    let back = SimDevice::new(&PLUS_XL);
+    rig.bus.plug("/dev/hidraw3", &back);
+    rig.wait_connection(connected_as("/dev/hidraw3", &PLUS_XL));
+    back.wait_until(|device| !device.features().is_empty());
+    assert!(back.features().iter().all(|report| report[2] == 100));
+    assert!(back.writes().is_empty(), "a stale picture was replayed");
+    assert!(xl.writes().is_empty());
+}
+
+#[test]
+fn held_work_is_kept_when_another_device_of_the_departed_model_remains() {
+    let scratch = Scratch::new("hub-kept");
+    let (first, second) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS));
+    let mut rig = Rig::empty();
+    rig.bus.plug("/dev/hidraw1", &first);
+    rig.bus.plug("/dev/hidraw2", &second);
+    rig.wait_connection(connected_as("/dev/hidraw2", &PLUS));
+    rig.send_artwork(&PLUS, assign_key(&scratch, "kept.png", 120));
+    first.wait_until(|device| device.image_count() == 1);
+    // One + leaves and its port returns as an XL; the other + still lives.
+    rig.bus.unplug("/dev/hidraw2");
+    let xl = SimDevice::new(&PLUS_XL);
+    rig.bus.plug("/dev/hidraw2", &xl);
+    rig.wait_connection(connected_as("/dev/hidraw2", &PLUS_XL));
+    let third = SimDevice::new(&PLUS);
+    rig.bus.plug("/dev/hidraw3", &third);
+    third.wait_until(|device| device.image_count() == 1);
+    assert!(xl.writes().is_empty());
+}

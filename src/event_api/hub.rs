@@ -73,7 +73,8 @@ struct State {
     /// single newest command of every target since.
     snapshots: HashMap<Pid, Vec<ArtworkCommand>>,
     /// What each model was last asked for, for devices that attach later.
-    desired: HashMap<Pid, DesiredState>,
+    /// `None` is intent sent before any model was known.
+    desired: HashMap<Option<Pid>, DesiredState>,
     /// The model last attached on each path.
     last_model: HashMap<String, Pid>,
     last_active: Option<Pid>,
@@ -89,13 +90,11 @@ impl State {
     }
 }
 
-/// Work queued for a device that is not there, as a channel would keep it: a
-/// snapshot supersedes everything before it.
+/// Work queued for a device that is not there. It is coalesced like the
+/// snapshot cache, so the hold is bounded by the number of targets: a newer
+/// command for a target replaces the older one and a snapshot replaces all.
 fn hold(list: &mut Vec<ArtworkCommand>, command: ArtworkCommand) {
-    if matches!(command, ArtworkCommand::Replace(_)) {
-        list.clear();
-    }
-    list.push(command);
+    remember(list, &command);
 }
 
 /// Keep the newest command per target so the cache stays as small as the
@@ -165,7 +164,11 @@ impl Shared {
 
     /// Send a control to every live device of the model. The model remembers
     /// it either way, and a model with no device says so.
-    pub(super) fn send_control(&self, model: Pid, action: DeviceAction) -> Result<(), HubClosed> {
+    pub(super) fn send_control(
+        &self,
+        model: Option<Pid>,
+        action: DeviceAction,
+    ) -> Result<(), HubClosed> {
         let mut guard = self.lock();
         let state = &mut *guard;
         if state.closed {
@@ -178,12 +181,10 @@ impl Shared {
             .apply(&action)
             .map_err(|error| error.to_string());
         let mut delivered = false;
-        for slot in state
-            .workers
-            .iter()
-            .filter(|slot| slot.model.pid() == model)
-        {
-            delivered |= slot.controls.send(action.clone()).is_ok();
+        if let Some(pid) = model {
+            for slot in state.workers.iter().filter(|slot| slot.model.pid() == pid) {
+                delivered |= slot.controls.send(action.clone()).is_ok();
+            }
         }
         drop(guard);
         if !delivered {
@@ -226,9 +227,20 @@ impl Shared {
         let pid = key.model.pid();
         let seen = state.last_model.insert(key.path.clone(), pid);
         if let Some(previous) = seen.filter(|previous| *previous != pid) {
-            // The same port now has another model: what waited for the old one
-            // means nothing to it.
-            state.pending.remove(&Some(previous));
+            // The same port now has another model. What was held for the old
+            // model (artwork, controls, its picture) means nothing to the new
+            // one, and must not replay stale if the old model returns later.
+            // It is dropped only when no other live device of the old model
+            // remains to take it; then it is kept.
+            if !state
+                .workers
+                .iter()
+                .any(|slot| slot.model.pid() == previous)
+            {
+                state.pending.remove(&Some(previous));
+                state.desired.remove(&Some(previous));
+                state.snapshots.remove(&previous);
+            }
         }
         let mirrored = state.workers.iter().any(|slot| slot.model.pid() == pid);
         let unaddressed = if state.served {
@@ -238,6 +250,12 @@ impl Shared {
         };
         for command in &unaddressed {
             remember(state.snapshots.entry(pid).or_default(), command);
+        }
+        if !state.served {
+            // Intent sent before any model was known goes to the first one.
+            if let Some(early) = state.desired.remove(&None) {
+                state.desired.entry(Some(pid)).or_insert(early);
+            }
         }
         let held = state.pending.remove(&Some(pid)).unwrap_or_default();
         let replay = if mirrored || seen.is_none() {
@@ -265,7 +283,7 @@ impl Shared {
         Attachment {
             artwork: artwork_commands,
             controls: control_commands,
-            desired: state.desired.get(&pid).cloned().unwrap_or_default(),
+            desired: state.desired.get(&Some(pid)).cloned().unwrap_or_default(),
         }
     }
 
@@ -309,11 +327,8 @@ fn route_controls(shared: &Shared, stop: &StopSignal, commands: Receiver<DeviceA
     while stop.live() {
         match commands.recv_timeout(ROUTE_POLL) {
             Ok(action) => {
-                // Controls have no "no model yet": there is nothing to remember.
-                let Some(model) = shared.active_model() else {
-                    continue;
-                };
-                if shared.send_control(model, action).is_err() {
+                // With no model yet the intent is retained for the first device.
+                if shared.send_control(shared.active_model(), action).is_err() {
                     return;
                 }
             }
@@ -582,5 +597,48 @@ where
             controls,
             shared: Some(shared),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_artwork::ArtworkTarget;
+
+    fn clear(key: u8) -> ArtworkCommand {
+        ArtworkCommand::Clear {
+            target: ArtworkTarget::Keypad(key),
+        }
+    }
+
+    #[test]
+    fn held_artwork_is_bounded_by_the_number_of_targets_on_both_paths() {
+        let (events, _received) = channel();
+        let shared = Shared::new(events);
+        for round in 0..100_000u32 {
+            let key = 1 + (round % 8) as u8;
+            // The addressed path and the one-session adapter path (no model yet).
+            shared.send_artwork(Some(0x00C6), clear(key)).unwrap();
+            shared.send_artwork(None, clear(key)).unwrap();
+        }
+        let state = shared.lock();
+        assert_eq!(state.pending[&Some(0x00C6)].len(), 8);
+        assert_eq!(state.pending[&None].len(), 8);
+        assert_eq!(state.snapshots[&0x00C6].len(), 8);
+    }
+
+    #[test]
+    fn a_snapshot_clears_the_hold_and_newer_commands_replace_older_ones() {
+        let mut held = vec![clear(1), clear(2)];
+        hold(&mut held, clear(1));
+        assert_eq!(held.len(), 2);
+        hold(&mut held, ArtworkCommand::Replace(vec![clear(3)]));
+        assert_eq!(held.len(), 1);
+        hold(&mut held, clear(3));
+        assert_eq!(held.len(), 2);
+        let ArtworkCommand::Replace(inner) = &held[0] else {
+            panic!("the snapshot stays first");
+        };
+        assert!(inner.is_empty(), "the newer command supersedes its entry");
     }
 }

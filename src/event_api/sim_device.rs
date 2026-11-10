@@ -23,6 +23,10 @@ struct State {
     features: Vec<Vec<u8>>,
     /// The cable was pulled: a read has already failed.
     gone: bool,
+    /// Times the hub opened this unit.
+    opened: usize,
+    /// The next write blocks this long, as a stalled USB transfer does.
+    stall: Option<Duration>,
 }
 
 /// One simulated unit. Clones share the same wire, so the test keeps a handle
@@ -59,8 +63,15 @@ impl Device for SimDevice {
 
     fn write(&self, report: &[u8]) -> Result<usize, String> {
         let (state, wake) = &*self.state;
-        state.lock().unwrap().writes.push(report.to_vec());
+        let stall = {
+            let mut state = state.lock().unwrap();
+            state.writes.push(report.to_vec());
+            state.stall.take()
+        };
         wake.notify_all();
+        if let Some(stall) = stall {
+            thread::sleep(stall);
+        }
         Ok(report.len())
     }
 
@@ -112,6 +123,36 @@ impl SimDevice {
         let (state, wake) = &*self.state;
         state.lock().unwrap().inputs.push_back(item);
         wake.notify_all();
+    }
+
+    /// Make the next write block for `time`.
+    pub(super) fn stall_next_write(&self, time: Duration) {
+        self.state.0.lock().unwrap().stall = Some(time);
+    }
+
+    /// How many times the hub opened this unit.
+    pub(super) fn opened(&self) -> usize {
+        self.state.0.lock().unwrap().opened
+    }
+
+    fn mark_opened(&self) {
+        self.state.0.lock().unwrap().opened += 1;
+    }
+
+    /// Handles to this unit alive now: the test's own, plus the bus's and the
+    /// worker's while they hold it.
+    pub(super) fn handles(&self) -> usize {
+        Arc::strong_count(&self.state)
+    }
+
+    /// The newest finished key image of zero-based `slot`.
+    pub(super) fn last_key_jpeg(&self, slot: u8) -> Option<Vec<u8>> {
+        self.assemble()
+            .0
+            .into_iter()
+            .rev()
+            .find(|image| image.command == 0x07 && image.slot == slot)
+            .map(|image| image.jpeg)
     }
 
     /// Whether a read already failed because of an unplug.
@@ -424,6 +465,7 @@ impl Bus {
                         if state.failing.contains(&path) {
                             return Err("Device found but could not open: busy".into());
                         }
+                        device.mark_opened();
                         Ok(device)
                     }),
                 }
@@ -491,6 +533,11 @@ impl Rig {
             bus,
             hid,
         }
+    }
+
+    /// What a send says once the hub has been stopped.
+    pub(super) fn closed_send(&self) -> Result<(), HubClosed> {
+        self.hid.send_control(&PLUS, DeviceAction::Wake)
     }
 
     pub(super) fn handle(&self) -> HidHandle {
