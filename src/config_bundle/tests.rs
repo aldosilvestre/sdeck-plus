@@ -33,6 +33,7 @@ impl Fixture {
         let bundle = Bundle {
             format: "sdeck-plus".into(),
             version: 1,
+            model: None,
             files: entries
                 .iter()
                 .map(|(path, bytes)| Entry {
@@ -61,7 +62,7 @@ const LAYERS: &[u8] = b"streamdeck-layers-v1\nactive\t42617365\nlayer\t42617365\
 fn contents(path: &Path) -> BTreeMap<String, Vec<u8>> {
     let bundle: Bundle = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     assert_eq!(bundle.format, "sdeck-plus");
-    assert_eq!(bundle.version, 4);
+    assert_eq!(bundle.version, 5);
     bundle
         .files
         .into_iter()
@@ -267,7 +268,7 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
     assert_eq!(fs::read(original.join("layers.conf")).unwrap(), before);
     let exported: serde_json::Value = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
     let image_path = format!("imagenes/{}", asset.file_name().unwrap().to_str().unwrap());
-    assert_eq!(exported["version"], 4);
+    assert_eq!(exported["version"], 5);
     let files = contents(&bundle);
     assert!(files.keys().all(|path| CONFIGS.contains(&path.as_str())));
     assert!(!files
@@ -851,7 +852,7 @@ fn metadata_export_uses_type_folders_without_contents_or_parent_paths() {
     let bundle = f.0.join("references.json");
     export(&root, &bundle).unwrap();
     let envelope: Bundle = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
-    assert_eq!(envelope.version, 4);
+    assert_eq!(envelope.version, 5);
     assert!(envelope
         .files
         .iter()
@@ -980,6 +981,7 @@ fn legacy_v2_embedded_audio_and_local_image_references_still_import() {
         &serde_json::to_vec(&Bundle {
             format: "sdeck-plus".into(),
             version: 2,
+            model: None,
             files: entries,
         })
         .unwrap(),
@@ -1027,6 +1029,7 @@ fn v3_rejects_unsafe_references_payloads_and_symlinked_local_directories_without
         let bundle = Bundle {
             format: "sdeck-plus".into(),
             version: 3,
+            model: None,
             files: vec![Entry {
                 path: "layers.conf".into(),
                 data: Some(STANDARD.encode(fs::read(source.join("layers.conf")).unwrap())),
@@ -1101,7 +1104,7 @@ fn background_images_export_as_references_and_all_configuration_is_plain_text() 
         .as_deref()
         .unwrap();
     assert!(manifest.starts_with("streamdeck-artwork-v3\n"));
-    assert_eq!(envelope.version, 4);
+    assert_eq!(envelope.version, 5);
     for name in &names {
         assert!(manifest.contains(&format!("./imagenes/{name}")));
     }
@@ -1162,6 +1165,7 @@ fn legacy_v3_base64_configuration_still_imports_relative_file_references() {
     export(&root, &path).unwrap();
     let mut bundle: Bundle = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     bundle.version = 3;
+    bundle.model = None;
     for entry in &mut bundle.files {
         entry.data = Some(STANDARD.encode(entry.data.take().unwrap().as_bytes()));
     }
@@ -1174,4 +1178,117 @@ fn legacy_v3_base64_configuration_still_imports_relative_file_references() {
         destination.join("sonidos/song.mp3")
     );
     assert!(!destination.join("sonidos/song.mp3").exists());
+}
+
+/// Every entry below `root` with its bytes (`None` for directories and links).
+fn snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
+    fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Option<Vec<u8>>>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.strip_prefix(base).unwrap().display().to_string();
+            let kind = fs::symlink_metadata(&path).unwrap().file_type();
+            if kind.is_dir() {
+                out.insert(name, None);
+                walk(base, &path, out);
+            } else if kind.is_symlink() {
+                out.insert(name, None);
+            } else {
+                out.insert(name, Some(fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+fn devices_fixture(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
+    let xl = root.join("devices/plus-xl");
+    private_dir(&root.join("devices")).unwrap();
+    private_dir(&xl).unwrap();
+    write_private(&xl.join("layers.conf"), LAYERS).unwrap();
+    write_private(&xl.join("marker.bin"), &[9, 8, 7]).unwrap();
+    snapshot(&xl)
+}
+
+fn reference_files(f: &Fixture) -> BTreeMap<String, Vec<u8>> {
+    let source = f.root("bundle-source");
+    let layers = LayerStore::open_at(&source).unwrap();
+    layers.persist().unwrap();
+    BTreeMap::from([(
+        "layers.conf".to_owned(),
+        fs::read(source.join("layers.conf")).unwrap(),
+    )])
+}
+
+#[test]
+fn a_failed_reference_import_into_the_plus_root_gives_devices_back_untouched() {
+    let f = Fixture::new();
+    let root = f.root("root");
+    let files = reference_files(&f);
+    let xl_before = devices_fixture(&root);
+    let before = snapshot(&root);
+    // Fail when the new root is moved into place; every earlier move succeeded.
+    let error = import_references(&root, &files, &PLUS, |from, to| {
+        if to == root
+            && from
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains("stage"))
+        {
+            Err(io::Error::other("injected install failure"))
+        } else {
+            fs::rename(from, to)
+        }
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("injected install failure"));
+    assert_eq!(snapshot(&root), before);
+    assert_eq!(snapshot(&root.join("devices/plus-xl")), xl_before);
+    assert_eq!(
+        fs::read_dir(&f.0).unwrap().count(),
+        2,
+        "stage is cleaned up"
+    );
+}
+
+#[test]
+fn a_successful_reference_import_keeps_devices_and_a_root_without_them_gets_none() {
+    let f = Fixture::new();
+    let root = f.root("root");
+    let files = reference_files(&f);
+    let xl_before = devices_fixture(&root);
+    import_references(&root, &files, &PLUS, |from, to| fs::rename(from, to))
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot(&root.join("devices/plus-xl")), xl_before);
+    let bare = f.root("bare");
+    import_references(&bare, &files, &PLUS, |from, to| fs::rename(from, to)).unwrap();
+    assert!(!bare.join("devices").exists());
+}
+
+#[test]
+fn a_legacy_v1_import_keeps_devices_too() {
+    let f = Fixture::new();
+    let root = f.root("root");
+    let xl_before = devices_fixture(&root);
+    let bundle = f.bundle(&[("layers.conf", LAYERS)]);
+    import(&bundle, &root).unwrap();
+    assert_eq!(snapshot(&root.join("devices/plus-xl")), xl_before);
+}
+
+#[test]
+fn a_devices_symlink_in_the_plus_root_stops_the_import_without_changes() {
+    let f = Fixture::new();
+    let root = f.root("root");
+    let elsewhere = f.0.join("elsewhere");
+    private_dir(&elsewhere).unwrap();
+    symlink(&elsewhere, root.join("devices")).unwrap();
+    let before = snapshot(&root);
+    let bundle = f.bundle(&[("layers.conf", LAYERS)]);
+    assert!(import(&bundle, &root).is_err());
+    assert_eq!(snapshot(&root), before);
+    assert!(fs::symlink_metadata(root.join("devices"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }

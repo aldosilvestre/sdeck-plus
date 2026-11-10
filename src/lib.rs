@@ -8,6 +8,7 @@ pub mod config_bundle;
 pub mod desktop_actions;
 pub mod device_control;
 pub mod device_model;
+pub mod device_roots;
 pub mod event_api;
 pub mod features;
 pub mod image_output;

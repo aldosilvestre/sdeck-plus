@@ -12,6 +12,7 @@ use sdeck_plus::{
 };
 use std::{
     cell::{Cell, RefCell},
+    path::{Path, PathBuf},
     rc::Rc,
     sync::mpsc,
     time::{Duration, Instant},
@@ -29,10 +30,31 @@ mod pages;
 mod timer_sound;
 mod touchscreen;
 
+/// The root OBS settings live in: the session's, or the Stream Deck + root.
+pub(crate) fn active_root(root: Option<&Path>) -> std::io::Result<PathBuf> {
+    match root {
+        Some(root) => Ok(root.to_owned()),
+        None => sdeck_plus::device_roots::data_root(&sdeck_plus::device_model::PLUS),
+    }
+}
+
+/// [`run_worker_at`] for the Stream Deck + root; tests drive the worker this way.
+#[cfg(test)]
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
     output: mpsc::Sender<MonitorEvent>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    run_worker_at(receiver, output, stop, None);
+}
+
+/// Runs queued layer commands; `root` is the active model root that OBS
+/// settings are read from and saved to.
+pub(crate) fn run_worker_at(
+    receiver: mpsc::Receiver<LayerCommand>,
+    output: mpsc::Sender<MonitorEvent>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    root: Option<PathBuf>,
 ) {
     let mut executor = sdeck_plus::layers::ActionExecutor::new(
         sdeck_plus::layers::SystemProcessRunner,
@@ -102,7 +124,13 @@ pub(crate) fn run_worker(
                 destination,
             } => {
                 let result = persist_snapshot(&store, organization.as_ref())
-                    .and_then(|()| sdeck_plus::config_bundle::export(store.root(), &destination))
+                    .and_then(|()| {
+                        sdeck_plus::config_bundle::export_for(
+                            store.root(),
+                            &destination,
+                            store.model(),
+                        )
+                    })
                     .map_err(|error| error.to_string());
                 Some(MonitorEvent::ConfigurationExportResult {
                     path: destination,
@@ -110,22 +138,32 @@ pub(crate) fn run_worker(
                 })
             }
             LayerCommand::ImportConfiguration { root, source } => {
-                let result = sdeck_plus::config_bundle::import(&source, &root)
+                let model = sdeck_plus::device_roots::owner_of_root(&root)
+                    .unwrap_or(&sdeck_plus::device_model::PLUS);
+                let result = sdeck_plus::config_bundle::import_for(&source, &root, model)
                     .map_err(|error| error.to_string());
                 Some(MonitorEvent::ConfigurationImportResult { root, result })
             }
             LayerCommand::Execute { binding_id, action } => {
-                crate::execute_layer_action_for(&mut executor, &binding_id, &action, &output);
+                crate::execute_layer_action_for(
+                    &mut executor,
+                    root.as_deref(),
+                    &binding_id,
+                    &action,
+                    &output,
+                );
                 None
             }
-            LayerCommand::ObsSave(config) => Some(match config.save() {
-                Ok(()) => MonitorEvent::AppEvent {
-                    name: "OBS settings saved.".into(),
+            LayerCommand::ObsSave(config) => Some(
+                match active_root(root.as_deref()).and_then(|root| config.save_at(&root)) {
+                    Ok(()) => MonitorEvent::AppEvent {
+                        name: "OBS settings saved.".into(),
+                    },
+                    Err(error) => {
+                        MonitorEvent::LayerError(format!("OBS settings save failed: {error}"))
+                    }
                 },
-                Err(error) => {
-                    MonitorEvent::LayerError(format!("OBS settings save failed: {error}"))
-                }
-            }),
+            ),
             LayerCommand::ObsProbe(config) => {
                 Some(match sdeck_plus::obs::Client::new(config).probe() {
                     Ok(status) => MonitorEvent::AppEvent {
@@ -187,7 +225,7 @@ pub(crate) fn run_worker(
         }
     }
     if let Some(config) = final_obs {
-        if let Err(error) = config.save() {
+        if let Err(error) = active_root(root.as_deref()).and_then(|root| config.save_at(&root)) {
             eprintln!("Could not save closing OBS settings: {error}");
         }
     }

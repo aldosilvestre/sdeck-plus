@@ -244,12 +244,7 @@ thread_local! {
 
 impl LayerStore {
     pub fn open() -> io::Result<Self> {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .filter(|p| Path::new(p).is_absolute())
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/share")))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no app data directory"))?;
-        Self::open_at(base.join("sdeck-plus"))
+        Self::open_at(crate::device_roots::data_root(&PLUS)?)
     }
 
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
@@ -262,6 +257,7 @@ impl LayerStore {
         model: &'static DeviceModel,
     ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         fs::create_dir_all(&root)?;
         touchscreen::recover(&root)?;
         let mut store = Self {

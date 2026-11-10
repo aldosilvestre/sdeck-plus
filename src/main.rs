@@ -28,6 +28,7 @@ mod autostart;
 mod button_swap;
 mod button_text_editor;
 mod configuration_menu;
+mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
@@ -112,7 +113,7 @@ fn execute_layer_action(
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
-    execute_layer_action_for(executor, "", action, output);
+    execute_layer_action_for(executor, None, "", action, output);
 }
 
 fn execute_layer_action_for(
@@ -120,13 +121,15 @@ fn execute_layer_action_for(
         impl sdeck_plus::layers::ProcessRunner,
         impl sdeck_plus::layers::KeyboardSender,
     >,
+    root: Option<&std::path::Path>,
     binding_id: &str,
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
     let result = match action {
         Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
-            sdeck_plus::obs::ObsConfig::load()
+            feature_runtime::active_root(root)
+                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
                 .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
         }
         _ => executor.execute_for(binding_id, action),
@@ -341,10 +344,16 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
     let (layer_sender, layer_receiver) = mpsc::channel::<LayerCommand>();
     let layer_result_sender = app_event_sender.clone();
     let layer_stop = lifecycle.borrow().layer_stop.clone();
+    let layer_root = layers.borrow().root().to_owned();
     let worker = thread::Builder::new()
         .name("layer-worker".into())
         .spawn(move || {
-            feature_runtime::run_worker(layer_receiver, layer_result_sender, layer_stop);
+            feature_runtime::run_worker_at(
+                layer_receiver,
+                layer_result_sender,
+                layer_stop,
+                Some(layer_root),
+            );
         });
     match worker {
         Ok(worker) => {
@@ -361,7 +370,11 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         }
     }
 
-    let (store, artwork_open_error) = match ArtworkStore::open_for_layer(Some(layers.borrow().active())) {
+    let (store, artwork_open_error) = match ArtworkStore::open_at_for_layer_model(
+        layers.borrow().root(),
+        Some(layers.borrow().active()),
+        layers.borrow().model(),
+    ) {
         Ok(store) => (Some(store), None),
         Err(error) => (None, Some(format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Check permissions and repair the artwork manifest/assets in the app data directory, then restart. Original files have not been replaced."))),
     };
@@ -403,7 +416,7 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
     }
     widgets.feature_runtime.configure(
         organization,
-        sdeck_plus::obs::ObsConfig::load(),
+        sdeck_plus::obs::ObsConfig::load_at(layers.borrow().root()),
         device_sender,
         app_event_sender.clone(),
     );
@@ -4395,6 +4408,7 @@ mod tests {
     mod configuration_transfer_tests;
     mod control_feedback_tests;
     mod control_remove_tests;
+    mod device_roots_tests;
     mod dial_action_tests;
     mod dial_preset_tests;
     mod documentation_screenshots;
@@ -5415,7 +5429,7 @@ mod tests {
         let (output, events) = mpsc::channel();
         // When: both bindings are explicitly executed twice.
         for identity in [&first, &second, &first, &second] {
-            execute_layer_action_for(&mut executor, identity, &action, &output);
+            execute_layer_action_for(&mut executor, None, identity, &action, &output);
             assert!(matches!(
                 events.try_recv().unwrap(),
                 MonitorEvent::AppEvent { name } if name == "Action dispatched."

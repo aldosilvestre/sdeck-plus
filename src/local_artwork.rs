@@ -123,6 +123,7 @@ impl ArtworkStore {
         model: &'static DeviceModel,
     ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         fs::create_dir_all(root.join("assets"))?;
         let (assignments, button_texts, legacy, diagnostics) =
             load_assignments(&root, false, model)?;
@@ -158,6 +159,7 @@ impl ArtworkStore {
         model: &'static DeviceModel,
     ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         let active_layer = active_layer.unwrap_or("Base");
         let (mut assignments, button_texts, legacy, diagnostics) =
             load_assignments(&root, true, model)?;
