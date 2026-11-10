@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows
   dial no longer looks configured after Remove; one **Undo remove** restores all of it.
   Applying a dial preset also drops the page return and live information of the events it
   replaces.
+  Undo refuses, changing nothing, when the control was edited after Remove.
 
 ### Changed
 

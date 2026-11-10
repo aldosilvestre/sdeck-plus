@@ -204,6 +204,9 @@ impl PageReturn {
     }
 }
 
+/// Why [`LayerStore::restore_removed`] refused: the control changed after its removal.
+pub const RESTORE_CONFLICT: &str = "this control was changed after it was removed";
+
 /// A binding taken out by [`LayerStore::unbind_control`], with its metadata.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemovedBinding {
@@ -436,9 +439,29 @@ impl LayerStore {
     /// Put back what [`LayerStore::unbind_control`] removed. All or nothing:
     /// a failure leaves the store as it was.
     ///
+    /// Refuses (changing nothing) when any trigger it would restore has been
+    /// bound, or given a return or display, since the removal.
+    ///
     /// # Errors
-    /// Owners, pages or actions that no longer validate.
+    /// `ErrorKind::AlreadyExists` ([`RESTORE_CONFLICT`]) after such an edit;
+    /// otherwise owners, pages or actions that no longer validate.
     pub fn restore_removed(&mut self, removed: &[RemovedBinding]) -> io::Result<()> {
+        for item in removed {
+            let data = self
+                .layers
+                .get(&item.layer)
+                .or_else(|| self.touchscreens.page(&item.layer));
+            if data.is_some_and(|data| {
+                data.bindings.contains_key(&item.trigger)
+                    || data.returns.contains_key(&item.trigger)
+                    || data.displays.contains_key(&item.trigger)
+            }) {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    RESTORE_CONFLICT,
+                ));
+            }
+        }
         let mut next = self.clone();
         for item in removed {
             next.bind(&item.layer, item.trigger.clone(), item.action.clone())?;

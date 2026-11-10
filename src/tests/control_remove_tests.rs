@@ -253,3 +253,102 @@ fn applying_a_preset_drops_the_stale_return_and_display_of_replaced_events() {
         })
     });
 }
+
+#[test]
+fn undo_after_a_later_edit_refuses_and_keeps_the_new_binding() {
+    run_gtk_test(|| {
+        catalog_fixture("undo-conflict", |widgets, layers, _requests| {
+            let ui = &widgets.binding_ui;
+            ui.select_control(ControlKind::Button, Some(2), true)
+                .unwrap();
+            ui.load_selected_binding(layers);
+            click(widgets, "Remove binding");
+            assert!(ui.undo_remove.is_visible());
+            layers
+                .borrow_mut()
+                .bind(
+                    "Base",
+                    Trigger::KeyPress(2),
+                    Action::Command("newer".into()),
+                )
+                .unwrap();
+            ui.undo_remove.emit_clicked();
+            assert_eq!(
+                layers.borrow().binding("Base", &Trigger::KeyPress(2)),
+                Some(Action::Command("newer".into()))
+            );
+            assert!(!ui.undo_remove.is_visible());
+            assert!(ui.removed.borrow().is_none());
+            assert!(ui.status.text().contains("Cannot undo"));
+        })
+    });
+}
+
+fn touch_remove_and_undo(number: u8, gone: &[Trigger], kept: &[Trigger]) {
+    catalog_fixture("touch-remove", |widgets, layers, _requests| {
+        let ui = &widgets.binding_ui;
+        let everything = [
+            Trigger::ZoneTap(2),
+            Trigger::ZonePress(2),
+            Trigger::ZoneTap(3),
+            Trigger::TouchTap,
+            Trigger::TouchFlick,
+            Trigger::TouchSwipe(sdeck_plus::layers::SwipeDirection::Left),
+        ];
+        for trigger in &everything {
+            layers
+                .borrow_mut()
+                .bind("Base", trigger.clone(), Action::Command("t".into()))
+                .unwrap();
+        }
+        ui.select_control(ControlKind::Touch, Some(number), true)
+            .unwrap();
+        ui.load_selected_binding(layers);
+        click(widgets, "Remove binding");
+        for trigger in gone {
+            assert!(
+                layers.borrow().binding("Base", trigger).is_none(),
+                "{trigger:?}"
+            );
+        }
+        for trigger in kept {
+            assert!(
+                layers.borrow().binding("Base", trigger).is_some(),
+                "{trigger:?}"
+            );
+        }
+        ui.undo_remove.emit_clicked();
+        for trigger in &everything {
+            assert!(
+                layers.borrow().binding("Base", trigger).is_some(),
+                "{trigger:?}"
+            );
+        }
+    })
+}
+
+#[test]
+fn removing_a_touch_section_keeps_the_strip_and_other_sections() {
+    run_gtk_test(|| {
+        touch_remove_and_undo(
+            2,
+            &[Trigger::ZoneTap(2), Trigger::ZonePress(2)],
+            &[Trigger::ZoneTap(3), Trigger::TouchTap, Trigger::TouchFlick],
+        )
+    });
+}
+
+#[test]
+fn removing_the_touch_strip_keeps_the_sections() {
+    run_gtk_test(|| {
+        touch_remove_and_undo(
+            0,
+            &[
+                Trigger::TouchTap,
+                Trigger::TouchFlick,
+                Trigger::TouchSwipe(sdeck_plus::layers::SwipeDirection::Left),
+            ],
+            &[Trigger::ZoneTap(3), Trigger::ZoneTap(2)],
+        )
+    });
+}

@@ -1165,6 +1165,12 @@ fn build_widgets(
                         ui.error("Could not save binding: saving worker is unavailable.");
                     }
                 }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // The removal can no longer be undone safely; keep the user's edits.
+                    let message = "Cannot undo: this control was changed after it was removed.";
+                    ui.error(message);
+                    toast.show(message, true);
+                }
                 Err(error) => {
                     *ui.removed.borrow_mut() = Some(removed);
                     ui.undo_remove.set_visible(true);

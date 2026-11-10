@@ -171,7 +171,7 @@ destructive). Remove clears the whole selected control (a key's press and hold,
 a dial's press, turns and exact ticks, a touch area's gestures) with their page
 returns and live information, whichever event is selected. It leaves an Undo
 remove button under that status line until it is used or another Remove
-replaces it; one Undo re-saves everything that was removed.
+replaces it; one Undo re-saves everything that was removed. Undo never overwrites later edits: if the control was changed after Remove, it refuses with a status message and the Undo button goes away.
 The related controls inside Appearance use 4px gaps to keep expanded artwork
 and the taller shortcut/argument fields compact within the scrolling workspace.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.

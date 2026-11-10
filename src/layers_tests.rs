@@ -325,3 +325,114 @@ fn a_failed_restore_changes_nothing() {
     assert!(store.restore_removed(&removed).is_err());
     assert!(store.binding("Base", &Trigger::KeyPress(1)).is_none());
 }
+
+fn dump(store: &LayerStore) -> String {
+    store
+        .configurations()
+        .map(|layer| {
+            format!(
+                "{}\n{:?}\n{:?}\n{:?}",
+                layer.name, layer.bindings, layer.returns, layer.displays
+            )
+        })
+        .collect()
+}
+
+fn removed_dial_one(store: &mut LayerStore) -> Vec<RemovedBinding> {
+    store
+        .bind("Base", Trigger::EncoderPress(1), text("p"))
+        .unwrap();
+    store
+        .bind("Base", Trigger::EncoderClockwise(1), text("cw"))
+        .unwrap();
+    store
+        .unbind_control("Base", ControlKind::Encoder, 1)
+        .unwrap()
+}
+
+#[test]
+fn restore_refuses_and_changes_nothing_when_a_trigger_was_rebound_after_removal() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    let removed = removed_dial_one(&mut store);
+    store
+        .bind("Base", Trigger::EncoderPress(1), text("new"))
+        .unwrap();
+    let before = dump(&store);
+    let error = store.restore_removed(&removed).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(dump(&store), before);
+}
+
+#[test]
+fn restore_refuses_when_a_later_binding_with_a_return_sits_on_a_restored_trigger() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    let removed = removed_dial_one(&mut store);
+    store.bind("Base", Trigger::KeyPress(1), text("k")).unwrap();
+    store
+        .set_return(
+            "Base",
+            &Trigger::KeyPress(1),
+            Some(PageReturn {
+                layer: "Base".into(),
+                seconds: 5,
+            }),
+        )
+        .unwrap();
+    // The conflicting record lives on a restored trigger: rebind then clear the binding only.
+    let mut removed = removed;
+    removed.push(RemovedBinding {
+        layer: "Base".into(),
+        trigger: Trigger::KeyPress(1),
+        action: text("old"),
+        page_return: None,
+        info: None,
+    });
+    let before = dump(&store);
+    assert!(store.restore_removed(&removed).is_err());
+    assert_eq!(dump(&store), before);
+}
+
+#[test]
+fn restore_succeeds_when_later_edits_were_cleared_again() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    store.bind("Base", Trigger::KeyPress(4), text("a")).unwrap();
+    let removed = store
+        .unbind_control("Base", ControlKind::Button, 4)
+        .unwrap();
+    store.bind("Base", Trigger::KeyPress(4), text("b")).unwrap();
+    store
+        .set_info("Base", &Trigger::KeyPress(4), Some(InfoSource::Clock))
+        .unwrap();
+    store.unbind("Base", &Trigger::KeyPress(4)).unwrap();
+    // Everything is gone again, so the restore is a no-conflict one.
+    store.restore_removed(&removed).unwrap();
+    assert_eq!(
+        store.binding("Base", &Trigger::KeyPress(4)),
+        Some(text("a"))
+    );
+}
+
+#[test]
+fn restore_without_conflicts_is_byte_identical_on_disk() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    store
+        .bind("Base", Trigger::EncoderPress(1), text("p"))
+        .unwrap();
+    store
+        .bind("Base", Trigger::EncoderClockwise(1), text("cw"))
+        .unwrap();
+    store.persist().unwrap();
+    let read = || fs::read(fixture.0.join("layers.conf")).unwrap();
+    let original = read();
+    let removed = store
+        .unbind_control("Base", ControlKind::Encoder, 1)
+        .unwrap();
+    store.persist().unwrap();
+    store.restore_removed(&removed).unwrap();
+    store.persist().unwrap();
+    assert_eq!(read(), original);
+}
