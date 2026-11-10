@@ -221,6 +221,60 @@ fn installer_environment_is_allowlisted_not_inherited() {
 }
 
 #[test]
+fn real_child_sees_only_allowlisted_environment() {
+    let names: Vec<String> = [
+        "PATH",
+        "HOME",
+        "RUSTUP_HOME",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "PREFIX",
+        "SDECK_PLUS_INSTALL_TEST",
+        "SDECK_PLUS_RELEASE_API",
+        "SDECK_PLUS_ARCHIVE_BASE",
+        "CARGO_TARGET_DIR",
+        "CARGO_HOME",
+        "RUSTFLAGS",
+        "RUSTUP_TOOLCHAIN",
+        "BASH_ENV",
+        "ENV",
+        "LD_PRELOAD",
+        "NODE_OPTIONS",
+    ]
+    .map(String::from)
+    .into();
+    assert_eq!(names.len(), 17);
+    let env = clean_environment(
+        names
+            .iter()
+            .map(|key| (OsString::from(key), OsString::from("/value"))),
+    );
+    let mut child = std::process::Command::new("/usr/bin/env")
+        .arg("-i")
+        .args(env.iter().map(|(k, v)| {
+            let mut pair = k.clone();
+            pair.push("=");
+            pair.push(v);
+            pair
+        }))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut out = String::new();
+    std::io::Read::read_to_string(child.stdout.as_mut().unwrap(), &mut out).unwrap();
+    assert!(child.wait().unwrap().success());
+    let mut seen: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, _)| k)
+        .collect();
+    seen.sort_unstable();
+    assert_eq!(seen, ["HOME", "PATH", "RUSTUP_HOME"]);
+}
+
+#[test]
 fn outcomes_argv_cleanup_and_bounded_failure_tail() {
     for mode in 0..=8 {
         let (mut runner, record) = fake(mode);

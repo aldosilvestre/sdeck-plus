@@ -10,7 +10,8 @@ tagged yet, so everything below is unreleased (package version `0.1.0`).
 
 - Release installer rejects an archive whose `Cargo.toml` package version differs from
   the requested tag (`Unsafe release archive`, nothing built); release tags must match
-  the package version.
+  the package version. The check ignores a version hidden behind a multi-line string
+  (such manifests are rejected) and accepts a `[package] # comment` heading.
 - The in-app updater forwards a custom `RUSTUP_HOME` to the installer's cargo, and a
   known newer release stays visible (indicator and Update button) while a later check
   runs or fails.

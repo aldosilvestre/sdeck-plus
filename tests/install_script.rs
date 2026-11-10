@@ -43,7 +43,7 @@ while (( $# )); do
 done
 case "$url" in
     https://fixture.invalid/latest|https://api.github.com/repos/aldosilvestre/sdeck-plus/releases/latest) cat "$FIXTURE/api" ;;
-    https://fixture.invalid/tags/v1.2.3.tar.gz|https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.2.3.tar.gz) cp "$FIXTURE/archive.tar.gz" "$out" ;;
+    https://fixture.invalid/tags/v*.tar.gz|https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.2.3.tar.gz) cp "$FIXTURE/archive.tar.gz" "$out" ;;
     *) echo 'Unexpected URL' >&2; exit 99 ;;
 esac
 "#,
@@ -103,6 +103,22 @@ printf 'binary' > "$dir/test-host/release/sdeck-plus"
             "icon",
         );
         self.write(&format!("{root}/install.sh"), SCRIPT);
+    }
+    /// Replace the fixture release with `manifest` under the directory for `version`.
+    fn release_with_manifest(&self, version: &str, manifest: &str) {
+        self.write("api", &format!("{{\"tag_name\": \"v{version}\"}}\n"));
+        fs::remove_dir_all(self.path("source")).unwrap();
+        self.tree(&format!("source/sdeck-plus-{version}"));
+        self.write(&format!("source/sdeck-plus-{version}/Cargo.toml"), manifest);
+        assert!(Command::new("tar")
+            .arg("-czf")
+            .arg(self.path("archive.tar.gz"))
+            .arg("-C")
+            .arg(self.path("source"))
+            .arg(format!("sdeck-plus-{version}"))
+            .status()
+            .unwrap()
+            .success());
     }
     fn archive(&self) {
         assert!(Command::new("tar")
@@ -361,6 +377,72 @@ fn release_whose_cargo_version_differs_from_tag_is_rejected_before_building() {
         assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
         s.no_install();
     }
+}
+
+#[test]
+fn multiline_string_cannot_fake_the_package_version() {
+    for delimiter in ["\"\"\"", "'''"] {
+        let s = Sandbox::new();
+        s.release_with_manifest(
+            "1.2.3",
+            &format!(
+                "[package]\nname = \"sdeck-plus\"\ndescription = {delimiter}\nversion = \"1.2.3\"\n{delimiter}\nversion = \"9.9.9\"\n"
+            ),
+        );
+        let o = s.run(false, &[], &[]);
+        assert_eq!(o.status.code(), Some(1), "{o:?}");
+        assert!(o.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&o.stderr).starts_with("Unsafe release archive"));
+        s.no_install();
+    }
+}
+
+#[test]
+fn package_heading_comment_and_crlf_manifest_install() {
+    for manifest in [
+        "[package] # c\nname = \"sdeck-plus\"\nversion = \"1.2.3\" # c\n",
+        "[package]\r\nname = \"sdeck-plus\"\r\nversion = \"1.2.3\"\r\n",
+    ] {
+        let s = Sandbox::new();
+        s.release_with_manifest("1.2.3", manifest);
+        let o = s.run(false, &[], &[]);
+        success(&o);
+        s.installed();
+    }
+}
+
+#[test]
+fn lookalike_version_forms_are_still_rejected() {
+    for manifest in [
+        "[package]\nversion.workspace = true\n",
+        "[package]\npackage.version = \"1.2.3\"\n",
+        "[package]\nmeta = { version = \"1.2.3\" }\n",
+        "[dependencies]\nversion = \"1.2.3\"\n",
+        "[package.metadata]\nversion = \"1.2.3\"\n",
+    ] {
+        let s = Sandbox::new();
+        s.release_with_manifest("1.2.3", manifest);
+        let o = s.run(false, &[], &[]);
+        assert_eq!(o.status.code(), Some(1), "{manifest}: {o:?}");
+        s.no_install();
+    }
+}
+
+#[test]
+fn repository_manifest_passes_for_its_own_tag() {
+    let manifest =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let version = manifest
+        .lines()
+        .find_map(|l| l.strip_prefix("version = \""))
+        .and_then(|l| l.strip_suffix('"'))
+        .unwrap()
+        .to_owned();
+    let s = Sandbox::new();
+    s.release_with_manifest(&version, &manifest);
+    let o = s.run(false, &[], &[]);
+    success(&o);
+    s.installed();
 }
 
 #[test]

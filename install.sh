@@ -264,11 +264,14 @@ if $release_mode; then
         exit 1
     fi
     # The archive must be the tagged release: its package version is the tag's.
+    # A multi-line string before the key could hide a fake version line; refuse it.
     package_version=''
     in_package=false
     while IFS= read -r line || [[ -n $line ]]; do
-        if [[ $line =~ ^[[:space:]]*\[([^]]*)\][[:space:]]*$ ]]; then
+        if [[ $line =~ ^[[:space:]]*\[([^]]*)\][[:space:]]*(#.*)?$ ]]; then
             [[ ${BASH_REMATCH[1]} == package ]] && in_package=true || in_package=false
+        elif $in_package && [[ $line == *'"""'* || $line == *"'''"* ]]; then
+            break
         elif $in_package &&
              [[ $line =~ ^[[:space:]]*version[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
             package_version=${BASH_REMATCH[1]}
