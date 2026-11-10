@@ -18,8 +18,7 @@ optdepends=('mpv: sound playback'
             'xdg-utils: opening files and websites (xdg-open)'
             'curl: weather information')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v$pkgver.tar.gz")
-# REPLACE with `updpkgsums` after the v0.1.0 tag is published (no release exists yet, so no checksum is known).
-sha256sums=('SKIP')
+sha256sums=('d6daef0a001bec91e3b50783bdde5b18f40f9026de69b59483df6ebde9d8930d')
 
 prepare() {
   cd "$pkgname-$pkgver"

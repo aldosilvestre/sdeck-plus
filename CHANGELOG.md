@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The stable AUR PKGBUILD pins the SHA-256 of the published `v0.1.0` tarball instead of `SKIP`.
+
 ## [0.1.0] - 2026-11-09
 
 First release (package version `0.1.0`).

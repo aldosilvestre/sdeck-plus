@@ -129,10 +129,19 @@ fn udev_rule_matches_the_stream_deck_plus_ids() {
 }
 
 #[test]
-fn stable_package_flags_the_unpublished_checksum() {
+fn stable_package_pins_the_published_release_checksum() {
     let text = pkgbuild("sdeck-plus");
-    assert_eq!(array(&text, "sha256sums"), ["SKIP"]);
-    assert!(text.contains("REPLACE with `updpkgsums` after the v0.1.0 tag is published"));
+    let sums = array(&text, "sha256sums");
+    assert_eq!(sums.len(), 1);
+    assert!(
+        sums[0].len() == 64
+            && sums[0]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "stable sha256sums must be a real lowercase hex digest, found {:?}",
+        sums[0]
+    );
+    assert!(!text.contains("REPLACE with `updpkgsums`"));
 }
 
 #[test]

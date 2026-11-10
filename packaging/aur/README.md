@@ -24,8 +24,10 @@ makepkg builds C code with `-flto`. The bundled hidapi object then cannot be lin
 ## Before publishing (human steps)
 
 1. Replace the placeholder `# Maintainer: Your Name <your-email>` line in both PKGBUILDs.
-2. Tag and publish the release `v0.1.0` on GitHub (the stable source is the tag's tarball).
-3. In `sdeck-plus/`, run `updpkgsums` (the stable PKGBUILD carries `sha256sums=('SKIP')` until then).
+2. Release `v0.1.0` is published and the stable PKGBUILD already carries its checksum. For a later
+   release, set `pkgver`, reset `pkgrel=1` and run `updpkgsums` in `sdeck-plus/`.
+3. Check the pinned source: `makepkg --verifysource` in `sdeck-plus/` (downloads the tag's tarball and
+   compares it with `sha256sums`).
 4. In each package directory, regenerate the metadata: `makepkg --printsrcinfo > .SRCINFO`.
 5. For each package, clone its empty AUR repository, copy `PKGBUILD` and `.SRCINFO` into it, commit and push:
 
