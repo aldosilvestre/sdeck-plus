@@ -16,7 +16,7 @@ impl FeatureRuntime {
         let dispatches = self
             .key_hold
             .borrow_mut()
-            .poll(&self.layers.borrow(), self.key_epoch.elapsed());
+            .poll(&self.layers.borrow(), self.key_now());
         self.dispatch_keys(dispatches);
     }
 

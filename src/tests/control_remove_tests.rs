@@ -59,7 +59,11 @@ fn removing_a_dial_after_a_preset_clears_every_turn_and_the_legend() {
                 assert!(store.binding("Base", &trigger).is_none(), "{trigger:?}");
             }
             assert!(!ui.dial_legends[0].is_visible());
-            assert!(!ui.summaries[9].text().contains(": Volume"));
+            assert!(!ui
+                .summary(ControlRef::Dial(1))
+                .expect("dial 1 has a summary")
+                .text()
+                .contains(": Volume"));
         })
     });
 }

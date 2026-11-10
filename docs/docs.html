@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sdeck-plus documentation: install, configuration and development</title>
-<meta name="description" content="sdeck-plus documentation: installation and requirements, how every control, action, profile, artwork and OBS setting behaves, data files, tray, and development checks.">
+<meta name="description" content="sdeck-plus documentation: installation and requirements, supported devices, how every control, action, profile, artwork and OBS setting behaves, data files, tray, and development checks.">
 <link rel="canonical" href="https://aldosilvestre.github.io/sdeck-plus/docs.html">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="color-scheme" content="light dark">
@@ -14,7 +14,7 @@
 <meta property="og:site_name" content="sdeck-plus">
 <meta property="og:url" content="https://aldosilvestre.github.io/sdeck-plus/docs.html">
 <meta property="og:title" content="sdeck-plus documentation">
-<meta property="og:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + on Linux.">
+<meta property="og:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.">
 <meta property="og:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -23,7 +23,7 @@
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="sdeck-plus documentation">
-<meta name="twitter:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + on Linux.">
+<meta name="twitter:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.">
 <meta name="twitter:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
 <meta name="twitter:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -167,6 +167,14 @@
             <li><a href="#requirements">Requirements</a></li>
           </ol>
         </li>
+        <li><a href="#devices">Supported devices</a>
+          <ol>
+            <li><a href="#device-models">Models and validation status</a></li>
+            <li><a href="#device-detection">Detection and several devices</a></li>
+            <li><a href="#device-data">Data per model</a></li>
+            <li><a href="#device-registry">Future models</a></li>
+          </ol>
+        </li>
         <li><a href="#configuration">Configuration</a>
           <ol>
             <li><a href="#getting-around">Getting around</a></li>
@@ -182,6 +190,7 @@
           <ol>
             <li><a href="#dev-checks">Checks</a></li>
             <li><a href="#dev-screenshots">Documentation screenshots</a></li>
+            <li><a href="#dev-simulated">Simulated devices</a></li>
             <li><a href="#dev-device-checks">Real-device checks</a></li>
             <li><a href="#dev-event-api">In-process event API</a></li>
             <li><a href="#dev-code">Code organization</a></li>
@@ -249,7 +258,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <li>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code> and <code>glib-compile-resources</code></li>
                 <li>GTK 4.8 or newer and libudev development files</li>
                 <li>A StatusNotifierItem tray (for example, Omarchy's)</li>
-                <li>Stream Deck + over USB, with permission to open its HID node</li>
+                <li>Stream Deck + or Stream Deck + XL over USB, with permission to open its HID node</li>
                 <li>Keyboard and mouse-wheel actions need <code>/dev/uinput</code> access</li>
               </ul>
             </article>
@@ -257,9 +266,113 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
                  <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
-              <p>If opening the device is denied, use your distribution's supported mechanism, for example an administrator-installed udev rule scoped to this VID/PID with
-                 <code>TAG+="uaccess"</code>, then reconnect the device. Missing tools or access are reported; the app never installs packages or changes permissions.</p>
+              <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
+                 <code>TAG+="uaccess"</code>: <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules</code>, then <code>sudo udevadm control --reload-rules</code> and reconnect the device (the installer prints these commands when needed). Missing tools or access are reported; the app never installs packages or changes permissions.</p>
               <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="devices" aria-labelledby="devices-title">
+        <header>
+          <p class="eyebrow">Hardware</p>
+          <h2 id="devices-title">Supported devices</h2>
+          <p>sdeck-plus drives the Elgato Stream Deck + and the Stream Deck + XL, and several can be connected at the same time. Each model has its own window content, stores, editor and previews; the window shows the one you are configuring. Neither the XL nor running several devices at once has been tested on real hardware (see below).</p>
+        </header>
+
+        <div class="doc-group" id="device-models" style="--c: var(--fam-media)">
+          <h3>Models and validation status</h3>
+          <div class="cards">
+            <article class="card wide">
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th></th><th>Stream Deck +</th><th>Stream Deck + XL</th></tr>
+                  <tr><th>USB id</th><td><code>0fd9:0084</code></td><td><code>0fd9:00c6</code></td></tr>
+                  <tr><th>Keys</th><td>8 (4 × 2), 120 px, sent unrotated</td><td>36 (9 × 4), 112 px, sent rotated 90° counterclockwise</td></tr>
+                  <tr><th>Dials</th><td>4</td><td>6</td></tr>
+                  <tr><th>Touch strip</th><td>800 × 100, 4 sections of 200 px</td><td>1200 × 100, 6 sections of 200 px, sent rotated 90° counterclockwise</td></tr>
+                  <tr><th>Validation</th><td>Developed and tested on this hardware.</td><td>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending.</td></tr>
+                </table>
+              </div>
+              <p>Sizes and rotations follow Elgato's HID documentation for each model (<a href="https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl">Stream Deck + XL</a>). The XL support has not been run on a real
+                 Stream Deck + XL: the simulator checks the report formats against that documentation, not the hardware. Details that the documentation leaves open are separate fields in the registry,
+                 so they can be corrected once a real unit is available.</p>
+              <figure style="margin: 1rem 0 0">
+                <a href="screenshots/main-window-xl.png"><img width="1000" height="700" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window configuring the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
+                <figcaption>The window configuring the Stream Deck + XL (rendered by the screenshot generator, with no device).</figcaption>
+              </figure>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-detection" style="--c: var(--fam-system)">
+          <h3>Detection and several devices</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Detection</h4>
+              <p>The app looks for vendor id <code>0x0FD9</code> with product id <code>0x0084</code> (Stream Deck +) or <code>0x00C6</code> (Stream Deck + XL). Every match is driven, so you can plug in both models, or two of one model.
+                 Other Elgato models are never matched, even if plugged in. The header lists what is connected, for example "Stream Deck + and Stream Deck + XL connected".</p>
+            </article>
+            <article class="card">
+              <h4>Each device runs its own configuration</h4>
+              <p>One hub serves all connected devices. Each model has its own session: its pictures, its key, dial and touch actions, its timers and its profiles. A device receives only the pictures of its own model, and input on one never runs the other's actions.</p>
+            </article>
+            <article class="card">
+              <h4>The Current selector</h4>
+              <p><strong>Current</strong> appears in the header only while two or more different models are connected; choosing a model makes the window show and edit that model. With one model, or none, there is no selector and the window looks the same as with a single device; with no device it shows the last model you used.
+                 The selector only chooses what the window edits: every connected device keeps running. Switching never asks about unsaved edits, because the other model keeps its draft.</p>
+              <p>With one model connected the window shows it. When several are, it shows the last model used if it is connected, else the first connected one (Stream Deck +, then + XL). Your choice stays until that model has no device left. The last model shown is remembered for the next start.</p>
+            </article>
+            <article class="card">
+              <h4>Two devices of one model</h4>
+              <p>Two Stream Decks of the same model share that model's profiles and mirror each other: same pictures, same active page and timers, and a key on either runs the same action. Brightness and sleep follow the model.</p>
+            </article>
+            <article class="card">
+              <h4>Unplugging</h4>
+              <p>Unplugging one device leaves the others running. If it was the last device of the model on screen, the window shows the remaining model; with none left it keeps showing the current one and reconnecting retries automatically. Quitting clears every connected device.
+                 The OBS menu and <strong>Test action</strong> act on the model shown; focus-based profile switching reaches every model.</p>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Running several devices at once has been validated only with simulated devices, through the real hub into the real window. It has not been tested with two physical Stream Decks, and the Stream Deck + XL has not been tested on real hardware; only the Stream Deck + alone has.</p>
+            </article>
+            <article class="card wide">
+              <h4>Preview of each model</h4>
+              <p>The window draws the shown model: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials.
+                 Control pickers, accessible names and keyboard order describe the same model.</p>
+              <figure style="margin: 1rem 0 0">
+                <a href="screenshots/main-window-two-devices.png"><img width="1000" height="700" src="screenshots/main-window-two-devices.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window with a Stream Deck + and a Stream Deck + XL connected: the header shows the Current selector set to Stream Deck +"></a>
+                <figcaption>Two models connected: the header shows <strong>Current</strong> (simulated devices; not tested on two real units).</figcaption>
+              </figure>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-data" style="--c: var(--fam-org)">
+          <h3>Data per model</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Separate folders</h4>
+              <p>Each model has its own profiles, pages, bindings, artwork, information and OBS settings. The Stream Deck + keeps <code>$XDG_DATA_HOME/sdeck-plus</code> unchanged;
+                 the Stream Deck + XL uses <code>&lt;data&gt;/sdeck-plus/devices/plus-xl/</code>, a complete independent set of the files listed under <a href="#data-tray-lifecycle">Data, tray and lifecycle</a>.</p>
+              <p>Shared across models, in <code>$XDG_CONFIG_HOME/sdeck-plus</code>: <code>tray.json</code>, <code>updates.json</code> and <code>device.json</code> (the last model used).</p>
+            </article>
+            <article class="card">
+              <h4>Backups</h4>
+              <p>Export format 5 records the model. Importing a bundle made for the other model is refused with "This configuration is for Stream Deck + XL; connect that model to import it." (or "...for Stream Deck +...").
+                 Import into the + keeps the <code>devices/</code> folder. Format 5 bundles cannot be imported by older versions of sdeck-plus.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-registry" style="--c: var(--fam-load)">
+          <h3>Future models</h3>
+          <div class="cards">
+            <article class="card wide">
+              <p>Every supported model is one entry in a registry (<code>src/device_model.rs</code>), and the editor, stores, previews and the screenshot generator read it instead of fixed numbers.
+                 The Stream Deck Classic, XL, Neo and Mini are already described there from Elgato's HID pages as <em>planned</em>: they are not supported and discovery never matches them.
+                 To add one, see <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>.</p>
             </article>
           </div>
         </div>
@@ -279,9 +392,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
           <div class="cards">
             <article class="card">
               <h4>Main window and connection status</h4>
-              <p>The header says in plain words whether the Stream Deck + is connected (for example "Stream Deck + not connected — plug it in")
+              <p>The header says in plain words whether a supported device is connected (for example "Stream Deck + or Stream Deck + XL not connected — plug one in", or "Stream Deck + XL connected — keys, dials and touch strip are live")
                  next to a colored <strong>Not connected</strong>, <strong>Unavailable</strong>, <strong>Disconnected</strong> or <strong>Connected</strong> badge;
-                 hover it for the USB IDs (VID <code>0x0FD9</code>, PID <code>0x0084</code>) and technical details.</p>
+                 hover it for the USB IDs (VID <code>0x0FD9</code>; PID <code>0x0084</code> or <code>0x00C6</code>) and technical details. See <a href="#devices">Supported devices</a>.</p>
               <p>If the device is absent, inaccessible or disconnected, the window stays open, reports the state and retries detection.
                  Touch gestures use Elgato's 800 × 100 logical-pixel space and are reported after the interaction completes,
                  not as separate contact start and release events. Each dial in the preview shows the action it is assigned to.</p>
@@ -297,7 +410,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Choosing another action replaces the draft already on that control; if the draft is on a different control you are asked before it is discarded. Existing key-to-key dragging still swaps saved settings and artwork.</p>
               <p>The action selector remains available for dials and the touch strip; keys use the Actions catalog:</p>
               <ol>
-                <li>Select a profile tab and page, then click one of the eight keys, the touch strip or one of the four dials.</li>
+                <li>Select a profile tab and page, then click one of the keys (eight on the Stream Deck +, 36 on the + XL), the touch strip or one of the dials (four or six).</li>
                 <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key's Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below. Select <strong>Hold 2 seconds</strong> to configure its optional secondary action without replacing the short action.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
                 <li>The three icon buttons at the top of the right-hand panel act on the selected control: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. <strong>Undo remove</strong>, right below, brings all of it back. If you changed that control after removing it, Undo refuses and keeps your changes. Hover any of them for a tooltip that explains what it does; the result message appears right below them.</li>
@@ -476,7 +589,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
           <div class="cards">
             <article class="card">
               <h4>Sections and gestures</h4>
-              <p>The strip has four sections, one above each dial. Choose <strong>Touch</strong>, then control <strong>1</strong> to <strong>4</strong>, and give each section its own
+              <p>On the Stream Deck + the strip has four sections, one above each dial (the + XL has six; the numbers below follow the shown model). Choose <strong>Touch</strong>, then control <strong>1</strong> to <strong>4</strong>, and give each section its own
                  <strong>Tap</strong> and <strong>Hold</strong> binding. <strong>Any</strong> keeps the older whole-strip bindings, which still handle taps no section claims.
                  Flick and swipes always apply to the whole strip.</p>
               <p>Touch bindings, section information, strip and section images and every dial binding belong to the profile's selected touchscreen page,
@@ -611,14 +724,15 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Data location and files</h4>
               <p>Configuration lives in <code>$XDG_DATA_HOME/sdeck-plus</code>, or <code>$HOME/.local/share/sdeck-plus</code> when it is unset (normally
                  <code>~/.local/share/sdeck-plus</code>): <code>layers.conf</code> (keypad layers and bindings), <code>touchscreen.json</code>, <code>organization.json</code>,
-                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>.</p>
+                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>. These are the Stream Deck + files; the Stream Deck + XL keeps the same set under
+                 <code>devices/plus-xl/</code> (see <a href="#device-data">Data per model</a>).</p>
               <p>An unreadable or unsupported <code>layers.conf</code> leaves configuration unavailable with writes disabled; repair it and restart. In a readable file, invalid, conflicting
                  or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.</p>
             </article>
             <article class="card">
               <h4>Backup and restore</h4>
               <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, image references, button text,
-                 live information, page returns and OBS settings, including credentials. Format version 4 stores configuration as readable UTF-8 text inside JSON, without base64. It never includes image, sound or other file contents.</p>
+                 live information, page returns and OBS settings, including credentials. Format version 5 records the device model and stores configuration as readable UTF-8 text inside JSON, without base64. It never includes image, sound or other file contents.</p>
               <p>File references keep only a type folder and filename: <code>/home/aldo/.../musica/cancionX.mp3</code> becomes <code>./sonidos/cancionX.mp3</code>;
                  all background images (keys, the whole touch strip and individual zones) use <code>./imagenes/filename.png</code>, and Open file/folder targets and explicit executable paths use <code>./archivos/filename</code>.
                  Existing copied images keep their app-assigned filename. Original directories and symlink destinations stay on the source machine.
@@ -627,7 +741,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  missing files do not block import. Put the files (or local symlinks to them) in those folders, or choose replacement files in the editor. Existing copied images in
                  <code>assets</code> can be reused by filename. An existing unreadable or invalid image cancels import rather than discarding its assignment.
                  Import validates first, asks for confirmation, retains previous configuration metadata in a sibling backup, and refreshes the device without running saved actions.
-                 Legacy version-1, version-2 and version-3 exports remain importable with their original encoding and file-reference rules.</p>
+                 Bundles of the other model are refused (see <a href="#device-data">Data per model</a>). Legacy version-1 to version-4 exports are Stream Deck + bundles and remain importable with their original encoding and file-reference rules.</p>
               <p>This is not general secret redaction: URLs, command text, application arguments, button text and OBS credentials remain verbatim. Review those fields before sharing.</p>
             </article>
             <article class="card">
@@ -701,10 +815,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Checks</h4>
               <div class="code-block">
 <pre><code>cargo fmt --all -- --check
+cargo test --offline --test device_roots --test device_registry --test device_model --test preview_layout
 env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=x11 cargo test --offline
 cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
               </div>
-              <p>The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
+              <p>The four named test targets cover the model registry, per-model data folders and the preview layout engine for every model. The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
                  its GTK main thread, for example:</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
@@ -717,17 +832,29 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-screenshots">
               <h4>Documentation screenshots</h4>
               <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
-                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window):</p>
+                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (both 1000 × 700; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
   cargo test --offline --bin sdeck-plus \
   tests::documentation_screenshots::regenerate_documentation_screenshots_when_explicitly_requested \
   -- --exact --nocapture --test-threads=1</code></pre>
               </div>
+              <p>The model previews alone can be written with <code>STREAMDECK_PREVIEW_PNG_DIR=&lt;dir&gt;</code> set for the test
+                 <code>tests::preview_model_tests::previews_render_to_images_for_every_supported_model_without_a_device</code>; the list of models comes from the registry, so a newly supported model gets its image automatically.</p>
+            </article>
+            <article class="card wide" id="dev-simulated">
+              <h4>Simulated devices</h4>
+              <p>A manual launcher opens the real window over scratch directories, with simulated Stream Decks plugged into the real hub, so no hardware, real data or network is involved. It is ignored by the test suite and runs until you close the window.
+                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
             </article>
             <article class="card wide" id="dev-device-checks">
               <h4>Opt-in real-device checks</h4>
-              <p>Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
+              <p>These need a real device and have been run on a single Stream Deck + only; nothing was run on a Stream Deck + XL or with two devices connected. Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
                  brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture.</p>
               <div class="code-block">
 <pre><code>cargo run --offline --example verify_streamdeck -- --device-controls
@@ -755,6 +882,8 @@ dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/
                 <table class="ref-table">
                   <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
                   <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
+                  <tr><th><code>src/device_model.rs</code>, <code>src/device_roots.rs</code></th><td>Model registry (<a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>) and each model's data folder</td></tr>
+                  <tr><th><code>src/preview_layout.rs</code></th><td>Preview geometry for any registry model</td></tr>
                   <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>
                   <tr><th><code>src/info.rs</code>, <code>src/info_render.rs</code></th><td>Live readings and the key/section compositor</td></tr>
                   <tr><th><code>src/desktop_actions/audio_output.rs</code></th><td>Fixed and rotating PipeWire output selection</td></tr>
@@ -782,7 +911,7 @@ dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/
     <div class="footer-grid">
       <div>
         <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
-        <p>Native GTK4 control desk for the Elgato Stream Deck + on Linux.</p>
+        <p>Native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.</p>
       </div>
       <nav aria-label="Product">
         <h2>Product</h2>

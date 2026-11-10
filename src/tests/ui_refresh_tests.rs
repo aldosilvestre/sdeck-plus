@@ -166,26 +166,29 @@ fn assert_header_connection_states() {
             );
         }
     };
-    let not_connected = "Stream Deck + not connected — plug it in";
+    let not_connected = "Stream Deck + or Stream Deck + XL not connected — plug one in";
+    let plus = Some(&sdeck_plus::device_model::PLUS);
     // Before the HID worker reports anything, the header already speaks plainly.
     assert_state(
         "Not connected",
         "status-idle",
         not_connected,
-        "VID 0FD9 / PID 0084",
+        "VID 0FD9 / PID 0084 or 00C6",
     );
-    for (state, badge, tone, text, tooltip) in [
+    for (state, last, badge, tone, text, tooltip) in [
         (
             ConnectionState::Searching,
+            None,
             "Not connected",
             "status-idle",
             not_connected,
-            "VID 0FD9 / PID 0084",
+            "VID 0FD9 / PID 0084 or 00C6",
         ),
         (
             ConnectionState::Unavailable(
                 "Device not found · connect Stream Deck + (VID 0FD9 / PID 0084)".into(),
             ),
+            None,
             "Not connected",
             "status-idle",
             not_connected,
@@ -193,29 +196,70 @@ fn assert_header_connection_states() {
         ),
         (
             ConnectionState::Unavailable("Device found but could not open: denied".into()),
+            plus,
             "Unavailable",
             "status-error",
             "Stream Deck + found but unavailable — hover for details",
+            "could not open: denied\nUSB device VID 0FD9 / PID 0084",
+        ),
+        (
+            ConnectionState::Unavailable("Device found but could not open: denied".into()),
+            None,
+            "Unavailable",
+            "status-error",
+            "Stream Deck found but unavailable — hover for details",
             "could not open: denied",
         ),
         (
-            ConnectionState::Disconnected("HID read ended: gone".into()),
+            ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS,
+                reason: "HID read ended: gone".into(),
+            },
+            plus,
             "Disconnected",
             "status-idle",
             "Stream Deck + disconnected — plug it back in",
-            "HID read ended: gone",
+            "HID read ended: gone\nUSB device VID 0FD9 / PID 0084",
         ),
         (
-            ConnectionState::Connected,
+            ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS_XL,
+                reason: "HID read ended: gone".into(),
+            },
+            Some(&sdeck_plus::device_model::PLUS_XL),
+            "Disconnected",
+            "status-idle",
+            "Stream Deck + XL disconnected — plug it back in",
+            "USB device VID 0FD9 / PID 00C6",
+        ),
+        (
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS,
+            },
+            None,
             "Connected",
             "status-online",
             "Stream Deck + connected — keys, dials and touch strip are live",
-            "VID 0FD9 / PID 0084",
+            "USB device VID 0FD9 / PID 0084 · HID input and artwork active",
+        ),
+        (
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS_XL,
+            },
+            None,
+            "Connected",
+            "status-online",
+            "Stream Deck + XL connected — keys, dials and touch strip are live",
+            "USB device VID 0FD9 / PID 00C6 · HID input and artwork active",
         ),
     ] {
         assert_eq!(
-            show_connection_state(status, detail, &state),
-            state == ConnectionState::Connected
+            show_connection_state(status, detail, &state, last),
+            state.is_connected()
         );
         assert_state(badge, tone, text, tooltip);
     }

@@ -1,3 +1,9 @@
+use crate::{
+    device_model::{DeviceModel, ProtocolFamily, PLUS},
+    image_output::{self, OutputReport},
+    local_artwork::ArtworkTarget,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Key {
@@ -28,19 +34,109 @@ pub enum Event {
     },
 }
 
+/// What one protocol family implements. This is the single dispatch point for
+/// a new family: add a [`ProtocolFamily`] variant, implement this trait for it
+/// and return it from [`protocol_for`]; no other call site changes.
+pub trait FamilyProtocol: Sync {
+    /// Decode one input report of `model`.
+    ///
+    /// # Errors
+    /// A message when the family cannot be decoded.
+    fn decode(&self, model: &DeviceModel, report: &[u8]) -> Result<Vec<Event>, String>;
+
+    /// The output reports that upload `jpeg` (an encoded image) to `target`.
+    ///
+    /// # Errors
+    /// A message when the target does not exist or the family cannot be driven.
+    fn encode_reports(
+        &self,
+        model: &DeviceModel,
+        target: ArtworkTarget,
+        jpeg: &[u8],
+    ) -> Result<Vec<OutputReport>, String>;
+}
+
+/// The handler of `family`.
+pub fn protocol_for(family: ProtocolFamily) -> &'static dyn FamilyProtocol {
+    match family {
+        ProtocolFamily::Expanded => &Expanded,
+        ProtocolFamily::LegacyMini => &Unimplemented,
+    }
+}
+
+/// Classic, XL, Neo, + and + XL.
+struct Expanded;
+
+/// A documented family with no handler yet: every call fails with a message
+/// and nothing is ever sent to a device.
+struct Unimplemented;
+
+impl FamilyProtocol for Unimplemented {
+    fn decode(&self, model: &DeviceModel, _report: &[u8]) -> Result<Vec<Event>, String> {
+        model.ensure_protocol().map(|()| Vec::new())
+    }
+
+    fn encode_reports(
+        &self,
+        model: &DeviceModel,
+        _target: ArtworkTarget,
+        _jpeg: &[u8],
+    ) -> Result<Vec<OutputReport>, String> {
+        model.ensure_protocol().map(|()| Vec::new())
+    }
+}
+
+impl FamilyProtocol for Expanded {
+    fn decode(&self, model: &DeviceModel, report: &[u8]) -> Result<Vec<Event>, String> {
+        Ok(decode_expanded(model, report))
+    }
+
+    fn encode_reports(
+        &self,
+        model: &DeviceModel,
+        target: ArtworkTarget,
+        jpeg: &[u8],
+    ) -> Result<Vec<OutputReport>, String> {
+        image_output::encode_expanded_reports(model, target, jpeg)
+    }
+}
+
+/// Decode one Stream Deck + input report.
 pub fn decode_report(report: &[u8]) -> Vec<Event> {
-    if report.len() < 4 || report[0] != 0x01 {
+    decode_report_for(&PLUS, report)
+}
+
+/// Decode one input report of `model`, whose key and dial counts size the
+/// payloads. A report the family cannot decode yields no events.
+pub fn decode_report_for(model: &DeviceModel, report: &[u8]) -> Vec<Event> {
+    try_decode_report_for(model, report).unwrap_or_default()
+}
+
+/// [`decode_report_for`] that says why a family cannot be decoded.
+///
+/// # Errors
+/// A message when the family of `model` has no handler.
+pub fn try_decode_report_for(model: &DeviceModel, report: &[u8]) -> Result<Vec<Event>, String> {
+    protocol_for(model.family).decode(model, report)
+}
+
+fn decode_expanded(model: &DeviceModel, report: &[u8]) -> Vec<Event> {
+    // The sensors a model appends after its keys read as extra buttons.
+    let keys = usize::from(model.key_inputs());
+    let dials = usize::from(model.dials);
+    let header = model.input_header_len;
+    if header < 4 || report.len() < header || report[0] != 0x01 {
         return Vec::new();
     }
     let length = u16::from_le_bytes([report[2], report[3]]) as usize;
-    if report.len() < 4 + length {
+    if report.len() < header + length {
         return Vec::new();
     }
-    let payload = &report[4..4 + length];
+    let payload = &report[header..header + length];
     match report[1] {
         0x00 => payload
             .iter()
-            .take(8)
+            .take(keys)
             .enumerate()
             .filter_map(|(index, &state)| {
                 (state <= 1).then_some(Event::Key {
@@ -49,8 +145,8 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
                 })
             })
             .collect(),
-        0x03 if payload.len() >= 5 => match payload[0] {
-            0x00 => payload[1..5]
+        0x03 if payload.len() > dials => match payload[0] {
+            0x00 => payload[1..=dials]
                 .iter()
                 .enumerate()
                 .filter_map(|(index, &state)| {
@@ -60,7 +156,7 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
                     })
                 })
                 .collect(),
-            0x01 => payload[1..5]
+            0x01 => payload[1..=dials]
                 .iter()
                 .enumerate()
                 .filter_map(|(index, &ticks)| {
@@ -70,7 +166,7 @@ pub fn decode_report(report: &[u8]) -> Vec<Event> {
                 .collect(),
             _ => Vec::new(),
         },
-        0x02 if payload.len() >= 2 => match payload[0] {
+        0x02 if model.has_touch() && payload.len() >= 2 => match payload[0] {
             0x01 if payload.len() >= 6 => vec![Event::TouchTap {
                 x: u16::from_le_bytes([payload[2], payload[3]]),
                 y: u16::from_le_bytes([payload[4], payload[5]]),

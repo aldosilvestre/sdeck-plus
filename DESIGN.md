@@ -3,9 +3,10 @@
 ## 1. Atmosphere and identity
 
 sdeck-plus is a native hardware configuration desk, not a web dashboard. Ink-toned
-surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview: eight
-keys, a touch strip and four circular encoders. Preserve its coordinates,
-artwork and existing functions.
+surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview of the shown model: eight keys, a touch
+strip and four circular encoders on the Stream Deck +; 36 keys, a touch strip and
+six encoders on the Stream Deck + XL. Preserve its coordinates, artwork and
+existing functions.
 
 Configuration follows a short path: choose a profile, drag an action from the
 right-hand searchable catalog onto a keypad button, then complete its fields
@@ -29,7 +30,9 @@ icon, its name and an action count. Rows are frameless 36px targets with the
 action icon in a bordered tile and a drag grip that brightens on hover; dragging
 shows the row itself. Searching opens every category with matches, hides the
 rest and shows "No actions match your search." when nothing matches; clearing
-restores the categories as the user left them.
+restores the categories as the user left them. Every key and every dial of
+the shown model takes a drop (36 keys and 6 dials on the + XL, 8 and 4 on the +),
+and each model's session keeps its own search text and open categories.
 Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
 assigned, with the same save-or-draft rule as keys, and clicking an action with a
@@ -193,18 +196,67 @@ The inspector-below-preview workspace uses vertical scrolling at the default
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
-between Save/Remove actions; its 120px preview remains unchanged.
+between Save/Remove actions; its preview is the key at the shown model's size
+(120px for the +, 112px for the + XL).
 
-The fixed-geometry device chassis sits in its preview card (440x428 at 1x,
-including padding and border). The card is presented through `ScaledBin`
+The fixed-geometry device chassis sits in its preview card: the chassis plus
+a 14px frame (padding and border), 440x428 at 1x for the Stream Deck +. The card is presented through `ScaledBin`
 (`src/ui/scaled_bin.rs`) at a fixed 1.0x (`PREVIEW_MAX_SCALE`), top-aligned and
 horizontally centered: the preview keeps one size whatever the window width,
 the selected action or the form beside it, so it never jumps. Hardware
-coordinates, artwork targets and the card's size never change, and the card
-never stretches to match a tall form. GTK applies the same
+coordinates, artwork targets and the card's size never change while a model is
+shown, and the card never stretches to match a tall form. GTK applies the same
 transform to drawing and pointer picking, so selection, drag-and-drop and
 focus keep working. The inspector uses its content height, without an
 arbitrary minimum height.
+
+**Model-driven preview.** The chassis is drawn from the shown model's layout
+(`PreviewLayout::for_model`, `src/preview_layout.rs`, pure geometry shared by
+the widgets and the tests); `PreviewView` (`src/ui/preview.rs`) builds it once, inside
+the session of that model; showing another model shows another session (see
+"Device model"), so a chassis is never rebuilt in place. Geometry,
+in preview pixels at 1x:
+
+| Model | Chassis | Keys | Touch strip | Dials |
+|-------|---------|------|-------------|-------|
+| Stream Deck + | 426x414 | 8 (4x2), 60px on a 91x67 pitch | 328x41, 4 sections of 82px | 4 knobs of 46px, 91px pitch |
+| Stream Deck + XL | 556x456 | 36 (9x4), 40px on a 46px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
+
+The Stream Deck + keeps the geometry it always had, pixel for pixel. Every
+other model of the registry is laid out by the same generic rules (44px keys on
+a 52px pitch, 76px sections, knobs under their sections, a chassis just wide
+enough for its widest row, margins kept whole so it is symmetric); models
+without a strip or dials omit them. The + XL uses those rules with 40px keys on
+a 46px pitch and a 24px bottom margin, so its four rows still fit the window
+(see below). A Neo's information window is drawn as a
+plain display that cannot be selected, and its two capacitive sensors are not
+drawn because they have no preview control.
+
+**Preview images.** The documentation shows one image per supported model,
+rendered from the real preview widget with no device: `preview-<model id>.png`
+is the device card alone (426x414 for the +, 556x456 for the + XL) and
+`main-window-xl.png` is the 1000x700 window content configuring the + XL (no
+selector: one model). `main-window-two-devices.png` (1000x700, scrolled to the
+header) shows the "Current" selector with a simulated + and + XL connected through
+the real hub. They are written by the documentation screenshot generator, which
+iterates `DeviceModel::supported()` for the per-model images, so a model that
+becomes supported gets its image without editing the generator. The + XL images
+and the two-device image come from simulated devices only; they say nothing about
+hardware behavior.
+
+The preview is never scaled for a model: the card is the chassis plus 14px
+(570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
+every control at least 24px on both sides (the smallest is the + XL key at
+40px). At the default 1000x700 window the + XL card still sits beside the
+352px action catalog (570 + 16 + 352 = 938 of the 968px of usable width), so
+the settings column stays usable; a narrower window wraps the catalog below
+the workspace exactly as it does for the +, and the page scrolls vertically.
+The + XL chassis is 42px taller than the + (456px against 414px); its card
+(570x470) ends inside the 700px viewport of the default window, so the page
+needs no vertical scroll to reach the dials (a test pins this for both
+models). A shorter window scrolls the page, never the preview. Dial captions are 72px wide on the + XL (86px
+on the +) so neighbours never touch.
+
 The complete configuration shell (header, profile toolbar, page navigation and
 body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
@@ -375,7 +427,9 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   the closed Action button show the chosen action's icon, while the Action
   menu row keeps `more`.
 - **Artwork targets:** every row of the Artwork target menu starts with a
-  26x22 mini map of the eight keys over the four strip sections, soft-filled
+  26x22 mini map of the shown model's keys over its strip sections (eight keys
+  over four sections on the +, the 9x4 grid over six sections on the + XL, at the
+  same overall size), soft-filled
   and outlined at half ink with its target filled (the whole strip row for the background),
   and menu rows end with the target's assigned action icon (key press; section
   tap, then hold), refreshed whenever the menu opens.
@@ -456,7 +510,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   the title names what is edited, "Key N on “<view>”", where the view is the
   page indicator's label (profile / folders / page). The editor fields and
   enlarged preview appear only in the popup. A compact two-column body keeps
-  the entire 120px live preview next to the form, with no popup scrolling at
+  the entire live key preview (120px, 112px on the + XL) next to the form, with no popup scrolling at
   640x480 or larger. Only a long multiline text input may scroll internally.
   Use a native font chooser button, a 6–120px size spinner, and one row with
   a linked pair of orientation icon toggles (upright and clockwise-rotated
@@ -467,11 +521,11 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Tab and arrow keys, and keep tooltips and distinct accessible names.
   Vertical text
   rotates the layout 90 degrees clockwise. White glyphs with a thin black
-  outline sit above the key's background. The enlarged 120px preview and the
+  outline sit above the key's background. The enlarged key preview (the model's key size) and the
   physical key preview show the key as the device does: its artwork, else its
   binding icon tile when the text leaves the icon a band, else the neutral
   black key; the derived picture is never stored. When the Pango ink extents
-  exceed the 116px text area, a warning-toned "Text does not fit; try a
+  exceed the key's text area (the key size less 4px), a warning-toned "Text does not fit; try a
   smaller size" sits under the preview; it is informational. Save text is
   explicit and enabled only for a valid, nonblank value that differs from the
   saved one (Ctrl+Enter saves; plain Enter inserts a line); its tooltip says
@@ -494,6 +548,51 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Action choices include existing toggles plus explicit start/stop recording,
   pause/resume recording, and start/stop streaming. Choosing or saving an
   action never executes it.
+- **Device model:** every model has a complete session of its own: its
+  widget tree (built once, the model-driven preview and the editor), runtime,
+  stores, action worker, information reader and event channel. A session is
+  created the first time its model is needed (the last used model at startup,
+  or the model of a device that connects) and kept alive afterwards, so two
+  connected Stream Decks of different models run live at the same time, each
+  with its own configuration, artwork and timers; two devices of one model
+  share that model's session and mirror each other. The window is a shared
+  header (title, connection status, "Current" selector, update indicator and
+  menu) over a stack whose pages are the sessions' editors; the stack takes the
+  size of the shown page only. The window shows one session. Automatically
+  (until the user picks a model in this run) it shows the last used model when
+  that model is connected, else the first connected model in the order Stream
+  Deck +, Stream Deck + XL; this is re-evaluated whenever a device connects or
+  is unplugged, so a last used model that connects second is shown as soon as
+  it connects, and the other connected model is shown when the shown model's
+  last device is unplugged. With no device the window keeps what it shows (the
+  last used model; the XL cannot be shown without a device). The header lists
+  what is connected: one model reads exactly "<model> connected — keys, dials
+  and touch strip are live", two models "Stream Deck + and Stream Deck + XL
+  connected — ...", two units of one model "<model> x2 connected"; models
+  are named in the order Stream Deck +, Stream Deck + XL whichever plugged in
+  first, and with several devices the tooltip of the line starts with the whole
+  sentence (the line itself may be ellipsized), then the USB ids.
+  The **Current selector** sits beside the connection badge: the caption
+  "Current" (muted, 12px) and a drop-down named "Current device" with the
+  tooltip "Choose the Stream Deck to configure". It is visible only while two
+  or more distinct models are connected; with none, one, or several units of
+  one model it is not in the layout at all (not focusable either), so a
+  window with one model looks exactly as it did before the selector existed.
+  Its entries are the connected models, plain names, in the order Stream Deck
+  +, Stream Deck + XL, and it shows the shown model. Choosing an entry shows
+  that model's session, rebinds the menu, toasts "Switched to <model>." and
+  remembers the model for the next start only once the session opened; it
+  never asks about unsaved edits, because the session left behind stays alive
+  and keeps its draft. A pick sticks until the shown model has no connected
+  device left, then the automatic rule applies again. The last shown model
+  (device.json) follows every successful change of the shown model, whether
+  automatic or picked. If a connected model's configuration cannot be opened,
+  the shown session stays visible, read-only while none of its own devices is
+  connected, with a persistent error, nothing is sent to that device and it is
+  not offered in the selector. The menu's import and export, OBS and Test
+  action act on the shown session; the focused application reaches every
+  session. Each preview's brand line reads "STREAM DECK +" or "STREAM DECK +
+  XL".
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
@@ -585,6 +684,15 @@ Native keyboard-operable controls, visible associated labels and focus rings
 are required. Icon-only controls have names/tooltips. Popovers provide a
 visible way out. Error explanations say what to correct near the relevant
 editor; passwords never appear in summaries or diagnostic text.
+
+Preview controls are named after the device's own numbering: keys "Button 1"
+through "Button N" (row-major), dials "Encoder 1" through "Encoder N", and
+touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
+is the shown model's count (36 keys, 6 dials and 6 sections for the + XL; the
++ keeps 8, 4 and 4). Tab visits the keys row-major, then the touch strip, its
+sections and the dials; Space or Enter selects the focused control, and any
+key of the shown model can be dragged onto another to swap them. Every model's
+session uses this order and these names.
 
 Agency Agents accessibility guidance is adapted to this native desktop surface:
 retain keyboard access, distinguish interactive boundaries at 3:1 or better,

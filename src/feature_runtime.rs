@@ -12,6 +12,7 @@ use sdeck_plus::{
 };
 use std::{
     cell::{Cell, RefCell},
+    path::{Path, PathBuf},
     rc::Rc,
     sync::mpsc,
     time::{Duration, Instant},
@@ -22,6 +23,7 @@ mod folder_panel;
 mod folders;
 mod key_hold;
 mod key_swap;
+mod model_session;
 mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
@@ -29,10 +31,40 @@ mod pages;
 mod timer_sound;
 mod touchscreen;
 
+#[cfg(test)]
+pub(crate) use model_session::choose_shown;
+#[cfg(test)]
+pub(crate) use model_session::SwitchReason;
+pub(crate) use model_session::{
+    open_session, Created, ModelSession, OpenError, OpenedSession, Session, SessionFactory,
+    SessionRoots, SharedHeader,
+};
+
+/// The root OBS settings live in: the session's, or the Stream Deck + root.
+pub(crate) fn active_root(root: Option<&Path>) -> std::io::Result<PathBuf> {
+    match root {
+        Some(root) => Ok(root.to_owned()),
+        None => sdeck_plus::device_roots::data_root(&sdeck_plus::device_model::PLUS),
+    }
+}
+
+/// [`run_worker_at`] for the Stream Deck + root; tests drive the worker this way.
+#[cfg(test)]
 pub(crate) fn run_worker(
     receiver: mpsc::Receiver<LayerCommand>,
     output: mpsc::Sender<MonitorEvent>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    run_worker_at(receiver, output, stop, None);
+}
+
+/// Runs queued layer commands; `root` is the active model root that OBS
+/// settings are read from and saved to.
+pub(crate) fn run_worker_at(
+    receiver: mpsc::Receiver<LayerCommand>,
+    output: mpsc::Sender<MonitorEvent>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    root: Option<PathBuf>,
 ) {
     let mut executor = sdeck_plus::layers::ActionExecutor::new(
         sdeck_plus::layers::SystemProcessRunner,
@@ -102,7 +134,13 @@ pub(crate) fn run_worker(
                 destination,
             } => {
                 let result = persist_snapshot(&store, organization.as_ref())
-                    .and_then(|()| sdeck_plus::config_bundle::export(store.root(), &destination))
+                    .and_then(|()| {
+                        sdeck_plus::config_bundle::export_for(
+                            store.root(),
+                            &destination,
+                            store.model(),
+                        )
+                    })
                     .map_err(|error| error.to_string());
                 Some(MonitorEvent::ConfigurationExportResult {
                     path: destination,
@@ -110,22 +148,32 @@ pub(crate) fn run_worker(
                 })
             }
             LayerCommand::ImportConfiguration { root, source } => {
-                let result = sdeck_plus::config_bundle::import(&source, &root)
+                let model = sdeck_plus::device_roots::owner_of_root(&root)
+                    .unwrap_or(&sdeck_plus::device_model::PLUS);
+                let result = sdeck_plus::config_bundle::import_for(&source, &root, model)
                     .map_err(|error| error.to_string());
                 Some(MonitorEvent::ConfigurationImportResult { root, result })
             }
             LayerCommand::Execute { binding_id, action } => {
-                crate::execute_layer_action_for(&mut executor, &binding_id, &action, &output);
+                crate::execute_layer_action_for(
+                    &mut executor,
+                    root.as_deref(),
+                    &binding_id,
+                    &action,
+                    &output,
+                );
                 None
             }
-            LayerCommand::ObsSave(config) => Some(match config.save() {
-                Ok(()) => MonitorEvent::AppEvent {
-                    name: "OBS settings saved.".into(),
+            LayerCommand::ObsSave(config) => Some(
+                match active_root(root.as_deref()).and_then(|root| config.save_at(&root)) {
+                    Ok(()) => MonitorEvent::AppEvent {
+                        name: "OBS settings saved.".into(),
+                    },
+                    Err(error) => {
+                        MonitorEvent::LayerError(format!("OBS settings save failed: {error}"))
+                    }
                 },
-                Err(error) => {
-                    MonitorEvent::LayerError(format!("OBS settings save failed: {error}"))
-                }
-            }),
+            ),
             LayerCommand::ObsProbe(config) => {
                 Some(match sdeck_plus::obs::Client::new(config).probe() {
                     Ok(status) => MonitorEvent::AppEvent {
@@ -187,7 +235,7 @@ pub(crate) fn run_worker(
         }
     }
     if let Some(config) = final_obs {
-        if let Err(error) = config.save() {
+        if let Err(error) = active_root(root.as_deref()).and_then(|root| config.save_at(&root)) {
             eprintln!("Could not save closing OBS settings: {error}");
         }
     }
@@ -215,6 +263,9 @@ pub(crate) struct FeatureRuntime {
     key_swap_pending: Rc<Cell<bool>>,
     key_swap_deferred_persist: Rc<Cell<bool>>,
     key_swap_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
+    /// The preview of the shown model; weak, because the preview's own
+    /// connections hold this runtime.
+    preview: Rc<RefCell<std::rc::Weak<crate::preview::PreviewView>>>,
     configuration_operation: Rc<Cell<Option<configuration::Operation>>>,
     configuration_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
     pub(crate) indicator: Label,
@@ -222,6 +273,9 @@ pub(crate) struct FeatureRuntime {
     pub(crate) timer_status: Label,
     key_hold: Rc<RefCell<sdeck_plus::key_hold::KeyHoldRecognizer>>,
     key_epoch: Instant,
+    /// Tests move the key clock forward instead of waiting out a hold.
+    #[cfg(test)]
+    key_skew: Rc<Cell<Duration>>,
     key_generation: Rc<Cell<u64>>,
     timer: Rc<RefCell<Option<glib::SourceId>>>,
     timer_sound: Rc<RefCell<timer_sound::TimerSound>>,
@@ -349,6 +403,9 @@ impl FeatureRuntime {
         obs_status.add_css_class("muted");
         fields.append(&obs_status);
         obs_panel.set_child(Some(&fields));
+        let key_hold = Rc::new(RefCell::new(sdeck_plus::key_hold::KeyHoldRecognizer::new(
+            layers.borrow().model(),
+        )));
         let runtime = Self {
             layers,
             organization: Rc::new(RefCell::new(Some(organization))),
@@ -359,13 +416,16 @@ impl FeatureRuntime {
             key_swap_pending: Rc::new(Cell::new(false)),
             key_swap_deferred_persist: Rc::new(Cell::new(false)),
             key_swap_root: Rc::new(RefCell::new(glib::WeakRef::new())),
+            preview: Rc::new(RefCell::new(std::rc::Weak::new())),
             configuration_operation: Rc::new(Cell::new(None)),
             configuration_root: Rc::new(RefCell::new(glib::WeakRef::new())),
             indicator,
             status,
             timer_status,
-            key_hold: Rc::default(),
+            key_hold,
             key_epoch: Instant::now(),
+            #[cfg(test)]
+            key_skew: Rc::default(),
             key_generation: Rc::new(Cell::new(0)),
             timer: Rc::new(RefCell::new(None)),
             timer_sound: Rc::new(RefCell::new(timer_sound::TimerSound::default())),
@@ -765,28 +825,40 @@ impl FeatureRuntime {
         }
     }
 
-    pub(crate) fn configure(
-        &self,
-        organization: std::io::Result<Organization>,
-        config: std::io::Result<ObsConfig>,
-        device: mpsc::Sender<DeviceAction>,
-        events: mpsc::Sender<MonitorEvent>,
-    ) {
-        *self.device.borrow_mut() = Some(device);
-        let info_events = events.clone();
-        *self.events.borrow_mut() = Some(events);
+    /// Start (or restart) the information reader on the current root. Dropping
+    /// the previous sender ends the previous reader.
+    fn start_info_worker(&self) {
+        self.info_watch.borrow_mut().take();
+        let Some(events) = self.events.borrow().clone() else {
+            return;
+        };
         let root = self.layers.borrow().root().to_owned();
-        match sdeck_plus::info::spawn_worker(root, info_events) {
+        match sdeck_plus::info::spawn_worker(root, events) {
             Ok(sender) => *self.info_watch.borrow_mut() = Some(sender),
             Err(error) => eprintln!("Could not start the information reader: {error}"),
         }
-        self.artwork.update_info(
-            InfoSource::Brightness,
-            InfoValue::gauge(Glyph::Sun, 100, "100%".into()),
-        );
-        self.sync_info_from(&self.layers.borrow());
+    }
+
+    /// Organization state of the session; `reenable` also turns writes back on
+    /// after an earlier session had disabled them.
+    fn apply_organization(&self, organization: std::io::Result<Organization>, reenable: bool) {
         match organization {
-            Ok(value) => *self.organization.borrow_mut() = Some(value),
+            Ok(value) => {
+                *self.organization.borrow_mut() = Some(value);
+                if reenable {
+                    self.page_controls.root.set_sensitive(true);
+                    self.page_controls.navigation_group.set_sensitive(true);
+                    self.page_controls.folders.set_sensitive(true);
+                    self.organization_management.set_sensitive(true);
+                    if self
+                        .status
+                        .text()
+                        .starts_with("Organization writes disabled")
+                    {
+                        self.status.set_text("");
+                    }
+                }
+            }
             Err(error) => {
                 *self.organization.borrow_mut() = None;
                 self.page_controls.root.set_sensitive(false);
@@ -797,8 +869,14 @@ impl FeatureRuntime {
                 crate::ui::feedback(&self.status, true);
             }
         }
+    }
+
+    fn apply_obs(&self, config: std::io::Result<ObsConfig>) {
         match config {
             Ok(config) => {
+                self.obs_valid.set(true);
+                self.obs_save.set_sensitive(true);
+                self.obs_test.set_sensitive(true);
                 self.endpoint.set_text(&config.endpoint);
                 self.password.set_text(&config.password);
             }
@@ -812,6 +890,27 @@ impl FeatureRuntime {
                 crate::ui::feedback(&self.obs_status, true);
             }
         }
+    }
+
+    /// Connect the session's stores to the device and the information reader.
+    /// Running it again replaces the reader; none is leaked.
+    pub(crate) fn configure(
+        &self,
+        organization: std::io::Result<Organization>,
+        config: std::io::Result<ObsConfig>,
+        device: mpsc::Sender<DeviceAction>,
+        events: mpsc::Sender<MonitorEvent>,
+    ) {
+        *self.device.borrow_mut() = Some(device);
+        *self.events.borrow_mut() = Some(events);
+        self.start_info_worker();
+        self.artwork.update_info(
+            InfoSource::Brightness,
+            InfoValue::gauge(Glyph::Sun, 100, "100%".into()),
+        );
+        self.sync_info_from(&self.layers.borrow());
+        self.apply_organization(organization, false);
+        self.apply_obs(config);
         self.reconcile_focus();
         self.refresh_indicator();
         self.refresh_application_editor();
@@ -854,16 +953,20 @@ impl FeatureRuntime {
             DeviceAction::Sleep => self.sleeping.set(true),
             DeviceAction::Wake => self.sleeping.set(false),
         }
+        self.artwork
+            .update_info(InfoSource::Brightness, self.brightness_value());
+    }
+
+    fn brightness_value(&self) -> InfoValue {
         let level = self.brightness.get();
-        let value = if self.sleeping.get() {
+        if self.sleeping.get() {
             InfoValue {
                 inactive: true,
                 ..InfoValue::gauge(Glyph::Sun, 0, "OFF".into())
             }
         } else {
             InfoValue::gauge(Glyph::Sun, level, format!("{level}%"))
-        };
-        self.artwork.update_info(InfoSource::Brightness, value);
+        }
     }
 
     pub(crate) fn persist(&self, store: LayerStore) {
@@ -950,6 +1053,12 @@ impl FeatureRuntime {
     }
 
     fn refresh_selection(&self) {
+        self.refresh_selection_for(true);
+    }
+
+    /// Reload the editor and preview; `send_artwork` also pushes the pictures
+    /// to the device.
+    fn refresh_selection_for(&self, send_artwork: bool) {
         let names = self.layers.borrow().names();
         self.updating.set(true);
         crate::replace_string_list(&self.ui.layer_model, &names);
@@ -959,7 +1068,7 @@ impl FeatureRuntime {
         self.updating.set(false);
         self.ui.load_selected_binding(&self.layers);
         self.ui.refresh_summaries(&self.layers);
-        self.artwork.refresh(false);
+        self.artwork.refresh_with(false, send_artwork);
         self.refresh_indicator();
     }
 
@@ -987,6 +1096,19 @@ impl FeatureRuntime {
         }
     }
 
+    /// Time on the monotonic key clock.
+    pub(crate) fn key_now(&self) -> Duration {
+        #[cfg(test)]
+        return self.key_epoch.elapsed() + self.key_skew.get();
+        #[cfg(not(test))]
+        self.key_epoch.elapsed()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance_key_clock(&self, by: Duration) {
+        self.key_skew.set(self.key_skew.get() + by);
+    }
+
     pub(crate) fn execute_input(&self, event: &sdeck_plus::protocol::Event) {
         if self.configuration_operation.get() == Some(configuration::Operation::Import) {
             return;
@@ -996,7 +1118,7 @@ impl FeatureRuntime {
                 &self.layers.borrow(),
                 *index,
                 *pressed,
-                self.key_epoch.elapsed(),
+                self.key_now(),
             );
             self.dispatch_keys(dispatches);
             return;

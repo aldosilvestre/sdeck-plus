@@ -2,6 +2,7 @@
 //! string dropdown whose rows carry one icon each.
 use gtk::{glib, prelude::*, Box as GtkBox, Image, Label, Orientation};
 use sdeck_plus::binding_icons::{self, BindingIcon};
+use sdeck_plus::device_model::DeviceModel;
 use sdeck_plus::local_artwork::ArtworkTarget;
 use std::rc::Rc;
 
@@ -186,12 +187,17 @@ pub(crate) fn gesture_badge(
     badge
 }
 
+/// The destinations the picker lists, in order; they follow the shown model.
+pub(crate) type Targets = Rc<dyn Fn() -> Vec<ArtworkTarget>>;
 /// The assigned action of an artwork target: its icon and summary.
 pub(crate) type TargetAction = Rc<dyn Fn(ArtworkTarget) -> Option<(BindingIcon, String)>>;
 
+/// The model whose keys and sections the target markers map.
+pub(crate) type Model = Rc<dyn Fn() -> &'static DeviceModel>;
+
 /// A target marker (mini map of keys and strip with this control filled),
 /// drawn in the theme foreground like [`binding_icon`].
-fn target_marker(target: ArtworkTarget) -> gtk::DrawingArea {
+fn target_marker(target: ArtworkTarget, model: &Model) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::builder()
         .content_width(26)
         .content_height(22)
@@ -199,11 +205,11 @@ fn target_marker(target: ArtworkTarget) -> gtk::DrawingArea {
         .accessible_role(gtk::AccessibleRole::Presentation)
         .build();
     area.add_css_class("target-marker");
-    set_target_marker(&area, target);
+    set_target_marker(&area, target, model.clone());
     area
 }
 
-fn set_target_marker(area: &gtk::DrawingArea, target: ArtworkTarget) {
+fn set_target_marker(area: &gtk::DrawingArea, target: ArtworkTarget, model: Model) {
     area.set_widget_name(&binding_icons::target_marker_id(target));
     area.set_draw_func(move |area, cairo, width, height| {
         #[allow(deprecated)]
@@ -217,7 +223,9 @@ fn set_target_marker(area: &gtk::DrawingArea, target: ArtworkTarget) {
         // The map spans about 23x20 grid units: fit both directions.
         let size = (f64::from(width) * 24.0 / 23.0).min(f64::from(height) * 24.0 / 20.0);
         let center = (f64::from(width) / 2.0, f64::from(height) / 2.0);
-        if let Err(error) = binding_icons::paint_target(cairo, target, center, size, ink) {
+        if let Err(error) =
+            binding_icons::paint_target_for(model(), cairo, target, center, size, ink)
+        {
             eprintln!("Could not draw artwork target marker: {error}");
         }
     });
@@ -227,10 +235,19 @@ fn set_target_marker(area: &gtk::DrawingArea, target: ArtworkTarget) {
 /// Artwork targets with a marker before each name; menu rows also show the
 /// target's assigned action icon after the name, read again whenever the
 /// menu opens so saved bindings appear without rebuilding the list.
-pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
+pub(crate) fn target_dropdown(
+    picker: &gtk::DropDown,
+    targets: Targets,
+    action: TargetAction,
+    model: Model,
+) {
     for menu in [false, true] {
         let factory = gtk::SignalListItemFactory::new();
         let setup_action = action.clone();
+        let setup_targets = targets.clone();
+        let setup_model = model.clone();
+        let bind_model = model.clone();
+        let bind_targets = targets.clone();
         factory.connect_setup(glib::clone!(
             #[weak]
             picker,
@@ -240,7 +257,7 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
                 };
                 let row = GtkBox::new(Orientation::Horizontal, 8);
                 row.add_css_class("icon-row");
-                row.append(&target_marker(ArtworkTarget::Keypad(1)));
+                row.append(&target_marker(ArtworkTarget::Keypad(1), &setup_model));
                 let label = Label::new(None);
                 label.set_xalign(0.0);
                 row.append(&label);
@@ -264,9 +281,10 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
                     });
                     let weak_item = item.downgrade();
                     let action = setup_action.clone();
+                    let targets = setup_targets.clone();
                     row.connect_map(move |_| {
                         if let Some(item) = weak_item.upgrade() {
-                            sync_target_action(&item, &assigned, &action);
+                            sync_target_action(&item, &assigned, &targets, &action);
                         }
                     });
                 }
@@ -284,12 +302,11 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
                 let Some(row) = item.child() else {
                     return;
                 };
-                let Some(target) = ArtworkTarget::TOUCH.get(item.position() as usize).copied()
-                else {
+                let Some(target) = bind_targets().get(item.position() as usize).copied() else {
                     return;
                 };
                 if let Some(marker) = row.first_child().and_downcast::<gtk::DrawingArea>() {
-                    set_target_marker(&marker, target);
+                    set_target_marker(&marker, target, bind_model.clone());
                 }
                 let label = row.first_child().and_then(|marker| marker.next_sibling());
                 if let Some(label) = label.clone().and_downcast::<Label>() {
@@ -303,7 +320,7 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
                 }
                 let assigned = label.and_then(|label| label.next_sibling());
                 if let Some(area) = assigned.clone().and_downcast::<gtk::DrawingArea>() {
-                    sync_target_action(item, &area, &bind_action);
+                    sync_target_action(item, &area, &bind_targets, &bind_action);
                 }
                 if let Some(check) = assigned
                     .and_then(|area| area.next_sibling())
@@ -321,8 +338,13 @@ pub(crate) fn target_dropdown(picker: &gtk::DropDown, action: TargetAction) {
     }
 }
 
-fn sync_target_action(item: &gtk::ListItem, area: &gtk::DrawingArea, action: &TargetAction) {
-    let assigned = ArtworkTarget::TOUCH
+fn sync_target_action(
+    item: &gtk::ListItem,
+    area: &gtk::DrawingArea,
+    targets: &Targets,
+    action: &TargetAction,
+) {
+    let assigned = targets()
         .get(item.position() as usize)
         .and_then(|target| action(*target));
     match assigned {

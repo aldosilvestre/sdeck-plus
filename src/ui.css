@@ -253,6 +253,10 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
     background-color: alpha(@desk_error, 0.16);
     border: 1px solid alpha(@desk_error, 0.55);
 }
+/* 'Current' sits beside the connection badge and reads as secondary to it. */
+.model-selector label.muted {
+    font-size: 12px;
+}
 .feedback-error { color: @desk_error; }
 .destructive-action:not(:disabled) { color: @desk_error; }
 .icon-action.destructive-action.flat {

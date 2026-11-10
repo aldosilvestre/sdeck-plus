@@ -1,4 +1,5 @@
 //! Exclusive physical keypad tap/hold recognition with caller-owned monotonic time.
+use crate::device_model::{DeviceModel, PLUS};
 use crate::layers::{Action, LayerStore, PageReturn, Trigger};
 use std::time::Duration;
 
@@ -40,13 +41,27 @@ struct KeyState {
 /// Owned by the existing serial input worker; creates no threads or timers.
 /// Feed every physical key report (zero-based HID index), including releases.
 /// Repeated down/up snapshots are harmless. Use one monotonic epoch throughout.
-#[derive(Default)]
 pub struct KeyHoldRecognizer {
     owner: Option<String>,
-    keys: [KeyState; 8],
+    keys: Vec<KeyState>,
+}
+
+/// Sized for the Stream Deck +; use [`KeyHoldRecognizer::new`] for another model.
+impl Default for KeyHoldRecognizer {
+    fn default() -> Self {
+        Self::new(&PLUS)
+    }
 }
 
 impl KeyHoldRecognizer {
+    /// A recognizer with one state per key of `model`.
+    pub fn new(model: &DeviceModel) -> Self {
+        Self {
+            owner: None,
+            keys: (0..model.keys()).map(|_| KeyState::default()).collect(),
+        }
+    }
+
     /// A configured hold defers tap until release. At or after the boundary,
     /// release dispatches hold even if the worker has not polled in the meantime.
     /// Invalid HID indices are ignored without changing state.

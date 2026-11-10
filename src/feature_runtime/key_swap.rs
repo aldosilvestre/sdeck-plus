@@ -17,7 +17,8 @@ pub(super) fn persist(
     }
     let mut next = original.clone();
     next.swap_keys(layer, first, second)?;
-    let mut artwork = ArtworkStore::open_at_for_layer(artwork_root, Some(layer))?;
+    let mut artwork =
+        ArtworkStore::open_at_for_layer_model(artwork_root, Some(layer), next.model())?;
     next.persist()?;
     if let Err(error) = artwork.swap_keys_in_layer(layer, first, second) {
         original.persist().map_err(|rollback| {
@@ -90,7 +91,8 @@ impl FeatureRuntime {
                 .ok_or("Artwork storage is unavailable")?
                 .root()
                 .to_path_buf();
-            let artwork = ArtworkStore::open_at_for_layer(root, Some(layer))
+            let model = self.layers.borrow().model();
+            let artwork = ArtworkStore::open_at_for_layer_model(root, Some(layer), model)
                 .map_err(|error| error.to_string())?;
             self.layers
                 .borrow_mut()

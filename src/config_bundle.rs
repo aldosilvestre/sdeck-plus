@@ -1,5 +1,7 @@
 //! Portable, versioned configuration snapshots. No action is ever executed.
 //!
+//! Version 5 is version 4 plus a top-level `model` naming the device model the
+//! configuration is for; bundles of versions 1 to 4 are Stream Deck + bundles.
 //! Version 4 contains only readable UTF-8 configuration entries, without base64.
 //! Background images and other structured
 //! file targets use ./imagenes/<name>, ./sonidos/<name>, ./archivos/<name>.
@@ -11,6 +13,8 @@
 
 use crate::{
     desktop_actions::DesktopAction,
+    device_model::{DeviceModel, PLUS},
+    device_roots::{self, DEVICES_DIR},
     features::FeatureAction,
     layers::{Action, LayerStore},
     local_artwork::ArtworkStore,
@@ -36,6 +40,8 @@ const CONFIGS: [&str; 6] = [
     "info.json",
     "touchscreen.json",
 ];
+/// Version written by [`export_for`]; it added the `model` field.
+const FORMAT_VERSION: u32 = 5;
 const MAX_FILE: usize = 32 * 1024 * 1024;
 const MAX_CONFIG: usize = 4 * 1024 * 1024;
 const MAX_TOTAL: usize = 128 * 1024 * 1024;
@@ -48,6 +54,9 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 struct Bundle {
     format: String,
     version: u32,
+    /// Device model id; present exactly in version 5 and later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     files: Vec<Entry>,
 }
 
@@ -221,16 +230,16 @@ fn materialize(stage: &Path, files: &BTreeMap<String, Vec<u8>>) -> io::Result<()
     Ok(())
 }
 
-fn validate(stage: &Path) -> io::Result<LayerStore> {
+fn validate(stage: &Path, model: &'static DeviceModel) -> io::Result<LayerStore> {
     if !stage.join("layers.conf").is_file() {
         return Err(invalid("bundle requires layers.conf"));
     }
-    let mut layers = LayerStore::open_at(stage)?;
+    let mut layers = LayerStore::open_at_model(stage, model)?;
     if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
         return Err(invalid("invalid or recovered layer configuration"));
     }
     let organization = Organization::open_at(stage, &layers)?;
-    let mut artwork = ArtworkStore::open_at_for_layer(stage, Some(layers.active()))?;
+    let mut artwork = ArtworkStore::open_at_for_layer_model(stage, Some(layers.active()), model)?;
     layers.initialize_touchscreens(&organization, &mut artwork)?;
     ObsConfig::load_at(stage)?;
     if stage.join("info.json").exists() {
@@ -426,6 +435,12 @@ fn persist_layers(layers: &LayerStore) -> io::Result<()> {
 /// All validation happens on an isolated snapshot. The destination is replaced
 /// only after validation, serialization and staging cleanup have succeeded.
 pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
+    export_for(root, destination, &PLUS)
+}
+
+/// [`export`] for a configuration root of `model`.
+pub fn export_for(root: &Path, destination: &Path, model: &'static DeviceModel) -> io::Result<()> {
+    device_roots::ensure_root_fits(root, model)?;
     no_symlinks(root)?;
     if !fs::metadata(root)?.is_dir() {
         return Err(invalid("configuration root is not a directory"));
@@ -455,7 +470,7 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
             *manifest = portable_artwork(manifest)?;
         }
         materialize(&stage, &files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         transform_files(&mut layers, &root, Some(&destination))?;
         persist_layers(&layers)?;
         // Strict artwork loading may migrate a legacy manifest in the snapshot.
@@ -471,7 +486,8 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
         }
         let bundle = Bundle {
             format: "sdeck-plus".into(),
-            version: 4,
+            version: FORMAT_VERSION,
+            model: Some(model.id.into()),
             files: files
                 .into_iter()
                 .map(|(path, bytes)| {
@@ -543,15 +559,58 @@ fn validate_portable_audio(layers: &LayerStore, stage: &Path) -> io::Result<()> 
 ///
 /// Returns `None` for a first install. A failed install restores the old root;
 /// if rollback itself fails, the error names the retained recovery backup.
+///
+/// The model is the owner of `root` (a `devices/<id>` folder), or the Stream
+/// Deck + for any other folder, so this wrapper can never put a Stream Deck +
+/// bundle over another model's configuration.
 pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
+    import_for(
+        source,
+        root,
+        device_roots::owner_of_root(root).unwrap_or(&PLUS),
+    )
+}
+
+/// [`import`] into a configuration root of `model`. Bundles of versions 1 to
+/// 4 describe the Stream Deck + and are validated against `model` as is; a
+/// version 5 bundle must name `model` or nothing is staged.
+///
+/// Importing into the Stream Deck + root keeps the `devices/` folder with the
+/// other models' configurations.
+pub fn import_for(
+    source: &Path,
+    root: &Path,
+    model: &'static DeviceModel,
+) -> io::Result<Option<PathBuf>> {
+    device_roots::ensure_root_fits(root, model)?;
     let bytes = read_regular(source, MAX_BUNDLE)?;
     let bundle: Bundle =
         serde_json::from_slice(&bytes).map_err(|_| invalid("invalid configuration bundle JSON"))?;
-    if bundle.format != "sdeck-plus" || !matches!(bundle.version, 1..=4) {
+    if bundle.format != "sdeck-plus" || !matches!(bundle.version, 1..=FORMAT_VERSION) {
         return Err(invalid("unsupported bundle format or version"));
+    }
+    // Before 5 the model was not recorded and every bundle was a Stream Deck +.
+    let bundle_model = match (bundle.version >= 5, bundle.model.as_deref()) {
+        (false, None) => DeviceModel::default_model(),
+        (true, Some(id)) => {
+            DeviceModel::by_id(id).ok_or_else(|| invalid("bundle names an unknown device model"))?
+        }
+        _ => return Err(invalid("unsupported bundle format or version")),
+    };
+    if bundle_model.id != model.id {
+        return Err(invalid(format!(
+            "This configuration is for {}; connect that model to import it.",
+            bundle_model.name
+        )));
     }
     if bundle.files.len() > MAX_ENTRIES {
         return Err(invalid("too many bundle entries"));
+    }
+    if model.id != DeviceModel::default_model().id {
+        // A model root lives in `<plus root>/devices/`, which may not exist yet.
+        if let Some(parent) = root.parent() {
+            fs::create_dir_all(parent)?;
+        }
     }
     let root = absolute_target(root)?;
     let mut files = BTreeMap::new();
@@ -564,7 +623,7 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
             return Err(invalid("unsafe, duplicate or oversized bundle entry"));
         }
         let bytes = match entry.data {
-            Some(data) if bundle.version == 4 => data.into_bytes(),
+            Some(data) if bundle.version >= 4 => data.into_bytes(),
             Some(data) => {
                 if data.len() > limit(&entry.path).div_ceil(3) * 4 {
                     return Err(invalid("oversized bundle entry"));
@@ -594,12 +653,13 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
         Err(error) => return Err(error),
     }
     if bundle.version >= 3 {
-        return import_references(&root, &files);
+        return import_references(&root, &files, model, |from, to| fs::rename(from, to));
     }
     let stage = stage_for(&root)?;
+    let mut devices_moved = false;
     let result = (|| {
         materialize(&stage, &files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         validate_portable_audio(&layers, &stage)?;
         for (layer, trigger, path) in audio_bindings(&layers) {
             bind_audio(&mut layers, &layer, trigger, root.join(path))?;
@@ -610,9 +670,48 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
                 fs::set_permissions(stage.join(name), fs::Permissions::from_mode(0o600))?;
             }
         }
+        devices_moved = carry_devices(&root, &stage, model)?;
         install(&stage, &root, |from, to| fs::rename(from, to))
     })();
+    if result.is_err() && devices_moved {
+        if let Err(error) = fs::rename(stage.join(DEVICES_DIR), root.join(DEVICES_DIR)) {
+            return Err(restore_failed(&result, &error, &stage));
+        }
+    }
     cleanup(&stage, result)
+}
+
+fn restore_failed<T>(result: &io::Result<T>, error: &io::Error, stage: &Path) -> io::Error {
+    // Never clean a stage that still holds original user files.
+    io::Error::other(format!(
+        "{}; {error}; local files retained at {}",
+        result
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        stage.display()
+    ))
+}
+
+// The Stream Deck + root also holds the other models' roots. They are not part
+// of any bundle, so they move into the new root untouched and go back on failure.
+fn carry_devices(root: &Path, stage: &Path, model: &DeviceModel) -> io::Result<bool> {
+    if model.id != DeviceModel::default_model().id {
+        return Ok(false);
+    }
+    let source = root.join(DEVICES_DIR);
+    match fs::symlink_metadata(&source) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::rename(&source, stage.join(DEVICES_DIR))?;
+            Ok(true)
+        }
+        Ok(_) => Err(invalid(
+            "local file directory must not be a symlink or file",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 // Move local file directories intact, never dereference their symlinks or copy
@@ -620,12 +719,14 @@ pub fn import(source: &Path, root: &Path) -> io::Result<Option<PathBuf>> {
 fn import_references(
     root: &Path,
     files: &BTreeMap<String, Vec<u8>>,
+    model: &'static DeviceModel,
+    rename: impl FnMut(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<Option<PathBuf>> {
     let stage = stage_for(root)?;
     let mut moved = Vec::new();
     let result = (|| {
         materialize(&stage, files)?;
-        let mut layers = validate(&stage)?;
+        let mut layers = validate(&stage, model)?;
         transform_files(&mut layers, root, None)?;
         persist_layers(&layers)?;
         for name in [
@@ -653,27 +754,21 @@ fn import_references(
                 Err(error) => return Err(error),
             }
         }
-        validate(&stage)?;
+        validate(&stage, model)?;
         for name in CONFIGS {
             if stage.join(name).exists() {
                 fs::set_permissions(stage.join(name), fs::Permissions::from_mode(0o600))?;
             }
         }
-        install(&stage, root, |from, to| fs::rename(from, to))
+        if carry_devices(root, &stage, model)? {
+            moved.push(DEVICES_DIR);
+        }
+        install(&stage, root, rename)
     })();
     if result.is_err() {
         for name in moved.into_iter().rev() {
             if let Err(error) = fs::rename(stage.join(name), root.join(name)) {
-                // Never clean a stage that still holds original user files.
-                return Err(io::Error::other(format!(
-                    "{}; {error}; local files retained at {}",
-                    result
-                        .as_ref()
-                        .err()
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    stage.display()
-                )));
+                return Err(restore_failed(&result, &error, &stage));
             }
         }
     }

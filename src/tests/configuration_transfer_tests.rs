@@ -190,7 +190,7 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     assert!(bundle.is_file());
     let exported: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&bundle).unwrap()).unwrap();
-    assert_eq!(exported["version"], 4);
+    assert_eq!(exported["version"], 5);
     assert!(exported["files"]
         .as_array()
         .unwrap()

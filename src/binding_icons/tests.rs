@@ -431,6 +431,41 @@ fn target_markers_fill_exactly_their_control_on_a_mini_map() {
 }
 
 #[test]
+fn target_markers_draw_the_shape_of_the_xl_model() {
+    use crate::device_model::PLUS_XL;
+    use crate::local_artwork::ArtworkTarget;
+    let filled = |target: ArtworkTarget, x: i32, y: i32| {
+        let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 48, 48).unwrap();
+        {
+            let context = cairo::Context::new(&surface).unwrap();
+            paint_target_for(
+                &PLUS_XL,
+                &context,
+                target,
+                (24.0, 24.0),
+                48.0,
+                (1.0, 1.0, 1.0, 1.0),
+            )
+            .unwrap();
+        }
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let offset = y as usize * stride + x as usize * 4;
+        u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap()) >> 24 > 0xc0
+    };
+    // The 9x4 grid keeps the + map's width: key 1 top-left, key 36 bottom-right.
+    assert!(filled(ArtworkTarget::Keypad(1), 3, 6));
+    assert!(filled(ArtworkTarget::Keypad(36), 45, 24));
+    assert!(!filled(ArtworkTarget::Keypad(35), 45, 24));
+    assert!(!filled(ArtworkTarget::Keypad(27), 45, 24));
+    // Six sections: the last one sits at the right edge, the strip fills all.
+    assert!(filled(ArtworkTarget::EncoderZone(6), 43, 38));
+    assert!(!filled(ArtworkTarget::EncoderZone(5), 43, 38));
+    assert!(filled(ArtworkTarget::TouchStripBackground, 43, 38));
+    assert!(filled(ArtworkTarget::TouchStripBackground, 6, 38));
+}
+
+#[test]
 fn live_information_glyphs_come_from_the_binding_vocabulary() {
     use crate::info::Glyph;
     // Shared meanings reuse the binding icon; the rest are new vocabulary icons.

@@ -99,10 +99,11 @@ fn physical_channel_tap_then_hold_cancels_countdown_without_second_tap() {
         );
         let send = |pressed| {
             events
-                .send(MonitorEvent::Input(protocol::Event::Key {
-                    index: 0,
-                    pressed,
-                }))
+                .send(MonitorEvent::Input {
+                    device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                    model: &sdeck_plus::device_model::PLUS,
+                    event: protocol::Event::Key { index: 0, pressed },
+                })
                 .unwrap()
         };
         await_label(&key, "KEY 1 · PRESSED", || send(true));

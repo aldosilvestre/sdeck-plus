@@ -2,6 +2,7 @@
 
 use crate::{
     binding_editor::{control_triggers, ControlKind},
+    device_model::{DeviceModel, PLUS},
     keyboard::{parse_chord, supported_key_names, Chord, Keyboard, Modifier},
     protocol::Event,
 };
@@ -49,10 +50,15 @@ pub enum Trigger {
 
 impl Trigger {
     pub fn from_event(event: &Event) -> Option<Self> {
-        Self::event_triggers(event).into_iter().next()
+        Self::from_event_for(&PLUS, event)
     }
 
-    fn event_triggers(event: &Event) -> Vec<Self> {
+    /// [`Self::from_event`] for the touch strip of `model`.
+    pub fn from_event_for(model: &DeviceModel, event: &Event) -> Option<Self> {
+        Self::event_triggers(model, event).into_iter().next()
+    }
+
+    fn event_triggers(model: &DeviceModel, event: &Event) -> Vec<Self> {
         match *event {
             Event::Key {
                 index,
@@ -78,12 +84,14 @@ impl Trigger {
                 triggers
             }
             // A section binding wins over the whole-strip binding.
-            Event::TouchTap { x, .. } => touch_zone(x)
+            Event::TouchTap { x, .. } => model
+                .zone_index_from_x(u32::from(x))
                 .map(Self::ZoneTap)
                 .into_iter()
                 .chain([Self::TouchTap])
                 .collect(),
-            Event::TouchPress { x, .. } => touch_zone(x)
+            Event::TouchPress { x, .. } => model
+                .zone_index_from_x(u32::from(x))
                 .map(Self::ZonePress)
                 .into_iter()
                 .chain([Self::TouchPress])
@@ -129,14 +137,6 @@ fn default_swipe_binding(event: &Event) -> Option<(Trigger, Action)> {
         Trigger::TouchSwipe(direction),
         Action::Feature(FeatureAction::Touchscreen(page)),
     ))
-}
-
-/// Section (1 through 4) of the 800px touch strip that contains `x`.
-fn touch_zone(x: u16) -> Option<u8> {
-    u8::try_from(x / 200)
-        .ok()
-        .filter(|zone| *zone < 4)
-        .map(|zone| zone + 1)
 }
 
 fn one_based(index: usize) -> Option<u8> {
@@ -234,6 +234,7 @@ pub struct LayerStore {
     active: String,
     diagnostics: Vec<String>,
     touchscreens: touchscreen::Touchscreens,
+    model: &'static DeviceModel,
 }
 
 #[cfg(test)]
@@ -243,16 +244,20 @@ thread_local! {
 
 impl LayerStore {
     pub fn open() -> io::Result<Self> {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .filter(|p| Path::new(p).is_absolute())
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/share")))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no app data directory"))?;
-        Self::open_at(base.join("sdeck-plus"))
+        Self::open_at(crate::device_roots::data_root(&PLUS)?)
     }
 
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
+        Self::open_at_model(root, &PLUS)
+    }
+
+    /// [`Self::open_at`] for a store that accepts the controls of `model`.
+    pub fn open_at_model(
+        root: impl Into<PathBuf>,
+        model: &'static DeviceModel,
+    ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         fs::create_dir_all(&root)?;
         touchscreen::recover(&root)?;
         let mut store = Self {
@@ -262,6 +267,7 @@ impl LayerStore {
             diagnostics: Vec::new(),
             conflicts: Vec::new(),
             touchscreens: touchscreen::Touchscreens::default(),
+            model,
         };
         store.layers.insert(
             DEFAULT_LAYER.into(),
@@ -273,7 +279,7 @@ impl LayerStore {
             },
         );
         store.load()?;
-        match touchscreen::Touchscreens::load(&store.root, &store.layers) {
+        match touchscreen::Touchscreens::load(&store.root, &store.layers, model) {
             Ok(touchscreens) => store.touchscreens = touchscreens,
             Err(error) => {
                 store
@@ -294,6 +300,11 @@ impl LayerStore {
     pub fn active(&self) -> &str {
         &self.active
     }
+    /// The device model whose controls this store accepts.
+    pub fn model(&self) -> &'static DeviceModel {
+        self.model
+    }
+
     /// Shared storage root for organization and integration settings.
     pub fn root(&self) -> &Path {
         &self.root
@@ -367,7 +378,7 @@ impl LayerStore {
         trigger: Trigger,
         action: Action,
     ) -> io::Result<()> {
-        validate_trigger(&trigger)?;
+        validate_trigger(self.model, &trigger)?;
         validate_action(&action)?;
         validate_binding_action(&trigger, &action)?;
         let action = normalize_keyboard_action(action)?;
@@ -389,7 +400,7 @@ impl LayerStore {
         if self.binding_layer(layer, trigger).is_none() {
             return Err(invalid("unknown layer"));
         }
-        validate_trigger(trigger)?;
+        validate_trigger(self.model, trigger)?;
         let data = self.binding_layer_mut(layer, trigger).expect("checked");
         data.returns.remove(trigger);
         data.displays.remove(trigger);
@@ -411,7 +422,7 @@ impl LayerStore {
         let triggers =
             control_triggers(self, layer, control, number).map_err(|error| invalid(&error.0))?;
         for trigger in &triggers {
-            validate_trigger(trigger)?;
+            validate_trigger(self.model, trigger)?;
             if self.binding_layer(layer, trigger).is_none() {
                 return Err(invalid("unknown layer"));
             }
@@ -481,7 +492,7 @@ impl LayerStore {
         trigger: &Trigger,
         value: Option<PageReturn>,
     ) -> io::Result<()> {
-        validate_trigger(trigger)?;
+        validate_trigger(self.model, trigger)?;
         if let Some(value) = &value {
             value.validate()?;
             if !self.layers.contains_key(&value.layer) {
@@ -514,7 +525,7 @@ impl LayerStore {
         trigger: &Trigger,
         value: Option<crate::info::InfoSource>,
     ) -> io::Result<()> {
-        validate_trigger(trigger)?;
+        validate_trigger(self.model, trigger)?;
         let data = self
             .binding_layer_mut(layer, trigger)
             .ok_or_else(|| invalid("unknown layer"))?;
@@ -571,10 +582,10 @@ impl LayerStore {
     /// in memory without persisting the layer store.
     ///
     /// # Errors
-    /// Returns an error for an unknown layer or keys outside 1..=8.
+    /// Returns an error for an unknown layer or keys the model does not have.
     pub fn swap_keys(&mut self, layer: &str, first: u8, second: u8) -> io::Result<()> {
-        validate_trigger(&Trigger::KeyPress(first))?;
-        validate_trigger(&Trigger::KeyPress(second))?;
+        validate_trigger(self.model, &Trigger::KeyPress(first))?;
+        validate_trigger(self.model, &Trigger::KeyPress(second))?;
         let data = self
             .layers
             .get_mut(layer)
@@ -621,7 +632,7 @@ impl LayerStore {
 
     /// Return the winning trigger as well as its action for per-binding state.
     pub fn matching_binding(&self, event: &Event) -> Option<(Trigger, Action)> {
-        Trigger::event_triggers(event)
+        Trigger::event_triggers(self.model, event)
             .into_iter()
             .find_map(|trigger| {
                 self.binding(&self.active, &trigger)
@@ -656,7 +667,7 @@ impl LayerStore {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(e) => return Err(e),
         };
-        let parsed = parse(&text);
+        let parsed = parse(self.model, &text);
         match parsed {
             Ok((layers, active, conflicts)) => {
                 self.layers = layers;
@@ -730,21 +741,26 @@ fn shows_information(trigger: &Trigger) -> bool {
             | Trigger::ZonePress(_)
     )
 }
-fn validate_trigger(t: &Trigger) -> io::Result<()> {
+fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
     match t {
-        Trigger::KeyPress(n) | Trigger::KeyHold(n) if !(1..=8).contains(n) => {
+        Trigger::KeyPress(n) | Trigger::KeyHold(n) if !model.is_valid_key(*n) => {
             Err(invalid("key index out of range"))
         }
         Trigger::EncoderPress(n)
         | Trigger::Rotation(n, _)
         | Trigger::EncoderClockwise(n)
         | Trigger::EncoderCounterClockwise(n)
-            if !(1..=4).contains(n) =>
+            if !model.is_valid_dial(*n) =>
         {
             Err(invalid("encoder index out of range"))
         }
-        Trigger::ZoneTap(n) | Trigger::ZonePress(n) if !(1..=4).contains(n) => {
+        Trigger::ZoneTap(n) | Trigger::ZonePress(n) if !model.is_valid_zone(*n) => {
             Err(invalid("touch section out of range"))
+        }
+        Trigger::TouchTap | Trigger::TouchPress | Trigger::TouchFlick | Trigger::TouchSwipe(_)
+            if !model.has_touch() =>
+        {
+            Err(invalid("this device has no touch strip"))
         }
         Trigger::Rotation(_, 0) => Err(invalid("rotation ticks cannot be zero")),
         _ => Ok(()),
@@ -900,7 +916,7 @@ fn decode_swipe_direction(value: &str) -> Result<SwipeDirection, String> {
         _ => Err("invalid swipe direction".into()),
     }
 }
-fn decode_trigger(s: &str) -> Result<Trigger, String> {
+fn decode_trigger(model: &DeviceModel, s: &str) -> Result<Trigger, String> {
     let p: Vec<_> = s.split(':').collect();
     let t = match p.as_slice() {
         ["k", n] => Trigger::KeyPress(n.parse().map_err(|_| "invalid key")?),
@@ -922,7 +938,7 @@ fn decode_trigger(s: &str) -> Result<Trigger, String> {
         ["zpress", zone] => Trigger::ZonePress(zone.parse().map_err(|_| "invalid touch section")?),
         _ => return Err("invalid trigger".into()),
     };
-    validate_trigger(&t).map_err(|e| e.to_string())?;
+    validate_trigger(model, &t).map_err(|e| e.to_string())?;
     Ok(t)
 }
 fn encode_action(a: &Action) -> io::Result<String> {
@@ -1061,7 +1077,7 @@ type Parsed = (BTreeMap<String, Layer>, String, Vec<ConfigConflict>);
 
 /// Only an unsupported header rejects the file; any other broken row removes
 /// just the setting it describes and is reported as a conflict.
-fn parse(text: &str) -> Result<Parsed, String> {
+fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
     let mut lines = text.lines();
     if lines.next() != Some(VERSION) {
         return Err("unsupported layer configuration version".into());
@@ -1079,7 +1095,7 @@ fn parse(text: &str) -> Result<Parsed, String> {
     let mut active = DEFAULT_LAYER.to_string();
     let mut conflicts = Vec::new();
     for row in lines {
-        if let Err(reason) = apply_row(&mut layers, &mut active, row) {
+        if let Err(reason) = apply_row(model, &mut layers, &mut active, row) {
             conflicts.push(conflict_for(row, reason));
         }
     }
@@ -1126,6 +1142,7 @@ fn parse(text: &str) -> Result<Parsed, String> {
 }
 
 fn apply_row(
+    model: &DeviceModel,
     layers: &mut BTreeMap<String, Layer>,
     active: &mut String,
     row: &str,
@@ -1152,7 +1169,7 @@ fn apply_row(
         }
         ["binding", layer, trigger, action] => {
             let layer = canonical_layer_name(&unhex(layer)?);
-            let trigger = decode_trigger(trigger)?;
+            let trigger = decode_trigger(model, trigger)?;
             let mut action = decode_action(action)?;
             validate_binding_action(&trigger, &action).map_err(|error| error.to_string())?;
             if let Action::SwitchLayer(target) = &mut action {
@@ -1170,7 +1187,7 @@ fn apply_row(
         ["return", _, _, _, _] => {}
         ["pagereturn", layer, trigger, target, seconds] => {
             let layer = canonical_layer_name(&unhex(layer)?);
-            let trigger = decode_trigger(trigger)?;
+            let trigger = decode_trigger(model, trigger)?;
             let value = PageReturn {
                 layer: canonical_layer_name(&unhex(target)?),
                 seconds: seconds.parse().map_err(|_| "invalid return delay")?,
@@ -1186,7 +1203,7 @@ fn apply_row(
         }
         ["info", layer, trigger, source] => {
             let layer = canonical_layer_name(&unhex(layer)?);
-            let trigger = decode_trigger(trigger)?;
+            let trigger = decode_trigger(model, trigger)?;
             let source =
                 crate::info::InfoSource::from_id(source).ok_or("unknown information source")?;
             let data = layers
@@ -1880,12 +1897,12 @@ mod tests {
 
     #[test]
     fn rejects_incompatible_directional_trigger_indices() {
-        assert!(validate_trigger(&Trigger::EncoderClockwise(0)).is_err());
-        assert!(validate_trigger(&Trigger::EncoderCounterClockwise(5)).is_err());
-        assert!(decode_trigger("r:1:+").is_ok());
-        assert!(decode_trigger("r:1:-").is_ok());
-        assert!(decode_trigger("swipe:left").is_ok());
-        assert!(decode_trigger("swipe:diagonal").is_err());
+        assert!(validate_trigger(&PLUS, &Trigger::EncoderClockwise(0)).is_err());
+        assert!(validate_trigger(&PLUS, &Trigger::EncoderCounterClockwise(5)).is_err());
+        assert!(decode_trigger(&PLUS, "r:1:+").is_ok());
+        assert!(decode_trigger(&PLUS, "r:1:-").is_ok());
+        assert!(decode_trigger(&PLUS, "swipe:left").is_ok());
+        assert!(decode_trigger(&PLUS, "swipe:diagonal").is_err());
     }
 
     #[test]
@@ -1954,7 +1971,7 @@ mod tests {
             match trigger {
                 // A tap or hold names its touch section first, then the strip.
                 Trigger::TouchTap | Trigger::TouchPress => {
-                    assert!(Trigger::event_triggers(event).contains(trigger));
+                    assert!(Trigger::event_triggers(&PLUS, event).contains(trigger));
                 }
                 Trigger::TouchFlick => {}
                 _ => assert_eq!(Trigger::from_event(event), Some(trigger.clone())),
@@ -2001,7 +2018,7 @@ mod tests {
         let mut s = LayerStore::open_at(&p).unwrap();
         assert_eq!(s.active(), "Base");
         assert!(!s.diagnostics().is_empty());
-        assert!(decode_trigger("k:9").is_err());
+        assert!(decode_trigger(&PLUS, "k:9").is_err());
         assert!(decode_action("switch:6e6f7065").is_ok());
         assert!(s
             .bind("Base", Trigger::KeyPress(1), Action::Emit("\n".into()))
@@ -2223,7 +2240,7 @@ mod tests {
 
     #[test]
     fn legacy_key_records_and_modifier_free_shortcuts_keep_physical_triggers() {
-        let trigger = decode_trigger("k:8").unwrap();
+        let trigger = decode_trigger(&PLUS, "k:8").unwrap();
         assert_eq!(trigger, Trigger::KeyPress(8));
         assert_eq!(encode_trigger(&trigger), "k:8");
         for key in ["return", "XF86Unsupported"] {

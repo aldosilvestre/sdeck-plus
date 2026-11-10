@@ -2,7 +2,11 @@
 //! for due frames between input reads; nothing here blocks or writes stores.
 
 use super::{command_target, ArtworkCommand};
-use crate::{info_render, local_artwork::ArtworkTarget};
+use crate::{
+    device_model::{DeviceModel, PLUS},
+    info_render,
+    local_artwork::ArtworkTarget,
+};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -26,24 +30,30 @@ struct Running {
 }
 
 /// The targets whose last command shows a scrolling title.
-#[derive(Default)]
 pub(super) struct Marquees {
+    model: &'static DeviceModel,
     running: HashMap<ArtworkTarget, Running>,
 }
 
+impl Default for Marquees {
+    fn default() -> Self {
+        Self::new(&PLUS)
+    }
+}
+
 /// Where a command's title scrolls, when it does.
-fn extent(command: &ArtworkCommand) -> Option<(f64, f64)> {
+fn extent(model: &DeviceModel, command: &ArtworkCommand) -> Option<(f64, f64)> {
     match command {
         ArtworkCommand::ComposeInfo {
             target: ArtworkTarget::Keypad(_),
             value,
             ..
-        } => info_render::marquee_extent(value, None),
+        } => info_render::marquee_extent_for(model, value, None),
         ArtworkCommand::ComposeInfo {
             target: ArtworkTarget::EncoderZone(_),
             value,
             ..
-        } => info_render::marquee_extent(value, Some((false, false))),
+        } => info_render::marquee_extent_for(model, value, Some((false, false))),
         ArtworkCommand::ComposeTouchscreenZone {
             zone,
             value: Some(value),
@@ -51,13 +61,24 @@ fn extent(command: &ArtworkCommand) -> Option<(f64, f64)> {
             next,
             ..
         } => {
-            info_render::marquee_extent(value, Some((*zone == 1 && *previous, *zone == 4 && *next)))
+            let edges = (
+                model.is_first_zone(*zone) && *previous,
+                model.is_last_zone(*zone) && *next,
+            );
+            info_render::marquee_extent_for(model, value, Some(edges))
         }
         _ => None,
     }
 }
 
 impl Marquees {
+    pub(super) fn new(model: &'static DeviceModel) -> Self {
+        Self {
+            model,
+            running: HashMap::new(),
+        }
+    }
+
     /// Follow a command just sent to the device (as its phase-zero frame):
     /// it replaces whatever its target showed, and starts a marquee when its
     /// title scrolls. The whole strip covers every section.
@@ -70,7 +91,7 @@ impl Marquees {
                 .retain(|shown, _| !matches!(shown, ArtworkTarget::EncoderZone(_)));
         }
         self.running.remove(&target);
-        if let Some(extent) = extent(command) {
+        if let Some(extent) = extent(self.model, command) {
             self.running.insert(
                 target,
                 Running {
@@ -241,12 +262,13 @@ mod tests {
         queue.send(info(key, title(Glyph::Play, LONG))).unwrap();
         let (events, received) = std::sync::mpsc::channel();
         let stop = StopSignal::default();
+        let device = super::super::DeviceId::from_path("test");
         let mut marquees = Marquees::default();
         let mut written = 0;
         process_artwork_with(
             &commands,
             &stop,
-            &events,
+            (&events, device),
             prepare_artwork,
             |report| {
                 written += 1;
@@ -263,7 +285,7 @@ mod tests {
                 marquees,
                 at,
                 &stop,
-                &events,
+                (&events, device),
                 |command, elapsed| {
                     frames.push(elapsed);
                     super::super::prepare_artwork_at(command, elapsed)
@@ -283,7 +305,7 @@ mod tests {
             &mut marquees,
             later + Duration::from_secs(1),
             &stop,
-            &events,
+            (&events, device),
             super::super::prepare_artwork_at,
             |_| Err("unplugged".into()),
         );

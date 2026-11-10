@@ -41,8 +41,17 @@ impl CatalogAction {
     }
 }
 
+/// What the user did to the catalog, kept across the rebuilds a model change
+/// causes: the search text and which categories are open.
+#[derive(Clone, Default)]
+pub(crate) struct CatalogMemory {
+    query: Rc<RefCell<String>>,
+    open: Rc<RefCell<std::collections::HashMap<&'static str, bool>>>,
+}
+
 pub(crate) fn connect(
     keys: Rc<Vec<gtk::Widget>>,
+    memory: &CatalogMemory,
     ui: &BindingUi,
     layers: &Rc<RefCell<LayerStore>>,
     heading: &Label,
@@ -62,13 +71,15 @@ pub(crate) fn connect(
         let layers = layers.clone();
         let heading = heading.clone();
         let keys: Vec<_> = keys.iter().map(ObjectExt::downgrade).collect();
+        // The first dial's widget follows the strip, after every key.
+        let dial_offset = usize::from(ui.model.get().keys()) + 1;
         let save = save.downgrade();
         let confirm_ui = ui.clone();
         let confirm_keys = keys.clone();
         let apply: Assign = Rc::new(move |action, target| {
             let (kind, index, widget) = match target {
                 Target::Key(index) => (ControlKind::Button, index, index),
-                Target::Dial(index, _) => (ControlKind::Encoder, index, 9 + index),
+                Target::Dial(index, _) => (ControlKind::Encoder, index, dial_offset + index),
             };
             let number = (index + 1) as u8;
             if ui.select_control(kind, Some(number), true).is_err() {
@@ -115,7 +126,7 @@ pub(crate) fn connect(
             if confirm_ui.is_dirty() && !same_control {
                 let widget = match target {
                     Target::Key(index) => index,
-                    Target::Dial(index, _) => 9 + index,
+                    Target::Dial(index, _) => dial_offset + index,
                 };
                 let anchor = confirm_keys
                     .get(widget)
@@ -136,6 +147,11 @@ pub(crate) fn connect(
         })
     };
     let mut sections = Vec::new();
+    let wiring = Wiring {
+        memory,
+        ui,
+        assign: &assign,
+    };
     let basic: Vec<_> = [
         ("Go to profile or page", 0),
         ("Run command", 1),
@@ -161,8 +177,7 @@ pub(crate) fn connect(
         BindingIcon::for_action_type(1),
         basic,
         true,
-        ui,
-        &assign,
+        &wiring,
     ));
     for (category, label) in ["System", "Multimedia", "Organization", "Device", "OBS"]
         .into_iter()
@@ -194,15 +209,16 @@ pub(crate) fn connect(
             Choice::category_icon(category as u32),
             entries,
             false,
-            ui,
-            &assign,
+            &wiring,
         ));
     }
     let empty = ui::helper("No actions match your search.");
     empty.add_css_class("catalog-empty");
     empty.set_visible(false);
     list.append(&empty);
+    let remembered_query = memory.query.clone();
     search.connect_search_changed(move |search| {
+        *remembered_query.borrow_mut() = search.text().to_string();
         let query = search.text().to_lowercase();
         // Every section must be filtered, so this cannot short-circuit.
         let mut found = false;
@@ -211,6 +227,9 @@ pub(crate) fn connect(
         }
         empty.set_visible(!found);
     });
+    // A rebuilt catalog shows the search the user had typed.
+    let remembered = memory.query.borrow().clone();
+    search.set_text(&remembered);
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .min_content_height(320)
@@ -219,7 +238,8 @@ pub(crate) fn connect(
         .child(&list)
         .build();
     catalog.append(&scroll);
-    for (index, key) in keys.iter().take(8).enumerate() {
+    let model = ui.model.get();
+    for (index, key) in keys.iter().take(usize::from(model.keys())).enumerate() {
         // A distinct boxed GType keeps COPY assignment separate from MOVE key swapping.
         let target = gtk::DropTarget::new(CatalogAction::static_type(), gtk::gdk::DragAction::COPY);
         let weak = key.downgrade();
@@ -247,7 +267,12 @@ pub(crate) fn connect(
         });
         key.add_controller(target);
     }
-    for (index, dial) in keys.iter().skip(9).take(4).enumerate() {
+    for (index, dial) in keys
+        .iter()
+        .skip(usize::from(model.keys()) + 1)
+        .take(usize::from(model.dials))
+        .enumerate()
+    {
         let target = gtk::DropTarget::new(CatalogAction::static_type(), gtk::gdk::DragAction::COPY);
         let weak = dial.downgrade();
         target.connect_enter(move |_, _, _| {
@@ -293,6 +318,13 @@ enum Target {
 
 type Assign = Rc<dyn Fn(CatalogAction, Target) -> bool>;
 
+/// What every category row is connected to.
+struct Wiring<'a> {
+    memory: &'a CatalogMemory,
+    ui: &'a BindingUi,
+    assign: &'a Assign,
+}
+
 /// One collapsible category: a header toggle and its action rows.
 struct Section {
     container: GtkBox,
@@ -310,9 +342,10 @@ impl Section {
         icon: BindingIcon,
         entries: Vec<(&'static str, BindingIcon, CatalogAction)>,
         expanded: bool,
-        ui: &BindingUi,
-        assign: &Assign,
+        wiring: &Wiring,
     ) -> Self {
+        let Wiring { memory, ui, assign } = wiring;
+        let expanded = memory.open.borrow().get(title).copied().unwrap_or(expanded);
         let container = GtkBox::new(Orientation::Vertical, 2);
         container.add_css_class("catalog-section");
         let header = Button::new();
@@ -337,7 +370,7 @@ impl Section {
         body.add_css_class("catalog-rows");
         let rows: Vec<_> = entries
             .into_iter()
-            .map(|(label, icon, action)| add_row(&body, label, icon, action, ui, assign.clone()))
+            .map(|(label, icon, action)| add_row(&body, label, icon, action, ui, (*assign).clone()))
             .collect();
         let revealer = gtk::Revealer::builder()
             .transition_type(gtk::RevealerTransitionType::SlideDown)
@@ -357,9 +390,11 @@ impl Section {
         let revealer = section.revealer.downgrade();
         let chevron = section.chevron.downgrade();
         let state = section.expanded.clone();
+        let remembered = memory.open.clone();
         section.header.connect_clicked(move |_| {
             let open = !state.get();
             state.set(open);
+            remembered.borrow_mut().insert(title, open);
             if let (Some(revealer), Some(chevron)) = (revealer.upgrade(), chevron.upgrade()) {
                 revealer.set_reveal_child(open);
                 chevron.set_icon_name(Some(chevron_name(open)));
@@ -433,11 +468,12 @@ fn add_row(
             .control_number()
             .and_then(|n| n.checked_sub(1))
             .map(usize::from);
+        let model = ui.model.get();
         match (ui.control_kind(), number) {
-            (ControlKind::Button, Some(index)) if index < 8 => {
+            (ControlKind::Button, Some(index)) if index < usize::from(model.keys()) => {
                 assign(action, Target::Key(index));
             }
-            (ControlKind::Encoder, Some(index)) if index < 4 => {
+            (ControlKind::Encoder, Some(index)) if index < usize::from(model.dials) => {
                 assign(action, Target::Dial(index, ui.event_kind()));
             }
             _ => ui.error("Select a key or a dial before assigning an action."),

@@ -1,11 +1,12 @@
 use sdeck_plus::{
     binding_editor::{
         action_from_fields, control_summary, events_for_control, existing_action,
-        format_application_args, trigger_from_selection, ActionKind, ControlKind, EventKind,
+        format_application_args, trigger_from_selection_for, ActionKind, ControlKind, EventKind,
     },
     binding_icons::BindingIcon,
     layers::{Action, LayerStore, RemovedBinding, Trigger},
     local_artwork::{ArtworkStore, ArtworkTarget},
+    preview_layout::ControlRef,
     protocol,
 };
 
@@ -28,6 +29,7 @@ mod autostart;
 mod button_swap;
 mod button_text_editor;
 mod configuration_menu;
+mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
@@ -46,6 +48,8 @@ mod update_preference;
 mod binding_icon;
 #[path = "ui/clamp.rs"]
 mod clamp;
+#[path = "ui/preview.rs"]
+mod preview;
 #[path = "ui/scaled_bin.rs"]
 mod scaled_bin;
 
@@ -56,10 +60,8 @@ const DEFAULT_HEIGHT: i32 = 700;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
 const PREVIEW_MAX_SCALE: f64 = 1.0;
-/// Width of each dial's assigned-action caption in the preview rail.
-const DIAL_LEGEND_WIDTH: i32 = 86;
 /// Action icon drawn on a preview knob face.
-const DIAL_ICON_SIZE: i32 = 20;
+const DIAL_ICON_SIZE: i32 = sdeck_plus::preview_layout::DIAL_ICON_PX;
 /// Widest configuration shell (including its margins) before it centers.
 const SHELL_MAX_WIDTH: i32 = 1272;
 
@@ -112,7 +114,7 @@ fn execute_layer_action(
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
-    execute_layer_action_for(executor, "", action, output);
+    execute_layer_action_for(executor, None, "", action, output);
 }
 
 fn execute_layer_action_for(
@@ -120,13 +122,15 @@ fn execute_layer_action_for(
         impl sdeck_plus::layers::ProcessRunner,
         impl sdeck_plus::layers::KeyboardSender,
     >,
+    root: Option<&std::path::Path>,
     binding_id: &str,
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
     let result = match action {
         Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
-            sdeck_plus::obs::ObsConfig::load()
+            feature_runtime::active_root(root)
+                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
                 .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
         }
         _ => executor.execute_for(binding_id, action),
@@ -218,13 +222,19 @@ fn main() -> glib::ExitCode {
     )
 }
 
+/// One session's action worker: stopped and joined at shutdown.
+struct LayerWorker {
+    sender: mpsc::Sender<LayerCommand>,
+    handle: thread::JoinHandle<()>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 #[derive(Default)]
 struct DeviceLifecycle {
     hid: Option<event_api::HidController>,
     polling: Option<glib::SourceId>,
-    layer_sender: Option<mpsc::Sender<LayerCommand>>,
-    layer_worker: Option<thread::JoinHandle<()>>,
-    layer_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// One per session, in the order the sessions were built.
+    workers: Vec<LayerWorker>,
     focus: Option<sdeck_plus::app_focus::FocusObserver>,
 }
 
@@ -233,10 +243,11 @@ impl DeviceLifecycle {
         if let Some(mut focus) = self.focus.take() {
             focus.stop();
         }
-        self.layer_stop
-            .store(true, std::sync::atomic::Ordering::Release);
-        if let Some(sender) = self.layer_sender.take() {
-            if let Err(error) = sender.send(LayerCommand::Shutdown) {
+        for worker in &self.workers {
+            worker
+                .stop
+                .store(true, std::sync::atomic::Ordering::Release);
+            if let Err(error) = worker.sender.send(LayerCommand::Shutdown) {
                 eprintln!("Layer shutdown delivery failed: {error}");
             }
         }
@@ -246,11 +257,12 @@ impl DeviceLifecycle {
         if let Some(source) = self.polling.take() {
             source.remove();
         }
+        // Blanks every device, then ends the hub and its routers.
         if let Some(mut hid) = self.hid.take() {
             hid.shutdown();
         }
-        if let Some(worker) = self.layer_worker.take() {
-            if worker.join().is_err() {
+        for worker in self.workers.drain(..) {
+            if worker.handle.join().is_err() {
                 eprintln!("Layer worker panicked during shutdown");
             }
         }
@@ -296,14 +308,52 @@ fn configure_window_close(window: &ApplicationWindow, app: &Application) {
     ));
 }
 
+/// What the window talks to; tests replace it so neither the real data
+/// directories nor a real device are touched.
+struct AppEnvironment {
+    roots: std::io::Result<feature_runtime::SessionRoots>,
+    /// Starts whatever feeds connection events and receives artwork.
+    start_monitor: Box<dyn FnOnce(mpsc::Sender<MonitorEvent>) -> event_api::HidController>,
+    update_preference: std::io::Result<std::path::PathBuf>,
+    /// Follow the focused application in the compositor.
+    observe_focus: bool,
+}
+
+impl AppEnvironment {
+    fn system() -> Self {
+        Self {
+            roots: feature_runtime::SessionRoots::system(),
+            start_monitor: Box::new(event_api::start_hid_monitor),
+            update_preference: update_preference::path(),
+            observe_focus: true,
+        }
+    }
+}
+
 fn build_ui_with_visibility(app: &Application, visible: bool) {
+    build_ui_in(app, visible, AppEnvironment::system);
+}
+
+/// [`build_ui_with_visibility`] over `environment`, built only when a new
+/// window is needed. Returns the model session of a window that was built.
+fn build_ui_in(
+    app: &Application,
+    visible: bool,
+    environment: impl FnOnce() -> AppEnvironment,
+) -> Option<Rc<feature_runtime::ModelSession>> {
     if let Some(window) = configuration_window(app) {
         app.activate_action("check-updates-on-open", None);
         if visible {
             window.present();
         }
-        return;
+        return None;
     }
+    let AppEnvironment {
+        roots,
+        start_monitor,
+        update_preference,
+        observe_focus,
+    } = environment();
     let window = ApplicationWindow::builder()
         .application(app)
         .name("configuration")
@@ -312,56 +362,212 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         .default_height(DEFAULT_HEIGHT)
         .build();
     configure_window_close(&window, app);
-    // Validate before starting either worker: failure cannot leave an orphan.
-    let layers = match LayerStore::open().and_then(checked_layer_store) {
-        Ok(store) => Rc::new(RefCell::new(store)),
+    let unavailable = |error: &dyn std::fmt::Display| {
+        window.set_child(Some(&Label::new(Some(
+            "Configuration unavailable. Writes are disabled.",
+        ))));
+        window.present();
+        show_artwork_error(&window, &format!("Could not open layer configuration: {error}. Check permissions and repair layers.conf in the app data directory, then restart. No fallback will be saved."));
+    };
+    let roots = match roots {
+        Ok(roots) => roots,
         Err(error) => {
-            window.set_child(Some(&Label::new(Some(
-                "Configuration unavailable. Writes are disabled.",
-            ))));
-            window.present();
-            show_artwork_error(&window, &format!("Could not open layer configuration: {error}. Check permissions and repair layers.conf in the app data directory, then restart. No fallback will be saved."));
-            return;
+            unavailable(&error);
+            return None;
         }
     };
-    // Every launch starts on Base (its first page), whatever was saved last.
-    layers
-        .borrow_mut()
-        .select(sdeck_plus::layers::DEFAULT_LAYER);
+    // The model used last; a damaged preference falls back to the Stream Deck +
+    // and is reported, never replaced.
+    let (model, preference_error) = match device_preference::load_from(&roots.preference) {
+        Ok(model) => (model, None),
+        Err(error) => (
+            sdeck_plus::device_model::DeviceModel::default_model(),
+            Some(error),
+        ),
+    };
+    // Validate before starting either worker: failure cannot leave an orphan.
+    let opened = match feature_runtime::open_session(model, &roots) {
+        Ok(opened) => opened,
+        Err(feature_runtime::OpenError::Layers(error)) => {
+            unavailable(&error);
+            return None;
+        }
+        Err(feature_runtime::OpenError::Touchscreens(error)) => {
+            window.set_child(Some(&Label::new(Some(
+                "Touchscreen configuration unavailable. Writes are disabled.",
+            ))));
+            window.present();
+            show_artwork_error(&window, &format!("Could not initialize touchscreen pages: {error}. Original configurations have been retained; repair the app data directory and restart."));
+            return None;
+        }
+    };
     let (sender, receiver) = mpsc::channel();
-    let app_event_sender = sender.clone();
-    let hid = event_api::start_hid_monitor(sender);
-    let artwork_sender = hid.artwork_sender();
-    let device_sender = hid.control_sender();
+    let hid = start_monitor(sender.clone());
     let lifecycle = Rc::new(RefCell::new(DeviceLifecycle {
         hid: Some(hid),
         ..DeviceLifecycle::default()
     }));
     install_device_cleanup(app, lifecycle.clone());
-    let (layer_sender, layer_receiver) = mpsc::channel::<LayerCommand>();
-    let layer_result_sender = app_event_sender.clone();
-    let layer_stop = lifecycle.borrow().layer_stop.clone();
-    let worker = thread::Builder::new()
-        .name("layer-worker".into())
-        .spawn(move || {
-            feature_runtime::run_worker(layer_receiver, layer_result_sender, layer_stop);
-        });
-    match worker {
-        Ok(worker) => {
-            lifecycle.borrow_mut().layer_worker = Some(worker);
-            lifecycle.borrow_mut().layer_sender = Some(layer_sender.clone());
+
+    let toast = ui::Toast::new();
+    let header = build_header(&window);
+    // Only the shown session's size counts, as it did with one session.
+    let stack = gtk::Stack::builder()
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .css_classes(["session-stack"])
+        .build();
+    let shell = shell_box();
+    shell.append(&header.root);
+    shell.append(&stack);
+    let viewport = shell_viewport(&shell);
+    let factory: feature_runtime::SessionFactory = Box::new({
+        let window = window.clone();
+        let lifecycle = Rc::downgrade(&lifecycle);
+        let toast = toast.clone();
+        let viewport = viewport.downgrade();
+        let shell = shell.downgrade();
+        let labels = (header.status.clone(), header.connection_detail.clone());
+        move |model, opened, send_initial| {
+            let (lifecycle, viewport, shell) = lifecycle
+                .upgrade()
+                .zip(viewport.upgrade())
+                .zip(shell.upgrade())
+                .map(|((lifecycle, viewport), shell)| (lifecycle, viewport, shell))
+                .ok_or("the window is closing")?;
+            build_session(
+                &SessionHost {
+                    window: &window,
+                    lifecycle: &lifecycle,
+                    toast: &toast,
+                    viewport: &viewport,
+                    shell: &shell,
+                    labels: (&labels.0, &labels.1),
+                },
+                model,
+                opened,
+                send_initial,
+            )
         }
+    });
+    let first = match factory(model, opened, true) {
+        Ok(created) => created,
         Err(error) => {
             lifecycle.borrow_mut().shutdown();
             window.set_child(Some(&Label::new(Some(&format!(
                 "Could not start action worker: {error}"
             )))));
             window.present();
-            return;
+            return None;
+        }
+    };
+    let feature_runtime::Created {
+        session: first,
+        artwork_error,
+    } = first;
+    if let Some(panel) = header.update_panel.borrow_mut().take() {
+        update_check::install(app, &header.configuration_menu, panel, update_preference);
+    }
+    let registry = feature_runtime::ModelSession::new(
+        roots,
+        feature_runtime::SharedHeader {
+            status: header.status.clone(),
+            detail: header.connection_detail.clone(),
+            selector: header.selector.clone(),
+            menu: header.configuration_menu.clone(),
+        },
+        stack,
+        window.upcast_ref(),
+        toast.clone(),
+        factory,
+        first,
+    );
+    if observe_focus {
+        let focus_output = sender.clone();
+        match sdeck_plus::app_focus::FocusObserver::start(move |result| {
+            let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
+        }) {
+            Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
+            Err(error) => registry.focus_changed(Err(error.to_string())),
         }
     }
+    install_style(&window);
+    window.set_child(Some(&toast.wrap(&viewport)));
+    if visible {
+        window.present();
+    }
+    if let Some(error) = artwork_error {
+        show_artwork_error(&window, &error);
+    }
+    if let Some(error) = preference_error {
+        show_artwork_error(&window, &format!("Could not read the last-used device model: {error}. Showing the Stream Deck + instead. The file was not changed; repair or remove device.json in the configuration folder."));
+    }
+    let polled = registry.clone();
+    lifecycle.borrow_mut().polling = Some(glib::timeout_add_local(
+        Duration::from_millis(40),
+        move || {
+            polled.pump(&receiver);
+            glib::ControlFlow::Continue
+        },
+    ));
+    Some(registry)
+}
 
-    let (store, artwork_open_error) = match ArtworkStore::open_for_layer(Some(layers.borrow().active())) {
+/// What building a session needs from the window it joins.
+struct SessionHost<'a> {
+    window: &'a ApplicationWindow,
+    lifecycle: &'a Rc<RefCell<DeviceLifecycle>>,
+    toast: &'a ui::Toast,
+    viewport: &'a gtk::ScrolledWindow,
+    /// What a key swap in progress makes insensitive.
+    shell: &'a GtkBox,
+    /// The window's connection status and detail labels.
+    labels: (&'a Label, &'a Label),
+}
+
+/// One model's session: its action worker, channel, stores and editor. Its
+/// pictures and controls are addressed to the model, so they reach the right
+/// devices whichever session the window shows.
+fn build_session(
+    host: &SessionHost,
+    model: &'static sdeck_plus::device_model::DeviceModel,
+    opened: feature_runtime::OpenedSession,
+    send_initial: bool,
+) -> Result<feature_runtime::Created, String> {
+    let feature_runtime::OpenedSession {
+        layers,
+        artwork: opened_artwork,
+        organization,
+        obs,
+    } = opened;
+    let layers = Rc::new(RefCell::new(layers));
+    let (events, receiver) = mpsc::channel();
+    let (artwork_sender, device_sender) = host
+        .lifecycle
+        .borrow()
+        .hid
+        .as_ref()
+        .map(|hid| hid.model_senders(model))
+        .ok_or("the device monitor is closed")?;
+    let (layer_sender, layer_receiver) = mpsc::channel::<LayerCommand>();
+    let layer_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let layer_root = layers.borrow().root().to_owned();
+    let worker = {
+        let (results, stop) = (events.clone(), layer_stop.clone());
+        thread::Builder::new()
+            .name("layer-worker".into())
+            .spawn(move || {
+                feature_runtime::run_worker_at(layer_receiver, results, stop, Some(layer_root));
+            })
+            .map_err(|error| error.to_string())?
+    };
+    host.lifecycle.borrow_mut().workers.push(LayerWorker {
+        sender: layer_sender.clone(),
+        handle: worker,
+        stop: layer_stop,
+    });
+
+    let (store, artwork_error) = match opened_artwork {
         Ok(store) => (Some(store), None),
         Err(error) => (None, Some(format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Check permissions and repair the artwork manifest/assets in the app data directory, then restart. Original files have not been replaced."))),
     };
@@ -369,77 +575,96 @@ fn build_ui_with_visibility(app: &Application, visible: bool) {
         store: Rc::new(RefCell::new(store)),
         layers: layers.clone(),
         pictures: Rc::new(RefCell::new(Vec::new())),
-        output: artwork_sender.clone(),
+        output: artwork_sender,
         last_layer: Rc::new(RefCell::new(None)),
         chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         info: Rc::default(),
     };
-    let organization =
-        sdeck_plus::organization::Organization::open_at(layers.borrow().root(), &layers.borrow());
-    if let (Ok(organization), Some(store)) = (&organization, artwork.store.borrow_mut().as_mut()) {
-        if let Err(error) = layers
-            .borrow_mut()
-            .initialize_touchscreens(organization, store)
-        {
-            lifecycle.borrow_mut().shutdown();
-            window.set_child(Some(&Label::new(Some(
-                "Touchscreen configuration unavailable. Writes are disabled.",
-            ))));
-            window.present();
-            show_artwork_error(&window, &format!("Could not initialize touchscreen pages: {error}. Original configurations have been retained; repair the app data directory and restart."));
-            return;
-        }
-    }
-    let widgets = build_widgets(
-        window.clone(),
-        layers.clone(),
+    let body = build_body(
+        host.window.clone(),
+        layers,
         artwork.clone(),
-        layer_sender.clone(),
+        layer_sender,
+        host.toast.clone(),
+        host.shell,
+        send_initial,
     );
-    if let Some(panel) = widgets.update_panel.borrow_mut().take() {
-        update_check::install(app, &widgets._configuration_menu, panel);
-    }
-    widgets.feature_runtime.configure(
-        organization,
-        sdeck_plus::obs::ObsConfig::load(),
-        device_sender,
-        app_event_sender.clone(),
-    );
-    if !widgets.feature_runtime.organization_available() {
-        for button in &widgets.organization_writes {
+    // Editing is switched off on the body alone: the header stays usable.
+    body.attach(host.viewport, body.root.upcast_ref());
+    body.feature_runtime
+        .configure(organization, obs, device_sender, events);
+    if !body.feature_runtime.organization_available() {
+        for button in &body.organization_writes {
             button.set_sensitive(false);
         }
     }
-    let focus_output = app_event_sender.clone();
-    match sdeck_plus::app_focus::FocusObserver::start(move |result| {
-        let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
-    }) {
-        Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
-        Err(error) => widgets
-            .feature_runtime
-            .focus_changed(Err(error.to_string())),
-    }
-    install_style(&window);
-    window.set_child(Some(&widgets.toast.wrap(&widgets.root)));
-    if visible {
-        window.present();
-    }
-    if let Some(error) = artwork_open_error {
-        show_artwork_error(&window, &error);
-    }
-    lifecycle.borrow_mut().polling = Some(start_event_updates(
-        widgets,
-        receiver,
-        layers,
-        artwork,
-        layer_sender,
-        app_event_sender,
-    ));
+    let surface = EventSurface::new(host.labels, host.toast, &body, &artwork);
+    Ok(feature_runtime::Created {
+        session: feature_runtime::Session::new(model, body, surface, receiver),
+        artwork_error,
+    })
 }
 
-// Shared production construction: no HID, action workers, disk reads or presentation.
+/// The 'Current' selector: which connected Stream Deck the window configures.
+/// It is only there while two or more models are connected; the session lists
+/// the models and positions it.
+#[derive(Clone)]
+struct ModelSelector {
+    root: GtkBox,
+    dropdown: gtk::DropDown,
+    names: gtk::StringList,
+    /// The models the drop-down lists, in order.
+    entries: Rc<RefCell<Vec<&'static sdeck_plus::device_model::DeviceModel>>>,
+}
+
+impl ModelSelector {
+    fn new() -> Self {
+        let names = gtk::StringList::new(&[]);
+        let dropdown = gtk::DropDown::new(Some(names.clone()), gtk::Expression::NONE);
+        dropdown.update_property(&[gtk::accessible::Property::Label("Current device")]);
+        dropdown.set_tooltip_text(Some("Choose the Stream Deck to configure"));
+        let caption = Label::new(Some("Current"));
+        caption.add_css_class("muted");
+        let root = GtkBox::new(Orientation::Horizontal, 6);
+        root.add_css_class("model-selector");
+        root.set_valign(gtk::Align::Center);
+        root.append(&caption);
+        root.append(&dropdown);
+        root.set_visible(false);
+        dropdown.set_focusable(false);
+        Self {
+            root,
+            dropdown,
+            names,
+            entries: Rc::default(),
+        }
+    }
+
+    /// List `connected`, select `shown` and appear only with a choice to make.
+    fn set_entries(
+        &self,
+        connected: &[&'static sdeck_plus::device_model::DeviceModel],
+        shown: &sdeck_plus::device_model::DeviceModel,
+    ) {
+        if *self.entries.borrow() != connected {
+            let names: Vec<&str> = connected.iter().map(|model| model.name).collect();
+            self.names.splice(0, self.names.n_items(), &names);
+            *self.entries.borrow_mut() = connected.to_vec();
+        }
+        if let Some(index) = connected.iter().position(|model| *model == shown) {
+            self.dropdown.set_selected(index as u32);
+        }
+        let visible = connected.len() >= 2;
+        self.root.set_visible(visible);
+        self.dropdown.set_focusable(visible);
+    }
+}
+
+// One window around a single model's editor, as the tests build it: no HID,
+// action workers, disk reads or presentation.
+#[cfg(test)]
 struct MonitorWidgets {
     root: gtk::ScrolledWindow,
     toast: ui::Toast,
@@ -460,48 +685,41 @@ struct MonitorWidgets {
     artwork_section: gtk::Expander,
     #[cfg(test)]
     target_picker: gtk::DropDown,
-    key_labels: Vec<Label>,
-    encoder_labels: Vec<Label>,
+    preview: Rc<preview::PreviewView>,
     touch_status: Label,
+    // What the first model's preview showed, for tests of the Stream Deck +
+    // preview; the live widgets are always `preview`'s.
+    #[cfg(test)]
+    key_labels: Vec<Label>,
+    #[cfg(test)]
+    encoder_labels: Vec<Label>,
+    #[cfg(test)]
     key_widgets: Vec<gtk::Widget>,
+    #[cfg(test)]
     encoder_widgets: Vec<gtk::Widget>,
+    #[cfg(test)]
     zone_widgets: Vec<gtk::Widget>,
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     _configuration_menu: configuration_menu::ConfigurationMenu,
-    update_panel: RefCell<Option<update_check::Panel>>,
 }
 
-fn build_widgets(
-    window: ApplicationWindow,
-    layers: Rc<RefCell<LayerStore>>,
-    artwork: ArtworkUi,
-    layer_sender: mpsc::Sender<LayerCommand>,
-) -> MonitorWidgets {
-    let updating_layers = Rc::new(Cell::new(false));
-    let toast = ui::Toast::new();
-    let conflicts = layers.borrow().conflicts().len();
-    if conflicts > 0 {
-        toast.show(
-            &format!(
-                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
-                sdeck_plus::layers::CONFLICT_LOG
-            ),
-            true,
-        );
-    }
-    let root = GtkBox::new(Orientation::Vertical, 16);
-    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
-    // below), then centers; it still shrinks to narrow desktops.
-    root.set_margin_top(16);
-    root.set_margin_bottom(16);
-    root.set_margin_start(16);
-    root.set_margin_end(16);
-    root.add_css_class("app-shell");
-    ui::track_motion(&root);
+/// What belongs to the window rather than to a model: the title, the
+/// connection status, the 'Current' selector, the update indicator and the menus.
+struct Header {
+    root: GtkBox,
+    status: Label,
+    connection_detail: Label,
+    selector: ModelSelector,
+    configuration_menu: configuration_menu::ConfigurationMenu,
+    update_panel: RefCell<Option<update_check::Panel>>,
+    #[cfg(test)]
+    help_menu: gtk::MenuButton,
+}
 
+fn build_header(window: &ApplicationWindow) -> Header {
     let header = GtkBox::new(Orientation::Horizontal, 12);
     let heading = GtkBox::new(Orientation::Vertical, 4);
     let title = Label::new(Some("SDECK-PLUS"));
@@ -514,6 +732,8 @@ fn build_widgets(
     status.set_hexpand(true);
     status.set_halign(gtk::Align::End);
     header.append(&status);
+    let selector = ModelSelector::new();
+    header.append(&selector.root);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
@@ -526,21 +746,209 @@ fn build_widgets(
         step.append(&ui::helper(explanation));
         help_body.append(&step);
     }
-    let configuration_menu = configuration_menu::ConfigurationMenu::new(&window, &help_body);
+    let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
     header.append(&update_panel.indicator);
     let help_menu = configuration_menu.button().clone();
     header.append(&help_menu);
-    root.append(&header);
 
     let connection_detail = Label::new(None);
-    show_connection_state(&status, &connection_detail, &ConnectionState::Searching);
+    show_connection_state(
+        &status,
+        &connection_detail,
+        &ConnectionState::Searching,
+        None,
+    );
     connection_detail.add_css_class("muted");
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
     connection_detail.set_max_width_chars(70);
     heading.append(&connection_detail);
+    Header {
+        root: header,
+        status,
+        connection_detail,
+        selector,
+        configuration_menu,
+        update_panel: RefCell::new(Some(update_panel)),
+        #[cfg(test)]
+        help_menu,
+    }
+}
+
+/// The padded, centered column the header and the shown body sit in.
+fn shell_box() -> GtkBox {
+    let root = GtkBox::new(Orientation::Vertical, 16);
+    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
+    // below), then centers; it still shrinks to narrow desktops.
+    root.set_margin_top(16);
+    root.set_margin_bottom(16);
+    root.set_margin_start(16);
+    root.set_margin_end(16);
+    root.add_css_class("app-shell");
+    ui::track_motion(&root);
+    root
+}
+
+/// A two-axis viewport is the fallback for unusually small allocations or fonts.
+/// Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
+fn shell_viewport(shell: &GtkBox) -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&clamp::Clamp::new(shell, SHELL_MAX_WIDTH))
+        .build()
+}
+
+/// One model's complete editor: everything below the header.
+struct Body {
+    root: GtkBox,
+    binding_status: Label,
+    preview: Rc<preview::PreviewView>,
+    touch_status: Label,
+    feature_runtime: feature_runtime::FeatureRuntime,
+    organization_writes: Vec<Button>,
+    settings_scroll: gtk::ScrolledWindow,
+    // Keep the weakly referenced editor callbacks alive with the body.
+    _text_editor: Rc<button_text_editor::ButtonTextEditor>,
+    #[cfg(test)]
+    layer_picker: gtk::DropDown,
+    #[cfg(test)]
+    binding_ui: BindingUi,
+    #[cfg(test)]
+    obs_menu: gtk::MenuButton,
+    #[cfg(test)]
+    management_menu: gtk::MenuButton,
+    #[cfg(test)]
+    artwork_section: gtk::Expander,
+    #[cfg(test)]
+    target_picker: gtk::DropDown,
+}
+
+impl Body {
+    /// Tie the body to the viewport that scrolls it: the form keeps within
+    /// about one window of height, and `configuration_root` is what editing
+    /// being switched off makes insensitive.
+    fn attach(&self, viewport: &gtk::ScrolledWindow, configuration_root: &gtk::Widget) {
+        self.feature_runtime
+            .attach_configuration_root(configuration_root);
+        let scroll = self.settings_scroll.downgrade();
+        viewport
+            .vadjustment()
+            .connect_page_size_notify(move |adjustment| {
+                if let Some(scroll) = scroll.upgrade() {
+                    scroll.set_max_content_height((adjustment.page_size() as i32 - 240).max(320));
+                }
+            });
+    }
+}
+
+#[cfg(test)]
+fn build_widgets(
+    window: ApplicationWindow,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    layer_sender: mpsc::Sender<LayerCommand>,
+) -> MonitorWidgets {
+    let toast = ui::Toast::new();
+    let header = build_header(&window);
+    let shell = shell_box();
+    let body = build_body(
+        window,
+        layers,
+        artwork,
+        layer_sender,
+        toast.clone(),
+        &shell,
+        true,
+    );
+    header.configuration_menu.bind(body.feature_runtime.clone());
+    shell.append(&header.root);
+    shell.append(&body.root);
+    let viewport = shell_viewport(&shell);
+    body.attach(&viewport, viewport.upcast_ref());
+    let Body {
+        binding_status,
+        preview,
+        touch_status,
+        feature_runtime,
+        organization_writes,
+        _text_editor,
+        #[cfg(test)]
+        layer_picker,
+        #[cfg(test)]
+        binding_ui,
+        #[cfg(test)]
+        obs_menu,
+        #[cfg(test)]
+        management_menu,
+        #[cfg(test)]
+        artwork_section,
+        #[cfg(test)]
+        target_picker,
+        ..
+    } = body;
+    MonitorWidgets {
+        root: viewport,
+        toast,
+        binding_status,
+        status: header.status,
+        connection_detail: header.connection_detail,
+        #[cfg(test)]
+        layer_picker,
+        #[cfg(test)]
+        binding_ui,
+        #[cfg(test)]
+        obs_menu,
+        #[cfg(test)]
+        help_menu: header.help_menu,
+        #[cfg(test)]
+        management_menu,
+        #[cfg(test)]
+        artwork_section,
+        #[cfg(test)]
+        target_picker,
+        touch_status,
+        #[cfg(test)]
+        key_labels: preview.key_labels(),
+        #[cfg(test)]
+        encoder_labels: preview.dial_labels(),
+        #[cfg(test)]
+        key_widgets: preview.key_widgets(),
+        #[cfg(test)]
+        encoder_widgets: preview.dial_widgets(),
+        #[cfg(test)]
+        zone_widgets: preview.zone_widgets(),
+        preview,
+        feature_runtime,
+        organization_writes,
+        _text_editor,
+        _configuration_menu: header.configuration_menu,
+    }
+}
+
+fn build_body(
+    window: ApplicationWindow,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    layer_sender: mpsc::Sender<LayerCommand>,
+    toast: ui::Toast,
+    shell: &GtkBox,
+    send_initial: bool,
+) -> Body {
+    let updating_layers = Rc::new(Cell::new(false));
+    let conflicts = layers.borrow().conflicts().len();
+    if conflicts > 0 {
+        toast.show(
+            &format!(
+                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
+                sdeck_plus::layers::CONFLICT_LOG
+            ),
+            true,
+        );
+    }
+    let root = GtkBox::new(Orientation::Vertical, 16);
 
     let layer_card = card();
     layer_card.add_css_class("navigation-card");
@@ -701,6 +1109,8 @@ fn build_widgets(
         args_row,
         modifier_row,
     );
+    // Everything below, summaries included, describes the model of these stores.
+    binding_ui.set_model(layers.borrow().model());
     binding_ui.refresh_layer_targets(&layers.borrow().names());
     binding_ui.update_for_control(false);
     binding_ui.update_action_visibility();
@@ -713,7 +1123,6 @@ fn build_widgets(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    configuration_menu.bind(feature_runtime.clone());
     let profile_tasks = gtk::Stack::builder()
         .vhomogeneous(false)
         .hhomogeneous(true)
@@ -764,6 +1173,7 @@ fn build_widgets(
         app.connect_shutdown(move |_| {
             cleanup.cancel_key_holds();
             cleanup.cancel_timer();
+            cleanup.stop_info_worker();
         });
     }
 
@@ -1213,296 +1623,19 @@ fn build_widgets(
     sidebar.set_hexpand(true);
     sidebar.set_valign(gtk::Align::Start);
     sidebar.add_css_class("settings-sidebar");
-    let device_area = card();
-    device_area.add_css_class("device-canvas");
-    // Reference image coordinates scaled to a compact physical front. Fixed
-    // geometry keeps loaded artwork and long live messages from resizing hardware.
-    let chassis = gtk::Fixed::new();
-    chassis.set_halign(gtk::Align::Center);
-    chassis.set_valign(gtk::Align::Center);
-    chassis.add_css_class("hardware-chassis");
-    chassis.set_size_request(426, 414);
-    device_area.append(&chassis);
-    let brand = Label::new(Some("STREAM DECK +"));
-    brand.add_css_class("hardware-brand");
-    brand.set_size_request(426, 24);
-    chassis.put(&brand, 0.0, 6.0);
-    let mut selectable_widgets: Vec<gtk::Widget> = Vec::new();
-    let mut key_labels = Vec::new();
-    for index in 0..8 {
-        let select_button = Button::new();
-        select_button.add_css_class("control-selectable");
-        select_button.add_css_class("key-surface");
-        select_button.set_overflow(gtk::Overflow::Hidden);
-        select_button.update_property(&[gtk::accessible::Property::Label(&format!(
-            "Button {}",
-            index + 1
-        ))]);
-        select_button.set_size_request(60, 60);
-        let picture = artwork_picture();
-        picture.set_visible(false);
-        let surface = gtk::Overlay::new();
-        surface.set_size_request(60, 60);
-        surface.add_overlay(&picture);
-        let label = Label::new(None);
-        label.add_css_class("control-tile");
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(4);
-        // Keep live-state bookkeeping without drawing names over key artwork.
-        label.set_visible(false);
-        surface.add_overlay(&label);
-        select_button.set_child(Some(&surface));
-        chassis.put(
-            &select_button,
-            48.0 + (index % 4) as f64 * 91.0,
-            38.0 + (index / 4) as f64 * 67.0,
-        );
-        register_picture(&artwork, ArtworkTarget::Keypad((index + 1) as u8), &picture);
-        selectable_widgets.push(select_button.upcast());
-        key_labels.push(label);
-    }
-    let bezel = gtk::Fixed::new();
-    bezel.add_css_class("hardware-bezel");
-    bezel.set_size_request(374, 77);
-    chassis.put(&bezel, 27.0, 177.0);
-    let touch_status = Label::new(Some("Touch strip · waiting for input"));
-    touch_status.add_css_class("touch-display");
-    touch_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    touch_status.set_max_width_chars(32);
-    touch_status.set_hexpand(true);
-    touch_status.set_size_request(-1, 16);
-    // The live status and the strip's gesture badges share the header line.
-    let strip_header = GtkBox::new(Orientation::Horizontal, 6);
-    strip_header.set_size_request(328, 16);
-    strip_header.append(&touch_status);
-    strip_header.append(&binding_ui.gesture_badges);
-    bezel.put(&strip_header, 23.0, 3.0);
-    let strip_button = Button::new();
-    strip_button.add_css_class("control-selectable");
-    strip_button.add_css_class("strip-surface");
-    let strip = gtk::Overlay::new();
-    strip.set_size_request(328, 41);
-    strip.add_css_class("strip-surface");
-    let background = artwork_picture();
-    background.set_visible(false);
-    let background_surface = gtk::Overlay::new();
-    background_surface.add_overlay(&background);
-    strip_button.set_child(Some(&background_surface));
-    strip.set_child(Some(&strip_button));
-    register_picture(&artwork, ArtworkTarget::TouchStripBackground, &background);
-    let zones = GtkBox::new(Orientation::Horizontal, 0);
-    zones.set_homogeneous(true);
-    let mut zone_select_buttons = Vec::new();
-    for zone in 1..=4 {
-        let zone_button = Button::new();
-        zone_button.add_css_class("control-selectable");
-        zone_button.add_css_class("strip-zone");
-        let visual = gtk::Overlay::new();
-        let picture = artwork_picture();
-        picture.set_visible(false);
-        visual.add_overlay(&picture);
-        zone_button.set_child(Some(&visual));
-        zone_button.set_tooltip_text(Some(&format!("Touch zone {zone}")));
-        zone_button.set_hexpand(true);
-        zone_button.set_vexpand(true);
-        register_picture(&artwork, ArtworkTarget::EncoderZone(zone), &picture);
-        zones.append(&zone_button);
-        zone_select_buttons.push(zone_button);
-    }
-    strip.add_overlay(&zones);
-    bezel.put(&strip, 23.0, 25.0);
-    selectable_widgets.push(strip_button.clone().upcast());
-    let rail = gtk::Fixed::new();
-    rail.add_css_class("hardware-rail");
-    rail.set_size_request(374, 108);
-    chassis.put(&rail, 27.0, 273.0);
-    let mut encoder_labels = Vec::new();
-    for index in 0..4 {
-        let button = Button::new();
-        button.add_css_class("control-selectable");
-        button.add_css_class("encoder");
-        button.update_property(&[gtk::accessible::Property::Label(&format!(
-            "Encoder {}",
-            index + 1
-        ))]);
-        button.set_size_request(46, 46);
-        let label = Label::new(None);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(4);
-        label.add_css_class("control-tile");
-        // Keep dial state bookkeeping without drawing legends on the knobs.
-        label.set_visible(false);
-        button.set_child(Some(&label));
-        rail.put(&button, 28.0 + index as f64 * 91.0, 34.0);
-        // The assigned action, centered under the knob inside the rail. It is
-        // preview-only and never drawn on the physical device.
-        // The same action's icon on the knob face; clicks still reach the knob.
-        rail.put(
-            &binding_ui.dial_icons[index],
-            28.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0 + index as f64 * 91.0,
-            34.0 + 23.0 - f64::from(DIAL_ICON_SIZE) / 2.0,
-        );
-        let legend = &binding_ui.dial_legends[index];
-        legend.set_size_request(DIAL_LEGEND_WIDTH, 16);
-        rail.put(
-            legend,
-            28.0 + 23.0 - f64::from(DIAL_LEGEND_WIDTH) / 2.0 + index as f64 * 91.0,
-            84.0,
-        );
-        selectable_widgets.push(button.upcast());
-        encoder_labels.push(label);
-    }
-    for (index, widget) in selectable_widgets.iter().take(8).enumerate() {
-        connect_artwork_selection(
-            &widget.clone().downcast::<Button>().unwrap(),
-            &target_picker,
-            &artwork,
-            ArtworkTarget::Keypad((index + 1) as u8),
-        );
-    }
-    connect_artwork_selection(
-        &strip_button,
-        &target_picker,
-        &artwork,
-        ArtworkTarget::TouchStripBackground,
-    );
-    for (index, button) in zone_select_buttons.iter().enumerate() {
-        connect_artwork_selection(
-            button,
-            &target_picker,
-            &artwork,
-            ArtworkTarget::EncoderZone((index + 1) as u8),
-        );
-    }
-    // Summaries remain available through tooltips, never underneath the front.
-    for (index, widget) in selectable_widgets.iter().enumerate() {
-        let widget = widget.clone();
-        let tooltip = move |text: &str| {
-            if index < 8 {
-                format!(
-                    "Button {} · {text}\nDrag onto another key to swap saved settings and artwork.",
-                    index + 1
-                )
-            } else if index >= 9 {
-                format!("Encoder {} · {text}", index - 8)
-            } else {
-                text.to_owned()
-            }
-        };
-        widget.set_tooltip_text(Some(&tooltip(&binding_ui.summaries[index].text())));
-        binding_ui.summaries[index].connect_label_notify(move |label| {
-            widget.set_tooltip_text(Some(&tooltip(&label.text())))
-        });
-    }
-
-    let key_widgets = selectable_widgets[..8].to_vec();
-    let encoder_widgets = selectable_widgets[9..].to_vec();
-    selectable_widgets.extend(
-        zone_select_buttons
-            .iter()
-            .map(|zone| zone.clone().upcast::<gtk::Widget>()),
-    );
-    let zone_widgets: Vec<gtk::Widget> = zone_select_buttons
-        .iter()
-        .map(|zone| zone.clone().upcast())
-        .collect();
-    let selected_widgets = Rc::new(selectable_widgets);
-    button_swap::connect(&selected_widgets[..8], &artwork, &feature_runtime, &root);
-    {
-        // Right-click selects the key like a left click would, unless it already is.
-        let ui = binding_ui.clone();
-        let artwork = artwork.clone();
-        let keys: Vec<_> = selected_widgets[..8]
-            .iter()
-            .map(ObjectExt::downgrade)
-            .collect();
-        text_editor.connect_context_menu(
-            &selected_widgets[..8],
-            Rc::new(move |index| {
-                let number = (index + 1) as u8;
-                let current =
-                    ui.control_kind() == ControlKind::Button && ui.control_number() == Some(number);
-                if !current {
-                    if let Some(button) = keys
-                        .get(index)
-                        .and_then(glib::WeakRef::upgrade)
-                        .and_then(|key| key.downcast::<Button>().ok())
-                    {
-                        button.emit_clicked();
-                    }
-                }
-                artwork.selected_target.get() == ArtworkTarget::Keypad(number)
-            }),
-        );
-    }
-    set_selected_control(&selected_widgets, 0);
-    for index in 0..8 {
-        connect_control_selection(
-            &key_labels[index],
-            selected_widgets[index]
-                .clone()
-                .downcast::<Button>()
-                .expect("button selectable"),
-            &binding_ui,
-            &layers,
-            &settings_heading,
-            selected_widgets.clone(),
-            index,
-            ControlKind::Button,
-            (index + 1) as u8,
-        );
-    }
-    connect_control_selection(
-        &touch_status,
-        strip_button,
+    // The chassis is built from the shown model's layout and rebuilt inside its
+    // card when the model changes; see ui/preview.rs.
+    let preview = preview::PreviewView::new(
         &binding_ui,
         &layers,
+        &artwork,
+        &target_picker,
         &settings_heading,
-        selected_widgets.clone(),
-        8,
-        ControlKind::Touch,
-        0,
     );
-    // Each of the four touch sections is its own control.
-    for (index, zone_button) in zone_select_buttons.into_iter().enumerate() {
-        connect_control_selection(
-            &touch_status,
-            zone_button,
-            &binding_ui,
-            &layers,
-            &settings_heading,
-            selected_widgets.clone(),
-            13 + index,
-            ControlKind::Touch,
-            (index + 1) as u8,
-        );
-    }
-    for index in 0..4 {
-        connect_control_selection(
-            &encoder_labels[index],
-            selected_widgets[index + 9]
-                .clone()
-                .downcast::<Button>()
-                .expect("encoder selectable"),
-            &binding_ui,
-            &layers,
-            &settings_heading,
-            selected_widgets.clone(),
-            index + 9,
-            ControlKind::Encoder,
-            (index + 1) as u8,
-        );
-    }
-
-    // The fixed hardware geometry is presented through one uniform scale, so
-    // spare width/height enlarges the whole preview without moving controls.
-    let preview = scaled_bin::ScaledBin::new(&device_area, PREVIEW_MAX_SCALE);
-    preview.set_hexpand(true);
-    preview.set_vexpand(false);
-    preview.add_css_class("device-preview");
+    feature_runtime.attach_preview(&preview);
     let workspace = GtkBox::new(Orientation::Vertical, 12);
     workspace.set_hexpand(true);
-    workspace.append(&preview);
+    workspace.append(preview.widget());
     // A tall form scrolls here, within its own region, instead of stretching the page.
     let settings_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -1525,29 +1658,29 @@ fn build_widgets(
         .vhomogeneous(false)
         .hhomogeneous(true)
         .build();
-    tabs.add_titled(
-        &action_catalog::connect(
-            selected_widgets.clone(),
-            &binding_ui,
-            &layers,
-            &settings_heading,
-            &save_binding,
-        ),
-        Some("actions"),
-        "Actions",
-    );
-    tabs.add_titled(
-        &dial_presets::connect(
-            selected_widgets.clone(),
-            &binding_ui,
-            &layers,
-            &settings_heading,
-            &feature_runtime,
-            &artwork,
-        ),
-        Some("dials"),
-        "Dials",
-    );
+    // Pages the catalog and the dial presets are rebuilt into, because their
+    // drop targets sit on preview controls that a model change replaces.
+    let actions_page = GtkBox::new(Orientation::Vertical, 0);
+    let dials_page = GtkBox::new(Orientation::Vertical, 0);
+    tabs.add_titled(&actions_page, Some("actions"), "Actions");
+    tabs.add_titled(&dials_page, Some("dials"), "Dials");
+    {
+        let wiring = PreviewWiring {
+            ui: binding_ui.clone(),
+            layers: layers.clone(),
+            artwork: artwork.clone(),
+            runtime: feature_runtime.clone(),
+            text_editor: text_editor.clone(),
+            root: shell.downgrade(),
+            heading: settings_heading.clone(),
+            save: save_binding.clone(),
+            target_picker: target_picker.clone(),
+            actions_page,
+            dials_page,
+            catalog: action_catalog::CatalogMemory::default(),
+        };
+        wiring.connect(&preview);
+    }
     let binding_page = GtkBox::new(Orientation::Vertical, 12);
     binding_page.append(&ui::helper(
         "Options saved with the selected control's binding. Use Save binding to apply them.",
@@ -1577,31 +1710,17 @@ fn build_widgets(
     root.append(feature_runtime.profile_tabs());
 
     // All thirteen pictures are registered independently of the shared editor.
-    artwork.refresh(false);
-
-    // A two-axis viewport is the fallback for unusually small allocations or fonts.
-    // Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
-    let viewport = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&clamp::Clamp::new(&root, SHELL_MAX_WIDTH))
-        .build();
-    feature_runtime.attach_configuration_root(viewport.upcast_ref());
-    // Keep the form within about one window of height; the preview stays put.
-    let scroll = settings_scroll.downgrade();
-    viewport
-        .vadjustment()
-        .connect_page_size_notify(move |adjustment| {
-            if let Some(scroll) = scroll.upgrade() {
-                scroll.set_max_content_height((adjustment.page_size() as i32 - 240).max(320));
-            }
-        });
-    MonitorWidgets {
-        root: viewport,
-        toast,
+    // A session whose device is not there has nothing to send yet.
+    artwork.refresh_with(false, send_initial);
+    Body {
+        root,
         binding_status: binding_ui.status.clone(),
-        status,
-        connection_detail,
+        touch_status: preview.touch_status().clone(),
+        preview,
+        feature_runtime,
+        organization_writes: vec![create_layer],
+        settings_scroll,
+        _text_editor: text_editor,
         #[cfg(test)]
         layer_picker,
         #[cfg(test)]
@@ -1609,205 +1728,279 @@ fn build_widgets(
         #[cfg(test)]
         obs_menu,
         #[cfg(test)]
-        help_menu,
-        #[cfg(test)]
         management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
         target_picker,
-        key_labels,
-        encoder_labels,
-        touch_status,
-        key_widgets,
-        encoder_widgets,
-        zone_widgets,
-        feature_runtime,
-        organization_writes: vec![create_layer],
-        _text_editor: text_editor,
-        _configuration_menu: configuration_menu,
-        update_panel: RefCell::new(Some(update_panel)),
     }
 }
 
+/// One running total per dial of the widest supported model.
+fn dial_totals() -> RefCell<Vec<i64>> {
+    let dials = sdeck_plus::device_model::DeviceModel::supported()
+        .map(|model| usize::from(model.dials))
+        .max()
+        .unwrap_or_default();
+    RefCell::new(vec![0; dials])
+}
+
+/// What a model's events are applied to: its editor, the preview that mirrors
+/// the device, and the window's connection labels.
+struct EventSurface {
+    status: Label,
+    connection_detail: Label,
+    toast: ui::Toast,
+    binding_status: Label,
+    feature_runtime: feature_runtime::FeatureRuntime,
+    preview: Rc<preview::PreviewView>,
+    touch_status: Label,
+    artwork: ArtworkUi,
+    organization_writes: Vec<Button>,
+    ticks: RefCell<Vec<i64>>,
+}
+
+impl EventSurface {
+    fn new(header: (&Label, &Label), toast: &ui::Toast, body: &Body, artwork: &ArtworkUi) -> Self {
+        Self {
+            status: header.0.clone(),
+            connection_detail: header.1.clone(),
+            toast: toast.clone(),
+            binding_status: body.binding_status.clone(),
+            feature_runtime: body.feature_runtime.clone(),
+            preview: body.preview.clone(),
+            touch_status: body.touch_status.clone(),
+            artwork: artwork.clone(),
+            organization_writes: body.organization_writes.clone(),
+            ticks: dial_totals(),
+        }
+    }
+
+    /// Apply a batch: focus changes first, so everything after them already
+    /// sees the focused application.
+    fn apply_all(&self, events: Vec<MonitorEvent>, accepts_input: bool) {
+        for event in &events {
+            if let MonitorEvent::ApplicationFocus(result) = event {
+                self.feature_runtime.focus_changed(result.clone());
+            }
+        }
+        for event in events {
+            self.apply(event, accepts_input);
+        }
+    }
+
+    /// One event, except focus (see [`Self::apply_all`]). Connection reports
+    /// are only handled here for a window that serves a single model; the
+    /// session registry handles them itself.
+    fn apply(&self, message: MonitorEvent, accepts_input: bool) {
+        let Self {
+            status,
+            connection_detail,
+            toast,
+            binding_status,
+            feature_runtime,
+            preview,
+            touch_status,
+            artwork,
+            organization_writes,
+            ticks,
+        } = self;
+        match message {
+            MonitorEvent::ApplicationFocus(_) => {}
+            MonitorEvent::Heartbeat => {}
+            MonitorEvent::ActionDispatched => {
+                feature_runtime.sync_info_from(&artwork.layers.borrow());
+            }
+            MonitorEvent::ConfigurationExportResult { path, result } => {
+                let failed = result.is_err();
+                feature_runtime.complete_configuration_export(&path, result);
+                toast.show(&feature_runtime.status.text(), failed);
+            }
+            MonitorEvent::ConfigurationImportResult { root, result } => {
+                let imported = feature_runtime.complete_configuration_import(&root, result);
+                if imported {
+                    for button in organization_writes {
+                        button.set_sensitive(true);
+                    }
+                }
+                toast.show(&feature_runtime.status.text(), !imported);
+            }
+            MonitorEvent::KeySwapResult {
+                layer,
+                first,
+                second,
+                result,
+            } => {
+                feature_runtime.complete_key_swap(&layer, first, second, result);
+            }
+            MonitorEvent::Connection(state) => {
+                if !state.is_connected() {
+                    feature_runtime.cancel_key_holds();
+                }
+                let connected = show_connection_state(status, connection_detail, &state, None);
+                if connected {
+                    artwork.refresh(true);
+                }
+            }
+            MonitorEvent::Input { event, .. } => {
+                if accepts_input {
+                    feature_runtime.execute_input(&event);
+                }
+                match event {
+                    protocol::Event::Key { index, pressed } => {
+                        if let Some(label) = preview.key_label(index) {
+                            label.set_text(&format!(
+                                "KEY {} · {}",
+                                index + 1,
+                                if pressed { "PRESSED" } else { "IDLE" }
+                            ));
+                            set_active(&label, pressed);
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Key, index) {
+                            set_pressed(&widget, pressed);
+                        }
+                    }
+                    protocol::Event::EncoderButton { index, pressed } => {
+                        if let Some(label) = preview.dial_label(index) {
+                            label.set_text(&format!(
+                                "DIAL {}\n{} · {} ticks",
+                                index + 1,
+                                if pressed { "PRESSED" } else { "IDLE" },
+                                ticks.borrow().get(index).copied().unwrap_or_default()
+                            ));
+                            set_active(&label, pressed);
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
+                            set_pressed(&widget, pressed);
+                        }
+                    }
+                    protocol::Event::Rotation {
+                        index,
+                        ticks: delta,
+                    } => {
+                        let mut totals = ticks.borrow_mut();
+                        let total = totals.get_mut(index).map(|total| {
+                            *total += i64::from(delta);
+                            *total
+                        });
+                        if let Some(label) = preview.dial_label(index) {
+                            label.set_text(&format!(
+                                "DIAL {}\n{} ticks · {delta:+}",
+                                index + 1,
+                                total.unwrap_or_default()
+                            ));
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
+                            flash(&widget, "control-rotated");
+                        }
+                    }
+                    protocol::Event::TouchTap { x, y } => {
+                        touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
+                        flash_zones_in(preview.model().zone_px().0, &preview.zone_widgets(), x, x);
+                    }
+                    protocol::Event::TouchPress { x, y } => {
+                        touch_status.set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
+                        flash_zones_in(preview.model().zone_px().0, &preview.zone_widgets(), x, x);
+                    }
+                    protocol::Event::TouchFlick {
+                        start_x,
+                        start_y,
+                        end_x,
+                        end_y,
+                    } => {
+                        touch_status.set_text(&format!(
+                            "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
+                        ));
+                        flash_zones_in(
+                            preview.model().zone_px().0,
+                            &preview.zone_widgets(),
+                            start_x.min(end_x),
+                            start_x.max(end_x),
+                        );
+                    }
+                }
+            }
+            MonitorEvent::ArtworkResult { target, result, .. } => match result {
+                Ok(()) => {}
+                Err(error) => {
+                    connection_detail.set_text(&format!(
+                        "Artwork update failed for {target:?} (local assignment retained): {error}",
+                    ));
+                }
+            },
+            MonitorEvent::DeviceResult { action, result, .. } => match result {
+                Ok(()) => {
+                    feature_runtime.report(&format!("Device: {} applied.", action.summary()), false)
+                }
+                Err(error) => feature_runtime.report(
+                    &format!("Device: {} failed: {error}", action.summary()),
+                    true,
+                ),
+            },
+            MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
+            MonitorEvent::Info { source, value } => artwork.update_info(source, value),
+            MonitorEvent::BindingSaveResult(result) => {
+                let (message, failed) = match result {
+                    Ok(()) => ("Binding saved successfully.".to_owned(), false),
+                    Err(error) => (format!("Could not save binding: {error}"), true),
+                };
+                binding_status.set_text(&message);
+                ui::feedback(binding_status, failed);
+                toast.show(&message, failed);
+            }
+            MonitorEvent::ProfileSaveResult(result) => {
+                let (message, failed) = match result {
+                    Ok(()) => ("Profile saved successfully.".to_owned(), false),
+                    Err(error) => (format!("Could not save profile: {error}"), true),
+                };
+                feature_runtime.report_profile_save(&message, failed);
+                toast.show(&message, failed);
+            }
+            MonitorEvent::LayerError(error) => {
+                connection_detail.set_text(&error);
+                feature_runtime.report(&error, true);
+            }
+        }
+    }
+}
+
+/// [`EventSurface`] polling for a window whose model never changes.
+#[cfg(test)]
 fn start_event_updates(
     widgets: MonitorWidgets,
     receiver: mpsc::Receiver<MonitorEvent>,
-    layers: Rc<RefCell<LayerStore>>,
+    _layers: Rc<RefCell<LayerStore>>,
     artwork: ArtworkUi,
     _layer_sender: mpsc::Sender<LayerCommand>,
     _app_event_sender: mpsc::Sender<MonitorEvent>,
 ) -> glib::SourceId {
-    let ticks = Rc::new(RefCell::new([0i64; 4]));
+    // The tests' first-model snapshots must not keep the first preview alive.
+    let widgets = {
+        let mut widgets = widgets;
+        widgets.key_labels.clear();
+        widgets.encoder_labels.clear();
+        widgets.key_widgets.clear();
+        widgets.encoder_widgets.clear();
+        widgets.zone_widgets.clear();
+        widgets
+    };
+    let surface = EventSurface {
+        status: widgets.status.clone(),
+        connection_detail: widgets.connection_detail.clone(),
+        toast: widgets.toast.clone(),
+        binding_status: widgets.binding_status.clone(),
+        feature_runtime: widgets.feature_runtime.clone(),
+        preview: widgets.preview.clone(),
+        touch_status: widgets.touch_status.clone(),
+        artwork,
+        organization_writes: widgets.organization_writes.clone(),
+        ticks: dial_totals(),
+    };
     glib::timeout_add_local(Duration::from_millis(40), move || {
-        let MonitorWidgets {
-            status,
-            toast,
-            binding_status,
-            connection_detail,
-            feature_runtime,
-            key_labels,
-            encoder_labels,
-            touch_status,
-            key_widgets,
-            encoder_widgets,
-            zone_widgets,
-            ..
-        } = &widgets;
-        let pending: Vec<_> = receiver.try_iter().collect();
-        for message in &pending {
-            if let MonitorEvent::ApplicationFocus(result) = message {
-                feature_runtime.focus_changed(result.clone());
-            }
-        }
-        for message in pending {
-            match message {
-                MonitorEvent::ApplicationFocus(_) => {}
-                MonitorEvent::Heartbeat => {}
-                MonitorEvent::ActionDispatched => {
-                    feature_runtime.sync_info_from(&layers.borrow());
-                }
-                MonitorEvent::ConfigurationExportResult { path, result } => {
-                    let failed = result.is_err();
-                    feature_runtime.complete_configuration_export(&path, result);
-                    toast.show(&feature_runtime.status.text(), failed);
-                }
-                MonitorEvent::ConfigurationImportResult { root, result } => {
-                    let imported = feature_runtime.complete_configuration_import(&root, result);
-                    if imported {
-                        for button in &widgets.organization_writes {
-                            button.set_sensitive(true);
-                        }
-                    }
-                    toast.show(&feature_runtime.status.text(), !imported);
-                }
-                MonitorEvent::KeySwapResult {
-                    layer,
-                    first,
-                    second,
-                    result,
-                } => {
-                    feature_runtime.complete_key_swap(&layer, first, second, result);
-                }
-                MonitorEvent::Connection(state) => {
-                    if !matches!(state, ConnectionState::Connected) {
-                        feature_runtime.cancel_key_holds();
-                    }
-                    if show_connection_state(status, connection_detail, &state) {
-                        artwork.refresh(true);
-                    }
-                }
-                MonitorEvent::Input(event) => {
-                    feature_runtime.execute_input(&event);
-                    match event {
-                        protocol::Event::Key { index, pressed } => {
-                            if let Some(label) = key_labels.get(index) {
-                                label.set_text(&format!(
-                                    "KEY {} · {}",
-                                    index + 1,
-                                    if pressed { "PRESSED" } else { "IDLE" }
-                                ));
-                                set_active(label, pressed);
-                            }
-                            if let Some(widget) = key_widgets.get(index) {
-                                set_pressed(widget, pressed);
-                            }
-                        }
-                        protocol::Event::EncoderButton { index, pressed } => {
-                            if let Some(label) = encoder_labels.get(index) {
-                                label.set_text(&format!(
-                                    "DIAL {}\n{} · {} ticks",
-                                    index + 1,
-                                    if pressed { "PRESSED" } else { "IDLE" },
-                                    ticks.borrow()[index]
-                                ));
-                                set_active(label, pressed);
-                            }
-                            if let Some(widget) = encoder_widgets.get(index) {
-                                set_pressed(widget, pressed);
-                            }
-                        }
-                        protocol::Event::Rotation {
-                            index,
-                            ticks: delta,
-                        } => {
-                            let mut totals = ticks.borrow_mut();
-                            totals[index] += i64::from(delta);
-                            if let Some(label) = encoder_labels.get(index) {
-                                label.set_text(&format!(
-                                    "DIAL {}\n{} ticks · {delta:+}",
-                                    index + 1,
-                                    totals[index]
-                                ));
-                            }
-                            if let Some(widget) = encoder_widgets.get(index) {
-                                flash(widget, "control-rotated");
-                            }
-                        }
-                        protocol::Event::TouchTap { x, y } => {
-                            touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
-                            flash_zones(zone_widgets, x, x);
-                        }
-                        protocol::Event::TouchPress { x, y } => {
-                            touch_status
-                                .set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
-                            flash_zones(zone_widgets, x, x);
-                        }
-                        protocol::Event::TouchFlick {
-                            start_x,
-                            start_y,
-                            end_x,
-                            end_y,
-                        } => {
-                            touch_status.set_text(&format!(
-                                "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
-                            ));
-                            flash_zones(zone_widgets, start_x.min(end_x), start_x.max(end_x));
-                        }
-                    }
-                }
-                MonitorEvent::ArtworkResult { target, result } => match result {
-                    Ok(()) => {}
-                    Err(error) => {
-                        connection_detail.set_text(&format!(
-                            "Artwork update failed for {target:?} (local assignment retained): {error}",
-                        ));
-                    }
-                },
-                MonitorEvent::DeviceResult { action, result } => match result {
-                    Ok(()) => feature_runtime
-                        .report(&format!("Device: {} applied.", action.summary()), false),
-                    Err(error) => feature_runtime.report(
-                        &format!("Device: {} failed: {error}", action.summary()),
-                        true,
-                    ),
-                },
-                MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
-                MonitorEvent::Info { source, value } => artwork.update_info(source, value),
-                MonitorEvent::BindingSaveResult(result) => {
-                    let (message, failed) = match result {
-                        Ok(()) => ("Binding saved successfully.".to_owned(), false),
-                        Err(error) => (format!("Could not save binding: {error}"), true),
-                    };
-                    binding_status.set_text(&message);
-                    ui::feedback(binding_status, failed);
-                    toast.show(&message, failed);
-                }
-                MonitorEvent::ProfileSaveResult(result) => {
-                    let (message, failed) = match result {
-                        Ok(()) => ("Profile saved successfully.".to_owned(), false),
-                        Err(error) => (format!("Could not save profile: {error}"), true),
-                    };
-                    feature_runtime.report_profile_save(&message, failed);
-                    toast.show(&message, failed);
-                }
-                MonitorEvent::LayerError(error) => {
-                    connection_detail.set_text(&error);
-                    feature_runtime.report(&error, true);
-                }
-            }
-        }
-        feature_runtime.poll_key_holds();
+        // The widgets live as long as the polling does.
+        let _ = &widgets;
+        surface.apply_all(receiver.try_iter().collect(), true);
+        surface.feature_runtime.poll_key_holds();
         glib::ControlFlow::Continue
     })
 }
@@ -1852,12 +2045,14 @@ struct BindingUi {
     info_location: Entry,
     info_row: GtkBox,
     info_location_row: GtkBox,
-    // Same order as the physical selection widgets: eight buttons, touch, four encoders.
-    summaries: Vec<Label>,
-    /// Short assigned-action captions drawn under the four preview dials.
-    dial_legends: Vec<Label>,
+    /// The model the preview shows; the slots below follow it.
+    model: Rc<Cell<&'static sdeck_plus::device_model::DeviceModel>>,
+    // The keys, then the touch strip, then the dials (`summary` finds one by control).
+    summaries: preview::ModelSlots<Label>,
+    /// Short assigned-action captions drawn under the preview dials.
+    dial_legends: preview::ModelSlots<Label>,
     /// The caption's action icon, drawn on each preview knob (preview-only).
-    dial_icons: Vec<gtk::DrawingArea>,
+    dial_icons: preview::ModelSlots<gtk::DrawingArea>,
     /// Swipe, tap and hold badges in the preview strip's header line.
     gesture_badges: GtkBox,
     shortcut_preview: Label,
@@ -2021,46 +2216,56 @@ impl BindingUi {
             info_location,
             info_row,
             info_location_row,
-            summaries: (0..13)
-                .map(|_| {
-                    let label = Label::new(None);
-                    label.add_css_class("muted");
-                    label.set_xalign(0.0);
-                    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                    label.set_width_chars(10);
-                    label.set_max_width_chars(12);
-                    label.set_tooltip_text(Some(
-                        "Assignments in the selected page. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
-                    ));
-                    label
-                })
-                .collect(),
-            dial_legends: (0..4)
-                .map(|_| {
-                    let label = Label::new(None);
-                    label.add_css_class("dial-legend");
-                    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                    label.set_max_width_chars(12);
-                    label.set_visible(false);
-                    label
-                })
-                .collect(),
+            model: Rc::new(Cell::new(&sdeck_plus::device_model::PLUS)),
+            summaries: preview::ModelSlots::new(
+                (0..preview::widest(|model| model.keys() + 1 + model.dials))
+                    .map(|_| {
+                        let label = Label::new(None);
+                        label.add_css_class("muted");
+                        label.set_xalign(0.0);
+                        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                        label.set_width_chars(10);
+                        label.set_max_width_chars(12);
+                        label.set_tooltip_text(Some(
+                            "Assignments in the selected page. CW = clockwise; CCW = counterclockwise. Exact ticks are legacy overrides. Select an event for full action details.",
+                        ));
+                        label
+                    })
+                    .collect(),
+                13,
+            ),
+            dial_legends: preview::ModelSlots::new(
+                (0..preview::widest(|model| model.dials))
+                    .map(|_| {
+                        let label = Label::new(None);
+                        label.add_css_class("dial-legend");
+                        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                        label.set_max_width_chars(12);
+                        label.set_visible(false);
+                        label
+                    })
+                    .collect(),
+                4,
+            ),
             gesture_badges: {
                 let row = GtkBox::new(Orientation::Horizontal, 4);
                 row.add_css_class("gesture-badges");
                 row.set_valign(gtk::Align::Center);
                 row
             },
-            dial_icons: (0..4)
-                .map(|_| {
-                    let icon = binding_icon::binding_icon(BindingIcon::Generic);
-                    icon.add_css_class("dial-icon");
-                    icon.set_size_request(DIAL_ICON_SIZE, DIAL_ICON_SIZE);
-                    icon.set_can_target(false);
-                    icon.set_visible(false);
-                    icon
-                })
-                .collect(),
+            dial_icons: preview::ModelSlots::new(
+                (0..preview::widest(|model| model.dials))
+                    .map(|_| {
+                        let icon = binding_icon::binding_icon(BindingIcon::Generic);
+                        icon.add_css_class("dial-icon");
+                        icon.set_size_request(DIAL_ICON_SIZE, DIAL_ICON_SIZE);
+                        icon.set_can_target(false);
+                        icon.set_visible(false);
+                        icon
+                    })
+                    .collect(),
+                4,
+            ),
             shortcut_preview,
             baseline: std::rc::Rc::new(RefCell::new(None)),
             undo_remove,
@@ -2083,23 +2288,68 @@ impl BindingUi {
         ui::feedback(&self.status, true);
     }
 
+    /// Make the summaries, dial captions and control numbers describe `model`.
+    fn set_model(&self, model: &'static sdeck_plus::device_model::DeviceModel) {
+        self.model.set(model);
+        self.summaries
+            .set_shown(usize::from(model.keys() + 1 + model.dials));
+        self.dial_legends.set_shown(usize::from(model.dials));
+        self.dial_icons.set_shown(usize::from(model.dials));
+        // Slots of a wider model stay empty until a model uses them again.
+        for label in self
+            .dial_legends
+            .all()
+            .iter()
+            .skip(usize::from(model.dials))
+        {
+            label.set_visible(false);
+        }
+        for icon in self.dial_icons.all().iter().skip(usize::from(model.dials)) {
+            icon.set_visible(false);
+        }
+    }
+
+    /// The summary label of `control` on the shown model.
+    fn summary(&self, control: sdeck_plus::preview_layout::ControlRef) -> Option<&Label> {
+        use sdeck_plus::preview_layout::ControlRef;
+        let model = self.model.get();
+        let keys = usize::from(model.keys());
+        let index = match control {
+            ControlRef::Key(number) if model.is_valid_key(number) => usize::from(number) - 1,
+            ControlRef::Strip if model.has_strip() => keys,
+            ControlRef::Dial(number) if model.is_valid_dial(number) => keys + usize::from(number),
+            _ => return None,
+        };
+        self.summaries.get(index)
+    }
+
+    /// The preview control the editor is on, if the shown model has it.
+    fn selected_control(&self) -> Option<sdeck_plus::preview_layout::ControlRef> {
+        preview::control_of(self.control_kind(), self.control_number()?)
+    }
+
     fn refresh_summaries(&self, layers: &RefCell<LayerStore>) {
         // Snapshot text before setting GTK properties, which can invoke callbacks.
         let texts = {
             let store = layers.borrow();
             let layer = dropdown_value(&self.layer_model, self.layer_picker.selected())
                 .unwrap_or_else(|| store.active().to_owned());
-            let summaries = (0..13)
+            let model = self.model.get();
+            let keys = usize::from(model.keys());
+            let summaries = (0..keys + 1 + usize::from(model.dials))
                 .map(|index| {
-                    let (control, number) = match index {
-                        0..=7 => (ControlKind::Button, index + 1),
-                        8 => (ControlKind::Touch, 0),
-                        _ => (ControlKind::Encoder, index - 8),
+                    let (control, number) = if index < keys {
+                        (ControlKind::Button, index + 1)
+                    } else if index == keys {
+                        (ControlKind::Touch, 0)
+                    } else {
+                        (ControlKind::Encoder, index - keys)
                     };
                     control_summary(&store, &layer, control, number as u8)
                 })
                 .collect::<Vec<_>>();
-            let legends = (1..=4)
+            let legends = model
+                .dial_numbers()
                 .map(|dial| {
                     sdeck_plus::binding_editor::dial_action(&store, &layer, dial).map(|action| {
                         (
@@ -2206,10 +2456,22 @@ impl BindingUi {
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
-            ControlKind::Button => (1..=8).map(|n| n.to_string()).collect(),
-            ControlKind::Encoder => (1..=4).map(|n| n.to_string()).collect(),
-            // "Any" is the whole strip; 1 through 4 are its sections.
-            ControlKind::Touch => ["Any", "1", "2", "3", "4"].map(str::to_owned).to_vec(),
+            ControlKind::Button => self
+                .model
+                .get()
+                .key_numbers()
+                .map(|n| n.to_string())
+                .collect(),
+            ControlKind::Encoder => self
+                .model
+                .get()
+                .dial_numbers()
+                .map(|n| n.to_string())
+                .collect(),
+            // "Any" is the whole strip; the numbers are its sections.
+            ControlKind::Touch => std::iter::once("Any".to_owned())
+                .chain(self.model.get().zone_numbers().map(|n| n.to_string()))
+                .collect(),
         };
         replace_string_list(&self.control_number_model, &numbers);
         self.control_number_row.set_visible(true);
@@ -2243,37 +2505,55 @@ impl BindingUi {
         {
             return Ok(());
         }
-        let selected = match control {
+        let number = match control {
             ControlKind::Button => {
                 let number = number.ok_or_else(|| "Select a button number.".to_string())?;
-                if !(1..=8).contains(&number) {
-                    return Err("button number must be 1 through 8".into());
+                if !self.model.get().is_valid_key(number) {
+                    return Err(format!(
+                        "button number must be 1 through {}",
+                        self.model.get().keys()
+                    ));
                 }
-                self.control_picker.set_selected(0);
-                self.update_for_control(reset_event);
-                number - 1
+                number
             }
             ControlKind::Encoder => {
                 let number = number.ok_or_else(|| "Select an encoder number.".to_string())?;
-                if !(1..=4).contains(&number) {
-                    return Err("encoder number must be 1 through 4".into());
+                if !self.model.get().is_valid_dial(number) {
+                    return Err(format!(
+                        "encoder number must be 1 through {}",
+                        self.model.get().dials
+                    ));
                 }
-                self.control_picker.set_selected(1);
-                self.update_for_control(reset_event);
-                number - 1
+                number
             }
             ControlKind::Touch => {
                 let number = number.unwrap_or(0);
-                if number > 4 {
-                    return Err("touch section must be 0 (whole strip) through 4".into());
+                if number > self.model.get().zones() {
+                    return Err(format!(
+                        "touch section must be 0 (whole strip) through {}",
+                        self.model.get().zones()
+                    ));
                 }
-                self.control_picker.set_selected(2);
-                self.update_for_control(reset_event);
                 number
             }
         };
-        self.control_number_picker.set_selected(u32::from(selected));
+        self.apply_control(control, number, reset_event);
         Ok(())
+    }
+
+    /// Put the editor on a control that exists, rebuilding the number list.
+    fn apply_control(&self, control: ControlKind, number: u8, reset_event: bool) {
+        self.control_picker.set_selected(match control {
+            ControlKind::Button => 0,
+            ControlKind::Encoder => 1,
+            ControlKind::Touch => 2,
+        });
+        self.update_for_control(reset_event);
+        self.control_number_picker
+            .set_selected(u32::from(match control {
+                ControlKind::Button | ControlKind::Encoder => number - 1,
+                ControlKind::Touch => number,
+            }));
     }
 
     fn update_action_visibility(&self) {
@@ -2361,10 +2641,18 @@ impl BindingUi {
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
-        let Ok((layer, trigger)) = self.selected_layer_and_trigger(layers) else {
-            self.status.set_text("Select a valid control event.");
-            self.mark_clean();
-            return;
+        let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
+            Ok(selection) => selection,
+            Err(error) if error.contains("does not exist on the") => {
+                self.status.set_text(&error);
+                self.mark_clean();
+                return;
+            }
+            Err(_) => {
+                self.status.set_text("Select a valid control event.");
+                self.mark_clean();
+                return;
+            }
         };
         let action = {
             let store = layers.borrow();
@@ -2537,10 +2825,26 @@ impl BindingUi {
         let number = self
             .control_number()
             .ok_or_else(|| "Select a control number.".to_string())?;
+        if let Some(error) = sdeck_plus::binding_editor::control_number_error(
+            self.model.get(),
+            self.control_kind(),
+            number,
+        ) {
+            return Err(error);
+        }
         let trigger = if self.control_kind() == ControlKind::Button {
-            sdeck_plus::key_hold_editor::key_trigger(number, self.hold_toggle.is_active())
+            sdeck_plus::key_hold_editor::key_trigger_for(
+                self.model.get(),
+                number,
+                self.hold_toggle.is_active(),
+            )
         } else {
-            trigger_from_selection(self.control_kind(), number, self.event_kind())
+            trigger_from_selection_for(
+                self.model.get(),
+                self.control_kind(),
+                number,
+                self.event_kind(),
+            )
         }
         .map_err(|error| error.0)?;
         let owner = layers
@@ -2835,7 +3139,7 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
         ControlKind::Button => format!("Configuring: Key {}", number.unwrap_or(1)),
         ControlKind::Encoder => format!("Configuring: Dial {}", number.unwrap_or(1)),
         ControlKind::Touch => match number {
-            Some(zone @ 1..=4) => format!("Configuring: Touchpad section {zone}"),
+            Some(zone @ 1..) => format!("Configuring: Touchpad section {zone}"),
             _ => "Configuring: Touchpad".into(),
         },
     }
@@ -2851,40 +3155,6 @@ fn set_selected_control(widgets: &[gtk::Widget], selected_index: usize) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn connect_control_selection(
-    _live_label: &Label,
-    button: Button,
-    ui: &BindingUi,
-    layers: &Rc<RefCell<LayerStore>>,
-    heading: &Label,
-    selected_widgets: Rc<Vec<gtk::Widget>>,
-    selected_index: usize,
-    control: ControlKind,
-    number: u8,
-) {
-    let ui = ui.clone();
-    let layers = layers.clone();
-    let heading = heading.clone();
-    let guard = ui.clone();
-    let switch: Rc<dyn Fn()> = Rc::new(move || {
-        if let Err(error) = ui.select_control(control, Some(number), false) {
-            ui.status.set_text(&error);
-            return;
-        }
-        set_selected_control(&selected_widgets, selected_index);
-        heading.set_text(&control_heading(control, Some(number)));
-        ui.load_selected_binding(&layers);
-    });
-    button.connect_clicked(move |button| {
-        if guard.is_dirty() {
-            confirm_discard(button, switch.clone());
-        } else {
-            switch();
-        }
-    });
-}
-
 /// Selecting another control reloads the editor, so unsaved edits need a choice first.
 fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
     let Some(parent) = anchor
@@ -2894,15 +3164,28 @@ fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
         proceed();
         return;
     };
+    confirm_discard_in(
+        &parent,
+        "You edited this binding without saving it. Selecting another control discards those edits.",
+        proceed,
+        Rc::new(|| {}),
+    );
+}
+
+/// Ask whether to discard unsaved edits: `proceed` on Discard, else `cancel`.
+fn confirm_discard_in(
+    parent: &gtk::Window,
+    explanation: &str,
+    proceed: Rc<dyn Fn()>,
+    cancel: Rc<dyn Fn()>,
+) {
     let dialog = gtk::MessageDialog::builder()
-        .transient_for(&parent)
+        .transient_for(parent)
         .modal(true)
         .destroy_with_parent(true)
         .message_type(gtk::MessageType::Question)
         .text("Discard unsaved changes?")
-        .secondary_text(
-            "You edited this binding without saving it. Selecting another control discards those edits.",
-        )
+        .secondary_text(explanation)
         .build();
     dialog.add_css_class("confirm-dialog");
     let mut child = dialog.message_area().first_child();
@@ -2923,6 +3206,8 @@ fn confirm_discard(anchor: &Button, proceed: Rc<dyn Fn()>) {
         dialog.close();
         if response == gtk::ResponseType::Accept {
             proceed();
+        } else {
+            cancel();
         }
     });
     dialog.present();
@@ -3115,11 +3400,12 @@ impl ArtworkUi {
     /// Keys and touch sections that show live information on `layer`.
     fn info_targets(&self, layer: &str) -> Vec<(ArtworkTarget, sdeck_plus::info::InfoSource)> {
         let store = self.layers.borrow();
-        let keys = (1..=8).filter_map(|key| {
+        let model = store.model();
+        let keys = model.key_numbers().filter_map(|key| {
             let source = store.info_source(layer, &Trigger::KeyPress(key))?;
             Some((ArtworkTarget::Keypad(key), source))
         });
-        let zones = (1..=4).filter_map(|zone| {
+        let zones = model.zone_numbers().filter_map(|zone| {
             let source = store.zone_info_source(layer, zone)?;
             Some((ArtworkTarget::EncoderZone(zone), source))
         });
@@ -3144,9 +3430,24 @@ impl ArtworkUi {
             .assigned_path_in_layer(owner, target)
     }
 
+    /// The sections that carry the previous/next page indicators: the first and
+    /// the last of the shown model.
+    fn indicator_zones(&self) -> Vec<u8> {
+        let zones = self.layers.borrow().model().zones();
+        if zones == 0 {
+            return Vec::new();
+        }
+        let mut ends = vec![1];
+        if zones > 1 {
+            ends.push(zones);
+        }
+        ends
+    }
+
     fn indicated_zone(&self, layer: &str, zone: u8) -> bool {
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
-        (zone == 1 && previous) || (zone == 4 && next)
+        let last = self.layers.borrow().model().zones();
+        (zone == 1 && previous) || (zone == last && next)
     }
 
     fn touchscreen_zone_command(&self, layer: &str, zone: u8) -> ArtworkCommand {
@@ -3231,7 +3532,7 @@ impl ArtworkUi {
         other.extend(info(|target| {
             matches!(target, ArtworkTarget::EncoderZone(_))
         }));
-        for zone in [1, 4] {
+        for zone in self.indicator_zones() {
             if self.indicated_zone(layer, zone) {
                 other.retain(|command| !matches!(command,
                     ArtworkCommand::Assign { target: ArtworkTarget::EncoderZone(shown), .. }
@@ -3252,9 +3553,11 @@ impl ArtworkUi {
     /// indicators instead of a separate indicator command.
     fn with_icons(&self, layer: &str, mut commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
         let strip_path = self.info_background(layer, ArtworkTarget::TouchStripBackground);
-        for target in (1..=8)
+        let model = self.layers.borrow().model();
+        for target in model
+            .key_numbers()
             .map(ArtworkTarget::Keypad)
-            .chain((1..=4).map(ArtworkTarget::EncoderZone))
+            .chain(model.zone_numbers().map(ArtworkTarget::EncoderZone))
         {
             let Some(icon) = self.control_icon(layer, target) else {
                 continue;
@@ -3313,7 +3616,8 @@ impl ArtworkUi {
         let layer = self.layers.borrow().active().to_owned();
         let indicators = |zone: u8| {
             let (previous, next) = self.layers.borrow().touchscreen_navigation(&layer);
-            (zone == 1 && previous, zone == 4 && next)
+            let last = self.layers.borrow().model().zones();
+            (zone == 1 && previous, zone == last && next)
         };
         let section = match target {
             ArtworkTarget::Keypad(_) => None,
@@ -3328,8 +3632,10 @@ impl ArtworkUi {
             }
         }
         let background = self.info_background(&layer, target);
+        let model = self.layers.borrow().model();
         let image = match target {
-            ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_at(
+            ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_for(
+                model,
                 value,
                 background.as_deref(),
                 elapsed,
@@ -3364,7 +3670,8 @@ impl ArtworkUi {
         section: Option<(bool, bool)>,
         now: std::time::Instant,
     ) -> Duration {
-        let extent = sdeck_plus::info_render::marquee_extent(value, section);
+        let model = self.layers.borrow().model();
+        let extent = sdeck_plus::info_render::marquee_extent_for(model, value, section);
         let mut info = self.info.borrow_mut();
         let marquee = &mut info.marquee;
         let Some(extent) = extent else {
@@ -3469,12 +3776,13 @@ impl ArtworkUi {
             .is_none()
             .then(|| self.control_icon(layer, target))
             .flatten();
-        match sdeck_plus::image_output::compose_touchscreen_zone_at(
+        let model = self.layers.borrow().model();
+        match sdeck_plus::image_output::compose_touchscreen_zone_for(
+            model,
             zone,
             background.as_deref(),
             value,
-            previous,
-            next,
+            (previous, next),
             elapsed,
         )
         .and_then(|indicators| match &icon {
@@ -3498,7 +3806,7 @@ impl ArtworkUi {
     }
 
     fn paint_navigation_previews(&self, layer: &str) {
-        for zone in [1, 4] {
+        for zone in self.indicator_zones() {
             // Information previews already paint their indicators with their value.
             if self.indicated_zone(layer, zone)
                 && self.layers.borrow().zone_info_source(layer, zone).is_none()
@@ -3583,6 +3891,11 @@ impl ArtworkUi {
     }
 
     fn refresh(&self, force: bool) {
+        self.refresh_with(force, true);
+    }
+
+    /// Repaint the preview; `send` also pushes the pictures to the device.
+    fn refresh_with(&self, force: bool, send: bool) {
         let layer = self.layers.borrow().active().to_owned();
         let touch_owner = self
             .layers
@@ -3622,12 +3935,15 @@ impl ArtworkUi {
             )
         };
         let commands = self.with_info(&layer, commands);
+        let model = self.layers.borrow().model();
         for (picture, path, text, icon) in paths {
-            set_button_picture(&picture, path, text.as_ref(), icon.as_ref());
+            set_button_picture(model, &picture, path, text.as_ref(), icon.as_ref());
         }
         self.paint_info_previews(&layer);
         self.paint_navigation_previews(&layer);
-        let _ = self.output.send(ArtworkCommand::Replace(commands));
+        if send {
+            let _ = self.output.send(ArtworkCommand::Replace(commands));
+        }
         *self.last_layer.borrow_mut() = Some(cache_key);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
             editor.load_context(false);
@@ -3659,6 +3975,7 @@ impl ArtworkUi {
         }
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
         Some(ControlIcon {
+            model: self.layers.borrow().model(),
             target,
             icon,
             caption: if icon == BindingIcon::MissingFile {
@@ -3667,7 +3984,8 @@ impl ArtworkUi {
                 sdeck_plus::binding_editor::action_caption(&action)
             },
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
-            next: target == ArtworkTarget::EncoderZone(4) && next,
+            next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
+                && next,
         })
     }
 
@@ -3694,7 +4012,9 @@ impl ArtworkUi {
             }
         }
         let shown = path.is_some() || !text.text.is_empty();
-        let image = sdeck_plus::image_output::compose_button_image(path.as_deref(), text)?;
+        let model = self.layers.borrow().model();
+        let image =
+            sdeck_plus::image_output::compose_button_image_for(model, path.as_deref(), text)?;
         Ok((image, shown))
     }
 
@@ -3729,9 +4049,10 @@ impl ArtworkUi {
             )
         };
         let icon = self.control_icon(&layer, *target);
+        let model = self.layers.borrow().model();
         for (picture_target, picture) in self.pictures.borrow().iter() {
             if picture_target == target {
-                set_button_picture(picture, path.clone(), text.as_ref(), icon.as_ref());
+                set_button_picture(model, picture, path.clone(), text.as_ref(), icon.as_ref());
             }
         }
         if !matches!(target, ArtworkTarget::Keypad(_)) {
@@ -3769,6 +4090,8 @@ impl ArtworkUi {
 /// A binding icon derived for one key or touch section without artwork.
 #[derive(Clone, Debug, PartialEq)]
 struct ControlIcon {
+    /// The model whose key size the picture is composed for.
+    model: &'static sdeck_plus::device_model::DeviceModel,
     target: ArtworkTarget,
     icon: BindingIcon,
     caption: String,
@@ -3785,9 +4108,12 @@ impl ControlIcon {
         text: Option<&sdeck_plus::button_text::ButtonText>,
     ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
         match self.target {
-            ArtworkTarget::Keypad(_) => {
-                sdeck_plus::binding_icons::compose_key_image(self.icon, &self.caption, text)
-            }
+            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_for(
+                self.model,
+                self.icon,
+                &self.caption,
+                text,
+            ),
             ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
                 self.icon,
                 &self.caption,
@@ -3826,6 +4152,7 @@ fn with_icon_under(
 }
 
 fn set_button_picture(
+    model: &sdeck_plus::device_model::DeviceModel,
     picture: &Picture,
     path: Option<std::path::PathBuf>,
     text: Option<&sdeck_plus::button_text::ButtonText>,
@@ -3844,13 +4171,15 @@ fn set_button_picture(
         }
     }
     match text {
-        Some(text) => match sdeck_plus::image_output::compose_button_image(path.as_deref(), text) {
-            Ok(image) => {
-                picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
-                picture.set_visible(true);
+        Some(text) => {
+            match sdeck_plus::image_output::compose_button_image_for(model, path.as_deref(), text) {
+                Ok(image) => {
+                    picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                    picture.set_visible(true);
+                }
+                Err(error) => eprintln!("Could not compose button preview: {error}"),
             }
-            Err(error) => eprintln!("Could not compose button preview: {error}"),
-        },
+        }
         None => set_picture_path(picture, path),
     }
 }
@@ -3921,7 +4250,8 @@ fn connect_artwork_selection(
 ) {
     let (picker, artwork) = (picker.clone(), artwork.clone());
     button.connect_clicked(move |_| {
-        match ArtworkTarget::TOUCH.iter().position(|item| *item == target) {
+        let targets = ArtworkTarget::touch_for(artwork.layers.borrow().model());
+        match targets.iter().position(|item| *item == target) {
             Some(index) => picker.set_selected(index as u32),
             // Keys are not in the picker; their right-click menu reads this target.
             None => {
@@ -3941,18 +4271,130 @@ fn binding_tool(icon: &str, name: &str, explanation: &str) -> Button {
     button
 }
 
+/// Everything a preview's controls are connected to, again after each rebuild.
+struct PreviewWiring {
+    ui: BindingUi,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    runtime: feature_runtime::FeatureRuntime,
+    text_editor: Rc<button_text_editor::ButtonTextEditor>,
+    root: glib::WeakRef<GtkBox>,
+    heading: Label,
+    save: Button,
+    target_picker: gtk::DropDown,
+    actions_page: GtkBox,
+    dials_page: GtkBox,
+    /// The catalog's search and open categories survive a model change.
+    catalog: action_catalog::CatalogMemory,
+}
+
+impl PreviewWiring {
+    fn connect(&self, view: &preview::PreviewView) {
+        let keys = view.key_widgets();
+        if let Some(root) = self.root.upgrade() {
+            button_swap::connect(&keys, &self.artwork, &self.runtime, &root);
+        }
+        {
+            // Right-click selects the key like a left click would, unless it already is.
+            let ui = self.ui.clone();
+            let artwork = self.artwork.clone();
+            let weak_keys: Vec<_> = keys.iter().map(ObjectExt::downgrade).collect();
+            self.text_editor.connect_context_menu(
+                &keys,
+                Rc::new(move |index| {
+                    let number = (index + 1) as u8;
+                    let current = ui.control_kind() == ControlKind::Button
+                        && ui.control_number() == Some(number);
+                    if !current {
+                        if let Some(button) = weak_keys
+                            .get(index)
+                            .and_then(glib::WeakRef::upgrade)
+                            .and_then(|key| key.downcast::<Button>().ok())
+                        {
+                            button.emit_clicked();
+                        }
+                    }
+                    artwork.selected_target.get() == ArtworkTarget::Keypad(number)
+                }),
+            );
+        }
+        self.follow_model(view.model());
+        // Every key and dial of the model takes catalog and preset drops.
+        if let Some(widgets) = view.catalog_widgets() {
+            replace_page(
+                &self.actions_page,
+                &action_catalog::connect(
+                    widgets.clone(),
+                    &self.catalog,
+                    &self.ui,
+                    &self.layers,
+                    &self.heading,
+                    &self.save,
+                ),
+            );
+            replace_page(
+                &self.dials_page,
+                &dial_presets::connect(
+                    widgets,
+                    &self.ui,
+                    &self.layers,
+                    &self.heading,
+                    &self.runtime,
+                    &self.artwork,
+                ),
+            );
+        }
+    }
+
+    /// The Appearance picker lists the strip and the sections of the model.
+    fn follow_model(&self, model: &'static sdeck_plus::device_model::DeviceModel) {
+        let Some(list) = self
+            .target_picker
+            .model()
+            .and_then(|model| model.downcast::<gtk::StringList>().ok())
+        else {
+            return;
+        };
+        let names: Vec<String> = ArtworkTarget::touch_for(model)
+            .into_iter()
+            .map(touch_target_label)
+            .collect();
+        let shown: Vec<String> = (0..list.n_items())
+            .filter_map(|index| list.string(index).map(|name| name.to_string()))
+            .collect();
+        if shown != names {
+            replace_string_list(&list, &names);
+            self.target_picker.set_selected(0);
+        }
+    }
+}
+
+/// Make `child` the only content of `page`.
+fn replace_page(page: &GtkBox, child: &GtkBox) {
+    while let Some(old) = page.first_child() {
+        page.remove(&old);
+    }
+    page.append(child);
+}
+
+fn touch_target_label(target: ArtworkTarget) -> String {
+    match target {
+        ArtworkTarget::Keypad(key) => format!("Key {key}"),
+        ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
+        ArtworkTarget::EncoderZone(zone) => format!("Touch zone {zone}"),
+    }
+}
+
 fn add_artwork_controls(
     parent: &GtkBox,
     window: &ApplicationWindow,
     artwork: &ArtworkUi,
 ) -> gtk::DropDown {
     let targets = gtk::StringList::new(
-        &ArtworkTarget::TOUCH
-            .map(|target| match target {
-                ArtworkTarget::Keypad(key) => format!("Key {key}"),
-                ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
-                ArtworkTarget::EncoderZone(zone) => format!("Touch zone {zone}"),
-            })
+        &ArtworkTarget::touch_for(artwork.layers.borrow().model())
+            .into_iter()
+            .map(touch_target_label)
+            .collect::<Vec<_>>()
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>(),
@@ -3960,8 +4402,11 @@ fn add_artwork_controls(
     let picker = gtk::DropDown::new(Some(targets), gtk::Expression::NONE);
     picker.add_css_class("artwork-target");
     let layers = artwork.layers.clone();
+    let target_layers = artwork.layers.clone();
+    let marker_layers = artwork.layers.clone();
     binding_icon::target_dropdown(
         &picker,
+        Rc::new(move || ArtworkTarget::touch_for(target_layers.borrow().model())),
         Rc::new(move |target| {
             let layers = layers.borrow();
             let layer = layers.active();
@@ -3976,11 +4421,13 @@ fn add_artwork_controls(
             icon.shown_on_controls()
                 .then(|| (icon, sdeck_plus::binding_editor::action_caption(&action)))
         }),
+        Rc::new(move || marker_layers.borrow().model()),
     );
     parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
     picker.connect_selected_notify(move |picker| {
-        if let Some(target) = ArtworkTarget::TOUCH.get(picker.selected() as usize) {
+        let targets = ArtworkTarget::touch_for(artwork_selection.layers.borrow().model());
+        if let Some(target) = targets.get(picker.selected() as usize) {
             artwork_selection.selected_target.set(*target);
             if let Some(editor) = artwork_selection.text_editor.borrow().upgrade() {
                 editor.load_context(false);
@@ -4082,7 +4529,9 @@ fn desired_artwork_commands_for_owners(
     layer: &str,
     touch_owner: &str,
 ) -> Vec<ArtworkCommand> {
-    let mut commands = (1..=8)
+    let mut commands = store
+        .model()
+        .key_numbers()
         .map(|key| {
             let target = ArtworkTarget::Keypad(key);
             if let Some(text) = store.button_text_in_layer(layer, target) {
@@ -4114,7 +4563,7 @@ fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand
             target: ArtworkTarget::TouchStripBackground,
         }),
     }
-    for zone in 1..=4 {
+    for zone in store.model().zone_numbers() {
         let target = ArtworkTarget::EncoderZone(zone);
         if let Some(path) = store.assigned_path_in_layer(layer, target) {
             commands.push(ArtworkCommand::Assign { target, path });
@@ -4123,7 +4572,7 @@ fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand
     commands
 }
 
-fn show_artwork_error(window: &ApplicationWindow, message: &str) {
+fn show_artwork_error(window: &impl IsA<gtk::Window>, message: &str) {
     let dialog = gtk::MessageDialog::builder()
         .transient_for(window)
         .modal(true)
@@ -4137,16 +4586,42 @@ fn show_artwork_error(window: &ApplicationWindow, message: &str) {
 
 /// Presents the device connection in plain language: a semantic badge plus a
 /// short next step. Technical identifiers and worker diagnostics stay in the
-/// tooltip. Returns whether the device is connected.
-fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState) -> bool {
-    const USB_ID: &str = "USB device VID 0FD9 / PID 0084";
-    let not_connected = "Stream Deck + not connected — plug it in";
+/// tooltip. `last` is the model that was connected last, when there was one.
+/// Returns whether the device is connected.
+fn show_connection_state(
+    status: &Label,
+    detail: &Label,
+    state: &ConnectionState,
+    last: Option<&'static sdeck_plus::device_model::DeviceModel>,
+) -> bool {
+    use sdeck_plus::device_model::DeviceModel;
+    let usb_ids = |pids: String| format!("USB device VID 0FD9 / PID {pids}");
+    let every_model = || {
+        usb_ids(
+            DeviceModel::supported()
+                .map(|model| format!("{:04X}", model.pid()))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        )
+    };
+    let usb_id = |model: Option<&DeviceModel>| match model {
+        Some(model) => usb_ids(format!("{:04X}", model.pid())),
+        None => every_model(),
+    };
+    let family = || {
+        DeviceModel::supported()
+            .map(|model| model.name)
+            .collect::<Vec<_>>()
+            .join(" or ")
+    };
+    let name = last.map_or("Stream Deck", |model| model.name);
+    let not_connected = format!("{} not connected — plug one in", family());
     let (badge, tone, text, hint) = match state {
         ConnectionState::Searching => (
             "Not connected",
             "status-idle",
             not_connected,
-            format!("Looking for the {USB_ID}"),
+            format!("Looking for the {}", every_model()),
         ),
         // Discovery reports a missing device as unavailable on every retry.
         ConnectionState::Unavailable(reason) if reason.starts_with("Device not found") => (
@@ -4158,22 +4633,36 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
         ConnectionState::Unavailable(reason) => (
             "Unavailable",
             "status-error",
-            "Stream Deck + found but unavailable — hover for details",
-            format!("{reason}\n{USB_ID}"),
+            format!("{name} found but unavailable — hover for details"),
+            format!("{reason}\n{}", usb_id(last)),
         ),
-        ConnectionState::Disconnected(reason) => (
+        ConnectionState::Disconnected { reason, .. } => (
             "Disconnected",
             "status-idle",
-            "Stream Deck + disconnected — plug it back in",
-            format!("{reason}\n{USB_ID}"),
+            format!("{name} disconnected — plug it back in"),
+            format!("{reason}\n{}", usb_id(last)),
         ),
-        ConnectionState::Connected => (
+        ConnectionState::Connected { model, .. } => (
             "Connected",
             "status-online",
-            "Stream Deck + connected — keys, dials and touch strip are live",
-            format!("{USB_ID} · HID input and artwork active"),
+            format!(
+                "{} connected — keys, dials and touch strip are live",
+                model.name
+            ),
+            format!("{} · HID input and artwork active", usb_id(Some(model))),
         ),
     };
+    paint_status(status, detail, (badge, tone), &text, &hint);
+    state.is_connected()
+}
+
+fn paint_status(
+    status: &Label,
+    detail: &Label,
+    (badge, tone): (&str, &str),
+    text: &str,
+    hint: &str,
+) {
     status.set_text(badge);
     for class in ["status-idle", "status-online", "status-error"] {
         status.remove_css_class(class);
@@ -4181,9 +4670,59 @@ fn show_connection_state(status: &Label, detail: &Label, state: &ConnectionState
     status.add_css_class(tone);
     detail.set_text(text);
     for label in [status, detail] {
-        label.set_tooltip_text(Some(&hint));
+        label.set_tooltip_text(Some(hint));
     }
-    matches!(state, ConnectionState::Connected)
+}
+
+/// The header while several devices are connected: each model once, with a
+/// count when two units of one model are plugged in.
+fn show_connected_devices(
+    status: &Label,
+    detail: &Label,
+    models: &[&'static sdeck_plus::device_model::DeviceModel],
+) {
+    // Supported order, whichever plugged in first.
+    let grouped: Vec<(&'static sdeck_plus::device_model::DeviceModel, usize)> =
+        sdeck_plus::device_model::DeviceModel::supported()
+            .filter_map(|model| {
+                let count = models.iter().filter(|known| **known == model).count();
+                (count > 0).then_some((model, count))
+            })
+            .collect();
+    let names: Vec<String> = grouped
+        .iter()
+        .map(|(model, count)| match count {
+            1 => model.name.to_owned(),
+            count => format!("{} x{count}", model.name),
+        })
+        .collect();
+    let list = match names.as_slice() {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first @ .., last] => format!("{} and {last}", first.join(", ")),
+    };
+    let pids: Vec<String> = grouped
+        .iter()
+        .map(|(model, _)| format!("{:04X}", model.pid()))
+        .collect();
+    let text = format!("{list} connected — keys, dials and touch strip are live");
+    // The line may be ellipsized: the tooltip carries the whole sentence.
+    let hint = format!(
+        "{text}\nUSB device VID 0FD9 / PID {} · HID input and artwork active",
+        pids.join(" and ")
+    );
+    paint_status(status, detail, ("Connected", "status-online"), &text, &hint);
+}
+
+/// The preview control for the zero-based input `index`, if the shown model
+/// has it; input from controls it lacks is ignored.
+fn control_at(
+    preview: &preview::PreviewView,
+    control: fn(u8) -> ControlRef,
+    index: usize,
+) -> Option<gtk::Widget> {
+    let number = u8::try_from(index.checked_add(1)?).ok()?;
+    preview.control(control(number))
 }
 
 fn set_pressed(widget: &gtk::Widget, pressed: bool) {
@@ -4205,13 +4744,29 @@ fn flash(widget: &gtk::Widget, class: &'static str) {
     });
 }
 
-/// The touch strip is 800 px wide and split into four 200 px regions.
-fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
-    for zone in usize::from(from_x / 200).min(3)..=usize::from(to_x / 200).min(3) {
+/// Flash the sections the touch from `from_x` to `to_x` crosses; sections the
+/// preview has no widget for are ignored.
+fn flash_zones_in(zone_width: u32, zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+    let width = zone_width.max(1);
+    let last = zones.len().saturating_sub(1);
+    let section =
+        |x: u16| usize::try_from(u32::from(x) / width).map_or(last, |zone| zone.min(last));
+    for zone in section(from_x)..=section(to_x) {
         if let Some(widget) = zones.get(zone) {
             flash(widget, "control-touched");
         }
     }
+}
+
+/// [`flash_zones_in`] for the Stream Deck +'s 200 px sections.
+#[cfg(test)]
+fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+    flash_zones_in(
+        sdeck_plus::device_model::PLUS.zone_px().0,
+        zones,
+        from_x,
+        to_x,
+    );
 }
 
 fn set_active(label: &Label, active: bool) {
@@ -4384,6 +4939,7 @@ mod tests {
     mod configuration_transfer_tests;
     mod control_feedback_tests;
     mod control_remove_tests;
+    mod device_roots_tests;
     mod dial_action_tests;
     mod dial_preset_tests;
     mod documentation_screenshots;
@@ -4392,24 +4948,31 @@ mod tests {
     mod key_hold_integration_tests;
     mod key_hold_ui_tests;
     mod live_info_tests;
+    mod model_selector_tests;
+    mod model_session_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
     mod preview_layout_tests;
+    mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
+    mod simulated_device_tests;
     mod timer_countdown_tests;
     mod timer_notification_tests;
     mod touchscreen_tests;
     mod tray_startup;
+    mod two_device_tests;
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
     mod volume_step_tests;
+    mod xl_editor_tests;
+    mod xl_event_safety_tests;
 
     include!("button_text_editor_tests.rs");
 
@@ -4652,14 +5215,17 @@ mod tests {
         app.connect_shutdown(move |_| shutdown_sent.send(()).unwrap());
         let (worker_sent, worker_received) = mpsc::channel();
         let (layer_sender, layer_receiver) = mpsc::channel();
-        lifecycle.borrow_mut().layer_sender = Some(layer_sender);
-        lifecycle.borrow_mut().layer_worker = Some(thread::spawn(move || {
-            assert!(matches!(
-                layer_receiver.recv().unwrap(),
-                LayerCommand::Shutdown
-            ));
-            worker_sent.send(()).unwrap();
-        }));
+        lifecycle.borrow_mut().workers.push(LayerWorker {
+            sender: layer_sender,
+            stop: Default::default(),
+            handle: thread::spawn(move || {
+                assert!(matches!(
+                    layer_receiver.recv().unwrap(),
+                    LayerCommand::Shutdown
+                ));
+                worker_sent.send(()).unwrap();
+            }),
+        });
         let timed_out = Rc::new(Cell::new(false));
         let deadline_hit = timed_out.clone();
         let deadline_app = app.clone();
@@ -5403,7 +5969,7 @@ mod tests {
         let (output, events) = mpsc::channel();
         // When: both bindings are explicitly executed twice.
         for identity in [&first, &second, &first, &second] {
-            execute_layer_action_for(&mut executor, identity, &action, &output);
+            execute_layer_action_for(&mut executor, None, identity, &action, &output);
             assert!(matches!(
                 events.try_recv().unwrap(),
                 MonitorEvent::AppEvent { name } if name == "Action dispatched."
@@ -8434,49 +9000,31 @@ mod tests {
     }
 
     fn assert_direct_button_click_selects_button_8_and_loads_existing_assignment() {
-        let Some(ui) = test_binding_ui() else {
+        let Some(fixture) = ui_refresh_tests::fixture("direct-select", |store| {
+            store
+                .bind(
+                    "Base",
+                    Trigger::KeyPress(8),
+                    Action::Command("echo eight".into()),
+                )
+                .unwrap();
+        }) else {
             eprintln!("skipping GTK direct-selection test because gtk::init failed");
             return;
         };
-        let root =
-            std::env::temp_dir().join(format!("streamdeck-direct-select-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let mut store = LayerStore::open_at(&root).unwrap();
-        store
-            .bind(
-                "Base",
-                Trigger::KeyPress(8),
-                Action::Command("echo eight".into()),
-            )
-            .unwrap();
-        let layers = Rc::new(RefCell::new(store));
-        let button = Button::new();
-        let selected_widgets = Rc::new(vec![button.clone().upcast::<gtk::Widget>()]);
-        let heading = Label::new(None);
-        connect_control_selection(
-            &Label::new(None),
-            button.clone(),
-            &ui,
-            &layers,
-            &heading,
-            selected_widgets.clone(),
-            0,
-            ControlKind::Button,
-            8,
-        );
+        let widgets = &fixture.widgets;
+        let ui = &widgets.binding_ui;
+        let button = widgets.key_widgets[7].clone().downcast::<Button>().unwrap();
 
         button.emit_clicked();
 
-        assert_eq!(
-            heading.text().as_str(),
-            control_heading(ControlKind::Button, Some(8))
-        );
-        assert!(selected_widgets[0].has_css_class("control-selected"));
-        let (_, trigger) = ui.selected_layer_and_trigger(&layers).unwrap();
+        assert!(button.has_css_class("control-selected"));
+        assert!(!widgets.key_widgets[0].has_css_class("control-selected"));
+        assert_eq!(widgets.preview.selected(), ControlRef::Key(8));
+        let (_, trigger) = ui.selected_layer_and_trigger(&fixture.layers).unwrap();
         assert_eq!(trigger, Trigger::KeyPress(8));
         assert_eq!(ui.action_kind(), ActionKind::RunCommand);
         assert_eq!(ui.text_entry.text().as_str(), "echo eight");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn assert_direct_selection_css_is_distinct_from_live_active_state() {

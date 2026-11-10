@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=sdeck-plus
-Comment=Configure an Elgato Stream Deck + on Linux
+Comment=Configure an Elgato Stream Deck + or Stream Deck + XL on Linux
 Exec=sdeck-plus
 Icon=sdeck-plus
 Terminal=false

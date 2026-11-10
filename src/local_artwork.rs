@@ -1,6 +1,7 @@
 //! Versioned, app-owned local artwork assignments.
 
 use crate::button_text::ButtonText;
+use crate::device_model::{DeviceModel, PLUS};
 use gtk::gdk_pixbuf::Pixbuf;
 use std::collections::HashMap;
 use std::fs;
@@ -49,17 +50,50 @@ impl ArtworkTarget {
         Self::EncoderZone(4),
     ];
 
-    fn id(self) -> String {
+    /// Every destination of `model`: its keys, the strip, then its sections.
+    pub fn all_for(model: &DeviceModel) -> Vec<Self> {
+        model
+            .key_numbers()
+            .map(Self::Keypad)
+            .chain(Self::touch_for(model))
+            .collect()
+    }
+
+    /// The Appearance picker destinations of `model`: the strip, then its sections.
+    pub fn touch_for(model: &DeviceModel) -> Vec<Self> {
+        model
+            .has_strip()
+            .then_some(Self::TouchStripBackground)
+            .into_iter()
+            .chain(model.zone_numbers().map(Self::EncoderZone))
+            .collect()
+    }
+
+    /// Whether `model` has this destination.
+    pub fn is_valid_for(self, model: &DeviceModel) -> bool {
         match self {
-            Self::Keypad(n) if (1..=8).contains(&n) => format!("keypad-{n}"),
-            Self::TouchStripBackground => "touch-strip-background".into(),
-            Self::EncoderZone(n) if (1..=4).contains(&n) => format!("encoder-zone-{n}"),
+            Self::Keypad(n) => model.is_valid_key(n),
+            Self::TouchStripBackground => model.has_strip(),
+            Self::EncoderZone(n) => model.is_valid_zone(n),
+        }
+    }
+
+    /// Stable stored name, empty when `model` has no such destination.
+    pub fn id_in(self, model: &DeviceModel) -> String {
+        match self {
+            Self::Keypad(n) if self.is_valid_for(model) => format!("keypad-{n}"),
+            Self::TouchStripBackground if self.is_valid_for(model) => {
+                "touch-strip-background".into()
+            }
+            Self::EncoderZone(n) if self.is_valid_for(model) => format!("encoder-zone-{n}"),
             _ => String::new(),
         }
     }
 
-    fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|target| target.id() == id)
+    pub fn from_id_in(model: &DeviceModel, id: &str) -> Option<Self> {
+        Self::all_for(model)
+            .into_iter()
+            .find(|target| target.id_in(model) == id)
     }
 }
 
@@ -71,6 +105,7 @@ pub struct ArtworkStore {
     diagnostics: Vec<String>,
     legacy: bool,
     compatibility_layer: String,
+    model: &'static DeviceModel,
 }
 
 impl ArtworkStore {
@@ -83,9 +118,19 @@ impl ArtworkStore {
 
     /// Open a specific root; public primarily for isolated tests.
     pub fn open_at(root: impl Into<PathBuf>) -> io::Result<Self> {
+        Self::open_at_model(root, &PLUS)
+    }
+
+    /// [`Self::open_at`] for the destinations of `model`.
+    pub fn open_at_model(
+        root: impl Into<PathBuf>,
+        model: &'static DeviceModel,
+    ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         fs::create_dir_all(root.join("assets"))?;
-        let (assignments, button_texts, legacy, diagnostics) = load_assignments(&root, false)?;
+        let (assignments, button_texts, legacy, diagnostics) =
+            load_assignments(&root, false, model)?;
         let compatibility_layer = if legacy { "" } else { "Base" }.into();
         Ok(Self {
             root,
@@ -94,6 +139,7 @@ impl ArtworkStore {
             diagnostics,
             legacy,
             compatibility_layer,
+            model,
         })
     }
 
@@ -107,16 +153,27 @@ impl ArtworkStore {
         root: impl Into<PathBuf>,
         active_layer: Option<&str>,
     ) -> io::Result<Self> {
+        Self::open_at_for_layer_model(root, active_layer, &PLUS)
+    }
+
+    /// [`Self::open_at_for_layer`] for the destinations of `model`.
+    pub fn open_at_for_layer_model(
+        root: impl Into<PathBuf>,
+        active_layer: Option<&str>,
+        model: &'static DeviceModel,
+    ) -> io::Result<Self> {
         let root = root.into();
+        crate::device_roots::ensure_root_fits(&root, model)?;
         let active_layer = active_layer.unwrap_or("Base");
-        let (mut assignments, button_texts, legacy, diagnostics) = load_assignments(&root, true)?;
+        let (mut assignments, button_texts, legacy, diagnostics) =
+            load_assignments(&root, true, model)?;
         fs::create_dir_all(root.join("assets"))?;
         if legacy {
             assignments = assignments
                 .into_iter()
                 .map(|((_, target), name)| ((active_layer.to_owned(), target), name))
                 .collect();
-            persist(&root, &assignments, &button_texts, false)?;
+            persist(&root, &assignments, &button_texts, false, model)?;
         }
         Ok(Self {
             root,
@@ -125,12 +182,18 @@ impl ArtworkStore {
             diagnostics,
             legacy: false,
             compatibility_layer: active_layer.to_owned(),
+            model,
         })
     }
 
     /// Non-fatal configuration and asset problems encountered while loading.
     pub fn diagnostics(&self) -> &[String] {
         &self.diagnostics
+    }
+
+    /// The device model whose destinations this store accepts.
+    pub fn model(&self) -> &'static DeviceModel {
+        self.model
     }
 
     /// Storage root for reopening the same artwork store.
@@ -166,10 +229,10 @@ impl ArtworkStore {
                 "text requires layer-aware migration",
             ));
         }
-        if !matches!(target, ArtworkTarget::Keypad(1..=8)) {
+        if !matches!(target, ArtworkTarget::Keypad(n) if self.model.is_valid_key(n)) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "text requires keypad 1..=8",
+                format!("text requires keypad 1..={}", self.model.keys()),
             ));
         }
         text.validate()?;
@@ -201,7 +264,7 @@ impl ArtworkStore {
         source: impl AsRef<Path>,
     ) -> io::Result<PathBuf> {
         self.check_mutation(layer)?;
-        if target.id().is_empty() {
+        if target.id_in(self.model).is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "unsupported artwork target",
@@ -220,7 +283,7 @@ impl ArtworkStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let name = format!("{}-{stamp}.{extension}", target.id());
+        let name = format!("{}-{stamp}.{extension}", target.id_in(self.model));
         let assets = self.root.join("assets");
         let destination = assets.join(&name);
         // Never overwrite an existing owned asset, even on a name collision.
@@ -264,7 +327,7 @@ impl ArtworkStore {
     /// failures leave all assignments, text, and referenced assets intact.
     pub fn swap_keys_in_layer(&mut self, layer: &str, first: u8, second: u8) -> io::Result<()> {
         self.check_mutation(layer)?;
-        if !(1..=8).contains(&first) || !(1..=8).contains(&second) {
+        if !self.model.is_valid_key(first) || !self.model.is_valid_key(second) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "key index out of range",
@@ -312,7 +375,7 @@ impl ArtworkStore {
         for (from, to) in owners {
             self.check_mutation(from)?;
             self.check_mutation(to)?;
-            for target in ArtworkTarget::ALL
+            for target in ArtworkTarget::all_for(self.model)
                 .into_iter()
                 .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
             {
@@ -360,7 +423,7 @@ impl ArtworkStore {
     }
 
     fn commit_with_text(&mut self, next: Assignments, texts: ButtonTexts) -> io::Result<()> {
-        persist(&self.root, &next, &texts, self.legacy)?;
+        persist(&self.root, &next, &texts, self.legacy, self.model)?;
         self.button_texts = texts;
         let old = std::mem::replace(&mut self.assignments, next);
         for name in old.values() {
@@ -402,7 +465,7 @@ fn default_root() -> io::Result<PathBuf> {
     Ok(base.join("sdeck-plus"))
 }
 
-fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
+fn load_assignments(root: &Path, strict: bool, model: &DeviceModel) -> io::Result<LoadedArtwork> {
     let text = match fs::read_to_string(root.join("artwork.conf")) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -430,8 +493,12 @@ fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
             let Some(layer) = decode_layer(layer) else {
                 return invalid_config(strict, "invalid encoded layer name");
             };
-            let Some(target @ ArtworkTarget::Keypad(1..=8)) = ArtworkTarget::from_id(id) else {
-                return invalid_config(strict, "text requires keypad 1..=8");
+            let Some(target @ ArtworkTarget::Keypad(_)) = ArtworkTarget::from_id_in(model, id)
+            else {
+                return invalid_config(
+                    strict,
+                    &format!("text requires keypad 1..={}", model.keys()),
+                );
             };
             let Ok(text) = serde_json::from_str::<ButtonText>(json) else {
                 return invalid_config(strict, "invalid button text configuration");
@@ -454,7 +521,7 @@ fn load_assignments(root: &Path, strict: bool) -> io::Result<LoadedArtwork> {
             }
             _ => return invalid_config(strict, "malformed artwork row"),
         };
-        let Some(target) = ArtworkTarget::from_id(id) else {
+        let Some(target) = ArtworkTarget::from_id_in(model, id) else {
             return invalid_config(strict, "unknown artwork target");
         };
         let portable = name.starts_with("./imagenes/");
@@ -528,9 +595,10 @@ fn persist(
     assignments: &Assignments,
     button_texts: &ButtonTexts,
     legacy: bool,
+    model: &DeviceModel,
 ) -> io::Result<()> {
     let mut rows: Vec<_> = assignments.iter().collect();
-    rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id()));
+    rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id_in(model)));
     let version = if legacy { CONFIG_VERSION } else { TEXT_VERSION };
     let mut text = format!("{version}\n");
     for ((layer, target), name) in rows {
@@ -538,16 +606,16 @@ fn persist(
             text.push_str(&encode_layer(layer));
             text.push('\t');
         }
-        text.push_str(&format!("{}\t{}\n", target.id(), name));
+        text.push_str(&format!("{}\t{}\n", target.id_in(model), name));
     }
     let mut texts: Vec<_> = button_texts.iter().collect();
-    texts.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id()));
+    texts.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id_in(model)));
     for ((layer, target), overlay) in texts {
         let json = serde_json::to_string(overlay).map_err(io::Error::other)?;
         text.push_str(&format!(
             "{}\t{}\ttext\t{json}\n",
             encode_layer(layer),
-            target.id()
+            target.id_in(model)
         ));
     }
     let temp = root.join("artwork.conf.tmp");
@@ -1162,7 +1230,7 @@ mod tests {
 
     #[test]
     fn targets_are_exactly_thirteen_unique_stable_ids() {
-        let ids: Vec<_> = ArtworkTarget::ALL.iter().map(|t| t.id()).collect();
+        let ids: Vec<_> = ArtworkTarget::ALL.iter().map(|t| t.id_in(&PLUS)).collect();
         assert_eq!(ids.len(), 13);
         assert_eq!(
             ids.iter().collect::<std::collections::HashSet<_>>().len(),

@@ -609,7 +609,7 @@ impl InfoReader {
             InfoSource::Memory => parse_memory(&fs::read_to_string("/proc/meminfo").ok()?),
             InfoSource::Temperature => format_temperature(&read_temperatures()),
             InfoSource::Obs => {
-                let config = obs::ObsConfig::load().ok()?;
+                let config = obs::ObsConfig::load_at(&self.root).ok()?;
                 obs::Client::new(config)
                     .probe()
                     .ok()

@@ -38,6 +38,7 @@ impl DeviceAction {
 }
 
 /// Remember intent even after a failed write; a fresh connection starts at full brightness.
+#[derive(Clone)]
 pub(crate) struct DesiredState {
     brightness: u8,
     sleeping: bool,

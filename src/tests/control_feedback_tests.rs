@@ -79,7 +79,15 @@ pub(super) fn assert_control_feedback() {
                 .unwrap();
         }
     };
-    let send = |event: protocol::Event| events.send(MonitorEvent::Input(event)).unwrap();
+    let send = |event: protocol::Event| {
+        events
+            .send(MonitorEvent::Input {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS,
+                event,
+            })
+            .unwrap()
+    };
     let idle = rendered_pixels(&window, &view);
     capture("idle");
 

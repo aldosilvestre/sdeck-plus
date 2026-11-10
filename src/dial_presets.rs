@@ -109,7 +109,7 @@ fn presets() -> Vec<Preset> {
 
 type Assign = Rc<dyn Fn(usize, usize) -> bool>;
 
-/// Build the Dials tab and make the four dial previews accept its presets.
+/// Build the Dials tab and make the dial previews accept its presets.
 pub(crate) fn connect(
     selected: Rc<Vec<gtk::Widget>>,
     ui: &BindingUi,
@@ -127,6 +127,8 @@ pub(crate) fn connect(
         let artwork = artwork.clone();
         let presets = presets.clone();
         let widgets: Vec<_> = selected.iter().map(ObjectExt::downgrade).collect();
+        // The first dial's widget follows the strip, after every key.
+        let dial_offset = usize::from(ui.model.get().keys()) + 1;
         let guard_ui = ui.clone();
         let guard_widgets = widgets.clone();
         let apply: Assign = Rc::new(move |preset, dial| {
@@ -160,7 +162,7 @@ pub(crate) fn connect(
                 return false;
             }
             let controls: Vec<_> = widgets.iter().filter_map(glib::WeakRef::upgrade).collect();
-            set_selected_control(&controls, 9 + dial);
+            set_selected_control(&controls, dial_offset + dial);
             heading.set_text(&control_heading(ControlKind::Encoder, Some(number)));
             ui.load_selected_binding(&layers);
             if runtime.save_binding(next) {
@@ -181,7 +183,7 @@ pub(crate) fn connect(
                 && guard_ui.control_number() == Some((dial + 1) as u8);
             if guard_ui.is_dirty() && !same_dial {
                 let anchor = guard_widgets
-                    .get(9 + dial)
+                    .get(dial_offset + dial)
                     .and_then(glib::WeakRef::upgrade)
                     .and_then(|control| control.downcast::<Button>().ok());
                 if let Some(anchor) = anchor {
@@ -238,9 +240,10 @@ pub(crate) fn connect(
         row.add_controller(source);
         let ui = ui.clone();
         let assign = assign.clone();
+        let dials = ui.model.get().dials;
         row.connect_clicked(
             move |_| match ui.control_number().and_then(|n| n.checked_sub(1)) {
-                Some(dial) if ui.control_kind() == ControlKind::Encoder && dial < 4 => {
+                Some(dial) if ui.control_kind() == ControlKind::Encoder && dial < dials => {
                     assign(index, usize::from(dial));
                 }
                 _ => ui.error("Select a dial before assigning a preset."),
@@ -250,7 +253,13 @@ pub(crate) fn connect(
     }
     page.append(&list);
 
-    for (dial, control) in selected.iter().skip(9).take(4).enumerate() {
+    let model = ui.model.get();
+    for (dial, control) in selected
+        .iter()
+        .skip(usize::from(model.keys()) + 1)
+        .take(usize::from(model.dials))
+        .enumerate()
+    {
         // A distinct boxed type keeps presets apart from keys and key swapping.
         let target = gtk::DropTarget::new(DialPreset::static_type(), gtk::gdk::DragAction::COPY);
         let weak = control.downgrade();

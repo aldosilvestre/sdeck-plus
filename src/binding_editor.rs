@@ -1,3 +1,4 @@
+use crate::device_model::{DeviceModel, PLUS};
 use crate::layers::{Action, LayerStore, SwipeDirection, Trigger};
 use std::path::PathBuf;
 
@@ -43,6 +44,18 @@ pub enum ActionKind {
     Extended,
 }
 
+/// The control kinds `model` has: its keys, plus dials and touch strip when present.
+pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
+    let mut controls = vec![ControlKind::Button];
+    if model.dials > 0 {
+        controls.push(ControlKind::Encoder);
+    }
+    if model.has_touch() {
+        controls.push(ControlKind::Touch);
+    }
+    controls
+}
+
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
         ControlKind::Button => vec![EventKind::ButtonPress],
@@ -63,7 +76,43 @@ pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     }
 }
 
+/// Why `number` is no control of `model`, in the editor's words; `None` when
+/// the model has it (the strip, number 0, is always a valid touch selection).
+pub fn control_number_error(
+    model: &DeviceModel,
+    control: ControlKind,
+    number: u8,
+) -> Option<String> {
+    match control {
+        ControlKind::Button if !model.is_valid_key(number) => Some(format!(
+            "Button {number} does not exist on the {}; its buttons are 1..={}.",
+            model.name,
+            model.keys()
+        )),
+        ControlKind::Encoder if !model.is_valid_dial(number) => Some(format!(
+            "Encoder {number} does not exist on the {}; its encoders are 1..={}.",
+            model.name, model.dials
+        )),
+        ControlKind::Touch if number > model.zones() => Some(format!(
+            "Touch section {number} does not exist on the {}; its sections are 1..={} (0 is the whole strip).",
+            model.name,
+            model.zones()
+        )),
+        _ => None,
+    }
+}
+
 pub fn trigger_from_selection(
+    control: ControlKind,
+    control_number: u8,
+    event: EventKind,
+) -> Result<Trigger, EditorError> {
+    trigger_from_selection_for(&PLUS, control, control_number, event)
+}
+
+/// [`trigger_from_selection`] for the control counts of `model`.
+pub fn trigger_from_selection_for(
+    model: &DeviceModel,
     control: ControlKind,
     control_number: u8,
     event: EventKind,
@@ -71,37 +120,44 @@ pub fn trigger_from_selection(
     if !events_for_control(control).contains(&event) {
         return Err("event does not match selected control".into());
     }
+    if control == ControlKind::Touch && !model.has_touch() {
+        return Err("this device has no touch strip".into());
+    }
     match (control, event) {
-        (ControlKind::Button, EventKind::ButtonPress) if (1..=8).contains(&control_number) => {
+        (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
             Ok(Trigger::KeyPress(control_number))
         }
-        (ControlKind::Encoder, EventKind::EncoderPress) if (1..=4).contains(&control_number) => {
+        (ControlKind::Encoder, EventKind::EncoderPress) if model.is_valid_dial(control_number) => {
             Ok(Trigger::EncoderPress(control_number))
         }
         (ControlKind::Encoder, EventKind::EncoderClockwise)
-            if (1..=4).contains(&control_number) =>
+            if model.is_valid_dial(control_number) =>
         {
             Ok(Trigger::EncoderClockwise(control_number))
         }
         (ControlKind::Encoder, EventKind::EncoderCounterClockwise)
-            if (1..=4).contains(&control_number) =>
+            if model.is_valid_dial(control_number) =>
         {
             Ok(Trigger::EncoderCounterClockwise(control_number))
         }
-        // Number 0 is the whole strip; 1 through 4 are its sections.
-        (ControlKind::Touch, EventKind::TouchTap) if control_number <= 4 => {
+        // Number 0 is the whole strip; 1 up to the model's last are its sections.
+        (ControlKind::Touch, EventKind::TouchTap)
+            if model.has_touch() && control_number <= model.zones() =>
+        {
             Ok(match control_number {
                 0 => Trigger::TouchTap,
                 zone => Trigger::ZoneTap(zone),
             })
         }
-        (ControlKind::Touch, EventKind::TouchPress) if control_number <= 4 => {
+        (ControlKind::Touch, EventKind::TouchPress)
+            if model.has_touch() && control_number <= model.zones() =>
+        {
             Ok(match control_number {
                 0 => Trigger::TouchPress,
                 zone => Trigger::ZonePress(zone),
             })
         }
-        (ControlKind::Touch, EventKind::TouchFlick) => Ok(Trigger::TouchFlick),
+        (ControlKind::Touch, EventKind::TouchFlick) if model.has_touch() => Ok(Trigger::TouchFlick),
         (ControlKind::Touch, EventKind::TouchSwipeLeft) => {
             Ok(Trigger::TouchSwipe(SwipeDirection::Left))
         }
@@ -226,7 +282,7 @@ pub fn control_triggers(
 ) -> Result<Vec<Trigger>, EditorError> {
     let mut triggers = Vec::new();
     for event in events_for_control(control) {
-        let trigger = trigger_from_selection(control, number, event)?;
+        let trigger = trigger_from_selection_for(store.model(), control, number, event)?;
         let section_only = control == ControlKind::Touch
             && number > 0
             && !matches!(trigger, Trigger::ZoneTap(_) | Trigger::ZonePress(_));
@@ -267,7 +323,7 @@ pub fn control_summary(
     let mut lines: Vec<String> = events_for_control(control)
         .into_iter()
         .map(|event| {
-            let action = trigger_from_selection(control, number, event)
+            let action = trigger_from_selection_for(store.model(), control, number, event)
                 .ok()
                 .and_then(|trigger| bindings.and_then(|bindings| bindings.get(&trigger)));
             format!("{}: {}", summary_event_label(event), action_summary(action))
@@ -281,7 +337,7 @@ pub fn control_summary(
     }
     if control == ControlKind::Touch {
         if let Some(bindings) = bindings {
-            for zone in 1..=4 {
+            for zone in store.model().zone_numbers() {
                 for (trigger, label) in [
                     (Trigger::ZoneTap(zone), "Tap"),
                     (Trigger::ZonePress(zone), "Hold"),
@@ -775,6 +831,49 @@ mod tests {
             ]
         );
         assert!(events_for_control(ControlKind::Touch).contains(&EventKind::TouchSwipeLeft));
+    }
+
+    #[test]
+    fn xl_keys_dials_and_sections_resolve_and_the_plus_still_refuses_them() {
+        use crate::device_model::PLUS_XL;
+        use crate::key_hold_editor::key_trigger_for;
+        assert_eq!(
+            key_trigger_for(&PLUS_XL, 36, false).unwrap(),
+            Trigger::KeyPress(36)
+        );
+        assert_eq!(
+            key_trigger_for(&PLUS_XL, 20, true).unwrap(),
+            Trigger::KeyHold(20)
+        );
+        assert!(key_trigger_for(&PLUS_XL, 37, false).is_err());
+        assert!(key_trigger_for(&PLUS, 9, true).is_err());
+        let xl =
+            |control, number, event| trigger_from_selection_for(&PLUS_XL, control, number, event);
+        assert_eq!(
+            xl(ControlKind::Encoder, 6, EventKind::EncoderClockwise).unwrap(),
+            Trigger::EncoderClockwise(6)
+        );
+        assert_eq!(
+            xl(ControlKind::Touch, 6, EventKind::TouchTap).unwrap(),
+            Trigger::ZoneTap(6)
+        );
+        assert_eq!(
+            xl(ControlKind::Touch, 0, EventKind::TouchPress).unwrap(),
+            Trigger::TouchPress
+        );
+        assert!(xl(ControlKind::Touch, 7, EventKind::TouchTap).is_err());
+        assert!(trigger_from_selection_for(
+            &PLUS,
+            ControlKind::Encoder,
+            5,
+            EventKind::EncoderPress
+        )
+        .is_err());
+        assert!(control_number_error(&PLUS_XL, ControlKind::Touch, 6).is_none());
+        assert_eq!(
+            control_number_error(&PLUS, ControlKind::Touch, 5).unwrap(),
+            "Touch section 5 does not exist on the Stream Deck +; its sections are 1..=4 (0 is the whole strip)."
+        );
     }
 
     #[test]

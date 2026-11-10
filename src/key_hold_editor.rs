@@ -1,6 +1,7 @@
 //! Optional keypad hold access without exposing the hidden physical-key selector.
 use crate::{
-    binding_editor::{trigger_from_selection, ControlKind, EditorError, EventKind},
+    binding_editor::{trigger_from_selection_for, ControlKind, EditorError, EventKind},
+    device_model::{DeviceModel, PLUS},
     layers::Trigger,
 };
 use gtk::prelude::*;
@@ -19,10 +20,23 @@ pub fn hold_toggle() -> gtk::CheckButton {
 /// Keep physical keys separate from the touch strip's existing hold gesture.
 ///
 /// # Errors
-/// Rejects physical key numbers outside 1 through 8 using the existing editor
+/// Rejects physical key numbers outside 1 through 8 (the Stream Deck +) using the existing editor
 /// validation, with the same error text as primary key selection.
 pub fn key_trigger(number: u8, hold: bool) -> Result<Trigger, EditorError> {
-    let primary = trigger_from_selection(ControlKind::Button, number, EventKind::ButtonPress)?;
+    key_trigger_for(&PLUS, number, hold)
+}
+
+/// [`key_trigger`] for the keys of `model`.
+///
+/// # Errors
+/// Rejects physical key numbers `model` does not have.
+pub fn key_trigger_for(
+    model: &DeviceModel,
+    number: u8,
+    hold: bool,
+) -> Result<Trigger, EditorError> {
+    let primary =
+        trigger_from_selection_for(model, ControlKind::Button, number, EventKind::ButtonPress)?;
     Ok(if hold {
         Trigger::KeyHold(number)
     } else {

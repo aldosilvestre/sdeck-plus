@@ -153,6 +153,12 @@ impl ConfigurationMenu {
         self.0.runtime.replace(Some(runtime));
     }
 
+    /// The runtime import and export act on.
+    #[cfg(test)]
+    pub(crate) fn bound_runtime(&self) -> Option<FeatureRuntime> {
+        self.0.runtime.borrow().clone()
+    }
+
     fn create_chooser(&self, transfer: Transfer) -> Option<gtk::FileChooserNative> {
         let window = self.0.window.upgrade()?;
         if let Some(chooser) = self.0.chooser.borrow_mut().take() {
@@ -178,6 +184,8 @@ impl ConfigurationMenu {
         if let Transfer::Export = transfer {
             chooser.set_current_name("configuration.sdeck-plus.json");
         }
+        // The operation belongs to the session shown when the user started it.
+        let target = self.0.runtime.borrow().clone();
         let weak = Rc::downgrade(&self.0);
         chooser.connect_response(move |chooser, response| {
             if let Some(state) = weak.upgrade() {
@@ -187,9 +195,9 @@ impl ConfigurationMenu {
                     menu.0.chooser.borrow_mut().take();
                     if response == ResponseType::Accept {
                         match chooser.file().and_then(|file| file.path()) {
-                            Some(path) => menu.selected_path(transfer, path),
+                            Some(path) => menu.selected_path_for(transfer, path, target.clone()),
                             None => {
-                                if let Some(runtime) = menu.0.runtime.borrow().as_ref() {
+                                if let Some(runtime) = target.as_ref() {
                                     runtime.report("Choose a local configuration file.", true);
                                 }
                             }
@@ -203,18 +211,18 @@ impl ConfigurationMenu {
         Some(chooser)
     }
 
-    fn selected_path(&self, transfer: Transfer, path: PathBuf) {
+    fn selected_path_for(&self, transfer: Transfer, path: PathBuf, target: Option<FeatureRuntime>) {
         match transfer {
-            Transfer::Import => self.confirm_import(path),
+            Transfer::Import => self.confirm_import(path, target),
             Transfer::Export => {
-                if let Some(runtime) = self.0.runtime.borrow().as_ref() {
+                if let Some(runtime) = target {
                     runtime.export_configuration(path);
                 }
             }
         }
     }
 
-    fn confirm_import(&self, path: PathBuf) {
+    fn confirm_import(&self, path: PathBuf, target: Option<FeatureRuntime>) {
         let Some(window) = self.0.window.upgrade() else {
             return;
         };
@@ -259,7 +267,7 @@ impl ConfigurationMenu {
                 if current {
                     state.confirmation.borrow_mut().take();
                     if response == ResponseType::Accept {
-                        if let Some(runtime) = state.runtime.borrow().as_ref() {
+                        if let Some(runtime) = target.as_ref() {
                             runtime.import_configuration(path.clone());
                         }
                     }
@@ -291,13 +299,15 @@ impl ConfigurationMenu {
 
     #[cfg(test)]
     pub(crate) fn select_path_for_test(&self, import: bool, path: PathBuf) {
-        self.selected_path(
+        let target = self.0.runtime.borrow().clone();
+        self.selected_path_for(
             if import {
                 Transfer::Import
             } else {
                 Transfer::Export
             },
             path,
+            target,
         );
     }
 

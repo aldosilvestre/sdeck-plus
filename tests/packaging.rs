@@ -65,7 +65,7 @@ fn every_installed_source_file_exists_in_the_repository() {
         "packaging/dev.streamdeck.EventMonitor.desktop",
         "assets/icons/scalable/apps/sdeck-plus.svg",
         "LICENSE",
-        "packaging/70-sdeck-plus.rules",
+        "udev/70-sdeck.rules",
     ];
     for package in PACKAGES {
         let text = pkgbuild(package);
@@ -78,7 +78,7 @@ fn every_installed_source_file_exists_in_the_repository() {
             "/usr/share/applications/dev.streamdeck.EventMonitor.desktop",
             "/usr/share/icons/hicolor/scalable/apps/sdeck-plus.svg",
             "/usr/share/licenses/$pkgname/LICENSE",
-            "/usr/lib/udev/rules.d/70-sdeck-plus.rules",
+            "/usr/lib/udev/rules.d/70-sdeck.rules",
         ] {
             assert!(text.contains(target), "{package} must install to {target}");
         }
@@ -115,18 +115,49 @@ fn desktop_file_matches_the_application_identity() {
 }
 
 #[test]
-fn udev_rule_matches_the_stream_deck_plus_ids() {
-    let protocol = read("src/event_api.rs").to_lowercase();
-    assert!(protocol.contains("0x0fd9") && protocol.contains("0x0084"));
-    let rules = read("packaging/70-sdeck-plus.rules");
-    let rule = rules
+fn descriptions_name_both_supported_models() {
+    let description =
+        "GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux";
+    let manifest = read("Cargo.toml");
+    assert!(manifest.contains(&format!("description = \"{description}\"")));
+    for (package, suffix) in [("sdeck-plus", ""), ("sdeck-plus-git", " (git version)")] {
+        let expected = format!("{description}{suffix}");
+        assert_eq!(
+            scalar(&pkgbuild(package), "pkgdesc"),
+            Some(expected.clone())
+        );
+        assert_eq!(srcinfo_values(&srcinfo(package), "pkgdesc"), [expected]);
+    }
+    let desktop = read("packaging/dev.streamdeck.EventMonitor.desktop");
+    assert!(desktop.lines().any(|line| {
+        line == "Comment=Configure an Elgato Stream Deck + or Stream Deck + XL on Linux"
+    }));
+}
+
+#[test]
+fn udev_rule_matches_the_ids_of_both_models() {
+    // The vendor id lives in the HID module and the product ids in the device model table.
+    let vendor = read("src/event_api.rs").to_lowercase();
+    assert!(vendor.contains("0x0fd9"));
+    let models = read("src/device_model.rs").to_lowercase();
+    let rules = read("udev/70-sdeck.rules");
+    let lines: Vec<_> = rules
         .lines()
-        .find(|line| !line.starts_with('#') && !line.is_empty())
-        .expect("rule line");
-    assert_eq!(
-        rule,
-        r#"SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0084", TAG+="uaccess""#
-    );
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .collect();
+    let pids: Vec<String> = sdeck_plus::device_model::DeviceModel::supported()
+        .flat_map(|model| model.pids.iter().map(|pid| format!("{pid:04x}")))
+        .collect();
+    assert_eq!(lines.len(), pids.len(), "one rule per supported product id");
+    for (line, pid) in lines.iter().zip(&pids) {
+        assert!(models.contains(&format!("0x{pid}")), "model table: {pid}");
+        assert_eq!(
+            *line,
+            format!(
+                r#"SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="0fd9", ATTRS{{idProduct}}=="{pid}", TAG+="uaccess""#
+            )
+        );
+    }
     assert!(rules.starts_with('#'), "rule needs a header comment");
 }
 
@@ -241,6 +272,23 @@ fn srcinfo_matches_its_pkgbuild() {
                 build.contains(&format!("'{name}:")),
                 "{package} optdepends {name}"
             );
+        }
+    }
+}
+
+#[test]
+fn every_supported_model_has_a_udev_rule_and_installer_hint() {
+    let rules = read("udev/70-sdeck.rules").to_lowercase();
+    let install = read("install.sh").to_lowercase();
+    for model in sdeck_plus::device_model::DeviceModel::supported() {
+        for pid in model.pids {
+            let id = format!("{pid:04x}");
+            assert!(
+                rules.contains(&format!("idproduct}}==\"{id}\"")),
+                "udev rule for {}",
+                model.id
+            );
+            assert!(install.contains(&id), "install.sh mentions {}", model.id);
         }
     }
 }

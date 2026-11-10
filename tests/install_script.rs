@@ -629,3 +629,48 @@ fn help_unknown_arguments_and_relative_prefix_do_not_install() {
     s.no_install();
     assert!(!s.path("requests").exists());
 }
+
+/// Run the installer with a fake sysfs holding one hidraw node per `(name, HID_ID)`.
+fn run_with_hidraw(nodes: &[(&str, &str)]) -> String {
+    let s = Sandbox::new();
+    for (name, id) in nodes {
+        s.write(
+            &format!("sys/{name}/device/uevent"),
+            &format!("DRIVER=hid-generic\nHID_ID={id}\n"),
+        );
+    }
+    let root = s.path("sys");
+    let o = s.run(
+        true,
+        &[],
+        &[("SDECK_PLUS_HIDRAW_ROOT", root.to_str().unwrap())],
+    );
+    success(&o);
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn unreadable_stream_deck_nodes_print_the_command_that_installs_the_rule_file() {
+    for id in ["0003:00000FD9:00000084", "0003:00000fd9:000000c6"] {
+        let out = run_with_hidraw(&[("hidraw-sdeck-fixture", id)]);
+        assert!(out.contains("cannot open the Stream Deck at /dev/hidraw-sdeck-fixture"));
+        // One command installs the repository's rule file, which covers every model.
+        assert!(
+            out.contains(
+                "curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules >/dev/null"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("sudo udevadm control --reload-rules && sudo udevadm trigger"));
+        assert!(
+            !out.contains("SUBSYSTEM=="),
+            "the rule text lives in the file: {out}"
+        );
+    }
+}
+
+#[test]
+fn other_hid_devices_get_no_udev_note() {
+    let out = run_with_hidraw(&[("hidraw-sdeck-fixture", "0003:00000FD9:00000080")]);
+    assert!(!out.contains("udev"), "{out}");
+}

@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match events.recv_timeout(deadline.saturating_duration_since(Instant::now()))? {
-            MonitorEvent::Connection(ConnectionState::Connected) => {
+            MonitorEvent::Connection(ConnectionState::Connected { .. }) => {
                 println!("CONNECTED: Stream Deck + 0FD9:0084, production HID worker");
                 break;
             }
@@ -48,13 +48,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     MonitorEvent::DeviceResult {
                         action: received,
                         result,
+                        ..
                     } if received == action => {
                         result.map_err(std::io::Error::other)?;
                         println!("DEVICE_OK: {action:?}");
                         break;
                     }
-                    MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {
-                        return Err(error.into());
+                    MonitorEvent::Connection(ConnectionState::Disconnected { reason, .. }) => {
+                        return Err(reason.into());
                     }
                     _ => {}
                 }
@@ -80,13 +81,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     MonitorEvent::ArtworkResult {
                         target: sdeck_plus::local_artwork::ArtworkTarget::Keypad(1),
                         result,
+                        ..
                     } => {
                         result.map_err(std::io::Error::other)?;
                         println!("BUTTON_TEXT_OK: {orientation:?}");
                         break;
                     }
-                    MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {
-                        return Err(error.into());
+                    MonitorEvent::Connection(ConnectionState::Disconnected { reason, .. }) => {
+                        return Err(reason.into());
                     }
                     _ => {}
                 }
@@ -99,7 +101,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut observed = 0u8;
         loop {
             match events.recv_timeout(deadline.saturating_duration_since(Instant::now()))? {
-                MonitorEvent::Input(input) => {
+                MonitorEvent::Input { event: input, .. } => {
                     let kind = match &input {
                         Event::Key { pressed: true, .. } => 1,
                         Event::Rotation { ticks, .. } if *ticks != 0 => 2,
@@ -119,8 +121,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         break;
                     }
                 }
-                MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {
-                    return Err(error.into());
+                MonitorEvent::Connection(ConnectionState::Disconnected { reason, .. }) => {
+                    return Err(reason.into());
                 }
                 _ => {}
             }
