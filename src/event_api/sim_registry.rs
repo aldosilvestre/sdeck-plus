@@ -4,7 +4,7 @@
 //! model later is a table edit plus verification.
 
 use super::sim_device::{key_report, Rig, SimDevice};
-use super::sim_tests::{connected, is_red, Scratch};
+use super::sim_tests::{connected, is_red, listed, Scratch};
 use super::*;
 use crate::device_model::{ProtocolFamily, Rotation, Support};
 
@@ -62,13 +62,22 @@ fn discovery_never_matches_a_planned_model() {
         for pid in model.pids {
             assert_eq!(DeviceModel::by_pid(*pid), None, "{} {pid:04X}", model.id);
             assert_eq!(DeviceModel::by_pid_supported(*pid), None);
-            assert_eq!(first_supported([(VID, *pid)]), None);
+            assert!(supported_devices([listed(VID, *pid, "a")]).is_empty());
             assert_eq!(DeviceModel::by_pid_any(*pid), Some(*model));
         }
     }
+    let found = supported_devices(
+        [0x006D, 0x009A, 0x0063, 0x00C6]
+            .into_iter()
+            .enumerate()
+            .map(|(at, pid)| listed(VID, pid, &format!("path{at}"))),
+    );
     assert_eq!(
-        first_supported([(VID, 0x006D), (VID, 0x009A), (VID, 0x0063), (VID, 0x00C6)]),
-        Some((3, &crate::device_model::PLUS_XL))
+        found
+            .iter()
+            .map(|key| (key.path.as_str(), key.model))
+            .collect::<Vec<_>>(),
+        [("path3", &crate::device_model::PLUS_XL)]
     );
 }
 
@@ -255,15 +264,23 @@ fn only_the_two_supported_product_ids_are_ever_discovered() {
             0x00C6 => Some("plus-xl"),
             _ => None,
         };
-        let found = first_supported([(VID, pid)]).map(|(_, model)| model.id);
+        let found = supported_devices([listed(VID, pid, "a")])
+            .first()
+            .map(|key| key.model.id);
         assert_eq!(found, expected, "{pid:04X}");
         assert_eq!(DeviceModel::by_pid(pid).map(|model| model.id), expected);
-        assert_eq!(first_supported([(VID ^ 1, pid)]), None, "{pid:04X}");
+        assert!(supported_devices([listed(VID ^ 1, pid, "a")]).is_empty());
     }
     for model in DeviceModel::all().iter().filter(|m| !m.is_supported()) {
         for pid in model.pids {
-            let found = first_supported([(VID, *pid), (VID, 0x0084)]);
-            assert_eq!(found.map(|(at, m)| (at, m.id)), Some((1, "plus")));
+            let found = supported_devices([listed(VID, *pid, "a"), listed(VID, 0x0084, "b")]);
+            assert_eq!(
+                found
+                    .iter()
+                    .map(|key| (key.path.as_str(), key.model.id))
+                    .collect::<Vec<_>>(),
+                [("b", "plus")]
+            );
         }
     }
 }

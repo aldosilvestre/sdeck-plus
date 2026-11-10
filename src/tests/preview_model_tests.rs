@@ -1018,7 +1018,15 @@ fn xl_input_lights_key_30_dial_5_and_zone_6_and_ignores_what_the_model_lacks() {
             layer_sender,
             events.clone(),
         );
-        let send = |event: protocol::Event| events.send(MonitorEvent::Input(event)).unwrap();
+        let send = |event: protocol::Event| {
+            events
+                .send(MonitorEvent::Input {
+                    device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                    model: &sdeck_plus::device_model::PLUS,
+                    event,
+                })
+                .unwrap()
+        };
         let key = |number: u8| preview.control(ControlRef::Key(number)).unwrap();
         let dial = |number: u8| preview.control(ControlRef::Dial(number)).unwrap();
         let zone = |number: u8| preview.control(ControlRef::Zone(number)).unwrap();

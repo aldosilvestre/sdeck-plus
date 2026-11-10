@@ -211,7 +211,11 @@ fn assert_header_connection_states() {
             "could not open: denied",
         ),
         (
-            ConnectionState::Disconnected("HID read ended: gone".into()),
+            ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS,
+                reason: "HID read ended: gone".into(),
+            },
             plus,
             "Disconnected",
             "status-idle",
@@ -219,7 +223,11 @@ fn assert_header_connection_states() {
             "HID read ended: gone\nUSB device VID 0FD9 / PID 0084",
         ),
         (
-            ConnectionState::Disconnected("HID read ended: gone".into()),
+            ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS_XL,
+                reason: "HID read ended: gone".into(),
+            },
             Some(&sdeck_plus::device_model::PLUS_XL),
             "Disconnected",
             "status-idle",
@@ -227,7 +235,10 @@ fn assert_header_connection_states() {
             "USB device VID 0FD9 / PID 00C6",
         ),
         (
-            ConnectionState::Connected(&sdeck_plus::device_model::PLUS),
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS,
+            },
             None,
             "Connected",
             "status-online",
@@ -235,7 +246,10 @@ fn assert_header_connection_states() {
             "USB device VID 0FD9 / PID 0084 · HID input and artwork active",
         ),
         (
-            ConnectionState::Connected(&sdeck_plus::device_model::PLUS_XL),
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS_XL,
+            },
             None,
             "Connected",
             "status-online",
@@ -245,7 +259,7 @@ fn assert_header_connection_states() {
     ] {
         assert_eq!(
             show_connection_state(status, detail, &state, last),
-            matches!(state, ConnectionState::Connected(_))
+            state.is_connected()
         );
         assert_state(badge, tone, text, tooltip);
     }

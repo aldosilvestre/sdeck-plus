@@ -1,11 +1,13 @@
 //! A simulated Stream Deck + / + XL for tests. It scripts 0x01 input reports,
 //! captures every 0x02 output report and feature report, reassembles the JPEG
 //! chunks of each image, and can be unplugged so a different model is found
-//! next. No hardware, HID stack or display server is involved.
+//! next. A [`Bus`] lists the devices that are plugged in right now, and a
+//! [`Rig`] runs the real hub over it, so several devices can come and go at
+//! runtime. No hardware, HID stack or display server is involved.
 
 use super::*;
 use gtk::gdk_pixbuf::Pixbuf;
-use std::{collections::VecDeque, thread::JoinHandle};
+use std::collections::VecDeque;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -19,6 +21,8 @@ struct State {
     inputs: VecDeque<Scripted>,
     writes: Vec<Vec<u8>>,
     features: Vec<Vec<u8>>,
+    /// The cable was pulled: a read has already failed.
+    gone: bool,
 }
 
 /// One simulated unit. Clones share the same wire, so the test keeps a handle
@@ -41,7 +45,10 @@ impl Device for SimDevice {
         }
         match state.inputs.pop_front() {
             None => Ok(0),
-            Some(Scripted::Unplug) => Err("unplugged".into()),
+            Some(Scripted::Unplug) => {
+                state.gone = true;
+                Err("unplugged".into())
+            }
             Some(Scripted::Report(report)) => {
                 let size = report.len().min(buffer.len());
                 buffer[..size].copy_from_slice(&report[..size]);
@@ -105,6 +112,11 @@ impl SimDevice {
         let (state, wake) = &*self.state;
         state.lock().unwrap().inputs.push_back(item);
         wake.notify_all();
+    }
+
+    /// Whether a read already failed because of an unplug.
+    fn is_gone(&self) -> bool {
+        self.state.0.lock().unwrap().gone
     }
 
     /// Every 0x02 output report written so far.
@@ -263,47 +275,235 @@ pub(super) fn touch_report(
     input_report(model, 0x02, &payload)
 }
 
-/// A monitor wired to scripted devices, plugged in one after another.
+struct Plugged {
+    path: String,
+    serial: Option<String>,
+    vendor: u16,
+    product: u16,
+    /// Listed as the device's own model, whatever the registry says of its
+    /// product id; otherwise it is matched by id like a real listing.
+    as_model: bool,
+    device: SimDevice,
+}
+
+#[derive(Default)]
+struct BusState {
+    plugged: Vec<Plugged>,
+    /// Devices that take the place of the one on `SEQUENCE_PATH` once it is gone.
+    sequence: VecDeque<SimDevice>,
+    opens: std::collections::HashMap<String, usize>,
+    enumerations: usize,
+    failing: std::collections::HashSet<String>,
+    /// Hand the hub its candidates in the opposite order.
+    reversed: bool,
+}
+
+/// The path of the one-after-another devices of [`Rig::start`].
+pub(super) const SEQUENCE_PATH: &str = "sim";
+
+/// What the USB bus lists right now. Clones share it.
+#[derive(Clone, Default)]
+pub(super) struct Bus(Arc<Mutex<BusState>>);
+
+impl Bus {
+    /// Plug a device in on `path`; it is listed from the next enumeration.
+    pub(super) fn plug(&self, path: &str, device: &SimDevice) {
+        self.add(path, (VID, device.model.pid()), device, true);
+    }
+
+    /// Plug in whatever has these USB ids, supported or not.
+    pub(super) fn plug_ids(&self, path: &str, ids: (u16, u16), device: &SimDevice) {
+        self.add(path, ids, device, false);
+    }
+
+    fn add(&self, path: &str, (vendor, product): (u16, u16), device: &SimDevice, as_model: bool) {
+        self.0.lock().unwrap().plugged.push(Plugged {
+            path: path.to_owned(),
+            serial: Some(format!("SERIAL-{path}")),
+            vendor,
+            product,
+            as_model,
+            device: device.clone(),
+        });
+    }
+
+    /// Pull the cable: the device stops being listed and its next read fails.
+    pub(super) fn unplug(&self, path: &str) {
+        let mut state = self.0.lock().unwrap();
+        state.plugged.retain(|plugged| {
+            let gone = plugged.path == path;
+            if gone {
+                plugged.device.unplug();
+            }
+            !gone
+        });
+    }
+
+    /// Make opening `path` fail, as a device another program holds does.
+    pub(super) fn refuse_open(&self, path: &str) {
+        self.0.lock().unwrap().failing.insert(path.to_owned());
+    }
+
+    pub(super) fn reverse_order(&self) {
+        self.0.lock().unwrap().reversed = true;
+    }
+
+    /// How many times `path` was opened.
+    pub(super) fn opens(&self, path: &str) -> usize {
+        self.0.lock().unwrap().opens.get(path).copied().unwrap_or(0)
+    }
+
+    /// How many times the hub has listed the bus.
+    pub(super) fn enumerations(&self) -> usize {
+        self.0.lock().unwrap().enumerations
+    }
+
+    fn enumerate(&self) -> Result<Vec<hub::Candidate<SimDevice>>, String> {
+        let mut state = self.0.lock().unwrap();
+        state.enumerations += 1;
+        state.plugged.retain(|plugged| !plugged.device.is_gone());
+        let sequenced = state
+            .plugged
+            .iter()
+            .any(|plugged| plugged.path == SEQUENCE_PATH);
+        if !sequenced {
+            if let Some(next) = state.sequence.pop_front() {
+                state.plugged.push(Plugged {
+                    path: SEQUENCE_PATH.into(),
+                    serial: None,
+                    vendor: VID,
+                    product: next.model.pid(),
+                    as_model: true,
+                    device: next,
+                });
+            }
+        }
+        let mut keys: Vec<DeviceKey> = state
+            .plugged
+            .iter()
+            .filter(|plugged| plugged.as_model)
+            .map(|plugged| DeviceKey {
+                path: plugged.path.clone(),
+                serial: plugged.serial.clone(),
+                model: plugged.device.model,
+            })
+            .collect();
+        let mut listing: Vec<_> = state
+            .plugged
+            .iter()
+            .filter(|plugged| !plugged.as_model)
+            .map(|plugged| Listing {
+                path: plugged.path.clone(),
+                serial: plugged.serial.clone(),
+                vendor: plugged.vendor,
+                product: plugged.product,
+            })
+            .collect();
+        // The OS order is not a contract.
+        listing.reverse();
+        keys.extend(supported_devices(listing));
+        if state.reversed {
+            keys.reverse();
+        }
+        Ok(keys
+            .into_iter()
+            .map(|key| {
+                let device = state
+                    .plugged
+                    .iter()
+                    .find(|plugged| plugged.path == key.path)
+                    .map(|plugged| plugged.device.clone())
+                    .unwrap();
+                let bus = self.clone();
+                let path = key.path.clone();
+                hub::Candidate {
+                    key,
+                    open: Box::new(move || {
+                        let mut state = bus.0.lock().unwrap();
+                        *state.opens.entry(path.clone()).or_default() += 1;
+                        if state.failing.contains(&path) {
+                            return Err("Device found but could not open: busy".into());
+                        }
+                        Ok(device)
+                    }),
+                }
+            })
+            .collect())
+    }
+}
+
+/// Faster than production, so a test does not wait seconds to see a replug.
+pub(super) fn quick() -> hub::Cadence {
+    hub::Cadence {
+        search: Duration::from_millis(4),
+        after_unplug: Duration::from_millis(2),
+    }
+}
+
+/// The real hub over a [`Bus`].
 pub(super) struct Rig {
     events: Receiver<MonitorEvent>,
+    /// The one-session adapter's inputs: they reach the first device's model.
     pub(super) artwork: Sender<ArtworkCommand>,
     pub(super) controls: Sender<DeviceAction>,
     /// Everything received so far, heartbeats excluded.
     pub(super) seen: Vec<MonitorEvent>,
-    stop: StopSignal,
-    worker: Option<JoinHandle<()>>,
+    pub(super) bus: Bus,
+    hid: HidController,
 }
 
 impl Rig {
+    /// Devices plugged in one after another: each appears once the one before
+    /// it has been unplugged, all on the same path.
     pub(super) fn start(devices: &[&SimDevice]) -> Self {
-        let mut plugged: VecDeque<SimDevice> = devices.iter().map(|d| (*d).clone()).collect();
+        let bus = Bus::default();
+        bus.0.lock().unwrap().sequence = devices.iter().map(|d| (*d).clone()).collect();
+        // Slow enough that a test reacts to an unplug before the next device
+        // shows up.
+        Self::over(
+            bus,
+            hub::Cadence {
+                search: Duration::from_millis(60),
+                after_unplug: Duration::from_millis(60),
+            },
+        )
+    }
+
+    /// Nothing plugged in; use [`Rig::bus`] to plug devices at runtime.
+    pub(super) fn empty() -> Self {
+        Self::over(Bus::default(), quick())
+    }
+
+    pub(super) fn over(bus: Bus, cadence: hub::Cadence) -> Self {
         let (sender, events) = std::sync::mpsc::channel();
-        let (artwork, commands) = std::sync::mpsc::channel();
-        let (controls, control_commands) = std::sync::mpsc::channel();
-        let stop = StopSignal::default();
-        let worker_stop = stop.clone();
-        let worker = thread::spawn(move || {
-            monitor_for(
-                sender,
-                (commands, control_commands),
-                worker_stop,
-                move |_| {
-                    plugged
-                        .pop_front()
-                        .map(|device| (device.clone(), device.model))
-                        .ok_or_else(|| "Device not found".to_string())
-                },
-                prepare_artwork_for,
-            )
-        });
+        let listing = bus.clone();
+        let hid = hub::spawn(
+            sender,
+            move |_| listing.enumerate(),
+            prepare_artwork_for,
+            cadence,
+        );
         Self {
             events,
-            artwork,
-            controls,
+            artwork: hid.artwork_sender(),
+            controls: hid.control_sender(),
             seen: Vec::new(),
-            stop,
-            worker: Some(worker),
+            bus,
+            hid,
         }
+    }
+
+    pub(super) fn handle(&self) -> HidHandle {
+        self.hid.handle()
+    }
+
+    /// Artwork for every live device of `model`.
+    pub(super) fn send_artwork(&self, model: &DeviceModel, command: ArtworkCommand) {
+        self.hid.send_artwork(model, command).unwrap();
+    }
+
+    pub(super) fn send_control(&self, model: &DeviceModel, action: DeviceAction) {
+        self.hid.send_control(model, action).unwrap();
     }
 
     /// Consume events until `pick` accepts one; bounded in time.
@@ -326,24 +526,37 @@ impl Rig {
         self.wait_event(|event| (*event == MonitorEvent::Connection(wanted.clone())).then_some(()));
     }
 
-    /// The next `count` decoded input events.
+    /// The next `count` decoded input events, from any device.
     pub(super) fn inputs(&mut self, count: usize) -> Vec<Event> {
+        self.inputs_tagged(count)
+            .into_iter()
+            .map(|(_, _, event)| event)
+            .collect()
+    }
+
+    /// The next `count` input events with the device and model they came from.
+    pub(super) fn inputs_tagged(
+        &mut self,
+        count: usize,
+    ) -> Vec<(DeviceId, &'static DeviceModel, Event)> {
         let mut found = Vec::new();
         self.wait_event(|event| {
-            if let MonitorEvent::Input(input) = event {
-                found.push(input.clone());
+            if let MonitorEvent::Input {
+                device,
+                model,
+                event,
+            } = event
+            {
+                found.push((*device, *model, event.clone()));
             }
             (found.len() == count).then_some(())
         });
         found
     }
 
-    /// Stop the monitor; it blanks the connected device before returning.
+    /// Stop the hub; each worker blanks its own device before it returns.
     pub(super) fn stop(&mut self) {
-        self.stop.request();
-        if let Some(worker) = self.worker.take() {
-            worker.join().unwrap();
-        }
+        self.hid.shutdown();
     }
 }
 

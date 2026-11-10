@@ -13,14 +13,18 @@ fn product_ids_select_their_model_and_unknown_ones_are_ignored() {
     assert_eq!(DeviceModel::by_pid(0x0084), Some(&PLUS));
     assert_eq!(DeviceModel::by_pid(0x00C6), Some(&PLUS_XL));
     assert_eq!(DeviceModel::by_pid(0x0080), None);
-    assert_eq!(
-        first_supported([(VID, 0x00C6), (VID, 0x0084)]),
-        Some((0, &PLUS_XL))
-    );
-    assert_eq!(
-        first_supported([(VID, 0x0084), (VID, 0x00C6)]),
-        Some((0, &PLUS))
-    );
+    // Whichever order the OS lists them in, the path decides.
+    for order in [
+        [("a", 0x00C6), ("b", 0x0084)],
+        [("b", 0x0084), ("a", 0x00C6)],
+    ] {
+        let found =
+            supported_devices(order.map(|(path, pid)| super::sim_tests::listed(VID, pid, path)));
+        assert_eq!(
+            found.iter().map(|key| key.model).collect::<Vec<_>>(),
+            [&PLUS_XL, &PLUS]
+        );
+    }
 }
 
 #[test]
@@ -76,17 +80,18 @@ fn plus_xl_plus_xl_replug_cycle_drops_stale_artwork_only_on_a_model_change() {
         rig.wait_event(|event| {
             matches!(
                 event,
-                MonitorEvent::Connection(ConnectionState::Disconnected(_))
+                MonitorEvent::Connection(ConnectionState::Disconnected { .. })
             )
             .then_some(())
         });
         if let Some(next) = devices.get(at + 1) {
             // Queued while unplugged, drawn only if the next device is the same model.
-            rig.artwork
-                .send(ArtworkCommand::Clear {
+            rig.send_artwork(
+                device.model,
+                ArtworkCommand::Clear {
                     target: ArtworkTarget::Keypad(2),
-                })
-                .unwrap();
+                },
+            );
             rig.wait_connection(connected(next.model));
             if next.model == device.model {
                 next.wait_until(|next| next.image_count() == 1);

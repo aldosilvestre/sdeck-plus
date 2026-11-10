@@ -36,11 +36,7 @@ impl Drop for ShutdownDevice {
 #[test]
 fn shutdown_turns_off_and_clears_every_display_before_releasing_device() {
     // Given: an idle connected worker, with pending artwork and controls.
-    let stop = StopSignal::default();
-    let worker_stop = stop.clone();
     let (events, _receiver) = channel();
-    let (artwork, commands) = channel();
-    let (controls, control_commands) = channel();
     let (entered, entry) = channel();
     let (release, released) = channel();
     let (dropped, reports) = channel();
@@ -50,33 +46,22 @@ fn shutdown_turns_off_and_clears_every_display_before_releasing_device() {
         reports: Default::default(),
         dropped,
     });
-    let worker = thread::spawn(move || {
-        monitor(
-            events,
-            (commands, control_commands),
-            worker_stop,
-            |_| Ok(device.take().unwrap()),
-            |_| panic!("pending artwork must not be prepared"),
-        );
-    });
-    let mut controller = HidController {
-        stop,
-        worker: Some(worker),
-        artwork,
-        controls,
-    };
+    let mut controller = tests::single(
+        events,
+        move |_| Ok(device.take().unwrap()),
+        |_, _| panic!("pending artwork must not be prepared"),
+    );
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
     controller
-        .artwork_sender()
-        .send(ArtworkCommand::Assign {
-            target: ArtworkTarget::Keypad(1),
-            path: "must-not-upload.png".into(),
-        })
+        .send_artwork(
+            &PLUS,
+            ArtworkCommand::Assign {
+                target: ArtworkTarget::Keypad(1),
+                path: "must-not-upload.png".into(),
+            },
+        )
         .unwrap();
-    controller
-        .control_sender()
-        .send(DeviceAction::Wake)
-        .unwrap();
+    controller.send_control(&PLUS, DeviceAction::Wake).unwrap();
 
     // When: full shutdown cancels ordinary work, then joins the device owner.
     controller.request_stop();
@@ -120,7 +105,7 @@ fn shutdown_turns_off_and_clears_every_display_before_releasing_device() {
             .chain(std::iter::once((0x0b, 0)))
             .collect::<Vec<_>>()
     );
-    assert!(controller.worker.is_none());
+    assert!(controller.hub.is_none());
 }
 
 struct FeatureDevice {
@@ -148,11 +133,7 @@ impl Device for FeatureDevice {
 #[test]
 fn worker_replays_disconnected_adjustment_on_the_same_device_owner() {
     // Given: two device generations, with reads controlled by exact signals.
-    let stop = StopSignal::default();
-    let worker_stop = stop.clone();
     let (events, receiver) = channel();
-    let (_artwork, artwork) = channel();
-    let (controls, control_commands) = channel();
     let (features, reports) = channel();
     let (entered, entry) = channel();
     let (release, released) = channel();
@@ -170,34 +151,32 @@ fn worker_replays_disconnected_adjustment_on_the_same_device_owner() {
             features,
         },
     ]);
-    let worker = thread::spawn(move || {
-        monitor(
-            events,
-            (artwork, control_commands),
-            worker_stop,
-            |_| Ok(devices.pop_front().unwrap()),
-            |_| panic!("unexpected artwork preparation"),
-        );
-    });
+    let mut hid = tests::single(
+        events,
+        move |_| Ok(devices.pop_front().unwrap()),
+        |_, _| panic!("unexpected artwork preparation"),
+    );
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(
         reports.recv_timeout(Duration::from_secs(5)).unwrap()[2],
         100
     );
-    controls.send(DeviceAction::Brightness(44)).unwrap();
+    hid.send_control(&PLUS, DeviceAction::Brightness(44))
+        .unwrap();
     release.send(Ok(0)).unwrap();
     let first = reports.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(first.len(), 32);
     assert_eq!(first[2], 44);
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
-    controls.send(DeviceAction::AdjustBrightness(-4)).unwrap();
+    hid.send_control(&PLUS, DeviceAction::AdjustBrightness(-4))
+        .unwrap();
     // When: a pending relative command crosses the physical disconnection.
     release.send(Err("unplugged".into())).unwrap();
     let replayed = reports.recv_timeout(Duration::from_secs(5)).unwrap();
     entry2.recv_timeout(Duration::from_secs(5)).unwrap();
-    stop.request();
+    hid.request_stop();
     release2.send(Ok(0)).unwrap();
-    worker.join().unwrap();
+    hid.shutdown();
     // Then: the second HID generation gets the final state once, not the step twice.
     assert_eq!(replayed.len(), 32);
     assert_eq!(replayed[2], 40);
@@ -206,7 +185,7 @@ fn worker_replays_disconnected_adjustment_on_the_same_device_owner() {
     let results: Vec<_> = receiver
         .try_iter()
         .filter_map(|event| match event {
-            MonitorEvent::DeviceResult { action, result } => Some((action, result)),
+            MonitorEvent::DeviceResult { action, result, .. } => Some((action, result)),
             _ => None,
         })
         .collect();
@@ -215,5 +194,5 @@ fn worker_replays_disconnected_adjustment_on_the_same_device_owner() {
     assert_eq!(results[1].0, DeviceAction::AdjustBrightness(-4));
     assert!(results[1].1.is_err());
     assert_eq!(results[2], (DeviceAction::AdjustBrightness(-4), Ok(())));
-    assert!(controls.send(DeviceAction::Wake).is_err());
+    assert!(hid.send_control(&PLUS, DeviceAction::Wake).is_err());
 }

@@ -39,7 +39,7 @@ fn results(events: Receiver<MonitorEvent>) -> Vec<(DeviceAction, Result<(), Stri
     events
         .try_iter()
         .filter_map(|event| match event {
-            MonitorEvent::DeviceResult { action, result } => Some((action, result)),
+            MonitorEvent::DeviceResult { action, result, .. } => Some((action, result)),
             _ => None,
         })
         .collect()

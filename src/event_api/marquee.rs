@@ -262,12 +262,13 @@ mod tests {
         queue.send(info(key, title(Glyph::Play, LONG))).unwrap();
         let (events, received) = std::sync::mpsc::channel();
         let stop = StopSignal::default();
+        let device = super::super::DeviceId::from_path("test");
         let mut marquees = Marquees::default();
         let mut written = 0;
         process_artwork_with(
             &commands,
             &stop,
-            &events,
+            (&events, device),
             prepare_artwork,
             |report| {
                 written += 1;
@@ -284,7 +285,7 @@ mod tests {
                 marquees,
                 at,
                 &stop,
-                &events,
+                (&events, device),
                 |command, elapsed| {
                     frames.push(elapsed);
                     super::super::prepare_artwork_at(command, elapsed)
@@ -304,7 +305,7 @@ mod tests {
             &mut marquees,
             later + Duration::from_secs(1),
             &stop,
-            &events,
+            (&events, device),
             super::super::prepare_artwork_at,
             |_| Err("unplugged".into()),
         );

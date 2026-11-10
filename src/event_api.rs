@@ -2,13 +2,11 @@
 //! External transports can be attached behind this API in a later phase.
 
 use crate::{
-    device_control::DeviceAction,
-    device_model::DeviceModel,
-    image_output,
-    local_artwork::ArtworkTarget,
-    protocol::{decode_report_for, Event},
+    device_control::DeviceAction, device_model::DeviceModel, image_output,
+    local_artwork::ArtworkTarget, protocol::Event,
 };
 use std::{
+    fmt,
     path::PathBuf,
     sync::{
         mpsc::{Receiver, Sender},
@@ -27,7 +25,12 @@ mod device_controls;
 #[path = "device_control/monitor_tests.rs"]
 mod control_monitor_tests;
 
+mod active;
+mod device_worker;
+mod hub;
 mod marquee;
+
+pub use active::ActiveDevice;
 
 #[cfg(test)]
 mod sim_device;
@@ -42,26 +45,94 @@ mod sim_xl_probes;
 mod sim_registry;
 
 #[cfg(test)]
+mod sim_hub;
+
+#[cfg(test)]
 mod rotation_probes;
+
+/// Opaque identity of one attached device, derived from its HID path: the same
+/// path always gives the same id, so a replug on the same port keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DeviceId(u64);
+
+impl DeviceId {
+    pub fn from_path(path: &str) -> Self {
+        // FNV-1a: stable across runs and releases, unlike `DefaultHasher`.
+        Self(path.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        }))
+    }
+}
+
+impl fmt::Display for DeviceId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "hid-{:016x}", self.0)
+    }
+}
+
+/// What enumeration knows about one supported device before it is opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceKey {
+    pub path: String,
+    pub serial: Option<String>,
+    pub model: &'static DeviceModel,
+}
+
+impl DeviceKey {
+    pub fn id(&self) -> DeviceId {
+        DeviceId::from_path(&self.path)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
+    /// No device is open at all; the hub is looking.
     Searching,
-    /// A supported device is open; everything follows its model.
-    Connected(&'static DeviceModel),
+    /// A supported device is open; everything about it follows its model.
+    Connected {
+        device: DeviceId,
+        model: &'static DeviceModel,
+    },
+    /// No device is open and the hub could not use what it found.
     Unavailable(String),
-    Disconnected(String),
+    /// One device went away; the others keep running.
+    Disconnected {
+        device: DeviceId,
+        model: &'static DeviceModel,
+        reason: String,
+    },
+}
+
+impl ConnectionState {
+    /// The model of the device that just connected.
+    pub fn connected_model(&self) -> Option<&'static DeviceModel> {
+        match self {
+            Self::Connected { model, .. } => Some(model),
+            _ => None,
+        }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MonitorEvent {
     Connection(ConnectionState),
-    Input(Event),
+    Input {
+        device: DeviceId,
+        model: &'static DeviceModel,
+        event: Event,
+    },
     ArtworkResult {
+        device: DeviceId,
         target: ArtworkTarget,
         result: Result<(), String>,
     },
     DeviceResult {
+        /// `None` when the action was addressed to a model with no live device.
+        device: Option<DeviceId>,
         action: DeviceAction,
         result: Result<(), String>,
     },
@@ -148,19 +219,50 @@ pub enum ArtworkCommand {
     },
 }
 
+impl MonitorEvent {
+    /// The device an event is about, when it is about one.
+    pub fn device(&self) -> Option<DeviceId> {
+        match self {
+            Self::Connection(
+                ConnectionState::Connected { device, .. }
+                | ConnectionState::Disconnected { device, .. },
+            )
+            | Self::Input { device, .. }
+            | Self::ArtworkResult { device, .. } => Some(*device),
+            Self::DeviceResult { device, .. } => *device,
+            _ => None,
+        }
+    }
+
+    /// The decoded input, whichever device sent it.
+    pub fn input(&self) -> Option<&Event> {
+        match self {
+            Self::Input { event, .. } => Some(event),
+            _ => None,
+        }
+    }
+}
+
 /// Cooperative cancellation and report admission share one lock. The lock is never
 /// held across HID calls: an admitted call may finish, and callbacks may request stop.
+/// A child (see [`StopSignal::child`]) also stops when its parent does.
 #[derive(Clone, Default)]
-struct StopSignal(Arc<(Mutex<bool>, Condvar)>);
+struct StopSignal(Arc<(Mutex<bool>, Condvar)>, Option<Arc<StopSignal>>);
 
 impl StopSignal {
+    /// A signal of its own that also reads as stopped once `self` is. Only the
+    /// parent's condition variable wakes waiters, so children never `wait`.
+    fn child(&self) -> Self {
+        Self(Arc::default(), Some(Arc::new(self.clone())))
+    }
+
     fn request(&self) {
         *self.0 .0.lock().unwrap() = true;
         self.0 .1.notify_all();
     }
 
     fn live(&self) -> bool {
-        !*self.0 .0.lock().unwrap()
+        !*self.0 .0.lock().unwrap() && self.1.as_ref().is_none_or(|parent| parent.live())
     }
 
     fn wait(&self, duration: Duration) -> bool {
@@ -173,38 +275,111 @@ impl StopSignal {
     }
 }
 
-/// Owns the HID worker; dropping it cancels, joins and releases the device.
-pub struct HidController {
-    stop: StopSignal,
-    worker: Option<thread::JoinHandle<()>>,
+/// The hub refused a command because it has shut down or its receiver is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HubClosed;
+
+impl fmt::Display for HubClosed {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the HID hub is closed")
+    }
+}
+
+impl std::error::Error for HubClosed {}
+
+/// A cloneable way to address the devices by model. It outlives nothing: once
+/// the controller shuts the hub down, every send fails with [`HubClosed`].
+#[derive(Clone)]
+pub struct HidHandle {
+    /// The one-session adapter inputs: what is sent here goes to the model of
+    /// the first connected device.
     artwork: Sender<ArtworkCommand>,
     controls: Sender<DeviceAction>,
+    shared: Option<Arc<hub::Shared>>,
+}
+
+impl HidHandle {
+    /// Send artwork to every live device of `model`. With none attached it is
+    /// held for the next one (see `hub::Shared`).
+    pub fn send_artwork(
+        &self,
+        model: &DeviceModel,
+        command: ArtworkCommand,
+    ) -> Result<(), HubClosed> {
+        match &self.shared {
+            Some(shared) => shared.send_artwork(Some(model.pid()), command),
+            None => self.artwork.send(command).map_err(|_| HubClosed),
+        }
+    }
+
+    /// Send a brightness or sleep action to every live device of `model`.
+    pub fn send_control(&self, model: &DeviceModel, action: DeviceAction) -> Result<(), HubClosed> {
+        match &self.shared {
+            Some(shared) => shared.send_control(model.pid(), action),
+            None => self.controls.send(action).map_err(|_| HubClosed),
+        }
+    }
+}
+
+/// Owns the HID hub; dropping it cancels, joins every device worker and
+/// releases the devices.
+///
+/// Artwork and device controls are addressed to a MODEL. Every live device of
+/// that model gets them, so two units of one model mirror each other.
+pub struct HidController {
+    stop: StopSignal,
+    hub: Option<thread::JoinHandle<()>>,
+    handle: HidHandle,
 }
 
 impl HidController {
+    /// A sender whose commands reach the model of the first connected device.
     pub fn control_sender(&self) -> Sender<DeviceAction> {
-        self.controls.clone()
+        self.handle.controls.clone()
     }
 
+    /// A sender whose commands reach the model of the first connected device.
     pub fn artwork_sender(&self) -> Sender<ArtworkCommand> {
-        self.artwork.clone()
+        self.handle.artwork.clone()
+    }
+
+    pub fn handle(&self) -> HidHandle {
+        self.handle.clone()
+    }
+
+    /// See [`HidHandle::send_artwork`].
+    pub fn send_artwork(
+        &self,
+        model: &DeviceModel,
+        command: ArtworkCommand,
+    ) -> Result<(), HubClosed> {
+        self.handle.send_artwork(model, command)
+    }
+
+    /// See [`HidHandle::send_control`].
+    pub fn send_control(&self, model: &DeviceModel, action: DeviceAction) -> Result<(), HubClosed> {
+        self.handle.send_control(model, action)
     }
 
     pub fn request_stop(&self) {
         self.stop.request();
     }
 
-    /// A controller with no HID worker, for callers that inject connection
-    /// events themselves. The receivers see everything sent to the device.
+    /// A controller with no HID hub, for callers that inject connection
+    /// events themselves. The receivers see everything sent to the device,
+    /// whatever model it was addressed to.
     pub fn detached() -> (Self, Receiver<ArtworkCommand>, Receiver<DeviceAction>) {
         let (artwork, commands) = std::sync::mpsc::channel();
         let (controls, control_commands) = std::sync::mpsc::channel();
         (
             Self {
                 stop: StopSignal::default(),
-                worker: None,
-                artwork,
-                controls,
+                hub: None,
+                handle: HidHandle {
+                    artwork,
+                    controls,
+                    shared: None,
+                },
             },
             commands,
             control_commands,
@@ -213,8 +388,8 @@ impl HidController {
 
     pub fn shutdown(&mut self) {
         self.request_stop();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        if let Some(hub) = self.hub.take() {
+            let _ = hub.join();
         }
     }
 }
@@ -225,31 +400,15 @@ impl Drop for HidController {
     }
 }
 
-/// Start the blocking HID producer on a dedicated, owned thread. It serves
-/// whichever supported model it finds first, and follows a swap to the other.
+/// Start the HID hub on a dedicated, owned thread. It serves every supported
+/// device it finds, each on a worker of its own, and follows plugs and unplugs.
 pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
-    let (artwork, commands) = std::sync::mpsc::channel();
-    let (controls, control_commands) = std::sync::mpsc::channel();
-    let stop = StopSignal::default();
-    let worker_stop = stop.clone();
-    let worker = thread::Builder::new()
-        .name("streamdeck-hid".into())
-        .spawn(move || {
-            monitor_for(
-                sender,
-                (commands, control_commands),
-                worker_stop,
-                discover_device,
-                prepare_artwork_for,
-            )
-        })
-        .expect("failed to start HID reader thread");
-    HidController {
-        stop,
-        worker: Some(worker),
-        artwork,
-        controls,
-    }
+    hub::spawn(
+        sender,
+        enumerate_devices,
+        prepare_artwork_for,
+        hub::Cadence::default(),
+    )
 }
 
 /// Queued work, and whether a snapshot replaced everything shown before it.
@@ -308,46 +467,78 @@ impl Device for hidapi::HidDevice {
     }
 }
 
-/// The first supported device among `(vendor, product)` ids, with its model.
-fn first_supported(
-    ids: impl IntoIterator<Item = (u16, u16)>,
-) -> Option<(usize, &'static DeviceModel)> {
-    ids.into_iter()
-        .enumerate()
-        .find_map(|(position, (vendor, product))| {
-            (vendor == VID)
-                .then(|| DeviceModel::by_pid_supported(product))
-                .flatten()
-                .map(|model| (position, model))
-        })
+/// One HID listing entry, before it is matched to a model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Listing {
+    path: String,
+    serial: Option<String>,
+    vendor: u16,
+    product: u16,
 }
 
-fn discover_device(stop: &StopSignal) -> Result<(hidapi::HidDevice, &'static DeviceModel), String> {
+/// Every listed supported device with its model, in HID path order. Other
+/// vendors, unknown products and Planned models never match.
+fn supported_devices(listing: impl IntoIterator<Item = Listing>) -> Vec<DeviceKey> {
+    let mut found: Vec<_> = listing
+        .into_iter()
+        .filter(|entry| entry.vendor == VID)
+        .filter_map(|entry| {
+            DeviceModel::by_pid_supported(entry.product).map(|model| DeviceKey {
+                path: entry.path,
+                serial: entry.serial,
+                model,
+            })
+        })
+        .collect();
+    // hidapi's order is not a contract; the path is.
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    found
+}
+
+/// The message while no supported device is listed.
+fn not_found_message() -> String {
+    let wanted = DeviceModel::supported()
+        .map(|model| format!("{} PID {:04X}", model.name, model.pid()))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
+}
+
+fn enumerate_devices(stop: &StopSignal) -> Result<Vec<hub::Candidate<hidapi::HidDevice>>, String> {
     if !stop.live() {
         return Err("HID discovery cancelled".into());
     }
     let api =
         hidapi::HidApi::new().map_err(|error| format!("HID initialization failed: {error}"))?;
-    let infos: Vec<_> = api.device_list().collect();
-    let (position, model) = first_supported(
-        infos
-            .iter()
-            .map(|device| (device.vendor_id(), device.product_id())),
-    )
-    .ok_or_else(|| {
-        let wanted = DeviceModel::supported()
-            .map(|model| format!("{} PID {:04X}", model.name, model.pid()))
-            .collect::<Vec<_>>()
-            .join(" or ");
-        format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
-    })?;
-    if !stop.live() {
-        return Err("HID discovery cancelled".into());
-    }
-    infos[position]
-        .open_device(&api)
-        .map(|device| (device, model))
-        .map_err(|error| format!("Device found but could not open: {error}"))
+    let (listing, mut paths): (Vec<_>, std::collections::HashMap<_, _>) = api
+        .device_list()
+        .map(|info| {
+            let path = info.path().to_string_lossy().into_owned();
+            let listed = Listing {
+                path: path.clone(),
+                serial: info.serial_number().map(str::to_owned),
+                vendor: info.vendor_id(),
+                product: info.product_id(),
+            };
+            (listed, (path, info.path().to_owned()))
+        })
+        .unzip();
+    let api = Arc::new(api);
+    Ok(supported_devices(listing)
+        .into_iter()
+        .map(|key| {
+            let api = api.clone();
+            let path = paths.remove(&key.path);
+            hub::Candidate {
+                key,
+                open: Box::new(move || {
+                    let path = path.ok_or("Device found but could not open: path vanished")?;
+                    api.open_path(&path)
+                        .map_err(|error| format!("Device found but could not open: {error}"))
+                }),
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -457,14 +648,21 @@ fn process_artwork(
     write: impl FnMut(&[u8]) -> Result<usize, String>,
 ) {
     let mut marquees = marquee::Marquees::new(&PLUS);
-    process_artwork_with(commands, stop, sender, prepare, write, &mut marquees);
+    process_artwork_with(
+        commands,
+        stop,
+        (sender, DeviceId::from_path("test")),
+        prepare,
+        write,
+        &mut marquees,
+    );
 }
 
 /// Send queued artwork, keeping `marquees` in step with what each target shows.
 fn process_artwork_with(
     commands: &Receiver<ArtworkCommand>,
     stop: &StopSignal,
-    sender: &Sender<MonitorEvent>,
+    (sender, device): (&Sender<MonitorEvent>, DeviceId),
     mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
     mut write: impl FnMut(&[u8]) -> Result<usize, String>,
     marquees: &mut marquee::Marquees,
@@ -500,7 +698,11 @@ fn process_artwork_with(
             marquees.stop(target);
         }
         if sender
-            .send(MonitorEvent::ArtworkResult { target, result })
+            .send(MonitorEvent::ArtworkResult {
+                device,
+                target,
+                result,
+            })
             .is_err()
         {
             stop.request();
@@ -515,7 +717,7 @@ fn send_marquee_frames(
     marquees: &mut marquee::Marquees,
     now: Instant,
     stop: &StopSignal,
-    sender: &Sender<MonitorEvent>,
+    (sender, device): (&Sender<MonitorEvent>, DeviceId),
     mut prepare: impl FnMut(ArtworkCommand, Duration) -> Result<Vec<image_output::OutputReport>, String>,
     mut write: impl FnMut(&[u8]) -> Result<usize, String>,
 ) {
@@ -535,6 +737,7 @@ fn send_marquee_frames(
             marquees.stop(target);
             if sender
                 .send(MonitorEvent::ArtworkResult {
+                    device,
                     target,
                     result: Err(error),
                 })
@@ -543,162 +746,6 @@ fn send_marquee_frames(
                 stop.request();
                 return;
             }
-        }
-    }
-}
-
-/// [`monitor_for`] on a Stream Deck + device.
-#[cfg(test)]
-fn monitor<D: Device>(
-    sender: Sender<MonitorEvent>,
-    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
-    stop: StopSignal,
-    mut discover: impl FnMut(&StopSignal) -> Result<D, String>,
-    mut prepare: impl FnMut(ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>,
-) {
-    monitor_for(
-        sender,
-        commands,
-        stop,
-        move |stop| discover(stop).map(|device| (device, &PLUS)),
-        move |_, command| prepare(command),
-    )
-}
-
-/// The HID owner: discover a device, serve it as its own model until it goes,
-/// then search again, possibly finding the other model.
-fn monitor_for<D: Device>(
-    sender: Sender<MonitorEvent>,
-    commands: (Receiver<ArtworkCommand>, Receiver<DeviceAction>),
-    stop: StopSignal,
-    mut discover: impl FnMut(&StopSignal) -> Result<(D, &'static DeviceModel), String>,
-    mut prepare: impl FnMut(
-        &DeviceModel,
-        ArtworkCommand,
-    ) -> Result<Vec<image_output::OutputReport>, String>,
-) {
-    let mut served: Option<&'static DeviceModel> = None;
-    let (commands, controls) = commands;
-    let mut controls = device_controls::Controls::new(controls);
-    while stop.live() {
-        controls.drain(&stop, &sender, None);
-        if !stop.live() {
-            return;
-        }
-        if sender
-            .send(MonitorEvent::Connection(ConnectionState::Searching))
-            .is_err()
-        {
-            return;
-        }
-        let (device, model) = match discover(&stop) {
-            Ok((device, model)) => match model.ensure_protocol() {
-                Ok(()) => (device, model),
-                Err(error) => {
-                    // Never drive a family without a handler.
-                    drop(device);
-                    if sender
-                        .send(MonitorEvent::Connection(ConnectionState::Unavailable(
-                            error,
-                        )))
-                        .is_err()
-                        || !stop.wait(Duration::from_secs(2))
-                    {
-                        return;
-                    }
-                    continue;
-                }
-            },
-            Err(error) => {
-                if sender
-                    .send(MonitorEvent::Connection(ConnectionState::Unavailable(
-                        error,
-                    )))
-                    .is_err()
-                {
-                    return;
-                }
-                if !stop.wait(Duration::from_secs(2)) {
-                    return;
-                }
-                continue;
-            }
-        };
-        // Keep shutdown writes on the HID owner, after ordinary work is cancelled.
-        // The session returns on unplug without blanking a disconnected device.
-        (|| {
-            if !stop.live() {
-                return;
-            }
-            // Work queued for the other model is meaningless on this one; the
-            // consumer redraws from the Connected report.
-            if served.is_some_and(|previous| previous != model) {
-                pending_artwork(&commands);
-            }
-            served = Some(model);
-            if sender
-                .send(MonitorEvent::Connection(ConnectionState::Connected(model)))
-                .is_err()
-            {
-                stop.request();
-                return;
-            }
-            let mut buffer = vec![0u8; model.input_report_len];
-            // Scrolling titles belong to this connection; a reconnect redraws.
-            let mut marquees = marquee::Marquees::new(model);
-            controls.replay(&stop, &sender, &device);
-            while stop.live() {
-                // A heartbeat detects consumer loss even when there is no input.
-                if sender.send(MonitorEvent::Heartbeat).is_err() {
-                    stop.request();
-                    return;
-                }
-                controls.drain(&stop, &sender, Some(&device));
-                process_artwork_with(
-                    &commands,
-                    &stop,
-                    &sender,
-                    |command| prepare(model, command),
-                    |report| device.write(report),
-                    &mut marquees,
-                );
-                send_marquee_frames(
-                    &mut marquees,
-                    Instant::now(),
-                    &stop,
-                    &sender,
-                    |command, elapsed| prepare_artwork_at_for(model, command, elapsed),
-                    |report| device.write(report),
-                );
-                if !stop.live() {
-                    return;
-                }
-                match device.read(&mut buffer) {
-                    Ok(0) => {}
-                    Ok(size) => {
-                        for event in decode_report_for(model, &buffer[..size]) {
-                            if sender.send(MonitorEvent::Input(event)).is_err() {
-                                stop.request();
-                                return;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.send(MonitorEvent::Connection(
-                            ConnectionState::Disconnected(format!("HID read ended: {error}")),
-                        ));
-                        break;
-                    }
-                }
-            }
-        })();
-        if !stop.live() {
-            blank_device(model, &device);
-            return;
-        }
-        drop(device);
-        if !stop.wait(Duration::from_secs(1)) {
-            return;
         }
     }
 }
@@ -803,7 +850,7 @@ mod tests {
         let results = received
             .try_iter()
             .filter_map(|event| match event {
-                super::MonitorEvent::ArtworkResult { target, result } => Some((target, result)),
+                super::MonitorEvent::ArtworkResult { target, result, .. } => Some((target, result)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -814,6 +861,39 @@ mod tests {
     }
 
     use super::*;
+
+    /// A hub over one device on one path: `discover` runs each time the hub
+    /// opens it, which it only does while no worker has the path.
+    pub(super) fn single<D: Device + Send + 'static>(
+        events: Sender<MonitorEvent>,
+        discover: impl FnMut(&StopSignal) -> Result<D, String> + Send + 'static,
+        prepare: impl Fn(&DeviceModel, ArtworkCommand) -> Result<Vec<image_output::OutputReport>, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> HidController {
+        let discover = Arc::new(Mutex::new(discover));
+        hub::spawn(
+            events,
+            move |stop| {
+                let discover = discover.clone();
+                let stop = stop.clone();
+                Ok(vec![hub::Candidate {
+                    key: DeviceKey {
+                        path: "test".into(),
+                        serial: None,
+                        model: &PLUS,
+                    },
+                    open: Box::new(move || (discover.lock().unwrap())(&stop)),
+                }])
+            },
+            prepare,
+            hub::Cadence {
+                search: Duration::from_millis(4),
+                after_unplug: Duration::from_millis(2),
+            },
+        )
+    }
 
     #[test]
     fn composed_text_is_encoded_for_the_requested_key() {
@@ -968,28 +1048,21 @@ mod tests {
     #[test]
     fn cancellation_interrupts_retry_wait_and_discovery() {
         for during_discovery in [false, true] {
-            let stop = StopSignal::default();
-            let worker_stop = stop.clone();
             let (events, receiver) = std::sync::mpsc::channel();
-            let (_commands, commands) = std::sync::mpsc::channel();
             let (entered, entry) = std::sync::mpsc::channel();
             let (release, released) = std::sync::mpsc::channel();
-            let worker = thread::spawn(move || {
-                monitor::<FakeDevice>(
-                    events,
-                    (commands, std::sync::mpsc::channel().1),
-                    worker_stop,
-                    |_| {
-                        entered.send(()).unwrap();
-                        released.recv().unwrap();
-                        Err("not found".into())
-                    },
-                    |_| panic!("unexpected preparation"),
-                )
-            });
+            let mut hid = single::<FakeDevice>(
+                events,
+                move |_| {
+                    entered.send(()).unwrap();
+                    released.recv().unwrap();
+                    Err("not found".into())
+                },
+                |_, _| panic!("unexpected preparation"),
+            );
             entry.recv().unwrap();
             if during_discovery {
-                stop.request();
+                hid.request_stop();
             }
             release.send(()).unwrap();
             if !during_discovery {
@@ -1001,56 +1074,42 @@ mod tests {
                         break;
                     }
                 }
-                stop.request();
+                hid.request_stop();
             }
-            worker.join().unwrap();
+            hid.shutdown();
         }
     }
 
     #[test]
     fn idle_worker_stops_and_controller_join_is_idempotent() {
-        let stop = StopSignal::default();
-        let worker_stop = stop.clone();
         let (events, _receiver) = std::sync::mpsc::channel();
-        let (artwork, commands) = std::sync::mpsc::channel();
-        let (controls, control_commands) = std::sync::mpsc::channel();
         let (entered, entry) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let mut device = Some(FakeDevice {
             read_started: entered,
             read_release: released,
         });
-        let worker = thread::spawn(move || {
-            monitor(
-                events,
-                (commands, control_commands),
-                worker_stop,
-                |_| Ok(device.take().unwrap()),
-                |_| panic!("unexpected preparation"),
-            )
-        });
-        let mut controller = HidController {
-            stop,
-            worker: Some(worker),
-            artwork,
-            controls,
-        };
+        let mut controller = single(
+            events,
+            move |_| Ok(device.take().unwrap()),
+            |_, _| panic!("unexpected preparation"),
+        );
         entry.recv().unwrap();
-        let controls = controller.control_sender();
-        controls.send(DeviceAction::Sleep).unwrap();
+        controller.send_control(&PLUS, DeviceAction::Sleep).unwrap();
         controller.request_stop();
         release.send(Ok(0)).unwrap();
         controller.shutdown();
         controller.shutdown();
-        assert!(controller.worker.is_none());
-        assert!(controls.send(DeviceAction::Wake).is_err());
+        assert!(controller.hub.is_none());
+        assert_eq!(
+            controller.send_control(&PLUS, DeviceAction::Wake),
+            Err(HubClosed)
+        );
     }
 
     #[test]
     fn reconnect_recovers_until_consumer_disappears() {
-        let stop = StopSignal::default();
         let (events, receiver) = std::sync::mpsc::channel();
-        let (_artwork, commands) = std::sync::mpsc::channel();
         let (entered, entry) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let (entered2, entry2) = std::sync::mpsc::channel();
@@ -1065,21 +1124,18 @@ mod tests {
                 read_release: released,
             },
         ];
-        let worker = thread::spawn(move || {
-            monitor(
-                events,
-                (commands, std::sync::mpsc::channel().1),
-                stop,
-                |_| Ok(devices.pop().unwrap()),
-                |_| panic!("unexpected preparation"),
-            )
-        });
+        let mut hid = single(
+            events,
+            move |_| Ok(devices.pop().unwrap()),
+            |_, _| panic!("unexpected preparation"),
+        );
         entry.recv().unwrap();
         release.send(Err("unplugged".into())).unwrap();
         entry2.recv().unwrap();
         drop(receiver);
         release2.send(Ok(0)).unwrap();
-        worker.join().unwrap();
+        // The hub ends by itself once nobody listens; nothing asks it to stop.
+        hid.hub.take().unwrap().join().unwrap();
     }
 
     #[test]
@@ -1111,10 +1167,14 @@ mod tests {
 
     #[test]
     fn api_messages_are_typed_and_cloneable() {
-        let message = MonitorEvent::Input(Event::Key {
-            index: 2,
-            pressed: true,
-        });
+        let message = MonitorEvent::Input {
+            device: DeviceId::from_path("test"),
+            model: &PLUS,
+            event: Event::Key {
+                index: 2,
+                pressed: true,
+            },
+        };
         assert_eq!(message.clone(), message);
         assert_eq!(
             MonitorEvent::Connection(ConnectionState::Searching),

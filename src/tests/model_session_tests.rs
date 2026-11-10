@@ -144,7 +144,10 @@ impl Harness {
 
     pub(super) fn connect(&self, model: &'static DeviceModel) {
         self.events
-            .send(MonitorEvent::Connection(ConnectionState::Connected(model)))
+            .send(MonitorEvent::Connection(ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model,
+            }))
             .unwrap();
     }
 
@@ -524,9 +527,11 @@ fn preview_as_is_disabled_with_an_explanation_while_a_device_is_connected() {
         // Unplugging keeps the last model shown and unlocks the choice.
         harness
             .events
-            .send(MonitorEvent::Connection(ConnectionState::Disconnected(
-                "unplugged".into(),
-            )))
+            .send(MonitorEvent::Connection(ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: harness.model(),
+                reason: "unplugged".into(),
+            }))
             .unwrap();
         let unlocked = dropdown.clone();
         wait_until("the picker to unlock", move || unlocked.is_sensitive());
@@ -733,7 +738,10 @@ fn a_switch_waits_for_a_running_configuration_operation() {
         // The device announces itself first, as it does in production.
         harness
             .session
-            .connection_changed(&ConnectionState::Connected(&PLUS_XL));
+            .connection_changed(&ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &PLUS_XL,
+            });
         assert_eq!(harness.model().id, "plus");
         assert_eq!(harness.model().id, "plus");
         // Once the export finishes the deferred switch runs.
@@ -907,10 +915,14 @@ fn a_deferred_device_switch_is_dropped_when_the_device_flips_back() {
         let runtime = h.session.runtime();
         runtime.export_configuration(h.base.join("p.sdeck-plus.json"));
         assert!(!runtime.can_switch_model());
-        h.session
-            .connection_changed(&ConnectionState::Connected(&PLUS_XL));
-        h.session
-            .connection_changed(&ConnectionState::Connected(&PLUS));
+        h.session.connection_changed(&ConnectionState::Connected {
+            device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+            model: &PLUS_XL,
+        });
+        h.session.connection_changed(&ConnectionState::Connected {
+            device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+            model: &PLUS,
+        });
         let s = h.session.clone();
         wait_until("export", move || {
             s.runtime()

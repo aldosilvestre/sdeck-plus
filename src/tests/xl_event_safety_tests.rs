@@ -40,11 +40,20 @@ fn every_event_an_xl_can_emit_is_handled_by_the_event_path() {
             layer_sender,
             events.clone(),
         );
-        let send = |event: protocol::Event| events.send(MonitorEvent::Input(event)).unwrap();
+        let send = |event: protocol::Event| {
+            events
+                .send(MonitorEvent::Input {
+                    device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                    model: &sdeck_plus::device_model::PLUS_XL,
+                    event,
+                })
+                .unwrap()
+        };
         events
-            .send(MonitorEvent::Connection(ConnectionState::Connected(
-                &sdeck_plus::device_model::PLUS_XL,
-            )))
+            .send(MonitorEvent::Connection(ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::PLUS_XL,
+            }))
             .unwrap();
         for index in 0..36 {
             for pressed in [true, false] {

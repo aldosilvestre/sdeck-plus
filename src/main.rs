@@ -1532,6 +1532,7 @@ fn start_event_updates_with(
         widgets.zone_widgets.clear();
         widgets
     };
+    let mut active = event_api::ActiveDevice::default();
     glib::timeout_add_local(Duration::from_millis(40), move || {
         let MonitorWidgets {
             status,
@@ -1543,7 +1544,11 @@ fn start_event_updates_with(
             touch_status,
             ..
         } = &widgets;
-        let pending: Vec<_> = receiver.try_iter().collect();
+        // One session for now: only the first connected device is followed.
+        let pending: Vec<_> = receiver
+            .try_iter()
+            .flat_map(|event| active.accept(event))
+            .collect();
         let accepts_input = || {
             session
                 .as_ref()
@@ -1584,7 +1589,7 @@ fn start_event_updates_with(
                     feature_runtime.complete_key_swap(&layer, first, second, result);
                 }
                 MonitorEvent::Connection(state) => {
-                    if !matches!(state, ConnectionState::Connected(_)) {
+                    if !state.is_connected() {
                         feature_runtime.cancel_key_holds();
                     }
                     let connected = show_connection_state(
@@ -1603,7 +1608,7 @@ fn start_event_updates_with(
                         artwork.refresh(true);
                     }
                 }
-                MonitorEvent::Input(event) => {
+                MonitorEvent::Input { event, .. } => {
                     if accepts_input() {
                         feature_runtime.execute_input(&event);
                     }
@@ -1692,7 +1697,7 @@ fn start_event_updates_with(
                         }
                     }
                 }
-                MonitorEvent::ArtworkResult { target, result } => match result {
+                MonitorEvent::ArtworkResult { target, result, .. } => match result {
                     Ok(()) => {}
                     Err(error) => {
                         connection_detail.set_text(&format!(
@@ -1700,7 +1705,7 @@ fn start_event_updates_with(
                         ));
                     }
                 },
-                MonitorEvent::DeviceResult { action, result } => match result {
+                MonitorEvent::DeviceResult { action, result, .. } => match result {
                     Ok(()) => feature_runtime
                         .report(&format!("Device: {} applied.", action.summary()), false),
                     Err(error) => feature_runtime.report(
@@ -4377,13 +4382,13 @@ fn show_connection_state(
             format!("{name} found but unavailable — hover for details"),
             format!("{reason}\n{}", usb_id(last)),
         ),
-        ConnectionState::Disconnected(reason) => (
+        ConnectionState::Disconnected { reason, .. } => (
             "Disconnected",
             "status-idle",
             format!("{name} disconnected — plug it back in"),
             format!("{reason}\n{}", usb_id(last)),
         ),
-        ConnectionState::Connected(model) => (
+        ConnectionState::Connected { model, .. } => (
             "Connected",
             "status-online",
             format!(
@@ -4402,7 +4407,7 @@ fn show_connection_state(
     for label in [status, detail] {
         label.set_tooltip_text(Some(&hint));
     }
-    matches!(state, ConnectionState::Connected(_))
+    state.is_connected()
 }
 
 /// The preview control for the zero-based input `index`, if the shown model

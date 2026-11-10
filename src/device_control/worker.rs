@@ -1,19 +1,35 @@
 //! Controls use a separate FIFO but the same HID worker and cancellation gate.
 
-use super::{Device, MonitorEvent, StopSignal};
+use super::{Device, DeviceId, MonitorEvent, StopSignal};
 use crate::device_control::{DesiredState, DeviceAction};
 use std::sync::mpsc::{Receiver, Sender};
 
 pub(super) struct Controls {
+    device: DeviceId,
     commands: Receiver<DeviceAction>,
     desired: DesiredState,
 }
 
 impl Controls {
+    #[cfg(test)]
     pub(super) fn new(commands: Receiver<DeviceAction>) -> Self {
-        Self {
+        Self::for_device(
+            DeviceId::from_path("test"),
             commands,
-            desired: DesiredState::default(),
+            DesiredState::default(),
+        )
+    }
+
+    /// The controls of one device, starting from what its model last asked for.
+    pub(super) fn for_device(
+        device: DeviceId,
+        commands: Receiver<DeviceAction>,
+        desired: DesiredState,
+    ) -> Self {
+        Self {
+            device,
+            commands,
+            desired,
         }
     }
 
@@ -91,7 +107,11 @@ impl Controls {
     ) {
         if stop.live()
             && sender
-                .send(MonitorEvent::DeviceResult { action, result })
+                .send(MonitorEvent::DeviceResult {
+                    device: Some(self.device),
+                    action,
+                    result,
+                })
                 .is_err()
         {
             stop.request();

@@ -59,8 +59,12 @@ pub(super) fn is_red(image: &Pixbuf, x: i32, y: i32) -> bool {
     pixel[0] > 180 && pixel[1] < 90 && pixel[2] < 90
 }
 
+/// The device the one-after-another [`Rig::start`] plugs in.
 pub(super) fn connected(model: &'static DeviceModel) -> ConnectionState {
-    ConnectionState::Connected(model)
+    ConnectionState::Connected {
+        device: DeviceId::from_path(super::sim_device::SEQUENCE_PATH),
+        model,
+    }
 }
 
 fn upload(device: &SimDevice, target: ArtworkTarget, path: std::path::PathBuf) -> CapturedImages {
@@ -83,17 +87,35 @@ impl CapturedImages {
     }
 }
 
+pub(super) fn listed(vendor: u16, product: u16, path: &str) -> Listing {
+    Listing {
+        path: path.into(),
+        serial: None,
+        vendor,
+        product,
+    }
+}
+
 #[test]
-fn first_supported_device_wins_and_other_vendors_are_ignored() {
-    let ids = [
-        (0x1234, 0x0084),
-        (VID, 0x1111),
-        (VID, 0x00C6),
-        (VID, 0x0084),
-    ];
-    assert_eq!(first_supported(ids), Some((2, &PLUS_XL)));
-    assert_eq!(first_supported([(0x1234, 0x0084)]), None);
-    assert_eq!(first_supported([(VID, 0x0084)]), Some((0, &PLUS)));
+fn every_supported_device_is_found_in_path_order_and_other_vendors_are_ignored() {
+    let found = supported_devices([
+        listed(0x1234, 0x0084, "/dev/hidraw0"),
+        listed(VID, 0x1111, "/dev/hidraw1"),
+        listed(VID, 0x00C6, "/dev/hidraw3"),
+        listed(VID, 0x0084, "/dev/hidraw2"),
+    ]);
+    assert_eq!(
+        found
+            .iter()
+            .map(|key| (key.path.as_str(), key.model.pid()))
+            .collect::<Vec<_>>(),
+        [("/dev/hidraw2", 0x0084), ("/dev/hidraw3", 0x00C6)]
+    );
+    assert!(supported_devices([listed(0x1234, 0x0084, "a")]).is_empty());
+    assert_eq!(
+        supported_devices([listed(VID, 0x0084, "a")])[0].model,
+        &PLUS
+    );
 }
 
 #[test]
@@ -214,16 +236,17 @@ fn replugging_the_other_model_reports_it_and_drops_stale_artwork() {
     rig.wait_event(|event| {
         matches!(
             event,
-            MonitorEvent::Connection(ConnectionState::Disconnected(_))
+            MonitorEvent::Connection(ConnectionState::Disconnected { .. })
         )
         .then_some(())
     });
     // Queued while nothing is attached, for the keypad of the old model.
-    rig.artwork
-        .send(ArtworkCommand::Clear {
+    rig.send_artwork(
+        &PLUS,
+        ArtworkCommand::Clear {
             target: ArtworkTarget::Keypad(3),
-        })
-        .unwrap();
+        },
+    );
     rig.wait_connection(connected(&PLUS_XL));
     xl.send(key_report(&PLUS_XL, &[35]));
     assert_eq!(rig.inputs(36).len(), 36);
@@ -232,7 +255,11 @@ fn replugging_the_other_model_reports_it_and_drops_stale_artwork() {
         [
             ConnectionState::Searching,
             connected(&PLUS),
-            ConnectionState::Disconnected("HID read ended: unplugged".into()),
+            ConnectionState::Disconnected {
+                device: DeviceId::from_path(super::sim_device::SEQUENCE_PATH),
+                model: &PLUS,
+                reason: "HID read ended: unplugged".into(),
+            },
             ConnectionState::Searching,
             connected(&PLUS_XL),
         ]
@@ -257,21 +284,23 @@ fn replugging_the_same_model_keeps_queued_artwork() {
     rig.wait_event(|event| {
         matches!(
             event,
-            MonitorEvent::Connection(ConnectionState::Disconnected(_))
+            MonitorEvent::Connection(ConnectionState::Disconnected { .. })
         )
         .then_some(())
     });
-    rig.artwork
-        .send(ArtworkCommand::Clear {
+    rig.send_artwork(
+        &PLUS,
+        ArtworkCommand::Clear {
             target: ArtworkTarget::Keypad(3),
-        })
-        .unwrap();
+        },
+    );
     rig.wait_event(|event| {
         matches!(
             event,
             MonitorEvent::ArtworkResult {
                 target: ArtworkTarget::Keypad(3),
-                result: Ok(())
+                result: Ok(()),
+                ..
             }
         )
         .then_some(())

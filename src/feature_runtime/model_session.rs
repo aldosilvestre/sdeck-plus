@@ -347,7 +347,7 @@ impl ModelSession {
     /// Follow the connection. Returns whether the current pictures still have
     /// to be sent to the device: a switch has already sent its own.
     pub(crate) fn connection_changed(self: &Rc<Self>, state: &ConnectionState) -> bool {
-        let ConnectionState::Connected(model) = state else {
+        let ConnectionState::Connected { model, .. } = state else {
             self.connected.set(None);
             self.sync_picker();
             return false;

@@ -518,7 +518,7 @@ fn assert_saved_text_on_streamdeck() {
             .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
             .unwrap()
         {
-            MonitorEvent::Connection(ConnectionState::Connected(_)) => break,
+            MonitorEvent::Connection(ConnectionState::Connected { .. }) => break,
             MonitorEvent::Connection(ConnectionState::Unavailable(error)) => {
                 panic!("HID unavailable: {error}")
             }
@@ -614,12 +614,12 @@ fn wait_for_saved_hid_images(receiver: &mpsc::Receiver<MonitorEvent>) {
             .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
             .unwrap()
         {
-            MonitorEvent::ArtworkResult { target, result } => {
+            MonitorEvent::ArtworkResult { target, result, .. } => {
                 result.unwrap_or_else(|error| panic!("HID image {target:?} failed: {error}"));
                 pending.remove(&target);
             }
-            MonitorEvent::Connection(ConnectionState::Disconnected(error)) => {
-                panic!("HID disconnected: {error}")
+            MonitorEvent::Connection(ConnectionState::Disconnected { reason, .. }) => {
+                panic!("HID disconnected: {reason}")
             }
             _ => {}
         }
