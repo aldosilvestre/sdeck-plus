@@ -762,46 +762,6 @@ fn the_plus_text_editor_keeps_its_120_px_preview() {
 }
 
 #[test]
-fn switching_model_pops_down_a_key_menu_and_leaves_no_popover_on_a_removed_key() {
-    run_gtk_test(|| {
-        let warnings = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let sink = warnings.clone();
-        let handler = glib::log_set_handler(
-            Some("Gtk"),
-            glib::LogLevels::LEVEL_WARNING | glib::LogLevels::LEVEL_CRITICAL,
-            false,
-            false,
-            move |_, _, message| sink.lock().unwrap().push(message.to_owned()),
-        );
-        let Some(f) = fixture("popover-teardown", &PLUS_XL) else {
-            glib::log_remove_handler(Some("Gtk"), handler);
-            return;
-        };
-        let key = f.widgets.preview.control(ControlRef::Key(3)).unwrap();
-        right_click(&key);
-        let mut found = Vec::new();
-        popovers(&key, &mut found);
-        let menu = found.pop().expect("the key's context menu");
-        wait_until_mapped(&menu);
-        drop(key);
-        f.widgets.preview.show_model(&PLUS);
-        assert_eq!(menu.parent(), None, "no popover stays on a removed key");
-        assert!(!menu.is_visible());
-        // Let GTK finalize what the rebuild dropped.
-        let context = glib::MainContext::default();
-        while context.iteration(false) {}
-        glib::log_remove_handler(Some("Gtk"), handler);
-        let seen = warnings.lock().unwrap().clone();
-        assert!(
-            !seen
-                .iter()
-                .any(|message| message.contains("still has children")),
-            "{seen:?}"
-        );
-    });
-}
-
-#[test]
 fn the_artwork_target_mini_map_draws_the_shown_models_sections() {
     run_gtk_test(|| {
         // Strip selected: every section is filled. Between sections 1 and 2 the
@@ -833,65 +793,6 @@ fn the_artwork_target_mini_map_draws_the_shown_models_sections() {
         assert!(seen[0].0 > 0xc0, "the + section 1 spans x = 4: {seen:?}");
         assert!(seen[1].0 < 0xc0, "the XL+ has a gap at x = 4: {seen:?}");
         assert!(seen[1].1 > 0x80, "the XL+ section 1 is drawn: {seen:?}");
-    });
-}
-
-fn catalog_search(f: &ModelFixture) -> gtk::SearchEntry {
-    super::preview_model_tests::descendants_of::<gtk::SearchEntry>(f.widgets.root.upcast_ref())
-        .into_iter()
-        .next()
-        .expect("the catalog search")
-}
-
-#[test]
-fn the_catalog_search_and_open_categories_survive_a_model_switch() {
-    run_gtk_test(|| {
-        let Some(f) = fixture("catalog-memory", &PLUS_XL) else {
-            return;
-        };
-        let mut buttons = Vec::new();
-        collect_catalog_buttons(f.widgets.root.upcast_ref(), &mut buttons);
-        let system = buttons
-            .iter()
-            .find(|button| button.tooltip_text().as_deref() == Some("Show or hide System actions"))
-            .expect("the System category");
-        system.emit_clicked();
-        catalog_search(&f).set_text("mute");
-        f.widgets.preview.show_model(&PLUS);
-        assert_eq!(catalog_search(&f).text(), "mute");
-        let visible_rows = |f: &ModelFixture| {
-            let mut buttons = Vec::new();
-            collect_catalog_buttons(f.widgets.root.upcast_ref(), &mut buttons);
-            buttons
-                .iter()
-                .filter(|button| {
-                    button.is_visible()
-                        && button.tooltip_text().is_some_and(|tip| {
-                            tip.starts_with("Drag ") && tip.contains("onto a key")
-                        })
-                })
-                .count()
-        };
-        assert!(
-            visible_rows(&f) >= 1,
-            "the search still filters the new catalog"
-        );
-        catalog_search(&f).set_text("");
-        f.widgets.preview.show_model(&PLUS_XL);
-        let mut buttons = Vec::new();
-        collect_catalog_buttons(f.widgets.root.upcast_ref(), &mut buttons);
-        let header = buttons
-            .iter()
-            .find(|button| button.tooltip_text().as_deref() == Some("Show or hide System actions"))
-            .unwrap();
-        let chevron = super::preview_model_tests::descendants_of::<gtk::Image>(header.upcast_ref())
-            .pop()
-            .unwrap();
-        assert_eq!(
-            chevron.icon_name().as_deref(),
-            Some("pan-down-symbolic"),
-            "System stays open"
-        );
     });
 }
 

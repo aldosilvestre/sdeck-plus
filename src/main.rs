@@ -81,8 +81,6 @@ enum LayerCommand {
         action: Action,
     },
     ObsSave(sdeck_plus::obs::ObsConfig),
-    /// The model session changed: later commands use this root.
-    SetRoot(std::path::PathBuf),
     ObsProbe(sdeck_plus::obs::ObsConfig),
     ExportConfiguration {
         store: LayerStore,
@@ -224,13 +222,19 @@ fn main() -> glib::ExitCode {
     )
 }
 
+/// One session's action worker: stopped and joined at shutdown.
+struct LayerWorker {
+    sender: mpsc::Sender<LayerCommand>,
+    handle: thread::JoinHandle<()>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 #[derive(Default)]
 struct DeviceLifecycle {
     hid: Option<event_api::HidController>,
     polling: Option<glib::SourceId>,
-    layer_sender: Option<mpsc::Sender<LayerCommand>>,
-    layer_worker: Option<thread::JoinHandle<()>>,
-    layer_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// One per session, in the order the sessions were built.
+    workers: Vec<LayerWorker>,
     focus: Option<sdeck_plus::app_focus::FocusObserver>,
 }
 
@@ -239,10 +243,11 @@ impl DeviceLifecycle {
         if let Some(mut focus) = self.focus.take() {
             focus.stop();
         }
-        self.layer_stop
-            .store(true, std::sync::atomic::Ordering::Release);
-        if let Some(sender) = self.layer_sender.take() {
-            if let Err(error) = sender.send(LayerCommand::Shutdown) {
+        for worker in &self.workers {
+            worker
+                .stop
+                .store(true, std::sync::atomic::Ordering::Release);
+            if let Err(error) = worker.sender.send(LayerCommand::Shutdown) {
                 eprintln!("Layer shutdown delivery failed: {error}");
             }
         }
@@ -252,11 +257,12 @@ impl DeviceLifecycle {
         if let Some(source) = self.polling.take() {
             source.remove();
         }
+        // Blanks every device, then ends the hub and its routers.
         if let Some(mut hid) = self.hid.take() {
             hid.shutdown();
         }
-        if let Some(worker) = self.layer_worker.take() {
-            if worker.join().is_err() {
+        for worker in self.workers.drain(..) {
+            if worker.handle.join().is_err() {
                 eprintln!("Layer worker panicked during shutdown");
             }
         }
@@ -395,42 +401,57 @@ fn build_ui_in(
             return None;
         }
     };
-    let feature_runtime::OpenedSession {
-        layers,
-        artwork: opened_artwork,
-        organization,
-        obs,
-    } = opened;
-    let layers = Rc::new(RefCell::new(layers));
     let (sender, receiver) = mpsc::channel();
-    let app_event_sender = sender.clone();
-    let hid = start_monitor(sender);
-    let artwork_sender = hid.artwork_sender();
-    let device_sender = hid.control_sender();
+    let hid = start_monitor(sender.clone());
     let lifecycle = Rc::new(RefCell::new(DeviceLifecycle {
         hid: Some(hid),
         ..DeviceLifecycle::default()
     }));
     install_device_cleanup(app, lifecycle.clone());
-    let (layer_sender, layer_receiver) = mpsc::channel::<LayerCommand>();
-    let layer_result_sender = app_event_sender.clone();
-    let layer_stop = lifecycle.borrow().layer_stop.clone();
-    let layer_root = layers.borrow().root().to_owned();
-    let worker = thread::Builder::new()
-        .name("layer-worker".into())
-        .spawn(move || {
-            feature_runtime::run_worker_at(
-                layer_receiver,
-                layer_result_sender,
-                layer_stop,
-                Some(layer_root),
-            );
-        });
-    match worker {
-        Ok(worker) => {
-            lifecycle.borrow_mut().layer_worker = Some(worker);
-            lifecycle.borrow_mut().layer_sender = Some(layer_sender.clone());
+
+    let toast = ui::Toast::new();
+    let header = build_header(&window);
+    // Only the shown session's size counts, as it did with one session.
+    let stack = gtk::Stack::builder()
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .css_classes(["session-stack"])
+        .build();
+    let shell = shell_box();
+    shell.append(&header.root);
+    shell.append(&stack);
+    let viewport = shell_viewport(&shell);
+    let factory: feature_runtime::SessionFactory = Box::new({
+        let window = window.clone();
+        let lifecycle = Rc::downgrade(&lifecycle);
+        let toast = toast.clone();
+        let viewport = viewport.downgrade();
+        let shell = shell.downgrade();
+        let labels = (header.status.clone(), header.connection_detail.clone());
+        move |model, opened, send_initial| {
+            let (lifecycle, viewport, shell) = lifecycle
+                .upgrade()
+                .zip(viewport.upgrade())
+                .zip(shell.upgrade())
+                .map(|((lifecycle, viewport), shell)| (lifecycle, viewport, shell))
+                .ok_or("the window is closing")?;
+            build_session(
+                &SessionHost {
+                    window: &window,
+                    lifecycle: &lifecycle,
+                    toast: &toast,
+                    viewport: &viewport,
+                    shell: &shell,
+                    labels: (&labels.0, &labels.1),
+                },
+                model,
+                opened,
+                send_initial,
+            )
         }
+    });
+    let first = match factory(model, opened, true) {
+        Ok(created) => created,
         Err(error) => {
             lifecycle.borrow_mut().shutdown();
             window.set_child(Some(&Label::new(Some(&format!(
@@ -439,9 +460,114 @@ fn build_ui_in(
             window.present();
             return None;
         }
+    };
+    let feature_runtime::Created {
+        session: first,
+        artwork_error,
+    } = first;
+    if let Some(panel) = header.update_panel.borrow_mut().take() {
+        update_check::install(app, &header.configuration_menu, panel, update_preference);
     }
+    let registry = feature_runtime::ModelSession::new(
+        roots,
+        feature_runtime::SharedHeader {
+            status: header.status.clone(),
+            detail: header.connection_detail.clone(),
+            picker: header.preview_picker.clone(),
+            menu: header.configuration_menu.clone(),
+        },
+        stack,
+        window.upcast_ref(),
+        toast.clone(),
+        factory,
+        first,
+    );
+    if observe_focus {
+        let focus_output = sender.clone();
+        match sdeck_plus::app_focus::FocusObserver::start(move |result| {
+            let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
+        }) {
+            Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
+            Err(error) => registry.focus_changed(Err(error.to_string())),
+        }
+    }
+    install_style(&window);
+    window.set_child(Some(&toast.wrap(&viewport)));
+    if visible {
+        window.present();
+    }
+    if let Some(error) = artwork_error {
+        show_artwork_error(&window, &error);
+    }
+    if let Some(error) = preference_error {
+        show_artwork_error(&window, &format!("Could not read the last-used device model: {error}. Showing the Stream Deck + instead. The file was not changed; repair or remove device.json in the configuration folder."));
+    }
+    let polled = registry.clone();
+    lifecycle.borrow_mut().polling = Some(glib::timeout_add_local(
+        Duration::from_millis(40),
+        move || {
+            polled.pump(&receiver);
+            glib::ControlFlow::Continue
+        },
+    ));
+    Some(registry)
+}
 
-    let (store, artwork_open_error) = match opened_artwork {
+/// What building a session needs from the window it joins.
+struct SessionHost<'a> {
+    window: &'a ApplicationWindow,
+    lifecycle: &'a Rc<RefCell<DeviceLifecycle>>,
+    toast: &'a ui::Toast,
+    viewport: &'a gtk::ScrolledWindow,
+    /// What a key swap in progress makes insensitive.
+    shell: &'a GtkBox,
+    /// The window's connection status and detail labels.
+    labels: (&'a Label, &'a Label),
+}
+
+/// One model's session: its action worker, channel, stores and editor. Its
+/// pictures and controls are addressed to the model, so they reach the right
+/// devices whichever session the window shows.
+fn build_session(
+    host: &SessionHost,
+    model: &'static sdeck_plus::device_model::DeviceModel,
+    opened: feature_runtime::OpenedSession,
+    send_initial: bool,
+) -> Result<feature_runtime::Created, String> {
+    let feature_runtime::OpenedSession {
+        layers,
+        artwork: opened_artwork,
+        organization,
+        obs,
+    } = opened;
+    let layers = Rc::new(RefCell::new(layers));
+    let (events, receiver) = mpsc::channel();
+    let (artwork_sender, device_sender) = host
+        .lifecycle
+        .borrow()
+        .hid
+        .as_ref()
+        .map(|hid| hid.model_senders(model))
+        .ok_or("the device monitor is closed")?;
+    let (layer_sender, layer_receiver) = mpsc::channel::<LayerCommand>();
+    let layer_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let layer_root = layers.borrow().root().to_owned();
+    let worker = {
+        let (results, stop) = (events.clone(), layer_stop.clone());
+        thread::Builder::new()
+            .name("layer-worker".into())
+            .spawn(move || {
+                feature_runtime::run_worker_at(layer_receiver, results, stop, Some(layer_root));
+            })
+            .map_err(|error| error.to_string())?
+    };
+    host.lifecycle.borrow_mut().workers.push(LayerWorker {
+        sender: layer_sender.clone(),
+        handle: worker,
+        stop: layer_stop,
+    });
+
+    let (store, artwork_error) = match opened_artwork {
         Ok(store) => (Some(store), None),
         Err(error) => (None, Some(format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Check permissions and repair the artwork manifest/assets in the app data directory, then restart. Original files have not been replaced."))),
     };
@@ -449,69 +575,36 @@ fn build_ui_in(
         store: Rc::new(RefCell::new(store)),
         layers: layers.clone(),
         pictures: Rc::new(RefCell::new(Vec::new())),
-        output: artwork_sender.clone(),
+        output: artwork_sender,
         last_layer: Rc::new(RefCell::new(None)),
         chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
         selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
         text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
         info: Rc::default(),
     };
-    let widgets = build_widgets(
-        window.clone(),
-        layers.clone(),
+    let body = build_body(
+        host.window.clone(),
+        layers,
         artwork.clone(),
-        layer_sender.clone(),
+        layer_sender,
+        host.toast.clone(),
+        host.shell,
+        send_initial,
     );
-    if let Some(panel) = widgets.update_panel.borrow_mut().take() {
-        update_check::install(app, &widgets._configuration_menu, panel, update_preference);
-    }
-    widgets
-        .feature_runtime
-        .configure(organization, obs, device_sender, app_event_sender.clone());
-    if !widgets.feature_runtime.organization_available() {
-        for button in &widgets.organization_writes {
+    // Editing is switched off on the body alone: the header stays usable.
+    body.attach(host.viewport, body.root.upcast_ref());
+    body.feature_runtime
+        .configure(organization, obs, device_sender, events);
+    if !body.feature_runtime.organization_available() {
+        for button in &body.organization_writes {
             button.set_sensitive(false);
         }
     }
-    let session = feature_runtime::ModelSession::new(
-        widgets.feature_runtime.clone(),
-        roots,
-        widgets.preview_picker.clone(),
-        widgets.organization_writes.clone(),
-        widgets.toast.clone(),
-    );
-    let focus_output = app_event_sender.clone();
-    if observe_focus {
-        match sdeck_plus::app_focus::FocusObserver::start(move |result| {
-            let _ = focus_output.send(MonitorEvent::ApplicationFocus(result));
-        }) {
-            Ok(observer) => lifecycle.borrow_mut().focus = Some(observer),
-            Err(error) => widgets
-                .feature_runtime
-                .focus_changed(Err(error.to_string())),
-        }
-    }
-    install_style(&window);
-    window.set_child(Some(&widgets.toast.wrap(&widgets.root)));
-    if visible {
-        window.present();
-    }
-    if let Some(error) = artwork_open_error {
-        show_artwork_error(&window, &error);
-    }
-    if let Some(error) = preference_error {
-        show_artwork_error(&window, &format!("Could not read the last-used device model: {error}. Showing the Stream Deck + instead. The file was not changed; repair or remove device.json in the configuration folder."));
-    }
-    lifecycle.borrow_mut().polling = Some(start_event_updates_with(
-        widgets,
-        receiver,
-        layers,
-        artwork,
-        layer_sender,
-        app_event_sender,
-        Some(session.clone()),
-    ));
-    Some(session)
+    let surface = EventSurface::new(host.labels, host.toast, &body, &artwork);
+    Ok(feature_runtime::Created {
+        session: feature_runtime::Session::new(model, body, surface, receiver),
+        artwork_error,
+    })
 }
 
 /// 'Preview as': which supported model the window shows while no device is
@@ -544,7 +637,9 @@ impl PreviewPicker {
     }
 }
 
-// Shared production construction: no HID, action workers, disk reads or presentation.
+// One window around a single model's editor, as the tests build it: no HID,
+// action workers, disk reads or presentation.
+#[cfg(test)]
 struct MonitorWidgets {
     root: gtk::ScrolledWindow,
     toast: ui::Toast,
@@ -581,41 +676,25 @@ struct MonitorWidgets {
     zone_widgets: Vec<gtk::Widget>,
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
-    preview_picker: PreviewPicker,
     // Keep the weakly referenced editor callbacks alive with the monitor widgets.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     _configuration_menu: configuration_menu::ConfigurationMenu,
-    update_panel: RefCell<Option<update_check::Panel>>,
 }
 
-fn build_widgets(
-    window: ApplicationWindow,
-    layers: Rc<RefCell<LayerStore>>,
-    artwork: ArtworkUi,
-    layer_sender: mpsc::Sender<LayerCommand>,
-) -> MonitorWidgets {
-    let updating_layers = Rc::new(Cell::new(false));
-    let toast = ui::Toast::new();
-    let conflicts = layers.borrow().conflicts().len();
-    if conflicts > 0 {
-        toast.show(
-            &format!(
-                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
-                sdeck_plus::layers::CONFLICT_LOG
-            ),
-            true,
-        );
-    }
-    let root = GtkBox::new(Orientation::Vertical, 16);
-    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
-    // below), then centers; it still shrinks to narrow desktops.
-    root.set_margin_top(16);
-    root.set_margin_bottom(16);
-    root.set_margin_start(16);
-    root.set_margin_end(16);
-    root.add_css_class("app-shell");
-    ui::track_motion(&root);
+/// What belongs to the window rather than to a model: the title, the
+/// connection status, 'Preview as', the update indicator and the menus.
+struct Header {
+    root: GtkBox,
+    status: Label,
+    connection_detail: Label,
+    preview_picker: PreviewPicker,
+    configuration_menu: configuration_menu::ConfigurationMenu,
+    update_panel: RefCell<Option<update_check::Panel>>,
+    #[cfg(test)]
+    help_menu: gtk::MenuButton,
+}
 
+fn build_header(window: &ApplicationWindow) -> Header {
     let header = GtkBox::new(Orientation::Horizontal, 12);
     let heading = GtkBox::new(Orientation::Vertical, 4);
     let title = Label::new(Some("SDECK-PLUS"));
@@ -642,13 +721,12 @@ fn build_widgets(
         step.append(&ui::helper(explanation));
         help_body.append(&step);
     }
-    let configuration_menu = configuration_menu::ConfigurationMenu::new(&window, &help_body);
+    let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
     header.append(&update_panel.indicator);
     let help_menu = configuration_menu.button().clone();
     header.append(&help_menu);
-    root.append(&header);
 
     let connection_detail = Label::new(None);
     show_connection_state(
@@ -662,6 +740,190 @@ fn build_widgets(
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
     connection_detail.set_max_width_chars(70);
     heading.append(&connection_detail);
+    Header {
+        root: header,
+        status,
+        connection_detail,
+        preview_picker,
+        configuration_menu,
+        update_panel: RefCell::new(Some(update_panel)),
+        #[cfg(test)]
+        help_menu,
+    }
+}
+
+/// The padded, centered column the header and the shown body sit in.
+fn shell_box() -> GtkBox {
+    let root = GtkBox::new(Orientation::Vertical, 16);
+    // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
+    // below), then centers; it still shrinks to narrow desktops.
+    root.set_margin_top(16);
+    root.set_margin_bottom(16);
+    root.set_margin_start(16);
+    root.set_margin_end(16);
+    root.add_css_class("app-shell");
+    ui::track_motion(&root);
+    root
+}
+
+/// A two-axis viewport is the fallback for unusually small allocations or fonts.
+/// Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
+fn shell_viewport(shell: &GtkBox) -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&clamp::Clamp::new(shell, SHELL_MAX_WIDTH))
+        .build()
+}
+
+/// One model's complete editor: everything below the header.
+struct Body {
+    root: GtkBox,
+    binding_status: Label,
+    preview: Rc<preview::PreviewView>,
+    touch_status: Label,
+    feature_runtime: feature_runtime::FeatureRuntime,
+    organization_writes: Vec<Button>,
+    settings_scroll: gtk::ScrolledWindow,
+    // Keep the weakly referenced editor callbacks alive with the body.
+    _text_editor: Rc<button_text_editor::ButtonTextEditor>,
+    #[cfg(test)]
+    layer_picker: gtk::DropDown,
+    #[cfg(test)]
+    binding_ui: BindingUi,
+    #[cfg(test)]
+    obs_menu: gtk::MenuButton,
+    #[cfg(test)]
+    management_menu: gtk::MenuButton,
+    #[cfg(test)]
+    artwork_section: gtk::Expander,
+    #[cfg(test)]
+    target_picker: gtk::DropDown,
+}
+
+impl Body {
+    /// Tie the body to the viewport that scrolls it: the form keeps within
+    /// about one window of height, and `configuration_root` is what editing
+    /// being switched off makes insensitive.
+    fn attach(&self, viewport: &gtk::ScrolledWindow, configuration_root: &gtk::Widget) {
+        self.feature_runtime
+            .attach_configuration_root(configuration_root);
+        let scroll = self.settings_scroll.downgrade();
+        viewport
+            .vadjustment()
+            .connect_page_size_notify(move |adjustment| {
+                if let Some(scroll) = scroll.upgrade() {
+                    scroll.set_max_content_height((adjustment.page_size() as i32 - 240).max(320));
+                }
+            });
+    }
+}
+
+#[cfg(test)]
+fn build_widgets(
+    window: ApplicationWindow,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    layer_sender: mpsc::Sender<LayerCommand>,
+) -> MonitorWidgets {
+    let toast = ui::Toast::new();
+    let header = build_header(&window);
+    let shell = shell_box();
+    let body = build_body(
+        window,
+        layers,
+        artwork,
+        layer_sender,
+        toast.clone(),
+        &shell,
+        true,
+    );
+    header.configuration_menu.bind(body.feature_runtime.clone());
+    shell.append(&header.root);
+    shell.append(&body.root);
+    let viewport = shell_viewport(&shell);
+    body.attach(&viewport, viewport.upcast_ref());
+    let Body {
+        binding_status,
+        preview,
+        touch_status,
+        feature_runtime,
+        organization_writes,
+        _text_editor,
+        #[cfg(test)]
+        layer_picker,
+        #[cfg(test)]
+        binding_ui,
+        #[cfg(test)]
+        obs_menu,
+        #[cfg(test)]
+        management_menu,
+        #[cfg(test)]
+        artwork_section,
+        #[cfg(test)]
+        target_picker,
+        ..
+    } = body;
+    MonitorWidgets {
+        root: viewport,
+        toast,
+        binding_status,
+        status: header.status,
+        connection_detail: header.connection_detail,
+        #[cfg(test)]
+        layer_picker,
+        #[cfg(test)]
+        binding_ui,
+        #[cfg(test)]
+        obs_menu,
+        #[cfg(test)]
+        help_menu: header.help_menu,
+        #[cfg(test)]
+        management_menu,
+        #[cfg(test)]
+        artwork_section,
+        #[cfg(test)]
+        target_picker,
+        touch_status,
+        #[cfg(test)]
+        key_labels: preview.key_labels(),
+        #[cfg(test)]
+        encoder_labels: preview.dial_labels(),
+        #[cfg(test)]
+        key_widgets: preview.key_widgets(),
+        #[cfg(test)]
+        encoder_widgets: preview.dial_widgets(),
+        #[cfg(test)]
+        zone_widgets: preview.zone_widgets(),
+        preview,
+        feature_runtime,
+        organization_writes,
+        _text_editor,
+        _configuration_menu: header.configuration_menu,
+    }
+}
+
+fn build_body(
+    window: ApplicationWindow,
+    layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    layer_sender: mpsc::Sender<LayerCommand>,
+    toast: ui::Toast,
+    shell: &GtkBox,
+    send_initial: bool,
+) -> Body {
+    let updating_layers = Rc::new(Cell::new(false));
+    let conflicts = layers.borrow().conflicts().len();
+    if conflicts > 0 {
+        toast.show(
+            &format!(
+                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
+                sdeck_plus::layers::CONFLICT_LOG
+            ),
+            true,
+        );
+    }
+    let root = GtkBox::new(Orientation::Vertical, 16);
 
     let layer_card = card();
     layer_card.add_css_class("navigation-card");
@@ -836,7 +1098,6 @@ fn build_widgets(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    configuration_menu.bind(feature_runtime.clone());
     let profile_tasks = gtk::Stack::builder()
         .vhomogeneous(false)
         .hhomogeneous(true)
@@ -887,6 +1148,7 @@ fn build_widgets(
         app.connect_shutdown(move |_| {
             cleanup.cancel_key_holds();
             cleanup.cancel_timer();
+            cleanup.stop_info_worker();
         });
     }
 
@@ -1384,7 +1646,7 @@ fn build_widgets(
             artwork: artwork.clone(),
             runtime: feature_runtime.clone(),
             text_editor: text_editor.clone(),
-            root: root.downgrade(),
+            root: shell.downgrade(),
             heading: settings_heading.clone(),
             save: save_binding.clone(),
             target_picker: target_picker.clone(),
@@ -1392,9 +1654,7 @@ fn build_widgets(
             dials_page,
             catalog: action_catalog::CatalogMemory::default(),
         };
-        let wire: Rc<dyn Fn(&preview::PreviewView)> = Rc::new(move |view| wiring.connect(view));
-        wire(&preview);
-        preview.set_after_build(wire);
+        wiring.connect(&preview);
     }
     let binding_page = GtkBox::new(Orientation::Vertical, 12);
     binding_page.append(&ui::helper(
@@ -1425,31 +1685,17 @@ fn build_widgets(
     root.append(feature_runtime.profile_tabs());
 
     // All thirteen pictures are registered independently of the shared editor.
-    artwork.refresh(false);
-
-    // A two-axis viewport is the fallback for unusually small allocations or fonts.
-    // Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
-    let viewport = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&clamp::Clamp::new(&root, SHELL_MAX_WIDTH))
-        .build();
-    feature_runtime.attach_configuration_root(viewport.upcast_ref());
-    // Keep the form within about one window of height; the preview stays put.
-    let scroll = settings_scroll.downgrade();
-    viewport
-        .vadjustment()
-        .connect_page_size_notify(move |adjustment| {
-            if let Some(scroll) = scroll.upgrade() {
-                scroll.set_max_content_height((adjustment.page_size() as i32 - 240).max(320));
-            }
-        });
-    MonitorWidgets {
-        root: viewport,
-        toast,
+    // A session whose device is not there has nothing to send yet.
+    artwork.refresh_with(false, send_initial);
+    Body {
+        root,
         binding_status: binding_ui.status.clone(),
-        status,
-        connection_detail,
+        touch_status: preview.touch_status().clone(),
+        preview,
+        feature_runtime,
+        organization_writes: vec![create_layer],
+        settings_scroll,
+        _text_editor: text_editor,
         #[cfg(test)]
         layer_picker,
         #[cfg(test)]
@@ -1457,72 +1703,253 @@ fn build_widgets(
         #[cfg(test)]
         obs_menu,
         #[cfg(test)]
-        help_menu,
-        #[cfg(test)]
         management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
         target_picker,
-        touch_status: preview.touch_status().clone(),
-        #[cfg(test)]
-        key_labels: preview.key_labels(),
-        #[cfg(test)]
-        encoder_labels: preview.dial_labels(),
-        #[cfg(test)]
-        key_widgets: preview.key_widgets(),
-        #[cfg(test)]
-        encoder_widgets: preview.dial_widgets(),
-        #[cfg(test)]
-        zone_widgets: preview.zone_widgets(),
-        preview,
-        feature_runtime,
-        organization_writes: vec![create_layer],
-        preview_picker,
-        _text_editor: text_editor,
-        _configuration_menu: configuration_menu,
-        update_panel: RefCell::new(Some(update_panel)),
     }
 }
 
-/// [`start_event_updates_with`] for a window whose model never changes.
-#[cfg(test)]
-fn start_event_updates(
-    widgets: MonitorWidgets,
-    receiver: mpsc::Receiver<MonitorEvent>,
-    layers: Rc<RefCell<LayerStore>>,
-    artwork: ArtworkUi,
-    layer_sender: mpsc::Sender<LayerCommand>,
-    app_event_sender: mpsc::Sender<MonitorEvent>,
-) -> glib::SourceId {
-    start_event_updates_with(
-        widgets,
-        receiver,
-        layers,
-        artwork,
-        layer_sender,
-        app_event_sender,
-        None,
-    )
-}
-
-fn start_event_updates_with(
-    widgets: MonitorWidgets,
-    receiver: mpsc::Receiver<MonitorEvent>,
-    layers: Rc<RefCell<LayerStore>>,
-    artwork: ArtworkUi,
-    _layer_sender: mpsc::Sender<LayerCommand>,
-    _app_event_sender: mpsc::Sender<MonitorEvent>,
-    session: Option<Rc<feature_runtime::ModelSession>>,
-) -> glib::SourceId {
-    // One running total per dial of the widest supported model.
+/// One running total per dial of the widest supported model.
+fn dial_totals() -> RefCell<Vec<i64>> {
     let dials = sdeck_plus::device_model::DeviceModel::supported()
         .map(|model| usize::from(model.dials))
         .max()
         .unwrap_or_default();
-    let ticks = Rc::new(RefCell::new(vec![0i64; dials]));
+    RefCell::new(vec![0; dials])
+}
+
+/// What a model's events are applied to: its editor, the preview that mirrors
+/// the device, and the window's connection labels.
+struct EventSurface {
+    status: Label,
+    connection_detail: Label,
+    toast: ui::Toast,
+    binding_status: Label,
+    feature_runtime: feature_runtime::FeatureRuntime,
+    preview: Rc<preview::PreviewView>,
+    touch_status: Label,
+    artwork: ArtworkUi,
+    organization_writes: Vec<Button>,
+    ticks: RefCell<Vec<i64>>,
+}
+
+impl EventSurface {
+    fn new(header: (&Label, &Label), toast: &ui::Toast, body: &Body, artwork: &ArtworkUi) -> Self {
+        Self {
+            status: header.0.clone(),
+            connection_detail: header.1.clone(),
+            toast: toast.clone(),
+            binding_status: body.binding_status.clone(),
+            feature_runtime: body.feature_runtime.clone(),
+            preview: body.preview.clone(),
+            touch_status: body.touch_status.clone(),
+            artwork: artwork.clone(),
+            organization_writes: body.organization_writes.clone(),
+            ticks: dial_totals(),
+        }
+    }
+
+    /// Apply a batch: focus changes first, so everything after them already
+    /// sees the focused application.
+    fn apply_all(&self, events: Vec<MonitorEvent>, accepts_input: bool) {
+        for event in &events {
+            if let MonitorEvent::ApplicationFocus(result) = event {
+                self.feature_runtime.focus_changed(result.clone());
+            }
+        }
+        for event in events {
+            self.apply(event, accepts_input);
+        }
+    }
+
+    /// One event, except focus (see [`Self::apply_all`]). Connection reports
+    /// are only handled here for a window that serves a single model; the
+    /// session registry handles them itself.
+    fn apply(&self, message: MonitorEvent, accepts_input: bool) {
+        let Self {
+            status,
+            connection_detail,
+            toast,
+            binding_status,
+            feature_runtime,
+            preview,
+            touch_status,
+            artwork,
+            organization_writes,
+            ticks,
+        } = self;
+        match message {
+            MonitorEvent::ApplicationFocus(_) => {}
+            MonitorEvent::Heartbeat => {}
+            MonitorEvent::ActionDispatched => {
+                feature_runtime.sync_info_from(&artwork.layers.borrow());
+            }
+            MonitorEvent::ConfigurationExportResult { path, result } => {
+                let failed = result.is_err();
+                feature_runtime.complete_configuration_export(&path, result);
+                toast.show(&feature_runtime.status.text(), failed);
+            }
+            MonitorEvent::ConfigurationImportResult { root, result } => {
+                let imported = feature_runtime.complete_configuration_import(&root, result);
+                if imported {
+                    for button in organization_writes {
+                        button.set_sensitive(true);
+                    }
+                }
+                toast.show(&feature_runtime.status.text(), !imported);
+            }
+            MonitorEvent::KeySwapResult {
+                layer,
+                first,
+                second,
+                result,
+            } => {
+                feature_runtime.complete_key_swap(&layer, first, second, result);
+            }
+            MonitorEvent::Connection(state) => {
+                if !state.is_connected() {
+                    feature_runtime.cancel_key_holds();
+                }
+                let connected = show_connection_state(status, connection_detail, &state, None);
+                if connected {
+                    artwork.refresh(true);
+                }
+            }
+            MonitorEvent::Input { event, .. } => {
+                if accepts_input {
+                    feature_runtime.execute_input(&event);
+                }
+                match event {
+                    protocol::Event::Key { index, pressed } => {
+                        if let Some(label) = preview.key_label(index) {
+                            label.set_text(&format!(
+                                "KEY {} · {}",
+                                index + 1,
+                                if pressed { "PRESSED" } else { "IDLE" }
+                            ));
+                            set_active(&label, pressed);
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Key, index) {
+                            set_pressed(&widget, pressed);
+                        }
+                    }
+                    protocol::Event::EncoderButton { index, pressed } => {
+                        if let Some(label) = preview.dial_label(index) {
+                            label.set_text(&format!(
+                                "DIAL {}\n{} · {} ticks",
+                                index + 1,
+                                if pressed { "PRESSED" } else { "IDLE" },
+                                ticks.borrow().get(index).copied().unwrap_or_default()
+                            ));
+                            set_active(&label, pressed);
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
+                            set_pressed(&widget, pressed);
+                        }
+                    }
+                    protocol::Event::Rotation {
+                        index,
+                        ticks: delta,
+                    } => {
+                        let mut totals = ticks.borrow_mut();
+                        let total = totals.get_mut(index).map(|total| {
+                            *total += i64::from(delta);
+                            *total
+                        });
+                        if let Some(label) = preview.dial_label(index) {
+                            label.set_text(&format!(
+                                "DIAL {}\n{} ticks · {delta:+}",
+                                index + 1,
+                                total.unwrap_or_default()
+                            ));
+                        }
+                        if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
+                            flash(&widget, "control-rotated");
+                        }
+                    }
+                    protocol::Event::TouchTap { x, y } => {
+                        touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
+                        flash_zones_in(preview.model().zone_px().0, &preview.zone_widgets(), x, x);
+                    }
+                    protocol::Event::TouchPress { x, y } => {
+                        touch_status.set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
+                        flash_zones_in(preview.model().zone_px().0, &preview.zone_widgets(), x, x);
+                    }
+                    protocol::Event::TouchFlick {
+                        start_x,
+                        start_y,
+                        end_x,
+                        end_y,
+                    } => {
+                        touch_status.set_text(&format!(
+                            "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
+                        ));
+                        flash_zones_in(
+                            preview.model().zone_px().0,
+                            &preview.zone_widgets(),
+                            start_x.min(end_x),
+                            start_x.max(end_x),
+                        );
+                    }
+                }
+            }
+            MonitorEvent::ArtworkResult { target, result, .. } => match result {
+                Ok(()) => {}
+                Err(error) => {
+                    connection_detail.set_text(&format!(
+                        "Artwork update failed for {target:?} (local assignment retained): {error}",
+                    ));
+                }
+            },
+            MonitorEvent::DeviceResult { action, result, .. } => match result {
+                Ok(()) => {
+                    feature_runtime.report(&format!("Device: {} applied.", action.summary()), false)
+                }
+                Err(error) => feature_runtime.report(
+                    &format!("Device: {} failed: {error}", action.summary()),
+                    true,
+                ),
+            },
+            MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
+            MonitorEvent::Info { source, value } => artwork.update_info(source, value),
+            MonitorEvent::BindingSaveResult(result) => {
+                let (message, failed) = match result {
+                    Ok(()) => ("Binding saved successfully.".to_owned(), false),
+                    Err(error) => (format!("Could not save binding: {error}"), true),
+                };
+                binding_status.set_text(&message);
+                ui::feedback(binding_status, failed);
+                toast.show(&message, failed);
+            }
+            MonitorEvent::ProfileSaveResult(result) => {
+                let (message, failed) = match result {
+                    Ok(()) => ("Profile saved successfully.".to_owned(), false),
+                    Err(error) => (format!("Could not save profile: {error}"), true),
+                };
+                feature_runtime.report_profile_save(&message, failed);
+                toast.show(&message, failed);
+            }
+            MonitorEvent::LayerError(error) => {
+                connection_detail.set_text(&error);
+                feature_runtime.report(&error, true);
+            }
+        }
+    }
+}
+
+/// [`EventSurface`] polling for a window whose model never changes.
+#[cfg(test)]
+fn start_event_updates(
+    widgets: MonitorWidgets,
+    receiver: mpsc::Receiver<MonitorEvent>,
+    _layers: Rc<RefCell<LayerStore>>,
+    artwork: ArtworkUi,
+    _layer_sender: mpsc::Sender<LayerCommand>,
+    _app_event_sender: mpsc::Sender<MonitorEvent>,
+) -> glib::SourceId {
     // The tests' first-model snapshots must not keep the first preview alive.
-    #[cfg(test)]
     let widgets = {
         let mut widgets = widgets;
         widgets.key_labels.clear();
@@ -1532,221 +1959,23 @@ fn start_event_updates_with(
         widgets.zone_widgets.clear();
         widgets
     };
-    let mut active = event_api::ActiveDevice::default();
+    let surface = EventSurface {
+        status: widgets.status.clone(),
+        connection_detail: widgets.connection_detail.clone(),
+        toast: widgets.toast.clone(),
+        binding_status: widgets.binding_status.clone(),
+        feature_runtime: widgets.feature_runtime.clone(),
+        preview: widgets.preview.clone(),
+        touch_status: widgets.touch_status.clone(),
+        artwork,
+        organization_writes: widgets.organization_writes.clone(),
+        ticks: dial_totals(),
+    };
     glib::timeout_add_local(Duration::from_millis(40), move || {
-        let MonitorWidgets {
-            status,
-            toast,
-            binding_status,
-            connection_detail,
-            feature_runtime,
-            preview,
-            touch_status,
-            ..
-        } = &widgets;
-        // One session for now: only the first connected device is followed.
-        let pending: Vec<_> = receiver
-            .try_iter()
-            .flat_map(|event| active.accept(event))
-            .collect();
-        let accepts_input = || {
-            session
-                .as_ref()
-                .is_none_or(|session| session.accepts_input())
-        };
-        for message in &pending {
-            if let MonitorEvent::ApplicationFocus(result) = message {
-                feature_runtime.focus_changed(result.clone());
-            }
-        }
-        for message in pending {
-            match message {
-                MonitorEvent::ApplicationFocus(_) => {}
-                MonitorEvent::Heartbeat => {}
-                MonitorEvent::ActionDispatched => {
-                    feature_runtime.sync_info_from(&layers.borrow());
-                }
-                MonitorEvent::ConfigurationExportResult { path, result } => {
-                    let failed = result.is_err();
-                    feature_runtime.complete_configuration_export(&path, result);
-                    toast.show(&feature_runtime.status.text(), failed);
-                }
-                MonitorEvent::ConfigurationImportResult { root, result } => {
-                    let imported = feature_runtime.complete_configuration_import(&root, result);
-                    if imported {
-                        for button in &widgets.organization_writes {
-                            button.set_sensitive(true);
-                        }
-                    }
-                    toast.show(&feature_runtime.status.text(), !imported);
-                }
-                MonitorEvent::KeySwapResult {
-                    layer,
-                    first,
-                    second,
-                    result,
-                } => {
-                    feature_runtime.complete_key_swap(&layer, first, second, result);
-                }
-                MonitorEvent::Connection(state) => {
-                    if !state.is_connected() {
-                        feature_runtime.cancel_key_holds();
-                    }
-                    let connected = show_connection_state(
-                        status,
-                        connection_detail,
-                        &state,
-                        session
-                            .as_ref()
-                            .and_then(|session| session.last_connected()),
-                    );
-                    // A model switch has already sent its own pictures.
-                    let resend = session
-                        .as_ref()
-                        .is_none_or(|session| session.connection_changed(&state));
-                    if resend && connected {
-                        artwork.refresh(true);
-                    }
-                }
-                MonitorEvent::Input { event, .. } => {
-                    if accepts_input() {
-                        feature_runtime.execute_input(&event);
-                    }
-                    match event {
-                        protocol::Event::Key { index, pressed } => {
-                            if let Some(label) = preview.key_label(index) {
-                                label.set_text(&format!(
-                                    "KEY {} · {}",
-                                    index + 1,
-                                    if pressed { "PRESSED" } else { "IDLE" }
-                                ));
-                                set_active(&label, pressed);
-                            }
-                            if let Some(widget) = control_at(preview, ControlRef::Key, index) {
-                                set_pressed(&widget, pressed);
-                            }
-                        }
-                        protocol::Event::EncoderButton { index, pressed } => {
-                            if let Some(label) = preview.dial_label(index) {
-                                label.set_text(&format!(
-                                    "DIAL {}\n{} · {} ticks",
-                                    index + 1,
-                                    if pressed { "PRESSED" } else { "IDLE" },
-                                    ticks.borrow().get(index).copied().unwrap_or_default()
-                                ));
-                                set_active(&label, pressed);
-                            }
-                            if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
-                                set_pressed(&widget, pressed);
-                            }
-                        }
-                        protocol::Event::Rotation {
-                            index,
-                            ticks: delta,
-                        } => {
-                            let mut totals = ticks.borrow_mut();
-                            let total = totals.get_mut(index).map(|total| {
-                                *total += i64::from(delta);
-                                *total
-                            });
-                            if let Some(label) = preview.dial_label(index) {
-                                label.set_text(&format!(
-                                    "DIAL {}\n{} ticks · {delta:+}",
-                                    index + 1,
-                                    total.unwrap_or_default()
-                                ));
-                            }
-                            if let Some(widget) = control_at(preview, ControlRef::Dial, index) {
-                                flash(&widget, "control-rotated");
-                            }
-                        }
-                        protocol::Event::TouchTap { x, y } => {
-                            touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
-                            flash_zones_in(
-                                preview.model().zone_px().0,
-                                &preview.zone_widgets(),
-                                x,
-                                x,
-                            );
-                        }
-                        protocol::Event::TouchPress { x, y } => {
-                            touch_status
-                                .set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
-                            flash_zones_in(
-                                preview.model().zone_px().0,
-                                &preview.zone_widgets(),
-                                x,
-                                x,
-                            );
-                        }
-                        protocol::Event::TouchFlick {
-                            start_x,
-                            start_y,
-                            end_x,
-                            end_y,
-                        } => {
-                            touch_status.set_text(&format!(
-                                "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
-                            ));
-                            flash_zones_in(
-                                preview.model().zone_px().0,
-                                &preview.zone_widgets(),
-                                start_x.min(end_x),
-                                start_x.max(end_x),
-                            );
-                        }
-                    }
-                }
-                MonitorEvent::ArtworkResult { target, result, .. } => match result {
-                    Ok(()) => {}
-                    Err(error) => {
-                        connection_detail.set_text(&format!(
-                            "Artwork update failed for {target:?} (local assignment retained): {error}",
-                        ));
-                    }
-                },
-                MonitorEvent::DeviceResult { action, result, .. } => match result {
-                    Ok(()) => feature_runtime
-                        .report(&format!("Device: {} applied.", action.summary()), false),
-                    Err(error) => feature_runtime.report(
-                        &format!("Device: {} failed: {error}", action.summary()),
-                        true,
-                    ),
-                },
-                MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
-                MonitorEvent::Info { source, value } => artwork.update_info(source, value),
-                MonitorEvent::BindingSaveResult(result) => {
-                    let (message, failed) = match result {
-                        Ok(()) => ("Binding saved successfully.".to_owned(), false),
-                        Err(error) => (format!("Could not save binding: {error}"), true),
-                    };
-                    binding_status.set_text(&message);
-                    ui::feedback(binding_status, failed);
-                    toast.show(&message, failed);
-                }
-                MonitorEvent::ProfileSaveResult(result) => {
-                    let (message, failed) = match result {
-                        Ok(()) => ("Profile saved successfully.".to_owned(), false),
-                        Err(error) => (format!("Could not save profile: {error}"), true),
-                    };
-                    feature_runtime.report_profile_save(&message, failed);
-                    toast.show(&message, failed);
-                }
-                MonitorEvent::LayerError(error) => {
-                    connection_detail.set_text(&error);
-                    feature_runtime.report(&error, true);
-                }
-            }
-        }
-        if session
-            .as_ref()
-            .is_none_or(|session| session.accepts_input())
-        {
-            feature_runtime.poll_key_holds();
-        }
-        if let Some(session) = &session {
-            session.retry_deferred();
-        }
+        // The widgets live as long as the polling does.
+        let _ = &widgets;
+        surface.apply_all(receiver.try_iter().collect(), true);
+        surface.feature_runtime.poll_key_holds();
         glib::ControlFlow::Continue
     })
 }
@@ -4398,16 +4627,68 @@ fn show_connection_state(
             format!("{} · HID input and artwork active", usb_id(Some(model))),
         ),
     };
+    paint_status(status, detail, (badge, tone), &text, &hint);
+    state.is_connected()
+}
+
+fn paint_status(
+    status: &Label,
+    detail: &Label,
+    (badge, tone): (&str, &str),
+    text: &str,
+    hint: &str,
+) {
     status.set_text(badge);
     for class in ["status-idle", "status-online", "status-error"] {
         status.remove_css_class(class);
     }
     status.add_css_class(tone);
-    detail.set_text(&text);
+    detail.set_text(text);
     for label in [status, detail] {
-        label.set_tooltip_text(Some(&hint));
+        label.set_tooltip_text(Some(hint));
     }
-    state.is_connected()
+}
+
+/// The header while several devices are connected: each model once, with a
+/// count when two units of one model are plugged in.
+fn show_connected_devices(
+    status: &Label,
+    detail: &Label,
+    models: &[&'static sdeck_plus::device_model::DeviceModel],
+) {
+    let mut grouped: Vec<(&'static sdeck_plus::device_model::DeviceModel, usize)> = Vec::new();
+    for model in models {
+        match grouped.iter_mut().find(|(known, _)| known == model) {
+            Some((_, count)) => *count += 1,
+            None => grouped.push((model, 1)),
+        }
+    }
+    let names: Vec<String> = grouped
+        .iter()
+        .map(|(model, count)| match count {
+            1 => model.name.to_owned(),
+            count => format!("{} x{count}", model.name),
+        })
+        .collect();
+    let list = match names.as_slice() {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first @ .., last] => format!("{} and {last}", first.join(", ")),
+    };
+    let pids: Vec<String> = grouped
+        .iter()
+        .map(|(model, _)| format!("{:04X}", model.pid()))
+        .collect();
+    paint_status(
+        status,
+        detail,
+        ("Connected", "status-online"),
+        &format!("{list} connected — keys, dials and touch strip are live"),
+        &format!(
+            "USB device VID 0FD9 / PID {} · HID input and artwork active",
+            pids.join(" and ")
+        ),
+    );
 }
 
 /// The preview control for the zero-based input `index`, if the shown model
@@ -4660,6 +4941,7 @@ mod tests {
     mod timer_notification_tests;
     mod touchscreen_tests;
     mod tray_startup;
+    mod two_device_tests;
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
@@ -4908,14 +5190,17 @@ mod tests {
         app.connect_shutdown(move |_| shutdown_sent.send(()).unwrap());
         let (worker_sent, worker_received) = mpsc::channel();
         let (layer_sender, layer_receiver) = mpsc::channel();
-        lifecycle.borrow_mut().layer_sender = Some(layer_sender);
-        lifecycle.borrow_mut().layer_worker = Some(thread::spawn(move || {
-            assert!(matches!(
-                layer_receiver.recv().unwrap(),
-                LayerCommand::Shutdown
-            ));
-            worker_sent.send(()).unwrap();
-        }));
+        lifecycle.borrow_mut().workers.push(LayerWorker {
+            sender: layer_sender,
+            stop: Default::default(),
+            handle: thread::spawn(move || {
+                assert!(matches!(
+                    layer_receiver.recv().unwrap(),
+                    LayerCommand::Shutdown
+                ));
+                worker_sent.send(()).unwrap();
+            }),
+        });
         let timed_out = Rc::new(Cell::new(false));
         let deadline_hit = timed_out.clone();
         let deadline_app = app.clone();

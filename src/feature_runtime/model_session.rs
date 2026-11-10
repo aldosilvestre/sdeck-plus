@@ -1,14 +1,19 @@
-//! In-process device-model sessions: open one model's stores away from the UI,
-//! then swap them into the running window without restarting anything.
+//! The session registry: one complete session per device model, created the
+//! first time the model is needed and kept alive afterwards.
 //!
-//! The widgets, tray, update controller, layer worker, focus observer and HID
-//! monitor outlive every switch. Rebuilding the widget tree would leave each
-//! old one alive through its own signal closures, so a switch replaces the
-//! data the widgets show instead, exactly as an imported configuration does.
+//! A session owns its widget tree (built once), runtime, stores, layer worker,
+//! information reader and its own event channel, so devices of different
+//! models run live at the same time and nothing crosses between them. Two
+//! devices of one model share that model's session (they mirror each other).
+//! The window shows one session at a time, as the visible child of a stack;
+//! the tray, update controller, focus observer and HID hub are shared.
 use super::*;
 use crate::device_preference;
 use sdeck_plus::{
-    device_model::DeviceModel, device_roots, event_api::ConnectionState, layers::DEFAULT_LAYER,
+    device_model::DeviceModel,
+    device_roots,
+    event_api::{ConnectionState, DeviceId},
+    layers::DEFAULT_LAYER,
     local_artwork::ArtworkStore,
 };
 
@@ -88,18 +93,6 @@ pub(crate) fn open_session(
     })
 }
 
-/// Windows over the main one (dialogs, pickers) belong to the old session.
-fn close_secondary_windows(main: &gtk::Window) {
-    for window in gtk::Window::list_toplevels()
-        .into_iter()
-        .filter_map(|window| window.downcast::<gtk::Window>().ok())
-    {
-        if &window != main && window.transient_for().as_ref() == Some(main) {
-            window.close();
-        }
-    }
-}
-
 impl FeatureRuntime {
     #[cfg(test)]
     pub(crate) fn preview(&self) -> Option<Rc<crate::preview::PreviewView>> {
@@ -110,7 +103,8 @@ impl FeatureRuntime {
         *self.preview.borrow_mut() = Rc::downgrade(preview);
     }
 
-    /// The model whose stores are shown now.
+    /// The model whose stores this session holds.
+    #[cfg(test)]
     pub(crate) fn session_model(&self) -> &'static DeviceModel {
         self.layers.borrow().model()
     }
@@ -147,11 +141,6 @@ impl FeatureRuntime {
         self.ui.is_dirty()
     }
 
-    /// A switch must not race an import, export or key swap.
-    pub(crate) fn can_switch_model(&self) -> bool {
-        self.configuration_operation.get().is_none() && !self.key_swap_pending.get()
-    }
-
     pub(crate) fn set_editing_enabled(&self, enabled: bool) {
         if let Some(root) = self.configuration_root.borrow().upgrade() {
             root.set_sensitive(enabled);
@@ -166,81 +155,66 @@ impl FeatureRuntime {
             .and_then(|root| root.downcast::<gtk::Window>().ok())
     }
 
-    /// Stop the countdown and pending page return without redrawing: the next
-    /// snapshot belongs to the new session.
-    fn drop_timers(&self) {
-        if let Some(source) = self.timer.borrow_mut().take() {
-            source.remove();
-        }
-        if let Some(source) = self.page_return.borrow_mut().take() {
-            source.remove();
-        }
-        self.artwork.info.borrow_mut().countdown = None;
+    /// Resend the session's complete picture to its devices.
+    pub(crate) fn resend_artwork(&self) {
+        self.artwork.refresh(true);
     }
 
-    /// Show `session` in place of the current one. Nothing is replaced when
-    /// the layer worker cannot be told about the new root.
-    pub(crate) fn install_session(
-        &self,
-        session: OpenedSession,
-        send_artwork: bool,
-    ) -> Result<(), String> {
-        // Ordered after every earlier command: queued work still sees the old root.
-        self.output
-            .send(LayerCommand::SetRoot(session.layers.root().to_owned()))
-            .map_err(|error| format!("the action worker is unavailable: {error}"))?;
-        self.cancel_key_holds();
-        // Sized for the new model, with no held-key state from the old one.
-        *self.key_hold.borrow_mut() =
-            sdeck_plus::key_hold::KeyHoldRecognizer::new(session.layers.model());
-        self.drop_timers();
-        // The reader ends once its only sender is gone.
+    /// Stop the information reader; it ends once its sender is gone.
+    pub(crate) fn stop_info_worker(&self) {
         self.info_watch.borrow_mut().take();
-        self.artwork.chooser_owners.borrow_mut().clear();
-        if let Some(window) = self.window() {
-            close_secondary_windows(&window);
-        }
-        self.ui.removed.borrow_mut().take();
-        self.ui.undo_remove.set_visible(false);
-        *self.layers.borrow_mut() = session.layers;
-        match session.artwork {
-            Ok(store) => *self.artwork.store.borrow_mut() = Some(store),
-            Err(error) => {
-                *self.artwork.store.borrow_mut() = None;
-                self.report(&format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Original files have not been replaced."), true);
-            }
-        }
-        // The preview shows what the stores now hold: rebuild it before anything
-        // below refreshes its pictures, summaries or selection.
-        let preview = self.preview.borrow().upgrade();
-        if let Some(preview) = preview {
-            preview.show_model(self.layers.borrow().model());
-        }
-        *self.artwork.last_layer.borrow_mut() = None;
-        {
-            let mut info = self.artwork.info.borrow_mut();
-            info.clear();
-            info.insert(InfoSource::Brightness, self.brightness_value());
-        }
-        self.profile_memory.borrow_mut().clear();
-        self.manual_profile.set(false);
-        self.apply_organization(session.organization, true);
-        self.apply_obs(session.obs);
-        self.start_info_worker();
-        self.sync_info_from(&self.layers.borrow());
-        self.refresh_selection_for(send_artwork);
-        if let Some(editor) = self.artwork.text_editor.borrow().upgrade() {
-            editor.load_context(true);
-        }
-        self.reconcile_focus();
-        self.refresh_application_editor();
-        Ok(())
     }
 }
 
+/// One model's complete session: its editor (the stack child the window
+/// shows), runtime and the channel its own workers report through.
+pub(crate) struct Session {
+    pub(crate) model: &'static DeviceModel,
+    pub(crate) runtime: FeatureRuntime,
+    /// What the window's stack shows.
+    pub(crate) root: GtkBox,
+    /// Keeps the editor's weakly referenced callbacks alive.
+    _body: crate::Body,
+    surface: crate::EventSurface,
+    events: mpsc::Receiver<MonitorEvent>,
+    /// Devices of this model that are connected now.
+    live: Cell<usize>,
+}
+
+impl Session {
+    pub(crate) fn new(
+        model: &'static DeviceModel,
+        body: crate::Body,
+        surface: crate::EventSurface,
+        events: mpsc::Receiver<MonitorEvent>,
+    ) -> Self {
+        Self {
+            model,
+            runtime: body.feature_runtime.clone(),
+            root: body.root.clone(),
+            _body: body,
+            surface,
+            events,
+            live: Cell::new(0),
+        }
+    }
+}
+
+/// A session just built, with what could not be opened along the way.
+pub(crate) struct Created {
+    pub(crate) session: Session,
+    pub(crate) artwork_error: Option<String>,
+}
+
+/// Builds the session of a model from its opened stores. The last argument is
+/// whether its first picture is sent right away; a model that is not shown
+/// yet has no device to send it to.
+pub(crate) type SessionFactory =
+    Box<dyn Fn(&'static DeviceModel, OpenedSession, bool) -> Result<Created, String>>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SwitchReason {
-    /// The connected hardware is another model: it decides.
+    /// The connected hardware decides which model is shown.
     Device,
     /// The user picked a model with 'Preview as'.
     Preview,
@@ -250,80 +224,125 @@ pub(crate) enum SwitchReason {
 pub(crate) enum Outcome {
     Unchanged,
     Switched,
-    /// Deferred, awaiting confirmation, or failed to open.
+    /// Awaiting confirmation, or failed to open.
     Blocked,
 }
 
-/// Which model the window shows, follows the hardware and serves 'Preview as'.
+/// The window's connection labels, 'Preview as' and menu: shared by every
+/// session, bound to the shown one.
+#[derive(Clone)]
+pub(crate) struct SharedHeader {
+    pub(crate) status: Label,
+    pub(crate) detail: Label,
+    pub(crate) picker: crate::PreviewPicker,
+    pub(crate) menu: crate::configuration_menu::ConfigurationMenu,
+}
+
+/// The registry: which sessions exist, which one the window shows and which
+/// devices are connected to them.
 pub(crate) struct ModelSession {
-    runtime: FeatureRuntime,
     roots: SessionRoots,
-    picker: crate::PreviewPicker,
-    organization_writes: Vec<Button>,
+    header: SharedHeader,
+    stack: gtk::Stack,
+    window: glib::WeakRef<gtk::Window>,
     toast: crate::ui::Toast,
-    connected: Cell<Option<&'static DeviceModel>>,
+    factory: SessionFactory,
+    sessions: RefCell<Vec<Rc<Session>>>,
+    shown: Cell<&'static DeviceModel>,
+    /// Connected devices in the order they connected.
+    devices: RefCell<Vec<(DeviceId, &'static DeviceModel)>>,
     last_connected: Cell<Option<&'static DeviceModel>>,
-    deferred: Cell<Option<(&'static DeviceModel, SwitchReason)>>,
-    /// The model that could not be opened; editing stays off until one does.
+    /// What the header says while no device is connected.
+    last_state: RefCell<ConnectionState>,
+    /// The model that could not be opened; the window stays read-only while it
+    /// is the one the hardware wants and nothing else is running.
     failed: Cell<Option<&'static DeviceModel>>,
+    last_focus: RefCell<Option<Result<Option<sdeck_plus::app_focus::FocusedApplication>, String>>>,
     syncing: Cell<bool>,
 }
 
 impl ModelSession {
+    /// The registry over the first session, already built for `model`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        runtime: FeatureRuntime,
         roots: SessionRoots,
-        picker: crate::PreviewPicker,
-        organization_writes: Vec<Button>,
+        header: SharedHeader,
+        stack: gtk::Stack,
+        window: &gtk::Window,
         toast: crate::ui::Toast,
+        factory: SessionFactory,
+        first: Session,
     ) -> Rc<Self> {
-        let session = Rc::new(Self {
-            runtime,
+        let shown = first.model;
+        let first = Rc::new(first);
+        stack.add_named(&first.root, Some(shown.id));
+        stack.set_visible_child(&first.root);
+        header.menu.bind(first.runtime.clone());
+        let registry = Rc::new(Self {
             roots,
-            picker,
-            organization_writes,
+            header,
+            stack,
+            window: window.downgrade(),
             toast,
-            connected: Cell::new(None),
+            factory,
+            sessions: RefCell::new(vec![first]),
+            shown: Cell::new(shown),
+            devices: RefCell::new(Vec::new()),
             last_connected: Cell::new(None),
-            deferred: Cell::new(None),
+            last_state: RefCell::new(ConnectionState::Searching),
             failed: Cell::new(None),
+            last_focus: RefCell::new(None),
             syncing: Cell::new(false),
         });
-        let weak = Rc::downgrade(&session);
-        session
+        let weak = Rc::downgrade(&registry);
+        registry
+            .header
             .picker
             .dropdown
             .connect_selected_notify(move |dropdown| {
-                let Some(session) = weak.upgrade() else {
+                let Some(registry) = weak.upgrade() else {
                     return;
                 };
-                if session.syncing.get() {
+                if registry.syncing.get() {
                     return;
                 }
-                let model = session
+                let model = registry
+                    .header
                     .picker
                     .models
                     .get(dropdown.selected() as usize)
                     .copied();
                 match model {
-                    Some(model) if session.connected.get().is_none() => {
-                        session.switch_model(model, SwitchReason::Preview);
+                    Some(model) if registry.devices.borrow().is_empty() => {
+                        registry.show(model, SwitchReason::Preview);
                     }
-                    _ => session.sync_picker(),
+                    _ => registry.sync_picker(),
                 }
             });
-        session.sync_picker();
-        session
+        registry.sync_picker();
+        registry
     }
 
+    /// The shown session's runtime.
     #[cfg(test)]
-    pub(crate) fn runtime(&self) -> &FeatureRuntime {
-        &self.runtime
+    pub(crate) fn runtime(&self) -> FeatureRuntime {
+        self.shown_session().runtime.clone()
+    }
+
+    /// The model the window shows.
+    #[cfg(test)]
+    pub(crate) fn model(&self) -> &'static DeviceModel {
+        self.shown.get()
     }
 
     #[cfg(test)]
     pub(crate) fn picker(&self) -> &crate::PreviewPicker {
-        &self.picker
+        &self.header.picker
+    }
+
+    #[cfg(test)]
+    pub(crate) fn menu(&self) -> &crate::configuration_menu::ConfigurationMenu {
+        &self.header.menu
     }
 
     #[cfg(test)]
@@ -331,81 +350,254 @@ impl ModelSession {
         &self.toast
     }
 
+    /// The runtime of `model`'s session, if it exists.
+    #[cfg(test)]
+    pub(crate) fn runtime_of(&self, model: &DeviceModel) -> Option<FeatureRuntime> {
+        self.session(model).map(|session| session.runtime.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session_count(&self) -> usize {
+        self.sessions.borrow().len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn live_devices(&self, model: &DeviceModel) -> usize {
+        self.session(model).map_or(0, |session| session.live.get())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn device_count(&self) -> usize {
+        self.devices.borrow().len()
+    }
+
+    #[cfg(test)]
     pub(crate) fn last_connected(&self) -> Option<&'static DeviceModel> {
         self.last_connected.get()
     }
 
-    /// Input only drives the session that was built for the model sending it.
+    /// Whether the shown session can be used: it cannot while the hardware
+    /// wants a model that failed to open and nothing of the shown one runs.
+    #[cfg(test)]
     pub(crate) fn accepts_input(&self) -> bool {
-        self.failed.get().is_none()
-            && self
-                .connected
-                .get()
-                .is_none_or(|model| model == self.runtime.session_model())
+        !self.read_only()
     }
 
-    /// Follow the connection. Returns whether the current pictures still have
-    /// to be sent to the device: a switch has already sent its own.
-    pub(crate) fn connection_changed(self: &Rc<Self>, state: &ConnectionState) -> bool {
-        let ConnectionState::Connected { model, .. } = state else {
-            self.connected.set(None);
-            self.sync_picker();
-            return false;
+    fn read_only(&self) -> bool {
+        self.failed.get().is_some() && self.shown_session().live.get() == 0
+    }
+
+    fn session(&self, model: &DeviceModel) -> Option<Rc<Session>> {
+        self.sessions
+            .borrow()
+            .iter()
+            .find(|session| session.model == model)
+            .cloned()
+    }
+
+    fn shown_session(&self) -> Rc<Session> {
+        self.session(self.shown.get())
+            .expect("the shown model always has a session")
+    }
+
+    /// Drain what arrived and apply it: the hub's tagged events to the session
+    /// of their model, then every session's own results.
+    pub(crate) fn pump(self: &Rc<Self>, hub: &mpsc::Receiver<MonitorEvent>) {
+        let arrived: Vec<_> = hub.try_iter().collect();
+        for event in &arrived {
+            if let MonitorEvent::ApplicationFocus(result) = event {
+                self.focus_changed(result.clone());
+            }
+        }
+        for event in arrived {
+            self.route(event);
+        }
+        let sessions: Vec<_> = self.sessions.borrow().clone();
+        for session in &sessions {
+            session
+                .surface
+                .apply_all(session.events.try_iter().collect(), true);
+            session.runtime.poll_key_holds();
+        }
+    }
+
+    /// Every session follows the focused application, now or when it is built.
+    pub(crate) fn focus_changed(
+        &self,
+        result: Result<Option<sdeck_plus::app_focus::FocusedApplication>, String>,
+    ) {
+        *self.last_focus.borrow_mut() = Some(result.clone());
+        for session in self.sessions.borrow().iter() {
+            session.runtime.focus_changed(result.clone());
+        }
+    }
+
+    fn route(self: &Rc<Self>, event: MonitorEvent) {
+        let by_device = |device| {
+            self.devices
+                .borrow()
+                .iter()
+                .find(|(known, _)| *known == device)
+                .and_then(|(_, model)| self.session(model))
+                .unwrap_or_else(|| self.shown_session())
         };
-        let model: &'static DeviceModel = model;
-        self.connected.set(Some(model));
-        self.last_connected.set(Some(model));
-        let outcome = self.switch_model(model, SwitchReason::Device);
-        self.sync_picker();
-        outcome == Outcome::Unchanged
+        match event {
+            MonitorEvent::Connection(state) => self.connection_changed(&state),
+            MonitorEvent::Heartbeat | MonitorEvent::ApplicationFocus(_) => {}
+            MonitorEvent::Input { model, .. } => {
+                if let Some(session) = self.session(model) {
+                    session.surface.apply(event, true);
+                }
+            }
+            MonitorEvent::ArtworkResult { device, .. } => {
+                by_device(device).surface.apply(event, true);
+            }
+            MonitorEvent::DeviceResult { device, .. } => {
+                let session = match device {
+                    Some(device) => by_device(device),
+                    // Addressed to a model with no device: the window shows it.
+                    None => self.shown_session(),
+                };
+                session.surface.apply(event, true);
+            }
+            // Nothing else is tagged: workers report through their session's
+            // own channel, so these come from outside and belong to the window.
+            other => self.shown_session().surface.apply(other, true),
+        }
     }
 
-    /// Run a switch that waited for an import, export or key swap.
-    pub(crate) fn retry_deferred(self: &Rc<Self>) {
-        if self.runtime.can_switch_model() {
-            if let Some((model, reason)) = self.deferred.take() {
-                // The connection may have moved on while the operation ran.
-                let current = match reason {
-                    SwitchReason::Device => self.connected.get() == Some(model),
-                    SwitchReason::Preview => self.connected.get().is_none(),
-                };
-                if current {
-                    self.switch_model(model, reason);
-                    self.sync_picker();
+    /// Follow one connection report.
+    pub(crate) fn connection_changed(self: &Rc<Self>, state: &ConnectionState) {
+        match state {
+            ConnectionState::Connected { device, model } => self.device_connected(*device, model),
+            ConnectionState::Disconnected { device, .. } => self.device_gone(*device, state),
+            ConnectionState::Searching | ConnectionState::Unavailable(_) => {
+                // The hub only says this while it holds no device at all.
+                let gone: Vec<_> = self.devices.borrow().iter().map(|(id, _)| *id).collect();
+                for device in gone {
+                    self.release(device);
                 }
+                *self.last_state.borrow_mut() = state.clone();
+                self.refresh_header();
             }
         }
     }
 
-    pub(crate) fn switch_model(
+    fn device_connected(self: &Rc<Self>, device: DeviceId, model: &'static DeviceModel) {
+        // A device that reports again as another model went away unseen.
+        let known = self
+            .devices
+            .borrow()
+            .iter()
+            .find(|(known, _)| *known == device)
+            .map(|(_, model)| *model);
+        if let Some(previous) = known {
+            if previous != model {
+                self.release(device);
+            }
+        }
+        self.last_connected.set(Some(model));
+        // The model may have been unreachable before: try its stores again.
+        let session = match self.ensure_session(model) {
+            Ok(session) => session,
+            Err(error) => {
+                self.devices
+                    .borrow_mut()
+                    .retain(|(known, _)| *known != device);
+                self.open_failed(model, SwitchReason::Device, &error);
+                self.refresh_header();
+                return;
+            }
+        };
+        if self.failed.get() == Some(model) {
+            self.failed.set(None);
+        }
+        if known != Some(model) {
+            self.devices.borrow_mut().push((device, model));
+            session.live.set(session.live.get() + 1);
+        }
+        self.refresh_header();
+        // The only device decides what the window shows; with several, the
+        // window keeps what it shows until the user (or an unplug) changes it.
+        if self.devices.borrow().len() == 1 && self.shown.get() != model {
+            self.show(model, SwitchReason::Device);
+        }
+        session.runtime.resend_artwork();
+        self.apply_read_only();
+        self.sync_picker();
+    }
+
+    fn device_gone(self: &Rc<Self>, device: DeviceId, state: &ConnectionState) {
+        self.release(device);
+        if self.devices.borrow().is_empty() {
+            *self.last_state.borrow_mut() = state.clone();
+        }
+        let shown = self.shown_session();
+        let next = self.devices.borrow().first().map(|(_, model)| *model);
+        if shown.live.get() == 0 {
+            if let Some(next) = next {
+                self.show(next, SwitchReason::Device);
+            }
+        }
+        self.refresh_header();
+        self.apply_read_only();
+        self.sync_picker();
+    }
+
+    /// Forget a device; its model's session stops holding keys down when no
+    /// device of the model remains.
+    fn release(&self, device: DeviceId) {
+        let model = {
+            let mut devices = self.devices.borrow_mut();
+            let Some(at) = devices.iter().position(|(known, _)| *known == device) else {
+                return;
+            };
+            devices.remove(at).1
+        };
+        if let Some(session) = self.session(model) {
+            session.live.set(session.live.get().saturating_sub(1));
+            if session.live.get() == 0 {
+                session.runtime.cancel_key_holds();
+            }
+        }
+    }
+
+    /// The session of `model`, built on first use. Nothing is sent to a device
+    /// while it is built: the model's device gets its picture once it connects.
+    fn ensure_session(&self, model: &'static DeviceModel) -> Result<Rc<Session>, String> {
+        if let Some(session) = self.session(model) {
+            return Ok(session);
+        }
+        let opened = open_session(model, &self.roots).map_err(|error| error.to_string())?;
+        let Created {
+            session,
+            artwork_error,
+        } = (self.factory)(model, opened, false)?;
+        let session = Rc::new(session);
+        self.stack.add_named(&session.root, Some(model.id));
+        if let Some(focus) = self.last_focus.borrow().clone() {
+            session.runtime.focus_changed(focus);
+        }
+        self.sessions.borrow_mut().push(session.clone());
+        if let Some(error) = artwork_error {
+            session.runtime.report(&error, true);
+            if let Some(window) = self.window.upgrade() {
+                crate::show_artwork_error(&window, &error);
+            }
+        }
+        Ok(session)
+    }
+
+    /// Show `model`'s session.
+    pub(crate) fn show(
         self: &Rc<Self>,
         model: &'static DeviceModel,
         reason: SwitchReason,
     ) -> Outcome {
-        // The newest request supersedes any switch that was waiting.
-        self.deferred.set(None);
-        let current = self.runtime.session_model();
-        if model == current && self.failed.get().is_none() {
+        if model == self.shown.get() {
             return Outcome::Unchanged;
         }
-        if !self.runtime.can_switch_model() {
-            self.deferred.set(Some((model, reason)));
-            self.runtime.report(
-                "Wait for the current configuration operation to finish; the model changes afterwards.",
-                true,
-            );
-            self.sync_picker();
-            return Outcome::Blocked;
-        }
-        self.deferred.set(None);
-        if model == current {
-            // Nothing to open: the shown session was never replaced.
-            self.failed.set(None);
-            self.runtime.set_editing_enabled(true);
-            self.sync_picker();
-            return Outcome::Unchanged;
-        }
-        if reason == SwitchReason::Preview && self.runtime.editor_dirty() {
+        if reason == SwitchReason::Preview && self.shown_session().runtime.editor_dirty() {
             self.confirm_preview(model);
             return Outcome::Blocked;
         }
@@ -413,7 +605,7 @@ impl ModelSession {
     }
 
     fn confirm_preview(self: &Rc<Self>, model: &'static DeviceModel) {
-        let Some(window) = self.runtime.window() else {
+        let Some(window) = self.shown_session().runtime.window() else {
             self.commit(model, SwitchReason::Preview);
             return;
         };
@@ -423,58 +615,46 @@ impl ModelSession {
             &window,
             "You edited this binding without saving it. Showing another Stream Deck model discards those edits.",
             Rc::new(move || {
-                if let Some(session) = accepted.upgrade() {
+                if let Some(registry) = accepted.upgrade() {
                     // A device that connected while the question was open decides.
-                    if session.connected.get().is_none() {
-                        session.commit(model, SwitchReason::Preview);
+                    if registry.devices.borrow().is_empty() {
+                        // The draft belongs to the model being left, which keeps its session.
+                        registry.shown_session().runtime.discard_draft();
+                        registry.commit(model, SwitchReason::Preview);
                     }
-                    session.sync_picker();
+                    registry.sync_picker();
                 }
             }),
             Rc::new(move || {
-                if let Some(session) = declined.upgrade() {
-                    session.sync_picker();
+                if let Some(registry) = declined.upgrade() {
+                    registry.sync_picker();
                 }
             }),
         );
     }
 
     fn commit(self: &Rc<Self>, model: &'static DeviceModel, reason: SwitchReason) -> Outcome {
-        let discarded = self.runtime.editor_dirty();
-        let opened = match open_session(model, &self.roots) {
-            Ok(opened) => opened,
+        let session = match self.ensure_session(model) {
+            Ok(session) => session,
             Err(error) => {
-                self.open_failed(model, reason, &error.to_string());
+                self.open_failed(model, reason, &error);
                 return Outcome::Blocked;
             }
         };
-        let send_artwork = self.connected.get() == Some(model);
-        if let Err(error) = self.runtime.install_session(opened, send_artwork) {
-            self.open_failed(model, reason, &error);
-            return Outcome::Blocked;
-        }
-        self.failed.set(None);
-        self.runtime.set_editing_enabled(true);
-        for button in &self.organization_writes {
-            button.set_sensitive(self.runtime.organization_available());
-        }
+        self.stack.set_visible_child(&session.root);
+        self.shown.set(model);
+        self.header.menu.bind(session.runtime.clone());
+        self.apply_read_only();
         // Remembered only once the session really opened.
         if let Err(error) = device_preference::save_to(&self.roots.preference, model) {
-            self.runtime.report(
+            session.runtime.report(
                 &format!("Could not remember the selected model: {error}"),
                 true,
             );
         }
         self.sync_picker();
-        let message = if reason == SwitchReason::Device && discarded {
-            format!(
-                "Switched to {}; unsaved changes were discarded.",
-                model.name
-            )
-        } else {
-            format!("Switched to {}.", model.name)
-        };
-        self.toast.show(&message, false);
+        self.toast
+            .show(&format!("Switched to {}.", model.name), false);
         Outcome::Switched
     }
 
@@ -484,36 +664,78 @@ impl ModelSession {
             model.name
         );
         if reason == SwitchReason::Device {
-            // The previous pictures belong to the other model: keep them on
-            // screen, read-only, and send nothing to the device.
+            // The hardware wants a model that cannot open: the window keeps
+            // what it shows, read-only, and nothing reaches the device.
             self.failed.set(Some(model));
-            self.runtime.set_editing_enabled(false);
-            self.runtime.report(&message, true);
+            self.apply_read_only();
+            self.shown_session().runtime.report(&message, true);
         } else {
             self.toast.show(&message, true);
         }
-        if let Some(window) = self.runtime.window() {
+        if let Some(window) = self.window.upgrade() {
             crate::show_artwork_error(&window, &message);
         }
         self.sync_picker();
     }
 
+    /// Editing is off while the window can only show a model that failed.
+    fn apply_read_only(&self) {
+        let read_only = self.read_only();
+        self.shown_session().runtime.set_editing_enabled(!read_only);
+        for session in self.sessions.borrow().iter() {
+            if session.model != self.shown.get() {
+                session.runtime.set_editing_enabled(true);
+            }
+        }
+    }
+
+    /// The header says what is connected.
+    fn refresh_header(&self) {
+        let devices = self.devices.borrow();
+        let header = &self.header;
+        match devices.as_slice() {
+            [] => {
+                crate::show_connection_state(
+                    &header.status,
+                    &header.detail,
+                    &self.last_state.borrow(),
+                    self.last_connected.get(),
+                );
+            }
+            [(device, model)] => {
+                crate::show_connection_state(
+                    &header.status,
+                    &header.detail,
+                    &ConnectionState::Connected {
+                        device: *device,
+                        model,
+                    },
+                    self.last_connected.get(),
+                );
+            }
+            several => {
+                let models: Vec<_> = several.iter().map(|(_, model)| *model).collect();
+                crate::show_connected_devices(&header.status, &header.detail, &models);
+            }
+        }
+    }
+
     /// Show the shown model in the picker; it is only usable without a device.
     pub(crate) fn sync_picker(&self) {
-        let shown = self.runtime.session_model();
+        let shown = self.shown.get();
+        let picker = &self.header.picker;
         self.syncing.set(true);
-        if let Some(index) = self.picker.models.iter().position(|model| *model == shown) {
-            self.picker.dropdown.set_selected(index as u32);
+        if let Some(index) = picker.models.iter().position(|model| *model == shown) {
+            picker.dropdown.set_selected(index as u32);
         }
         self.syncing.set(false);
-        let tooltip = match self.connected.get() {
+        let connected = self.devices.borrow().first().map(|(_, model)| *model);
+        let tooltip = match connected {
             Some(model) => format!("Using the connected {}", model.name),
             None => "Show the configuration of another Stream Deck model while none is connected"
                 .to_owned(),
         };
-        self.picker
-            .dropdown
-            .set_sensitive(self.connected.get().is_none());
-        self.picker.dropdown.set_tooltip_text(Some(&tooltip));
+        picker.dropdown.set_sensitive(connected.is_none());
+        picker.dropdown.set_tooltip_text(Some(&tooltip));
     }
 }

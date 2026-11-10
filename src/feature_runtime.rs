@@ -31,8 +31,11 @@ mod pages;
 mod timer_sound;
 mod touchscreen;
 
+#[cfg(test)]
+pub(crate) use model_session::SwitchReason;
 pub(crate) use model_session::{
-    open_session, ModelSession, OpenError, OpenedSession, SessionRoots,
+    open_session, Created, ModelSession, OpenError, OpenedSession, Session, SessionFactory,
+    SessionRoots, SharedHeader,
 };
 
 /// The root OBS settings live in: the session's, or the Stream Deck + root.
@@ -61,7 +64,6 @@ pub(crate) fn run_worker_at(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     root: Option<PathBuf>,
 ) {
-    let mut root = root;
     let mut executor = sdeck_plus::layers::ActionExecutor::new(
         sdeck_plus::layers::SystemProcessRunner,
         sdeck_plus::keyboard::Keyboard::new(),
@@ -87,10 +89,6 @@ pub(crate) fn run_worker_at(
         }
         let event = match command {
             LayerCommand::Shutdown => break,
-            LayerCommand::SetRoot(next) => {
-                root = Some(next);
-                None
-            }
             LayerCommand::SwapKeys {
                 store,
                 artwork_root,
@@ -205,17 +203,6 @@ pub(crate) fn run_worker_at(
                 final_store = Some((store, organization))
             }
             LayerCommand::ObsSave(config) => final_obs = Some(config),
-            LayerCommand::SetRoot(next) => {
-                // Settings saved before the switch belong to the root they were saved on.
-                if let Some(config) = final_obs.take() {
-                    if let Err(error) =
-                        active_root(root.as_deref()).and_then(|root| config.save_at(&root))
-                    {
-                        eprintln!("Could not save closing OBS settings: {error}");
-                    }
-                }
-                root = Some(next);
-            }
             LayerCommand::SwapKeys {
                 store,
                 artwork_root,
@@ -848,6 +835,11 @@ impl FeatureRuntime {
             Ok(sender) => *self.info_watch.borrow_mut() = Some(sender),
             Err(error) => eprintln!("Could not start the information reader: {error}"),
         }
+    }
+
+    /// Reload the selected control, dropping an unsaved draft.
+    pub(crate) fn discard_draft(&self) {
+        self.ui.load_selected_binding(&self.layers);
     }
 
     /// Organization state of the session; `reenable` also turns writes back on

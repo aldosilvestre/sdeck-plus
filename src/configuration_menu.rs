@@ -153,6 +153,12 @@ impl ConfigurationMenu {
         self.0.runtime.replace(Some(runtime));
     }
 
+    /// The runtime import and export act on.
+    #[cfg(test)]
+    pub(crate) fn bound_runtime(&self) -> Option<FeatureRuntime> {
+        self.0.runtime.borrow().clone()
+    }
+
     fn create_chooser(&self, transfer: Transfer) -> Option<gtk::FileChooserNative> {
         let window = self.0.window.upgrade()?;
         if let Some(chooser) = self.0.chooser.borrow_mut().take() {

@@ -46,12 +46,12 @@ impl Drop for Harness {
     }
 }
 
-fn fs_set_writable(path: &Path) -> std::io::Result<()> {
+pub(super) fn fs_set_writable(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
-fn scratch(tag: &str) -> PathBuf {
+pub(super) fn scratch(tag: &str) -> PathBuf {
     let base = std::env::temp_dir().join(format!(
         "sdeck-model-session-{}-{}-{tag}",
         std::process::id(),
@@ -62,7 +62,7 @@ fn scratch(tag: &str) -> PathBuf {
     base
 }
 
-fn roots_in(base: &Path) -> SessionRoots {
+pub(super) fn roots_in(base: &Path) -> SessionRoots {
     SessionRoots {
         data_dir: base.join("data/sdeck-plus"),
         preference: base.join("config/sdeck-plus/device.json"),
@@ -218,7 +218,8 @@ impl Harness {
     }
 
     pub(super) fn make_editor_dirty(&self) {
-        let ui = self.session.runtime().binding_ui();
+        let runtime = self.session.runtime();
+        let ui = runtime.binding_ui();
         assert!(!ui.is_dirty());
         ui.text_entry.set_text("echo changed");
         ui.action_picker.set_selected(1);
@@ -265,6 +266,10 @@ pub(super) fn stored_binding(root: &Path, model: &'static DeviceModel, key: u8) 
 
 fn header_label(window: &ApplicationWindow, class: &str) -> Label {
     fn find(widget: &gtk::Widget, class: &str) -> Option<Label> {
+        // Sessions the window is not showing are not the header's business.
+        if super::preview_model_tests::is_hidden_session(widget) {
+            return None;
+        }
         if let Some(label) = widget.downcast_ref::<Label>() {
             if label.has_css_class(class) {
                 return Some(label.clone());
@@ -292,7 +297,7 @@ pub(super) fn count_widgets(widget: &gtk::Widget) -> usize {
     count
 }
 
-fn live_threads(name: &str) -> usize {
+pub(super) fn live_threads(name: &str) -> usize {
     std::fs::read_dir("/proc/self/task")
         .unwrap()
         .filter_map(Result::ok)
@@ -439,7 +444,8 @@ fn connecting_an_xl_switches_stores_without_touching_the_plus_files() {
         // Switching back restores the + data.
         harness.connect(&PLUS);
         harness.wait_for_model(&PLUS);
-        let layers = runtime.layers().borrow();
+        let plus = harness.session.runtime();
+        let layers = plus.layers().borrow();
         assert!(layers.binding("Base", &Trigger::KeyPress(2)).is_some());
         assert_eq!(layers.root(), plus_root);
         drop(layers);
@@ -578,27 +584,35 @@ fn preview_as_asks_before_discarding_a_dirty_draft() {
 }
 
 #[test]
-fn a_device_switch_discards_the_draft_without_asking_and_says_so() {
+fn a_device_switch_asks_nothing_and_the_left_session_keeps_its_draft() {
     run_gtk_test(|| {
         let Some(harness) = start("device-dirty", |_| {}) else {
             return;
         };
+        let plus = harness.session.runtime();
         harness.make_editor_dirty();
         harness.connect(&PLUS_XL);
         harness.wait_for_model(&PLUS_XL);
         assert!(harness.dialogs().is_empty(), "the hardware does not ask");
-        assert!(!harness.session.runtime().binding_ui().is_dirty());
+        assert!(
+            !harness.session.runtime().binding_ui().is_dirty(),
+            "the XL session starts clean"
+        );
+        assert!(
+            plus.binding_ui().is_dirty(),
+            "the + session keeps its draft"
+        );
         assert_eq!(
             harness.session.toast().label.text(),
-            "Switched to Stream Deck + XL; unsaved changes were discarded."
+            "Switched to Stream Deck + XL."
         );
     });
 }
 
 #[test]
-fn a_switch_cancels_key_holds_timers_and_the_pending_undo() {
+fn a_hidden_session_keeps_its_timer_and_pending_undo_running() {
     run_gtk_test(|| {
-        let Some(harness) = start("cancel", |_| {}) else {
+        let Some(harness) = start("hidden-timer", |_| {}) else {
             return;
         };
         let runtime = harness.session.runtime();
@@ -609,15 +623,13 @@ fn a_switch_cancels_key_holds_timers_and_the_pending_undo() {
         assert!(runtime.timer_active());
         runtime.binding_ui().undo_remove.set_visible(true);
         *runtime.binding_ui().removed.borrow_mut() = Some(Vec::new());
-        let generation = runtime.key_hold_generation();
 
         harness.connect(&PLUS_XL);
         harness.wait_for_model(&PLUS_XL);
-        assert!(!runtime.timer_active());
-        assert!(!runtime.page_return_active());
-        assert!(runtime.key_hold_generation() != generation);
-        assert!(!runtime.binding_ui().undo_remove.is_visible());
-        assert!(runtime.binding_ui().removed.borrow().is_none());
+        // The + stays alive behind the XL: its countdown keeps running.
+        assert!(runtime.timer_active());
+        assert!(!harness.session.runtime().timer_active());
+        assert!(runtime.binding_ui().removed.borrow().is_some());
     });
 }
 
@@ -726,40 +738,48 @@ fn a_failed_preview_keeps_the_session_and_does_not_remember_the_choice() {
 }
 
 #[test]
-fn a_switch_waits_for_a_running_configuration_operation() {
+fn a_switch_does_not_wait_for_a_configuration_operation_and_the_operation_finishes() {
     run_gtk_test(|| {
-        let Some(harness) = start("deferred", |_| {}) else {
+        let Some(harness) = start("operation", |_| {}) else {
             return;
         };
         let runtime = harness.session.runtime();
         let bundle = harness.base.join("plus.sdeck-plus.json");
         runtime.export_configuration(bundle.clone());
-        assert!(!runtime.can_switch_model());
-        // The device announces itself first, as it does in production.
+        // Sessions are kept, so showing another one cannot race the export.
         harness
             .session
             .connection_changed(&ConnectionState::Connected {
                 device: sdeck_plus::event_api::DeviceId::from_path("sim"),
                 model: &PLUS_XL,
             });
-        assert_eq!(harness.model().id, "plus");
-        assert_eq!(harness.model().id, "plus");
-        // Once the export finishes the deferred switch runs.
-        harness.wait_for_model(&PLUS_XL);
+        assert_eq!(harness.model().id, "plus-xl");
+        let exporting = runtime.clone();
+        wait_until("the + export", move || {
+            exporting
+                .status
+                .text()
+                .starts_with("Configuration exported to")
+        });
         assert!(bundle.is_file());
     });
 }
-
 #[test]
 fn twenty_alternating_switches_leave_no_widgets_handlers_or_workers_behind() {
     run_gtk_test(|| {
         let Some(harness) = start("churn", |_| {}) else {
             return;
         };
-        let runtime = harness.session.runtime().clone();
+        // Both models' sessions exist from here on; they are built once.
+        harness.connect(&PLUS_XL);
+        harness.wait_for_model(&PLUS_XL);
+        harness.connect(&PLUS);
+        harness.wait_for_model(&PLUS);
+        assert_eq!(harness.session.session_count(), 2);
+        let runtime = harness.session.runtime();
         let widgets = count_widgets(harness.window.upcast_ref());
-        // Readers of earlier tests' windows may still be around; count from here.
         let readers = live_threads("info-reader");
+        let workers = live_threads("layer-worker");
         let mut actions = harness.app.list_actions();
         actions.sort();
         let strong = Rc::strong_count(runtime.layers());
@@ -770,6 +790,7 @@ fn twenty_alternating_switches_leave_no_widgets_handlers_or_workers_behind() {
             harness.wait_for_model(model);
         }
         assert_eq!(harness.model().id, "plus");
+        assert_eq!(harness.session.session_count(), 2);
         assert_eq!(count_widgets(harness.window.upcast_ref()), widgets);
         let mut after = harness.app.list_actions();
         after.sort();
@@ -783,10 +804,8 @@ fn twenty_alternating_switches_leave_no_widgets_handlers_or_workers_behind() {
             Rc::strong_count(&runtime.artwork_ui().chooser_owners),
             owners
         );
-        // Every replaced information reader ends once its sender is dropped.
-        wait_until("old information readers to end", move || {
-            live_threads("info-reader") <= readers
-        });
+        assert_eq!(live_threads("info-reader"), readers);
+        assert_eq!(live_threads("layer-worker"), workers);
         // The update controller keeps working: its action is still the one installed.
         harness.app.activate_action("check-updates-on-open", None);
     });
@@ -903,47 +922,6 @@ fn the_header_uses_the_connected_models_own_wording() {
             detail.tooltip_text().as_deref(),
             Some("USB device VID 0FD9 / PID 00C6 · HID input and artwork active")
         );
-    });
-}
-
-#[test]
-fn a_deferred_device_switch_is_dropped_when_the_device_flips_back() {
-    run_gtk_test(|| {
-        let Some(h) = start("stale-deferred", |_| {}) else {
-            return;
-        };
-        let runtime = h.session.runtime();
-        runtime.export_configuration(h.base.join("p.sdeck-plus.json"));
-        assert!(!runtime.can_switch_model());
-        h.session.connection_changed(&ConnectionState::Connected {
-            device: sdeck_plus::event_api::DeviceId::from_path("sim"),
-            model: &PLUS_XL,
-        });
-        h.session.connection_changed(&ConnectionState::Connected {
-            device: sdeck_plus::event_api::DeviceId::from_path("sim"),
-            model: &PLUS,
-        });
-        let s = h.session.clone();
-        wait_until("export", move || {
-            s.runtime()
-                .status
-                .text()
-                .starts_with("Configuration exported to")
-        });
-        // Let the polling tick run retry_deferred; the signal is its pass count.
-        let ticks = Rc::new(Cell::new(0));
-        let counter = ticks.clone();
-        let source = glib::timeout_add_local(Duration::from_millis(40), move || {
-            counter.set(counter.get() + 1);
-            glib::ControlFlow::Continue
-        });
-        wait_until("two polling ticks", {
-            let ticks = ticks.clone();
-            move || ticks.get() >= 3
-        });
-        source.remove();
-        assert_eq!(h.model().id, "plus");
-        assert!(h.session.accepts_input());
     });
 }
 
@@ -1209,8 +1187,8 @@ fn xl_physical_keys_beyond_the_plus_range_run_their_bindings() {
         let runtime = harness.session.runtime();
         for (index, expect) in [(0usize, "A"), (8, "B"), (19, "C"), (35, "A")] {
             runtime.layers().borrow_mut().select("Base");
-            press_key(runtime, index);
-            assert_eq!(active(runtime), expect, "key {}", index + 1);
+            press_key(&runtime, index);
+            assert_eq!(active(&runtime), expect, "key {}", index + 1);
         }
     });
 }
@@ -1232,8 +1210,8 @@ fn keys_beyond_the_plus_range_work_after_switching_from_a_plus_session() {
         };
         harness.connect(&PLUS_XL);
         harness.wait_for_model(&PLUS_XL);
-        press_key(harness.session.runtime(), 35);
-        assert_eq!(active(harness.session.runtime()), "A");
+        press_key(&harness.session.runtime(), 35);
+        assert_eq!(active(&harness.session.runtime()), "A");
     });
 }
 
@@ -1280,7 +1258,7 @@ fn xl_dials_five_and_six_run_rotation_and_press_bindings() {
         for (event, expect) in events {
             runtime.layers().borrow_mut().select("Base");
             runtime.execute_input(&event);
-            assert_eq!(active(runtime), expect, "{event:?}");
+            assert_eq!(active(&runtime), expect, "{event:?}");
         }
     });
 }
@@ -1302,7 +1280,7 @@ fn xl_touch_zones_five_and_six_run_tap_bindings() {
         for (x, expect) in [(900u16, "A"), (1100, "B")] {
             runtime.layers().borrow_mut().select("Base");
             runtime.execute_input(&protocol::Event::TouchTap { x, y: 50 });
-            assert_eq!(active(runtime), expect, "x {x}");
+            assert_eq!(active(&runtime), expect, "x {x}");
         }
     });
 }
@@ -1325,12 +1303,12 @@ fn a_plus_session_runs_keys_one_to_eight_and_ignores_key_nine() {
         let runtime = harness.session.runtime();
         for index in [0usize, 7] {
             runtime.layers().borrow_mut().select("Base");
-            press_key(runtime, index);
-            assert_eq!(active(runtime), "A", "key {}", index + 1);
+            press_key(&runtime, index);
+            assert_eq!(active(&runtime), "A", "key {}", index + 1);
         }
         runtime.layers().borrow_mut().select("Base");
-        press_key(runtime, 8);
-        assert_eq!(active(runtime), "Base", "a + has no key 9");
+        press_key(&runtime, 8);
+        assert_eq!(active(&runtime), "Base", "a + has no key 9");
     });
 }
 
@@ -1352,18 +1330,18 @@ fn xl_key_36_taps_run_the_tap_and_a_two_second_hold_fires_once() {
         // A short tap runs the tap action once released.
         key(true);
         key(false);
-        assert_eq!(active(runtime), "A");
+        assert_eq!(active(&runtime), "A");
         // A hold fires at the boundary; the release afterwards does nothing.
         runtime.layers().borrow_mut().select("Base");
         key(true);
         runtime.advance_key_clock(sdeck_plus::key_hold::HOLD_DURATION);
         runtime.poll_key_holds();
-        assert_eq!(active(runtime), "B");
+        assert_eq!(active(&runtime), "B");
         runtime.layers().borrow_mut().select("Base");
         key(false);
         runtime.poll_key_holds();
         assert_eq!(
-            active(runtime),
+            active(&runtime),
             "Base",
             "the hold fired once; release is silent"
         );

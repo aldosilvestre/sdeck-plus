@@ -32,7 +32,7 @@ shows the row itself. Searching opens every category with matches, hides the
 rest and shows "No actions match your search." when nothing matches; clearing
 restores the categories as the user left them. Every key and every dial of
 the shown model takes a drop (36 keys and 6 dials on the + XL, 8 and 4 on the +),
-and the search text and the open categories survive a model change.
+and each model's session keeps its own search text and open categories.
 Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
 assigned, with the same save-or-draft rule as keys, and clicking an action with a
@@ -212,10 +212,9 @@ arbitrary minimum height.
 
 **Model-driven preview.** The chassis is drawn from the shown model's layout
 (`PreviewLayout::for_model`, `src/preview_layout.rs`, pure geometry shared by
-the widgets and the tests); `PreviewView` (`src/ui/preview.rs`) builds it and,
-when the model changes, replaces only the chassis inside the same card. The
-header, catalog and editor stay; a key's open context menu is popped down and
-detached first, so no popover outlives the key it was attached to. Geometry,
+the widgets and the tests); `PreviewView` (`src/ui/preview.rs`) builds it once, inside
+the session of that model; showing another model shows another session (see
+"Device model"), so a chassis is never rebuilt in place. Geometry,
 in preview pixels at 1x:
 
 | Model | Chassis | Keys | Touch strip | Dials |
@@ -547,21 +546,34 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Action choices include existing toggles plus explicit start/stop recording,
   pause/resume recording, and start/stop streaming. Choosing or saving an
   action never executes it.
-- **Device model:** the window shows one model at a time and follows the
-  connected hardware without restarting. Beside the connection badge, a
-  "Preview as" drop-down lists the supported models (Stream Deck + and Stream
-  Deck + XL) with that accessible name; it is enabled only while no device is
-  connected and otherwise disabled with the tooltip "Using the connected
-  <model>". The last model stays shown after an unplug and is remembered for
-  the next start. A hardware change switches without asking and discards an
-  unsaved draft with a toast ("Switched to <model>; unsaved changes were
-  discarded."); choosing a model with "Preview as" asks first when the editor
-  has unsaved edits. If the new model's configuration cannot be opened, the
-  previous one stays visible but read-only with a persistent error, and nothing
-  is sent to the device. The preview itself follows the model (see the
-  model-driven preview in section 4): its brand line reads "STREAM DECK +" or
-  "STREAM DECK + XL", and the selected control stays selected when the new
-  model has it, else the first key is selected.
+- **Device model:** every model has a complete session of its own: its
+  widget tree (built once, the model-driven preview and the editor), runtime,
+  stores, action worker, information reader and event channel. A session is
+  created the first time its model is needed (the last used model at startup,
+  or the model of a device that connects) and kept alive afterwards, so two
+  connected Stream Decks of different models run live at the same time, each
+  with its own configuration, artwork and timers; two devices of one model
+  share that model's session and mirror each other. The window is a shared
+  header (title, connection status, "Preview as", update indicator and menu)
+  over a stack whose pages are the sessions' editors; the stack takes the
+  size of the shown page only. The window shows one session: the last used
+  model at startup; the model of a device that connects when no other device
+  is connected; the other connected model when the shown model's last device
+  is unplugged; otherwise it keeps what it shows. The header lists what is
+  connected (each model once, "x2" for two units of one). Beside the
+  connection badge, a "Preview as" drop-down lists the supported models
+  (Stream Deck + and Stream Deck + XL) with that accessible name; it is
+  enabled only while no device is connected and otherwise disabled with the
+  tooltip "Using the connected <model>". Changing the shown model toasts
+  "Switched to <model>." and is remembered for the next start only once the
+  session opened; "Preview as" asks first when the shown editor has unsaved
+  edits, a hardware change never asks and leaves each session's draft in
+  place. If a connected model's configuration cannot be opened, the shown
+  session stays visible, read-only while none of its own devices is
+  connected, with a persistent error, and nothing is sent to that device. The
+  menu's import and export, OBS and Test action act on the shown session; the
+  focused application reaches every session. Each preview's brand line reads
+  "STREAM DECK +" or "STREAM DECK + XL".
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
@@ -660,9 +672,8 @@ touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
 is the shown model's count (36 keys, 6 dials and 6 sections for the + XL; the
 + keeps 8, 4 and 4). Tab visits the keys row-major, then the touch strip, its
 sections and the dials; Space or Enter selects the focused control, and any
-key of the shown model can be dragged onto another to swap them. A rebuild for
-another model keeps this order and these names, and never leaves a handler or
-widget of the previous model behind.
+key of the shown model can be dragged onto another to swap them. Every model's
+session uses this order and these names.
 
 Agency Agents accessibility guidance is adapted to this native desktop surface:
 retain keyboard access, distinguish interactive boundaries at 3:1 or better,

@@ -1,4 +1,5 @@
-//! A simulated Stream Deck + / + XL for tests. It scripts 0x01 input reports,
+//! A simulated Stream Deck + / + XL for tests (also exposed, hidden, through
+//! `test_support` so binary tests can run the real hub over it). It scripts 0x01 input reports,
 //! captures every 0x02 output report and feature report, reassembles the JPEG
 //! chunks of each image, and can be unplugged so a different model is found
 //! next. A [`Bus`] lists the devices that are plugged in right now, and a
@@ -32,8 +33,8 @@ struct State {
 /// One simulated unit. Clones share the same wire, so the test keeps a handle
 /// while the monitor owns another.
 #[derive(Clone)]
-pub(super) struct SimDevice {
-    pub(super) model: &'static DeviceModel,
+pub struct SimDevice {
+    pub model: &'static DeviceModel,
     state: Arc<(Mutex<State>, Condvar)>,
 }
 
@@ -84,25 +85,25 @@ impl Device for SimDevice {
 }
 
 /// An image the host uploaded, reassembled from its chunk reports.
-pub(super) struct CapturedImage {
+pub struct CapturedImage {
     /// 0x07 key image, 0x0b full window, 0x0c partial window.
-    pub(super) command: u8,
+    pub command: u8,
     /// Zero-based key for 0x07, otherwise 0.
-    pub(super) slot: u8,
+    pub slot: u8,
     /// `(x, y, width, height)` of a 0x0c partial window.
-    pub(super) window: Option<(u16, u16, u16, u16)>,
-    pub(super) chunks: usize,
-    pub(super) jpeg: Vec<u8>,
+    pub window: Option<(u16, u16, u16, u16)>,
+    pub chunks: usize,
+    pub jpeg: Vec<u8>,
 }
 
 impl CapturedImage {
-    pub(super) fn decode(&self) -> Pixbuf {
+    pub fn decode(&self) -> Pixbuf {
         Pixbuf::from_read(std::io::Cursor::new(self.jpeg.clone())).unwrap()
     }
 }
 
 impl SimDevice {
-    pub(super) fn new(model: &'static DeviceModel) -> Self {
+    pub fn new(model: &'static DeviceModel) -> Self {
         Self {
             model,
             state: Arc::default(),
@@ -110,12 +111,12 @@ impl SimDevice {
     }
 
     /// Queue one raw input report, as the device would send it.
-    pub(super) fn send(&self, report: Vec<u8>) {
+    pub fn send(&self, report: Vec<u8>) {
         self.script(Scripted::Report(report));
     }
 
     /// The next read fails, as it does when the cable is pulled.
-    pub(super) fn unplug(&self) {
+    pub fn unplug(&self) {
         self.script(Scripted::Unplug);
     }
 
@@ -126,12 +127,12 @@ impl SimDevice {
     }
 
     /// Make the next write block for `time`.
-    pub(super) fn stall_next_write(&self, time: Duration) {
+    pub fn stall_next_write(&self, time: Duration) {
         self.state.0.lock().unwrap().stall = Some(time);
     }
 
     /// How many times the hub opened this unit.
-    pub(super) fn opened(&self) -> usize {
+    pub fn opened(&self) -> usize {
         self.state.0.lock().unwrap().opened
     }
 
@@ -141,12 +142,12 @@ impl SimDevice {
 
     /// Handles to this unit alive now: the test's own, plus the bus's and the
     /// worker's while they hold it.
-    pub(super) fn handles(&self) -> usize {
+    pub fn handles(&self) -> usize {
         Arc::strong_count(&self.state)
     }
 
     /// The newest finished key image of zero-based `slot`.
-    pub(super) fn last_key_jpeg(&self, slot: u8) -> Option<Vec<u8>> {
+    pub fn last_key_jpeg(&self, slot: u8) -> Option<Vec<u8>> {
         self.assemble()
             .0
             .into_iter()
@@ -161,17 +162,17 @@ impl SimDevice {
     }
 
     /// Every 0x02 output report written so far.
-    pub(super) fn writes(&self) -> Vec<Vec<u8>> {
+    pub fn writes(&self) -> Vec<Vec<u8>> {
         self.state.0.lock().unwrap().writes.clone()
     }
 
     /// Every feature report written so far.
-    pub(super) fn features(&self) -> Vec<Vec<u8>> {
+    pub fn features(&self) -> Vec<Vec<u8>> {
         self.state.0.lock().unwrap().features.clone()
     }
 
     /// Wait until `done` holds for the captured traffic, within a bounded time.
-    pub(super) fn wait_until(&self, mut done: impl FnMut(&SimDevice) -> bool) {
+    pub fn wait_until(&self, mut done: impl FnMut(&SimDevice) -> bool) {
         let deadline = Instant::now() + WAIT;
         while !done(self) {
             assert!(Instant::now() < deadline, "simulated device wait timed out");
@@ -183,7 +184,7 @@ impl SimDevice {
     }
 
     /// Finished images and the number of chunk sequences still open.
-    pub(super) fn assemble(&self) -> (Vec<CapturedImage>, usize) {
+    pub fn assemble(&self) -> (Vec<CapturedImage>, usize) {
         let mut open: Vec<CapturedImage> = Vec::new();
         let mut done = Vec::new();
         for report in self.writes() {
@@ -251,13 +252,13 @@ impl SimDevice {
     }
 
     /// Finished images; panics if an upload was left half-sent.
-    pub(super) fn images(&self) -> Vec<CapturedImage> {
+    pub fn images(&self) -> Vec<CapturedImage> {
         let (images, open) = self.assemble();
         assert_eq!(open, 0, "an image upload was left incomplete");
         images
     }
 
-    pub(super) fn image_count(&self) -> usize {
+    pub fn image_count(&self) -> usize {
         self.assemble().0.len()
     }
 }
@@ -272,7 +273,7 @@ fn input_report(model: &DeviceModel, command: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// Key states, one byte per key, for the zero-based keys in `down`.
-pub(super) fn key_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
+pub fn key_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
     // Sensors a model appends after its keys are the last entries.
     let mut states = vec![0; usize::from(model.key_inputs())];
     for key in down {
@@ -282,7 +283,7 @@ pub(super) fn key_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
 }
 
 /// Encoder buttons (type 0) for the zero-based dials in `down`.
-pub(super) fn encoder_button_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
+pub fn encoder_button_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
     let mut payload = vec![0; usize::from(model.dials) + 1];
     for dial in down {
         payload[1 + dial] = 1;
@@ -291,7 +292,7 @@ pub(super) fn encoder_button_report(model: &DeviceModel, down: &[usize]) -> Vec<
 }
 
 /// Encoder rotation (type 1) as `(zero-based dial, signed ticks)`.
-pub(super) fn rotation_report(model: &DeviceModel, turns: &[(usize, i8)]) -> Vec<u8> {
+pub fn rotation_report(model: &DeviceModel, turns: &[(usize, i8)]) -> Vec<u8> {
     let mut payload = vec![0; usize::from(model.dials) + 1];
     payload[0] = 1;
     for (dial, ticks) in turns {
@@ -302,12 +303,7 @@ pub(super) fn rotation_report(model: &DeviceModel, turns: &[(usize, i8)]) -> Vec
 
 /// A touch report: `kind` 1 tap, 2 press, 3 flick; `points` are x, y (and the
 /// end point of a flick) as little-endian words. `length` is the payload size.
-pub(super) fn touch_report(
-    model: &DeviceModel,
-    kind: u8,
-    length: usize,
-    points: &[u16],
-) -> Vec<u8> {
+pub fn touch_report(model: &DeviceModel, kind: u8, length: usize, points: &[u16]) -> Vec<u8> {
     let mut payload = vec![kind, 0];
     for point in points {
         payload.extend_from_slice(&point.to_le_bytes());
@@ -340,20 +336,20 @@ struct BusState {
 }
 
 /// The path of the one-after-another devices of [`Rig::start`].
-pub(super) const SEQUENCE_PATH: &str = "sim";
+pub const SEQUENCE_PATH: &str = "sim";
 
 /// What the USB bus lists right now. Clones share it.
 #[derive(Clone, Default)]
-pub(super) struct Bus(Arc<Mutex<BusState>>);
+pub struct Bus(Arc<Mutex<BusState>>);
 
 impl Bus {
     /// Plug a device in on `path`; it is listed from the next enumeration.
-    pub(super) fn plug(&self, path: &str, device: &SimDevice) {
+    pub fn plug(&self, path: &str, device: &SimDevice) {
         self.add(path, (VID, device.model.pid()), device, true);
     }
 
     /// Plug in whatever has these USB ids, supported or not.
-    pub(super) fn plug_ids(&self, path: &str, ids: (u16, u16), device: &SimDevice) {
+    pub fn plug_ids(&self, path: &str, ids: (u16, u16), device: &SimDevice) {
         self.add(path, ids, device, false);
     }
 
@@ -369,7 +365,7 @@ impl Bus {
     }
 
     /// Pull the cable: the device stops being listed and its next read fails.
-    pub(super) fn unplug(&self, path: &str) {
+    pub fn unplug(&self, path: &str) {
         let mut state = self.0.lock().unwrap();
         state.plugged.retain(|plugged| {
             let gone = plugged.path == path;
@@ -381,25 +377,25 @@ impl Bus {
     }
 
     /// Make opening `path` fail, as a device another program holds does.
-    pub(super) fn refuse_open(&self, path: &str) {
+    pub fn refuse_open(&self, path: &str) {
         self.0.lock().unwrap().failing.insert(path.to_owned());
     }
 
-    pub(super) fn reverse_order(&self) {
+    pub fn reverse_order(&self) {
         self.0.lock().unwrap().reversed = true;
     }
 
     /// How many times `path` was opened.
-    pub(super) fn opens(&self, path: &str) -> usize {
+    pub fn opens(&self, path: &str) -> usize {
         self.0.lock().unwrap().opens.get(path).copied().unwrap_or(0)
     }
 
     /// How many times the hub has listed the bus.
-    pub(super) fn enumerations(&self) -> usize {
+    pub fn enumerations(&self) -> usize {
         self.0.lock().unwrap().enumerations
     }
 
-    fn enumerate(&self) -> Result<Vec<hub::Candidate<SimDevice>>, String> {
+    pub(super) fn enumerate(&self) -> Result<Vec<hub::Candidate<SimDevice>>, String> {
         let mut state = self.0.lock().unwrap();
         state.enumerations += 1;
         state.plugged.retain(|plugged| !plugged.device.is_gone());
@@ -483,6 +479,7 @@ pub(super) fn quick() -> hub::Cadence {
 }
 
 /// The real hub over a [`Bus`].
+#[cfg(test)]
 pub(super) struct Rig {
     events: Receiver<MonitorEvent>,
     /// The one-session adapter's inputs: they reach the first device's model.
@@ -491,9 +488,10 @@ pub(super) struct Rig {
     /// Everything received so far, heartbeats excluded.
     pub(super) seen: Vec<MonitorEvent>,
     pub(super) bus: Bus,
-    hid: HidController,
+    pub(super) hid: HidController,
 }
 
+#[cfg(test)]
 impl Rig {
     /// Devices plugged in one after another: each appears once the one before
     /// it has been unplugged, all on the same path.
@@ -607,6 +605,7 @@ impl Rig {
     }
 }
 
+#[cfg(test)]
 impl Drop for Rig {
     fn drop(&mut self) {
         self.stop();

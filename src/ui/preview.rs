@@ -105,7 +105,6 @@ fn placeholder(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
 
 /// One model's chassis subtree.
 struct Built {
-    layout: PreviewLayout,
     chassis: gtk::Fixed,
     /// Every selectable control, in the order the widgets were created.
     controls: Vec<(ControlRef, Button)>,
@@ -125,8 +124,6 @@ impl Drop for Built {
     }
 }
 
-type AfterBuild = Rc<dyn Fn(&PreviewView)>;
-
 pub(crate) struct PreviewView {
     /// The card the chassis sits in; its size follows the chassis.
     card: GtkBox,
@@ -140,7 +137,6 @@ pub(crate) struct PreviewView {
     heading: Label,
     built: RefCell<Option<Built>>,
     selected: Cell<ControlRef>,
-    after_build: RefCell<Option<AfterBuild>>,
 }
 
 impl PreviewView {
@@ -182,7 +178,6 @@ impl PreviewView {
             heading: heading.clone(),
             built: RefCell::new(None),
             selected: Cell::new(ControlRef::Key(1)),
-            after_build: RefCell::new(None),
         });
         view.install(model);
         // Catalogs and presets move the editor's selection themselves; the
@@ -203,20 +198,6 @@ impl PreviewView {
 
     pub(crate) fn touch_status(&self) -> &Label {
         &self.touch_status
-    }
-
-    /// Run `hook` after every later rebuild, with the new subtree in place.
-    pub(crate) fn set_after_build(&self, hook: AfterBuild) {
-        *self.after_build.borrow_mut() = Some(hook);
-    }
-
-    /// Handlers this view holds on widgets that outlive its subtree.
-    #[cfg(test)]
-    pub(crate) fn bound_handlers(&self) -> usize {
-        self.built
-            .borrow()
-            .as_ref()
-            .map_or(0, |built| built.handlers.len())
     }
 
     pub(crate) fn model(&self) -> &'static DeviceModel {
@@ -319,63 +300,6 @@ impl PreviewView {
         Some(Rc::new(controls))
     }
 
-    /// Show `model`, rebuilding the subtree when it differs from the one shown.
-    /// The selected control stays when the model has it, else the first key is
-    /// selected.
-    pub(crate) fn show_model(self: &Rc<Self>, model: &'static DeviceModel) {
-        if self
-            .built
-            .borrow()
-            .as_ref()
-            .is_some_and(|built| built.layout.model_id == model.id)
-        {
-            return;
-        }
-        let selection = self.ui.selected_control();
-        self.ui.set_model(model);
-        self.teardown();
-        self.install(model);
-        let layout = self.layout();
-        let keep = selection
-            .filter(|control| layout.has(*control))
-            .unwrap_or(ControlRef::Key(1));
-        let (kind, number) = kind_and_number(keep);
-        self.ui.apply_control(kind, number, false);
-        self.heading.set_text(&control_heading(kind, Some(number)));
-        self.set_selected(keep);
-        self.touch_status.set_text(placeholder(model));
-        if !self.artwork.selected_target.get().is_valid_for(model) {
-            self.artwork.selected_target.set(ArtworkTarget::Keypad(1));
-        }
-        let hook = self.after_build.borrow().clone();
-        if let Some(hook) = hook {
-            hook(self);
-        }
-    }
-
-    /// Detach the shared widgets and drop the current subtree.
-    fn teardown(&self) {
-        let old = self.built.borrow_mut().take();
-        // A key's context menu is parented to the key: close it, or the key
-        // would be finalized with a popover still attached.
-        if let Some(old) = &old {
-            detach_popovers(old.chassis.upcast_ref());
-        }
-        self.touch_status.unparent();
-        self.ui.gesture_badges.unparent();
-        for icon in self.ui.dial_icons.all() {
-            icon.unparent();
-        }
-        for legend in self.ui.dial_legends.all() {
-            legend.unparent();
-        }
-        if let Some(old) = old {
-            self.card.remove(&old.chassis);
-        }
-        // The pictures belonged to the subtree that just went.
-        self.artwork.pictures.borrow_mut().clear();
-    }
-
     fn install(self: &Rc<Self>, model: &'static DeviceModel) {
         let built = self.build(PreviewLayout::for_model(model));
         self.card.append(&built.chassis);
@@ -443,7 +367,6 @@ impl PreviewView {
         chassis.add_css_class("hardware-chassis");
         chassis.set_size_request(layout.size.0, layout.size.1);
         let mut built = Built {
-            layout: layout.clone(),
             chassis: chassis.clone(),
             controls: Vec::new(),
             key_labels: Vec::new(),
@@ -654,21 +577,6 @@ fn put(parent: &gtk::Fixed, child: &impl IsA<gtk::Widget>, rect: &Rect) {
 fn put_in(parent: &gtk::Fixed, child: &impl IsA<gtk::Widget>, rect: &Rect, origin: &Rect) {
     let rect = rect.relative_to(origin);
     parent.put(child, f64::from(rect.x), f64::from(rect.y));
-}
-
-/// Pop down and unparent every popover attached below `widget`.
-fn detach_popovers(widget: &gtk::Widget) {
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        // Read the sibling first: unparenting removes `current` from the chain.
-        child = current.next_sibling();
-        if let Some(popover) = current.downcast_ref::<gtk::Popover>() {
-            popover.popdown();
-            popover.unparent();
-        } else {
-            detach_popovers(&current);
-        }
-    }
 }
 
 #[cfg(test)]

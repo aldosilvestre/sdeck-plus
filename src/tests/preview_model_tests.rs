@@ -11,10 +11,22 @@ use sdeck_plus::{
 };
 use ui_refresh_tests::fixture;
 
+/// A page of the window's session stack that is not the shown one.
+pub(super) fn is_hidden_session(widget: &gtk::Widget) -> bool {
+    widget
+        .parent()
+        .filter(|parent| parent.has_css_class("session-stack"))
+        .and_then(|parent| parent.downcast::<gtk::Stack>().ok())
+        .is_some_and(|stack| stack.visible_child().as_ref() != Some(widget))
+}
+
 pub(super) fn descendants_of<T: IsA<gtk::Widget> + glib::object::IsClass>(
     widget: &gtk::Widget,
 ) -> Vec<T> {
     let mut found = Vec::new();
+    if is_hidden_session(widget) {
+        return found;
+    }
     if let Ok(this) = widget.clone().downcast::<T>() {
         found.push(this);
     }
@@ -626,85 +638,79 @@ fn every_control_of_every_model_selects_when_activated_from_the_keyboard() {
 }
 
 #[test]
-fn a_switch_rebuilds_the_preview_and_keeps_the_selection_only_when_it_still_exists() {
+fn each_models_session_keeps_its_own_preview_and_selection() {
     run_gtk_test(|| {
         let Some(h) = model_session_tests::start("preview-switch", |_| {}) else {
             return;
         };
         let root: gtk::Widget = h.window.clone().upcast();
-        let preview = h
-            .session
-            .runtime()
-            .preview()
-            .expect("the preview is attached");
-        let ui = h.session.runtime().binding_ui().clone();
+        let plus_runtime = h.session.runtime();
+        let plus_preview = plus_runtime.preview().expect("the preview is attached");
+        let plus_ui = plus_runtime.binding_ui().clone();
         let plus = [("key", 8), ("strip", 1), ("zone", 4), ("dial", 4)];
         let xl = [("key", 36), ("strip", 1), ("zone", 6), ("dial", 6)];
         assert_eq!(shown_shape(&root), plus);
         let shipped = render_preview(&h.window, &preview_of(&root), None);
 
-        // A dial both models have stays selected; so does a section.
-        activate(&preview, ControlRef::Dial(2));
+        activate(&plus_preview, ControlRef::Dial(2));
         h.preview_as(&PLUS_XL);
         assert_eq!(h.model().id, "plus-xl");
         assert_eq!(shown_shape(&root), xl);
-        assert_eq!(preview.selected(), ControlRef::Dial(2));
-        assert_eq!(ui.selected_control(), Some(ControlRef::Dial(2)));
-        assert!(preview
-            .control(ControlRef::Dial(2))
-            .unwrap()
-            .has_css_class("control-selected"));
+        let xl_runtime = h.session.runtime();
+        let xl_preview = xl_runtime
+            .preview()
+            .expect("the XL has a preview of its own");
+        let xl_ui = xl_runtime.binding_ui().clone();
+        // Another session, another tree: the + keeps its selection, the XL starts fresh.
+        assert_eq!(plus_preview.selected(), ControlRef::Dial(2));
+        assert_eq!(xl_preview.selected(), ControlRef::Key(1));
         let brand = class_of(&root, "hardware-brand")
             .downcast::<Label>()
             .unwrap();
         assert_eq!(brand.text(), "STREAM DECK + XL");
         assert_eq!(
             (
-                ui.summaries.len(),
-                ui.dial_legends.len(),
-                ui.dial_icons.len()
+                xl_ui.summaries.len(),
+                xl_ui.dial_legends.len(),
+                xl_ui.dial_icons.len()
             ),
             (43, 6, 6)
         );
-        // The editor's numbers follow the model.
-        assert_eq!(ui.control_number_model.n_items(), 6, "dials 1-6");
 
-        // Controls only the XL+ has can be selected there, and reset on the way back.
+        // Controls only the XL+ has can be selected there; the + is not affected.
         for control in [
             ControlRef::Key(30),
             ControlRef::Dial(6),
             ControlRef::Zone(6),
         ] {
-            activate(&preview, control);
-            assert_eq!(ui.selected_control(), Some(control));
+            activate(&xl_preview, control);
+            assert_eq!(xl_ui.selected_control(), Some(control));
             h.preview_as(&PLUS);
             assert_eq!(shown_shape(&root), plus);
-            assert_eq!(
-                preview.selected(),
-                ControlRef::Key(1),
-                "{control:?} does not exist on the +"
-            );
-            assert_eq!(ui.selected_control(), Some(ControlRef::Key(1)));
-            assert!(preview
-                .control(ControlRef::Key(1))
-                .unwrap()
-                .has_css_class("control-selected"));
+            assert_eq!(plus_preview.selected(), ControlRef::Dial(2));
+            assert_eq!(plus_ui.selected_control(), Some(ControlRef::Dial(2)));
             h.preview_as(&PLUS_XL);
+            assert_eq!(
+                xl_preview.selected(),
+                control,
+                "the XL session kept its selection"
+            );
         }
-        activate(&preview, ControlRef::Zone(3));
+        activate(&xl_preview, ControlRef::Dial(2));
+        assert_eq!(xl_ui.control_number_model.n_items(), 6, "dials 1-6");
         h.preview_as(&PLUS);
+        activate(&plus_preview, ControlRef::Zone(3));
         assert_eq!(
-            preview.selected(),
-            ControlRef::Zone(3),
-            "a section the + has is kept"
+            plus_ui.control_number_model.n_items(),
+            5,
+            "Any and sections 1-4"
         );
-        assert_eq!(ui.control_number_model.n_items(), 5, "Any and sections 1-4");
         let brand = class_of(&root, "hardware-brand")
             .downcast::<Label>()
             .unwrap();
         assert_eq!(brand.text(), "STREAM DECK +");
         // Back on the + the preview is the shipped one again.
-        activate(&preview, ControlRef::Key(1));
+        activate(&plus_preview, ControlRef::Key(1));
         let rendered = render_preview(&h.window, &preview_of(&root), None);
         assert_eq!(
             (rendered.width, rendered.height),
@@ -715,98 +721,6 @@ fn a_switch_rebuilds_the_preview_and_keeps_the_selection_only_when_it_still_exis
             shipped.hash(),
             "+ -> XL -> + renders as before"
         );
-    });
-}
-
-#[test]
-fn twenty_alternating_switches_free_every_replaced_preview_widget() {
-    run_gtk_test(|| {
-        let Some(h) = model_session_tests::start("preview-churn", |_| {}) else {
-            return;
-        };
-        let root: gtk::Widget = h.window.clone().upcast();
-        let runtime = h.session.runtime().clone();
-        let preview = runtime.preview().unwrap();
-        let ui = runtime.binding_ui().clone();
-        let widgets_before = model_session_tests::count_widgets(&root);
-        let view_refs = Rc::strong_count(&preview);
-        let ui_refs = (
-            Rc::strong_count(&ui.baseline),
-            Rc::strong_count(&runtime.artwork_ui().pictures),
-            Rc::strong_count(runtime.layers()),
-        );
-        let handlers = preview.bound_handlers();
-        // The widgets every model shares live on by design.
-        let shared: Vec<gtk::Widget> = [
-            preview.touch_status().clone().upcast(),
-            ui.gesture_badges.clone().upcast(),
-        ]
-        .into_iter()
-        .chain(ui.dial_icons.all().iter().map(|icon| icon.clone().upcast()))
-        .chain(
-            ui.dial_legends
-                .all()
-                .iter()
-                .map(|legend| legend.clone().upcast()),
-        )
-        .collect();
-        let mut dead: Vec<glib::WeakRef<gtk::Widget>> = Vec::new();
-        let mut rounds = Vec::new();
-        for round in 0..20 {
-            // Everything of the tree that is about to be replaced.
-            let old = descendants_of::<gtk::Widget>(&chassis_of(&root));
-            dead.extend(
-                old.iter()
-                    .filter(|widget| {
-                        !shared
-                            .iter()
-                            .any(|shared| *widget == shared || widget.is_ancestor(shared))
-                    })
-                    .map(ObjectExt::downgrade),
-            );
-            drop(old);
-            h.preview_as(if round % 2 == 0 { &PLUS_XL } else { &PLUS });
-            rounds.push((
-                preview.bound_handlers(),
-                runtime.artwork_ui().pictures.borrow().len(),
-            ));
-            // Drive the editor and live paths through the new tree too.
-            activate(&preview, ControlRef::Key(1));
-            let flow = preview.key_widgets();
-            assert!(!flow.is_empty());
-        }
-        assert_eq!(h.model().id, "plus");
-        assert!(
-            dead.iter().all(|weak| weak.upgrade().is_none()),
-            "{} replaced widgets are still alive",
-            dead.iter().filter(|weak| weak.upgrade().is_some()).count()
-        );
-        assert_eq!(model_session_tests::count_widgets(&root), widgets_before);
-        assert_eq!(
-            Rc::strong_count(&preview),
-            view_refs,
-            "nothing keeps the view alive"
-        );
-        assert_eq!(
-            (
-                Rc::strong_count(&ui.baseline),
-                Rc::strong_count(&runtime.artwork_ui().pictures),
-                Rc::strong_count(runtime.layers())
-            ),
-            ui_refs,
-            "no handler of a dropped preview still holds shared state"
-        );
-        // The captions every model shares keep exactly the handlers of the model on show.
-        assert_eq!(preview.bound_handlers(), handlers);
-        for (index, (bound, pictures)) in rounds.iter().enumerate() {
-            let xl = index % 2 == 0;
-            assert_eq!(
-                *bound,
-                if xl { 36 + 1 + 6 } else { 8 + 1 + 4 },
-                "round {index}"
-            );
-            assert_eq!(*pictures, if xl { 43 } else { 13 }, "round {index}");
-        }
     });
 }
 
@@ -1105,19 +1019,20 @@ fn the_artwork_target_picker_and_clicks_follow_the_models_sections() {
         let Some(h) = model_session_tests::start("preview-targets", |_| {}) else {
             return;
         };
-        let preview = h.session.runtime().preview().unwrap();
-        let artwork = h.session.runtime().artwork_ui().clone();
         let root: gtk::Widget = h.window.clone().upcast();
-        // The expander keeps its content outside the widget chain while collapsed.
-        let section = descendants_of::<gtk::Expander>(&root)
-            .into_iter()
-            .find(|expander| expander.label().as_deref() == Some("Artwork and touch zones"))
-            .and_then(|expander| expander.child())
-            .expect("the artwork section");
-        let picker = descendants_of::<gtk::DropDown>(&section)
-            .into_iter()
-            .find(|picker| picker.has_css_class("artwork-target"))
-            .expect("the artwork target picker");
+        // The shown session's picker; the expander keeps its content outside
+        // the widget chain while collapsed.
+        let shown_picker = || {
+            let section = descendants_of::<gtk::Expander>(&root)
+                .into_iter()
+                .find(|expander| expander.label().as_deref() == Some("Artwork and touch zones"))
+                .and_then(|expander| expander.child())
+                .expect("the artwork section");
+            descendants_of::<gtk::DropDown>(&section)
+                .into_iter()
+                .find(|picker| picker.has_css_class("artwork-target"))
+                .expect("the artwork target picker")
+        };
         let names = |picker: &gtk::DropDown| -> Vec<String> {
             let model = picker.model().unwrap();
             (0..model.n_items())
@@ -1132,8 +1047,12 @@ fn the_artwork_target_picker_and_clicks_follow_the_models_sections() {
                 })
                 .collect()
         };
-        assert_eq!(names(&picker).len(), 5);
+        assert_eq!(names(&shown_picker()).len(), 5);
+        let plus_artwork = h.session.runtime().artwork_ui().clone();
         h.preview_as(&PLUS_XL);
+        let picker = shown_picker();
+        let preview = h.session.runtime().preview().unwrap();
+        let artwork = h.session.runtime().artwork_ui().clone();
         let listed = names(&picker);
         assert_eq!(listed.len(), 7, "the strip and six sections");
         assert_eq!(listed[6], "Touch zone 6");
@@ -1154,10 +1073,10 @@ fn the_artwork_target_picker_and_clicks_follow_the_models_sections() {
             .unwrap()
             .emit_clicked();
         assert_eq!(artwork.selected_target.get(), ArtworkTarget::Keypad(30));
-        // Going back to the + drops a target it does not have.
-        artwork.selected_target.set(ArtworkTarget::EncoderZone(6));
+        // The + session has its own picker and target, untouched by the XL's.
         h.preview_as(&PLUS);
-        assert_eq!(names(&picker).len(), 5);
-        assert!(artwork.selected_target.get().is_valid_for(&PLUS));
+        assert_eq!(names(&shown_picker()).len(), 5);
+        assert!(plus_artwork.selected_target.get().is_valid_for(&PLUS));
+        assert_eq!(artwork.selected_target.get(), ArtworkTarget::Keypad(30));
     });
 }

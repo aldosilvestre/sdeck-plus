@@ -25,15 +25,13 @@ mod device_controls;
 #[path = "device_control/monitor_tests.rs"]
 mod control_monitor_tests;
 
-mod active;
 mod device_worker;
 mod hub;
 mod marquee;
-
-pub use active::ActiveDevice;
-
-#[cfg(test)]
+#[cfg_attr(not(test), allow(dead_code))]
 mod sim_device;
+#[doc(hidden)]
+pub mod test_support;
 
 #[cfg(test)]
 mod sim_tests;
@@ -333,6 +331,8 @@ pub struct HidController {
     stop: StopSignal,
     hub: Option<thread::JoinHandle<()>>,
     handle: HidHandle,
+    /// Routers of the senders handed out by [`HidController::model_senders`].
+    routes: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl HidController {
@@ -348,6 +348,38 @@ impl HidController {
 
     pub fn handle(&self) -> HidHandle {
         self.handle.clone()
+    }
+
+    /// Senders whose commands reach every live device of `model`, whatever
+    /// the other models do. Each pair is served by two threads the controller
+    /// owns and joins; a controller with no hub (see [`Self::detached`])
+    /// hands out its single channel pair instead.
+    pub fn model_senders(
+        &self,
+        model: &'static DeviceModel,
+    ) -> (Sender<ArtworkCommand>, Sender<DeviceAction>) {
+        let Some(shared) = &self.handle.shared else {
+            return self.legacy_senders();
+        };
+        let (artwork, artwork_commands) = std::sync::mpsc::channel();
+        let (controls, control_commands) = std::sync::mpsc::channel();
+        let mut routes = self.routes.lock().unwrap();
+        // Drop the handles of routers that already ended on their own.
+        routes.retain(|route| !route.is_finished());
+        for route in [
+            hub::route_artwork_to(shared.clone(), self.stop.clone(), model, artwork_commands),
+            hub::route_controls_to(shared.clone(), self.stop.clone(), model, control_commands),
+        ] {
+            match route {
+                Ok(route) => routes.push(route),
+                Err(error) => eprintln!("Could not start a device route: {error}"),
+            }
+        }
+        (artwork, controls)
+    }
+
+    fn legacy_senders(&self) -> (Sender<ArtworkCommand>, Sender<DeviceAction>) {
+        (self.handle.artwork.clone(), self.handle.controls.clone())
     }
 
     /// See [`HidHandle::send_artwork`].
@@ -383,6 +415,7 @@ impl HidController {
                     controls,
                     shared: None,
                 },
+                routes: Mutex::default(),
             },
             commands,
             control_commands,
@@ -393,6 +426,10 @@ impl HidController {
         self.request_stop();
         if let Some(hub) = self.hub.take() {
             let _ = hub.join();
+        }
+        let routes = std::mem::take(&mut *self.routes.lock().unwrap());
+        for route in routes {
+            let _ = route.join();
         }
     }
 }

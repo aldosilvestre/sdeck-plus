@@ -566,3 +566,31 @@ fn held_work_is_kept_when_another_device_of_the_departed_model_remains() {
     third.wait_until(|device| device.image_count() == 1);
     assert!(xl.writes().is_empty());
 }
+
+#[test]
+fn model_senders_reach_only_their_own_model_and_end_with_the_controller() {
+    let scratch = Scratch::new("hub-model-senders");
+    let (mut rig, plus, xl) = pair();
+    let (plus_artwork, plus_controls) = rig.hid.model_senders(&PLUS);
+    let (xl_artwork, _xl_controls) = rig.hid.model_senders(&PLUS_XL);
+    plus_artwork
+        .send(assign_key(&scratch, "p.png", 120))
+        .unwrap();
+    plus_controls.send(DeviceAction::Brightness(61)).unwrap();
+    xl_artwork.send(assign_key(&scratch, "x.png", 112)).unwrap();
+    plus.wait_until(|device| {
+        device.image_count() == 1 && device.features().iter().any(|report| report[2] == 61)
+    });
+    xl.wait_until(|device| device.image_count() == 1);
+    assert_eq!(plus.image_count(), 1);
+    assert!(xl.features().iter().all(|report| report[2] == 100));
+    let started = Instant::now();
+    rig.stop();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "routers are joined promptly"
+    );
+    assert!(plus_artwork
+        .send(assign_key(&scratch, "late.png", 120))
+        .is_err());
+}

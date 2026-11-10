@@ -338,6 +338,55 @@ fn route_controls(shared: &Shared, stop: &StopSignal, commands: Receiver<DeviceA
     }
 }
 
+/// A router thread for the senders of one model: everything sent into them is
+/// addressed to `model`.
+pub(super) fn route_artwork_to(
+    shared: Arc<Shared>,
+    stop: StopSignal,
+    model: &'static DeviceModel,
+    commands: Receiver<ArtworkCommand>,
+) -> std::io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new()
+        .name(format!("hid-art-{:04x}", model.pid()))
+        .spawn(move || {
+            while stop.live() {
+                match commands.recv_timeout(ROUTE_POLL) {
+                    Ok(command) => {
+                        if shared.send_artwork(Some(model.pid()), command).is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        })
+}
+
+/// [`route_artwork_to`] for brightness and sleep actions.
+pub(super) fn route_controls_to(
+    shared: Arc<Shared>,
+    stop: StopSignal,
+    model: &'static DeviceModel,
+    commands: Receiver<DeviceAction>,
+) -> std::io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new()
+        .name(format!("hid-ctl-{:04x}", model.pid()))
+        .spawn(move || {
+            while stop.live() {
+                match commands.recv_timeout(ROUTE_POLL) {
+                    Ok(action) => {
+                        if shared.send_control(Some(model.pid()), action).is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        })
+}
+
 /// What the hub last told its consumer while no device was open.
 #[derive(PartialEq)]
 enum Announced {
@@ -597,6 +646,7 @@ where
             controls,
             shared: Some(shared),
         },
+        routes: Mutex::default(),
     }
 }
 
