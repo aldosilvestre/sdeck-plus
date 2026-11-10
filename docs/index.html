@@ -181,7 +181,7 @@
           <a class="btn btn-primary" href="#install">Install <svg class="arrow" aria-hidden="true"><use href="#i-arrow"/></svg></a>
           <a class="btn" href="https://github.com/aldosilvestre/sdeck-plus"><svg aria-hidden="true"><use href="#i-github"/></svg>View on GitHub</a>
         </div>
-        <p class="note">This project is still under construction. Developed and tested on Arch Linux with Hyprland.</p>
+        <p class="note">Developed and tested on Arch Linux with Hyprland. New features will be released over time.</p>
         <dl class="stats">
           <div><dt>keys</dt><dd>8</dd></div>
           <div><dt>dials</dt><dd>4</dd></div>
@@ -908,6 +908,7 @@
           <li><div><strong>Install the build requirements</strong>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code>, <code>glib-compile-resources</code>, GTK 4.8 or newer and libudev development files, plus <code>curl</code> and GNU <code>tar</code> for release downloads.</div></li>
           <li><div><strong>Run the release installer</strong>A published GitHub release tagged <code>vX.Y.Z</code> is required. Files go under <code>~/.local</code>; no root, no autostart, nothing launched. Downloaded sources and build caches are removed, including on failure or interruption.</div></li>
           <li><div><strong>Plug in the Stream Deck +</strong>Your user needs permission to open its HID node; the installer prints a udev rule an administrator can install when needed.</div></li>
+          <li><div><strong>Stay up to date</strong>The app looks for a newer GitHub release when it opens and shows <em>Update available</em> in the header. Open <em>Updates</em> in the menu to check again, switch the automatic check off or update; copies installed by a package manager show how to update with it instead.</div></li>
         </ol>
         <p style="margin-top: 1.8rem"><a class="text-link" href="docs.html#install">Full requirements and installer options <svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
       </div>

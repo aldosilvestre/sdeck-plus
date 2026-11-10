@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > [!NOTE]
-> This project is still under construction.
+> New features will be released over time.
 
 sdeck-plus is a native GTK4 control desk for the Elgato Stream Deck +
 (Stream Deck Plus; VID `0x0FD9`, PID `0x0084`) on Linux, developed and tested on
