@@ -12,6 +12,8 @@ fn read(relative: &str) -> String {
 }
 
 const PACKAGES: [&str; 2] = ["sdeck-plus", "sdeck-plus-git"];
+const MAINTAINER_EMAIL: &str = "aldosilvestre89@gmail.com";
+const MAINTAINER: &str = "# Maintainer: Aldo Silvestre <aldosilvestre89@gmail.com>";
 
 fn pkgbuild(package: &str) -> String {
     read(&format!("packaging/aur/{package}/PKGBUILD"))
@@ -155,10 +157,11 @@ fn git_package_replaces_the_stable_package() {
 }
 
 #[test]
-fn packages_share_metadata_and_a_maintainer_placeholder() {
+fn packages_share_metadata_and_the_maintainer() {
     for package in PACKAGES {
         let text = pkgbuild(package);
-        assert!(text.contains("# Maintainer: Your Name <your-email>"));
+        assert_eq!(text.lines().next(), Some(MAINTAINER));
+        assert!(!text.contains("TODO(human)"));
         assert_eq!(array(&text, "arch"), ["x86_64", "aarch64"]);
         assert_eq!(array(&text, "license"), ["MIT"]);
         assert_eq!(
@@ -170,7 +173,7 @@ fn packages_share_metadata_and_a_maintainer_placeholder() {
 }
 
 #[test]
-fn packaging_files_carry_no_email_addresses() {
+fn packaging_files_carry_only_the_maintainer_email() {
     fn walk(dir: &Path, found: &mut Vec<String>) {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -186,6 +189,7 @@ fn packaging_files_carry_no_email_addresses() {
                             && host.contains('.')
                             && !word.contains("://")
                             && !local.contains('/')
+                            && word != MAINTAINER_EMAIL
                         {
                             found.push(format!("{}: {word}", path.display()));
                         }
@@ -196,7 +200,7 @@ fn packaging_files_carry_no_email_addresses() {
     }
     let mut found = Vec::new();
     walk(&root().join("packaging"), &mut found);
-    assert!(found.is_empty(), "email-like strings: {found:?}");
+    assert!(found.is_empty(), "unexpected email-like strings: {found:?}");
 }
 
 #[test]

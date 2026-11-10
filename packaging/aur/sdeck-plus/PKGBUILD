@@ -1,5 +1,4 @@
-# Maintainer: Your Name <your-email>
-# TODO(human): replace the Maintainer line above with your own name and address before publishing.
+# Maintainer: Aldo Silvestre <aldosilvestre89@gmail.com>
 pkgname=sdeck-plus
 pkgver=0.1.0
 pkgrel=1

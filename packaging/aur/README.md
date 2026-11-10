@@ -23,7 +23,7 @@ makepkg builds C code with `-flto`. The bundled hidapi object then cannot be lin
 
 ## Before publishing (human steps)
 
-1. Replace the placeholder `# Maintainer: Your Name <your-email>` line in both PKGBUILDs.
+1. Both PKGBUILDs already name the maintainer on their first line; change it there if the maintainer changes.
 2. Release `v0.1.0` is published and the stable PKGBUILD already carries its checksum. For a later
    release, set `pkgver`, reset `pkgrel=1` and run `updpkgsums` in `sdeck-plus/`.
 3. Check the pinned source: `makepkg --verifysource` in `sdeck-plus/` (downloads the tag's tarball and
