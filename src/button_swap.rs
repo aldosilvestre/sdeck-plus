@@ -14,7 +14,10 @@ pub(crate) fn connect(
 ) {
     runtime.attach_key_swap_root(root.upcast_ref());
     let session = Rc::new(());
-    for (number, key) in sdeck_plus::device_model::PLUS.key_numbers().zip(keys) {
+    for (number, key) in (1..=keys.len())
+        .filter_map(|number| u8::try_from(number).ok())
+        .zip(keys)
+    {
         let source = gtk::DragSource::builder()
             .actions(gtk::gdk::DragAction::MOVE)
             .build();

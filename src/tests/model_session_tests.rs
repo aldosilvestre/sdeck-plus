@@ -16,15 +16,15 @@ use std::{
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-struct Harness {
+pub(super) struct Harness {
     base: PathBuf,
     roots: SessionRoots,
-    app: gtk::Application,
-    window: ApplicationWindow,
-    session: Rc<ModelSession>,
+    pub(super) app: gtk::Application,
+    pub(super) window: ApplicationWindow,
+    pub(super) session: Rc<ModelSession>,
     /// Connection events enter the window through the monitor's own channel.
-    events: mpsc::Sender<MonitorEvent>,
-    artwork: mpsc::Receiver<ArtworkCommand>,
+    pub(super) events: mpsc::Sender<MonitorEvent>,
+    pub(super) artwork: mpsc::Receiver<ArtworkCommand>,
     _controls: mpsc::Receiver<sdeck_plus::device_control::DeviceAction>,
 }
 
@@ -70,7 +70,7 @@ fn roots_in(base: &Path) -> SessionRoots {
 }
 
 /// Run the main loop until `condition` holds, failing after a bounded wait.
-fn wait_until(what: &str, condition: impl Fn() -> bool + 'static) {
+pub(super) fn wait_until(what: &str, condition: impl Fn() -> bool + 'static) {
     if condition() {
         return;
     }
@@ -94,7 +94,7 @@ fn wait_until(what: &str, condition: impl Fn() -> bool + 'static) {
 }
 
 /// Start the window over `roots` prepared by `prepare`; `None` without a display.
-fn start(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Harness> {
+pub(super) fn start(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Harness> {
     if !init_gtk_for_test() {
         return None;
     }
@@ -138,17 +138,17 @@ fn start(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Harness> {
 }
 
 impl Harness {
-    fn model(&self) -> &'static DeviceModel {
+    pub(super) fn model(&self) -> &'static DeviceModel {
         self.session.runtime().session_model()
     }
 
-    fn connect(&self, model: &'static DeviceModel) {
+    pub(super) fn connect(&self, model: &'static DeviceModel) {
         self.events
             .send(MonitorEvent::Connection(ConnectionState::Connected(model)))
             .unwrap();
     }
 
-    fn wait_for_model(&self, model: &'static DeviceModel) {
+    pub(super) fn wait_for_model(&self, model: &'static DeviceModel) {
         let session = self.session.clone();
         wait_until(model.name, move || {
             session.runtime().session_model() == model
@@ -164,7 +164,7 @@ impl Harness {
     }
 
     /// A binding in the shown session, saved through the layer worker.
-    fn bind_and_save(&self, key: u8) {
+    pub(super) fn bind_and_save(&self, key: u8) {
         let runtime = self.session.runtime();
         let snapshot = {
             let mut layers = runtime.layers().borrow_mut();
@@ -192,7 +192,7 @@ impl Harness {
             .collect()
     }
 
-    fn preview_as(&self, model: &DeviceModel) {
+    pub(super) fn preview_as(&self, model: &DeviceModel) {
         let index = self
             .session
             .picker()
@@ -214,7 +214,7 @@ impl Harness {
             .collect()
     }
 
-    fn make_editor_dirty(&self) {
+    pub(super) fn make_editor_dirty(&self) {
         let ui = self.session.runtime().binding_ui();
         assert!(!ui.is_dirty());
         ui.text_entry.set_text("echo changed");
@@ -279,7 +279,7 @@ fn header_label(window: &ApplicationWindow, class: &str) -> Label {
     find(window.upcast_ref(), class).expect("header label")
 }
 
-fn count_widgets(widget: &gtk::Widget) -> usize {
+pub(super) fn count_widgets(widget: &gtk::Widget) -> usize {
     let mut count = 1;
     let mut child = widget.first_child();
     while let Some(current) = child {

@@ -101,6 +101,15 @@ fn close_secondary_windows(main: &gtk::Window) {
 }
 
 impl FeatureRuntime {
+    #[cfg(test)]
+    pub(crate) fn preview(&self) -> Option<Rc<crate::preview::PreviewView>> {
+        self.preview.borrow().upgrade()
+    }
+
+    pub(crate) fn attach_preview(&self, preview: &Rc<crate::preview::PreviewView>) {
+        *self.preview.borrow_mut() = Rc::downgrade(preview);
+    }
+
     /// The model whose stores are shown now.
     pub(crate) fn session_model(&self) -> &'static DeviceModel {
         self.layers.borrow().model()
@@ -197,6 +206,12 @@ impl FeatureRuntime {
                 *self.artwork.store.borrow_mut() = None;
                 self.report(&format!("Could not open or migrate artwork: {error}. Artwork writes and layer removal are disabled. Original files have not been replaced."), true);
             }
+        }
+        // The preview shows what the stores now hold: rebuild it before anything
+        // below refreshes its pictures, summaries or selection.
+        let preview = self.preview.borrow().upgrade();
+        if let Some(preview) = preview {
+            preview.show_model(self.layers.borrow().model());
         }
         *self.artwork.last_layer.borrow_mut() = None;
         {

@@ -195,16 +195,47 @@ heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its 120px preview remains unchanged.
 
-The fixed-geometry device chassis sits in its preview card (440x428 at 1x,
-including padding and border). The card is presented through `ScaledBin`
+The fixed-geometry device chassis sits in its preview card: the chassis plus
+a 14px frame (padding and border), 440x428 at 1x for the Stream Deck +. The card is presented through `ScaledBin`
 (`src/ui/scaled_bin.rs`) at a fixed 1.0x (`PREVIEW_MAX_SCALE`), top-aligned and
 horizontally centered: the preview keeps one size whatever the window width,
 the selected action or the form beside it, so it never jumps. Hardware
-coordinates, artwork targets and the card's size never change, and the card
-never stretches to match a tall form. GTK applies the same
+coordinates, artwork targets and the card's size never change while a model is
+shown, and the card never stretches to match a tall form. GTK applies the same
 transform to drawing and pointer picking, so selection, drag-and-drop and
 focus keep working. The inspector uses its content height, without an
 arbitrary minimum height.
+
+**Model-driven preview.** The chassis is drawn from the shown model's layout
+(`PreviewLayout::for_model`, `src/preview_layout.rs`, pure geometry shared by
+the widgets and the tests); `PreviewView` (`src/ui/preview.rs`) builds it and,
+when the model changes, replaces only the chassis inside the same card. The
+header, catalog and editor stay. Geometry, in preview pixels at 1x:
+
+| Model | Chassis | Keys | Touch strip | Dials |
+|-------|---------|------|-------------|-------|
+| Stream Deck + | 426x414 | 8 (4x2), 60px on a 91x67 pitch | 328x41, 4 sections of 82px | 4 knobs of 46px, 91px pitch |
+| Stream Deck + XL | 556x487 | 36 (9x4), 44px on a 52px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
+
+The Stream Deck + keeps the geometry it always had, pixel for pixel. Every
+other model of the registry is laid out by the same generic rules (44px keys on
+a 52px pitch, 76px sections, knobs under their sections, a chassis just wide
+enough for its widest row, margins kept whole so it is symmetric); models
+without a strip or dials omit them. A Neo's information window is drawn as a
+plain display that cannot be selected, and its two capacitive sensors are not
+drawn because they have no preview control.
+
+The preview is never scaled for a model: the card is the chassis plus 14px
+(570x501 for the XL+) at exactly 1.0x, never scrolls inside itself, and keeps
+every control at least 24px on both sides (the smallest is the XL+ key at
+44px). At the default 1000x700 window the XL+ card still sits beside the
+352px action catalog (570 + 16 + 352 = 938 of the 968px of usable width), so
+the settings column stays usable; a narrower window wraps the catalog below
+the workspace exactly as it does for the +, and the page scrolls vertically.
+The XL+ preview is 87px taller than the +: the page's own vertical scroll
+absorbs it, never the preview. Dial captions are 72px wide on the XL+ (86px
+on the +) so neighbours never touch.
+
 The complete configuration shell (header, profile toolbar, page navigation and
 body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
@@ -505,8 +536,10 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   discarded."); choosing a model with "Preview as" asks first when the editor
   has unsaved edits. If the new model's configuration cannot be opened, the
   previous one stays visible but read-only with a persistent error, and nothing
-  is sent to the device. Until the model-driven preview lands, an XL session
-  reuses the Stream Deck + preview geometry.
+  is sent to the device. The preview itself follows the model (see the
+  model-driven preview in section 4): its brand line reads "STREAM DECK +" or
+  "STREAM DECK + XL", and the selected control stays selected when the new
+  model has it, else the first key is selected.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
@@ -598,6 +631,16 @@ Native keyboard-operable controls, visible associated labels and focus rings
 are required. Icon-only controls have names/tooltips. Popovers provide a
 visible way out. Error explanations say what to correct near the relevant
 editor; passwords never appear in summaries or diagnostic text.
+
+Preview controls are named after the device's own numbering: keys "Button 1"
+through "Button N" (row-major), dials "Encoder 1" through "Encoder N", and
+touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
+is the shown model's count (36 keys, 6 dials and 6 sections for the XL+; the
++ keeps 8, 4 and 4). Tab visits the keys row-major, then the touch strip, its
+sections and the dials; Space or Enter selects the focused control, and any
+key of the shown model can be dragged onto another to swap them. A rebuild for
+another model keeps this order and these names, and never leaves a handler or
+widget of the previous model behind.
 
 Agency Agents accessibility guidance is adapted to this native desktop surface:
 retain keyboard access, distinguish interactive boundaries at 3:1 or better,

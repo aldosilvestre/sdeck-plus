@@ -274,6 +274,9 @@ pub(crate) struct FeatureRuntime {
     key_swap_pending: Rc<Cell<bool>>,
     key_swap_deferred_persist: Rc<Cell<bool>>,
     key_swap_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
+    /// The preview of the shown model; weak, because the preview's own
+    /// connections hold this runtime.
+    preview: Rc<RefCell<std::rc::Weak<crate::preview::PreviewView>>>,
     configuration_operation: Rc<Cell<Option<configuration::Operation>>>,
     configuration_root: Rc<RefCell<glib::WeakRef<gtk::Widget>>>,
     pub(crate) indicator: Label,
@@ -418,6 +421,7 @@ impl FeatureRuntime {
             key_swap_pending: Rc::new(Cell::new(false)),
             key_swap_deferred_persist: Rc::new(Cell::new(false)),
             key_swap_root: Rc::new(RefCell::new(glib::WeakRef::new())),
+            preview: Rc::new(RefCell::new(std::rc::Weak::new())),
             configuration_operation: Rc::new(Cell::new(None)),
             configuration_root: Rc::new(RefCell::new(glib::WeakRef::new())),
             indicator,
