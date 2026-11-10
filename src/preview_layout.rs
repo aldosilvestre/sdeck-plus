@@ -7,7 +7,9 @@
 //! The Stream Deck + keeps the geometry it has always shipped (taken from the
 //! reference image); every other model is laid out from one generic rule set:
 //! 44 px keys on a 52 px pitch, touch sections 76 px wide, dials centred under
-//! their sections, and a chassis just wide enough for the widest row.
+//! their sections, and a chassis just wide enough for the widest row. The XL+
+//! uses the same rules with 40 px keys on a 46 px pitch and a tighter bottom
+//! margin so its four rows fit the default window.
 //!
 //! A Stream Deck Neo's information window is drawn as a plain, non-interactive
 //! display (a [`StripLayout`] without zones and with `touch == false`); its two
@@ -40,6 +42,7 @@ const LEGEND_Y: i32 = 84;
 const LEGEND_H: i32 = 16;
 const BOTTOM_MARGIN: i32 = 33;
 const KEYS_ONLY_BOTTOM_MARGIN: i32 = 24;
+const XL_BOTTOM_MARGIN: i32 = 24;
 const MIN_WIDTH: i32 = 240;
 
 /// An axis-aligned rectangle in preview pixels.
@@ -162,6 +165,8 @@ struct Metrics {
     /// Rail-relative x of the first dial when `dial_pitch` is set.
     dial_x0: i32,
     legend_w: i32,
+    /// Space under the last row when the model has a strip or dials.
+    bottom_margin: i32,
     /// A shipped chassis width, left key margin and bezel margin.
     fixed: Option<(i32, i32, i32)>,
 }
@@ -174,6 +179,7 @@ const PLUS_METRICS: Metrics = Metrics {
     dial_pitch: Some(91),
     dial_x0: 28,
     legend_w: 86,
+    bottom_margin: BOTTOM_MARGIN,
     fixed: Some((426, 48, 27)),
 };
 
@@ -185,17 +191,29 @@ const GENERIC_METRICS: Metrics = Metrics {
     dial_pitch: None,
     dial_x0: 0,
     legend_w: 72,
+    bottom_margin: BOTTOM_MARGIN,
     fixed: None,
+};
+
+/// The XL+ has four rows of keys, so its keys are a little smaller and its
+/// bottom margin tighter: the whole card then fits the default 1000x700 window
+/// without the page scrolling.
+const XL_METRICS: Metrics = Metrics {
+    key: 40,
+    pitch_x: 46,
+    pitch_y: 46,
+    bottom_margin: XL_BOTTOM_MARGIN,
+    ..GENERIC_METRICS
 };
 
 impl PreviewLayout {
     /// The layout of `model`. Deterministic: equal models give equal layouts.
     pub fn for_model(model: &DeviceModel) -> Self {
         // The Stream Deck + keeps its shipped geometry; see the module notes.
-        let metrics = if model.id == crate::device_model::PLUS.id {
-            &PLUS_METRICS
-        } else {
-            &GENERIC_METRICS
+        let metrics = match model.id {
+            id if id == crate::device_model::PLUS.id => &PLUS_METRICS,
+            id if id == crate::device_model::PLUS_XL.id => &XL_METRICS,
+            _ => &GENERIC_METRICS,
         };
         build(model, metrics)
     }
@@ -407,7 +425,7 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
 
     let height = bottom
         + if has_strip || dials > 0 {
-            BOTTOM_MARGIN
+            metrics.bottom_margin
         } else {
             KEYS_ONLY_BOTTOM_MARGIN
         };

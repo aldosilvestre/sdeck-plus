@@ -1,7 +1,7 @@
 use sdeck_plus::{
     binding_editor::{
         action_from_fields, control_summary, events_for_control, existing_action,
-        format_application_args, trigger_from_selection, ActionKind, ControlKind, EventKind,
+        format_application_args, trigger_from_selection_for, ActionKind, ControlKind, EventKind,
     },
     binding_icons::BindingIcon,
     layers::{Action, LayerStore, RemovedBinding, Trigger},
@@ -1390,6 +1390,7 @@ fn build_widgets(
             target_picker: target_picker.clone(),
             actions_page,
             dials_page,
+            catalog: action_catalog::CatalogMemory::default(),
         };
         let wire: Rc<dyn Fn(&preview::PreviewView)> = Rc::new(move |view| wiring.connect(view));
         wire(&preview);
@@ -1656,12 +1657,22 @@ fn start_event_updates_with(
                         }
                         protocol::Event::TouchTap { x, y } => {
                             touch_status.set_text(&format!("TAP     ·     X {x}   /   Y {y}"));
-                            flash_zones(&preview.zone_widgets(), x, x);
+                            flash_zones_in(
+                                preview.model().zone_px().0,
+                                &preview.zone_widgets(),
+                                x,
+                                x,
+                            );
                         }
                         protocol::Event::TouchPress { x, y } => {
                             touch_status
                                 .set_text(&format!("PRESS & HOLD     ·     X {x}   /   Y {y}"));
-                            flash_zones(&preview.zone_widgets(), x, x);
+                            flash_zones_in(
+                                preview.model().zone_px().0,
+                                &preview.zone_widgets(),
+                                x,
+                                x,
+                            );
                         }
                         protocol::Event::TouchFlick {
                             start_x,
@@ -1672,7 +1683,8 @@ fn start_event_updates_with(
                             touch_status.set_text(&format!(
                                 "FLICK     ·     ({start_x}, {start_y})  →  ({end_x}, {end_y})"
                             ));
-                            flash_zones(
+                            flash_zones_in(
+                                preview.model().zone_px().0,
                                 &preview.zone_widgets(),
                                 start_x.min(end_x),
                                 start_x.max(end_x),
@@ -2370,10 +2382,18 @@ impl BindingUi {
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
-        let Ok((layer, trigger)) = self.selected_layer_and_trigger(layers) else {
-            self.status.set_text("Select a valid control event.");
-            self.mark_clean();
-            return;
+        let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
+            Ok(selection) => selection,
+            Err(error) if error.contains("does not exist on the") => {
+                self.status.set_text(&error);
+                self.mark_clean();
+                return;
+            }
+            Err(_) => {
+                self.status.set_text("Select a valid control event.");
+                self.mark_clean();
+                return;
+            }
         };
         let action = {
             let store = layers.borrow();
@@ -2546,10 +2566,26 @@ impl BindingUi {
         let number = self
             .control_number()
             .ok_or_else(|| "Select a control number.".to_string())?;
+        if let Some(error) = sdeck_plus::binding_editor::control_number_error(
+            self.model.get(),
+            self.control_kind(),
+            number,
+        ) {
+            return Err(error);
+        }
         let trigger = if self.control_kind() == ControlKind::Button {
-            sdeck_plus::key_hold_editor::key_trigger(number, self.hold_toggle.is_active())
+            sdeck_plus::key_hold_editor::key_trigger_for(
+                self.model.get(),
+                number,
+                self.hold_toggle.is_active(),
+            )
         } else {
-            trigger_from_selection(self.control_kind(), number, self.event_kind())
+            trigger_from_selection_for(
+                self.model.get(),
+                self.control_kind(),
+                number,
+                self.event_kind(),
+            )
         }
         .map_err(|error| error.0)?;
         let owner = layers
@@ -3337,8 +3373,10 @@ impl ArtworkUi {
             }
         }
         let background = self.info_background(&layer, target);
+        let model = self.layers.borrow().model();
         let image = match target {
-            ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_at(
+            ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_for(
+                model,
                 value,
                 background.as_deref(),
                 elapsed,
@@ -3373,7 +3411,8 @@ impl ArtworkUi {
         section: Option<(bool, bool)>,
         now: std::time::Instant,
     ) -> Duration {
-        let extent = sdeck_plus::info_render::marquee_extent(value, section);
+        let model = self.layers.borrow().model();
+        let extent = sdeck_plus::info_render::marquee_extent_for(model, value, section);
         let mut info = self.info.borrow_mut();
         let marquee = &mut info.marquee;
         let Some(extent) = extent else {
@@ -3478,12 +3517,13 @@ impl ArtworkUi {
             .is_none()
             .then(|| self.control_icon(layer, target))
             .flatten();
-        match sdeck_plus::image_output::compose_touchscreen_zone_at(
+        let model = self.layers.borrow().model();
+        match sdeck_plus::image_output::compose_touchscreen_zone_for(
+            model,
             zone,
             background.as_deref(),
             value,
-            previous,
-            next,
+            (previous, next),
             elapsed,
         )
         .and_then(|indicators| match &icon {
@@ -3636,8 +3676,9 @@ impl ArtworkUi {
             )
         };
         let commands = self.with_info(&layer, commands);
+        let model = self.layers.borrow().model();
         for (picture, path, text, icon) in paths {
-            set_button_picture(&picture, path, text.as_ref(), icon.as_ref());
+            set_button_picture(model, &picture, path, text.as_ref(), icon.as_ref());
         }
         self.paint_info_previews(&layer);
         self.paint_navigation_previews(&layer);
@@ -3675,6 +3716,7 @@ impl ArtworkUi {
         }
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
         Some(ControlIcon {
+            model: self.layers.borrow().model(),
             target,
             icon,
             caption: if icon == BindingIcon::MissingFile {
@@ -3683,7 +3725,8 @@ impl ArtworkUi {
                 sdeck_plus::binding_editor::action_caption(&action)
             },
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
-            next: target == ArtworkTarget::EncoderZone(4) && next,
+            next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
+                && next,
         })
     }
 
@@ -3710,7 +3753,9 @@ impl ArtworkUi {
             }
         }
         let shown = path.is_some() || !text.text.is_empty();
-        let image = sdeck_plus::image_output::compose_button_image(path.as_deref(), text)?;
+        let model = self.layers.borrow().model();
+        let image =
+            sdeck_plus::image_output::compose_button_image_for(model, path.as_deref(), text)?;
         Ok((image, shown))
     }
 
@@ -3745,9 +3790,10 @@ impl ArtworkUi {
             )
         };
         let icon = self.control_icon(&layer, *target);
+        let model = self.layers.borrow().model();
         for (picture_target, picture) in self.pictures.borrow().iter() {
             if picture_target == target {
-                set_button_picture(picture, path.clone(), text.as_ref(), icon.as_ref());
+                set_button_picture(model, picture, path.clone(), text.as_ref(), icon.as_ref());
             }
         }
         if !matches!(target, ArtworkTarget::Keypad(_)) {
@@ -3785,6 +3831,8 @@ impl ArtworkUi {
 /// A binding icon derived for one key or touch section without artwork.
 #[derive(Clone, Debug, PartialEq)]
 struct ControlIcon {
+    /// The model whose key size the picture is composed for.
+    model: &'static sdeck_plus::device_model::DeviceModel,
     target: ArtworkTarget,
     icon: BindingIcon,
     caption: String,
@@ -3801,9 +3849,12 @@ impl ControlIcon {
         text: Option<&sdeck_plus::button_text::ButtonText>,
     ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
         match self.target {
-            ArtworkTarget::Keypad(_) => {
-                sdeck_plus::binding_icons::compose_key_image(self.icon, &self.caption, text)
-            }
+            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_for(
+                self.model,
+                self.icon,
+                &self.caption,
+                text,
+            ),
             ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
                 self.icon,
                 &self.caption,
@@ -3842,6 +3893,7 @@ fn with_icon_under(
 }
 
 fn set_button_picture(
+    model: &sdeck_plus::device_model::DeviceModel,
     picture: &Picture,
     path: Option<std::path::PathBuf>,
     text: Option<&sdeck_plus::button_text::ButtonText>,
@@ -3860,13 +3912,15 @@ fn set_button_picture(
         }
     }
     match text {
-        Some(text) => match sdeck_plus::image_output::compose_button_image(path.as_deref(), text) {
-            Ok(image) => {
-                picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
-                picture.set_visible(true);
+        Some(text) => {
+            match sdeck_plus::image_output::compose_button_image_for(model, path.as_deref(), text) {
+                Ok(image) => {
+                    picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
+                    picture.set_visible(true);
+                }
+                Err(error) => eprintln!("Could not compose button preview: {error}"),
             }
-            Err(error) => eprintln!("Could not compose button preview: {error}"),
-        },
+        }
         None => set_picture_path(picture, path),
     }
 }
@@ -3971,6 +4025,8 @@ struct PreviewWiring {
     target_picker: gtk::DropDown,
     actions_page: GtkBox,
     dials_page: GtkBox,
+    /// The catalog's search and open categories survive a model change.
+    catalog: action_catalog::CatalogMemory,
 }
 
 impl PreviewWiring {
@@ -4004,13 +4060,13 @@ impl PreviewWiring {
             );
         }
         self.follow_model(view.model());
-        // The catalog and the presets were written for the first eight keys and
-        // four dials; other controls of a larger model do not accept drops yet.
+        // Every key and dial of the model takes catalog and preset drops.
         if let Some(widgets) = view.catalog_widgets() {
             replace_page(
                 &self.actions_page,
                 &action_catalog::connect(
                     widgets.clone(),
+                    &self.catalog,
                     &self.ui,
                     &self.layers,
                     &self.heading,
@@ -4088,6 +4144,7 @@ fn add_artwork_controls(
     picker.add_css_class("artwork-target");
     let layers = artwork.layers.clone();
     let target_layers = artwork.layers.clone();
+    let marker_layers = artwork.layers.clone();
     binding_icon::target_dropdown(
         &picker,
         Rc::new(move || ArtworkTarget::touch_for(target_layers.borrow().model())),
@@ -4105,6 +4162,7 @@ fn add_artwork_controls(
             icon.shown_on_controls()
                 .then(|| (icon, sdeck_plus::binding_editor::action_caption(&action)))
         }),
+        Rc::new(move || marker_layers.borrow().model()),
     );
     parent.append(&labeled("Artwork target (active page)", &picker));
     let artwork_selection = artwork.clone();
@@ -4377,15 +4435,29 @@ fn flash(widget: &gtk::Widget, class: &'static str) {
     });
 }
 
-/// The touch strip is split into 200 px regions; sections the preview has no
-/// widget for are ignored.
-fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+/// Flash the sections the touch from `from_x` to `to_x` crosses; sections the
+/// preview has no widget for are ignored.
+fn flash_zones_in(zone_width: u32, zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+    let width = zone_width.max(1);
     let last = zones.len().saturating_sub(1);
-    for zone in usize::from(from_x / 200).min(last)..=usize::from(to_x / 200).min(last) {
+    let section =
+        |x: u16| usize::try_from(u32::from(x) / width).map_or(last, |zone| zone.min(last));
+    for zone in section(from_x)..=section(to_x) {
         if let Some(widget) = zones.get(zone) {
             flash(widget, "control-touched");
         }
     }
+}
+
+/// [`flash_zones_in`] for the Stream Deck +'s 200 px sections.
+#[cfg(test)]
+fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
+    flash_zones_in(
+        sdeck_plus::device_model::PLUS.zone_px().0,
+        zones,
+        from_x,
+        to_x,
+    );
 }
 
 fn set_active(label: &Label, active: bool) {
@@ -4587,6 +4659,7 @@ mod tests {
     mod update_check;
     mod update_install;
     mod volume_step_tests;
+    mod xl_editor_tests;
     mod xl_event_safety_tests;
 
     include!("button_text_editor_tests.rs");

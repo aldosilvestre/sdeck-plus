@@ -47,13 +47,13 @@ fn plus_layout_reproduces_the_shipped_geometry() {
 fn xl_layout_has_nine_columns_four_rows_and_six_aligned_sections() {
     let layout = PreviewLayout::for_model(&PLUS_XL);
     assert_eq!(layout.brand, "STREAM DECK + XL");
-    assert_eq!(layout.size, (556, 487));
+    assert_eq!(layout.size, (556, 456));
     assert_eq!(layout.key_count(), 36);
     for (index, key) in layout.keys.iter().enumerate() {
         let (col, row) = ((index % 9) as i32, (index / 9) as i32);
         assert_eq!(
             *key,
-            r(48 + col * 52, 38 + row * 52, 44, 44),
+            r(74 + col * 46, 38 + row * 46, 40, 40),
             "key {}",
             index + 1
         );

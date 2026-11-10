@@ -76,6 +76,32 @@ pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     }
 }
 
+/// Why `number` is no control of `model`, in the editor's words; `None` when
+/// the model has it (the strip, number 0, is always a valid touch selection).
+pub fn control_number_error(
+    model: &DeviceModel,
+    control: ControlKind,
+    number: u8,
+) -> Option<String> {
+    match control {
+        ControlKind::Button if !model.is_valid_key(number) => Some(format!(
+            "Button {number} does not exist on the {}; its buttons are 1..={}.",
+            model.name,
+            model.keys()
+        )),
+        ControlKind::Encoder if !model.is_valid_dial(number) => Some(format!(
+            "Encoder {number} does not exist on the {}; its encoders are 1..={}.",
+            model.name, model.dials
+        )),
+        ControlKind::Touch if number > model.zones() => Some(format!(
+            "Touch section {number} does not exist on the {}; its sections are 1..={} (0 is the whole strip).",
+            model.name,
+            model.zones()
+        )),
+        _ => None,
+    }
+}
+
 pub fn trigger_from_selection(
     control: ControlKind,
     control_number: u8,
@@ -805,6 +831,49 @@ mod tests {
             ]
         );
         assert!(events_for_control(ControlKind::Touch).contains(&EventKind::TouchSwipeLeft));
+    }
+
+    #[test]
+    fn xl_keys_dials_and_sections_resolve_and_the_plus_still_refuses_them() {
+        use crate::device_model::PLUS_XL;
+        use crate::key_hold_editor::key_trigger_for;
+        assert_eq!(
+            key_trigger_for(&PLUS_XL, 36, false).unwrap(),
+            Trigger::KeyPress(36)
+        );
+        assert_eq!(
+            key_trigger_for(&PLUS_XL, 20, true).unwrap(),
+            Trigger::KeyHold(20)
+        );
+        assert!(key_trigger_for(&PLUS_XL, 37, false).is_err());
+        assert!(key_trigger_for(&PLUS, 9, true).is_err());
+        let xl =
+            |control, number, event| trigger_from_selection_for(&PLUS_XL, control, number, event);
+        assert_eq!(
+            xl(ControlKind::Encoder, 6, EventKind::EncoderClockwise).unwrap(),
+            Trigger::EncoderClockwise(6)
+        );
+        assert_eq!(
+            xl(ControlKind::Touch, 6, EventKind::TouchTap).unwrap(),
+            Trigger::ZoneTap(6)
+        );
+        assert_eq!(
+            xl(ControlKind::Touch, 0, EventKind::TouchPress).unwrap(),
+            Trigger::TouchPress
+        );
+        assert!(xl(ControlKind::Touch, 7, EventKind::TouchTap).is_err());
+        assert!(trigger_from_selection_for(
+            &PLUS,
+            ControlKind::Encoder,
+            5,
+            EventKind::EncoderPress
+        )
+        .is_err());
+        assert!(control_number_error(&PLUS_XL, ControlKind::Touch, 6).is_none());
+        assert_eq!(
+            control_number_error(&PLUS, ControlKind::Touch, 5).unwrap(),
+            "Touch section 5 does not exist on the Stream Deck +; its sections are 1..=4 (0 is the whole strip)."
+        );
     }
 
     #[test]

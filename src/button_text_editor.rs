@@ -38,7 +38,7 @@ pub(super) struct ButtonTextEditor {
     image_clear: gtk::Button,
     /// "Add text" or "Edit text", the verb of the key's context menu entry.
     caption: RefCell<String>,
-    /// The eight key widgets the modal opens on.
+    /// The key widgets of the shown model the modal opens on.
     anchors: RefCell<Vec<glib::WeakRef<gtk::Widget>>>,
     loading: Cell<bool>,
     control_available: Cell<bool>,
@@ -406,7 +406,7 @@ impl ButtonTextEditor {
         select: Rc<dyn Fn(usize) -> bool>,
     ) {
         self.set_anchors(keys);
-        for (index, key) in keys.iter().enumerate().take(8) {
+        for (index, key) in keys.iter().enumerate() {
             let gesture = gtk::GestureClick::builder().button(3).build();
             let editor = Rc::downgrade(self);
             let weak_key = key.downgrade();
@@ -586,11 +586,17 @@ impl ButtonTextEditor {
         if !matches!(target, ArtworkTarget::Keypad(_)) {
             return Ok(());
         }
-        let layer = self.artwork.layers.borrow().active().to_owned();
+        let (layer, model) = {
+            let layers = self.artwork.layers.borrow();
+            (layers.active().to_owned(), layers.model())
+        };
         let (image, shown) = self.artwork.key_text_image(&layer, target, value)?;
         let texture = gtk::gdk::Texture::for_pixbuf(&image);
+        // The picture is the key as the model's hardware shows it.
+        let side = i32::try_from(model.key_px).unwrap_or(120);
+        self.preview.set_size_request(side, side);
         self.preview.set_paintable(Some(&texture));
-        self.overflow.set_visible(!text_fits(value));
+        self.overflow.set_visible(!text_fits_for(model, value));
         // A key that shows live information keeps its picture in the window.
         if self.artwork.shows_info(&layer, target) {
             return Ok(());
@@ -638,11 +644,21 @@ impl ButtonTextEditor {
 
 /// Text placement inside the key, as the renderer applies it: 2px margins and
 /// the ink extents of the Pango layout, swapped for vertical text.
-const KEY_TEXT_AREA: i32 = 116;
+const KEY_TEXT_MARGIN: i32 = 4;
 
 /// Whether `value` fits inside the key at its size and orientation, measured
 /// with Pango exactly as `compose_button_image` lays it out.
+#[cfg(test)]
 pub(super) fn text_fits(value: &ButtonText) -> bool {
+    text_fits_for(&sdeck_plus::device_model::PLUS, value)
+}
+
+/// [`text_fits`] for the key size of `model`.
+pub(super) fn text_fits_for(
+    model: &sdeck_plus::device_model::DeviceModel,
+    value: &ButtonText,
+) -> bool {
+    let area = i32::try_from(model.key_px).unwrap_or(120) - KEY_TEXT_MARGIN;
     if value.text.is_empty() {
         return true;
     }
@@ -658,7 +674,7 @@ pub(super) fn text_fits(value: &ButtonText) -> bool {
         TextOrientation::Horizontal => (ink.width(), ink.height()),
         TextOrientation::Vertical => (ink.height(), ink.width()),
     };
-    width <= KEY_TEXT_AREA && height <= KEY_TEXT_AREA
+    width <= area && height <= area
 }
 
 const POSITION_NAMES: [&str; 9] = [

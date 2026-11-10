@@ -18,7 +18,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 pub(super) struct Harness {
     base: PathBuf,
-    roots: SessionRoots,
+    pub(super) roots: SessionRoots,
     pub(super) app: gtk::Application,
     pub(super) window: ApplicationWindow,
     pub(super) session: Rc<ModelSession>,
@@ -159,7 +159,7 @@ impl Harness {
         self.artwork.try_iter().collect()
     }
 
-    fn root(&self, model: &DeviceModel) -> PathBuf {
+    pub(super) fn root(&self, model: &DeviceModel) -> PathBuf {
         self.roots.root_for(model)
     }
 
@@ -224,7 +224,7 @@ impl Harness {
 }
 
 /// Every file under `root` (relative path to bytes), skipping `devices/`.
-fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+pub(super) fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     fn walk(root: &Path, dir: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -249,12 +249,12 @@ fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     found
 }
 
-fn remember(roots: &SessionRoots, model: &DeviceModel) {
+pub(super) fn remember(roots: &SessionRoots, model: &DeviceModel) {
     std::fs::create_dir_all(roots.preference.parent().unwrap()).unwrap();
     std::fs::write(&roots.preference, format!(r#"{{"model":"{}"}}"#, model.id)).unwrap();
 }
 
-fn stored_binding(root: &Path, model: &'static DeviceModel, key: u8) -> bool {
+pub(super) fn stored_binding(root: &Path, model: &'static DeviceModel, key: u8) -> bool {
     // A save in flight can briefly hide a file; the caller polls until it settles.
     LayerStore::open_at_model(root, model)
         .is_ok_and(|store| store.binding("Base", &Trigger::KeyPress(key)).is_some())
@@ -1056,5 +1056,56 @@ fn the_updates_entry_opens_exactly_one_dialog_even_after_switches() {
         }
         entry.emit_clicked();
         assert_eq!(open(), 1);
+    });
+}
+
+#[test]
+fn an_xl_session_saves_xl_keys_through_the_layer_worker_into_the_xl_root_only() {
+    run_gtk_test(|| {
+        let Some(harness) = start("xl-e2e", |roots| remember(roots, &PLUS_XL)) else {
+            return;
+        };
+        assert_eq!(harness.model(), &PLUS_XL);
+        let plus_before = tree(&harness.roots.data_dir);
+        let runtime = harness.session.runtime();
+        let ui = runtime.binding_ui().clone();
+        let preview = runtime.preview().expect("the preview");
+        let click_in_window = |caption: &str| {
+            let mut buttons = Vec::new();
+            super::action_catalog_tests::collect_catalog_buttons(
+                harness.window.upcast_ref(),
+                &mut buttons,
+            );
+            buttons
+                .iter()
+                .find(|button| button_caption(button).as_deref() == Some(caption))
+                .unwrap_or_else(|| panic!("{caption} button"))
+                .emit_clicked();
+        };
+        let root = harness.root(&PLUS_XL);
+        for (control, trigger_key) in [
+            (sdeck_plus::preview_layout::ControlRef::Key(36), 36u8),
+            (sdeck_plus::preview_layout::ControlRef::Key(20), 20),
+        ] {
+            preview
+                .control(control)
+                .unwrap()
+                .downcast::<Button>()
+                .unwrap()
+                .emit_clicked();
+            ui.action_picker.set_selected(1);
+            ui.text_entry.set_text("echo e2e");
+            click_in_window("Save binding");
+            let root = root.clone();
+            wait_until("the XL binding on disk", move || {
+                stored_binding(&root, &PLUS_XL, trigger_key)
+            });
+        }
+        assert_eq!(
+            tree(&harness.roots.data_dir),
+            plus_before,
+            "the Stream Deck + root is untouched"
+        );
+        assert!(!stored_binding(&harness.roots.data_dir, &PLUS, 1));
     });
 }

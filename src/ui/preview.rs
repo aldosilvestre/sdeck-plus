@@ -286,23 +286,24 @@ impl PreviewView {
             .map_or_else(Vec::new, |built| built.dial_labels.clone())
     }
 
-    /// The first eight keys, the strip, the first four dials and sections in
-    /// the order the action catalog and the dial presets were written for.
-    /// `None` for a model too small for them.
+    /// Every key, the strip, every dial and every section of the shown model,
+    /// in the order the action catalog and the dial presets address them.
+    /// `None` for a model without a strip or dials, which they do not serve.
     pub(crate) fn catalog_widgets(&self) -> Option<Rc<Vec<gtk::Widget>>> {
         let layout = self.layout();
-        if !layout.has(ControlRef::Key(8))
+        if layout.key_count() == 0
             || !layout.has(ControlRef::Strip)
-            || !layout.has(ControlRef::Dial(4))
-            || !layout.has(ControlRef::Zone(4))
+            || layout.dial_count() == 0
+            || layout.zone_count() == 0
         {
             return None;
         }
-        let controls = (1..=8)
+        let number = |count: usize| 1..=count as u8;
+        let controls = number(layout.key_count())
             .map(ControlRef::Key)
             .chain([ControlRef::Strip])
-            .chain((1..=4).map(ControlRef::Dial))
-            .chain((1..=4).map(ControlRef::Zone))
+            .chain(number(layout.dial_count()).map(ControlRef::Dial))
+            .chain(number(layout.zone_count()).map(ControlRef::Zone))
             .map(|control| self.control(control))
             .collect::<Option<Vec<_>>>()?;
         Some(Rc::new(controls))
@@ -345,6 +346,11 @@ impl PreviewView {
     /// Detach the shared widgets and drop the current subtree.
     fn teardown(&self) {
         let old = self.built.borrow_mut().take();
+        // A key's context menu is parented to the key: close it, or the key
+        // would be finalized with a popover still attached.
+        if let Some(old) = &old {
+            detach_popovers(old.chassis.upcast_ref());
+        }
         self.touch_status.unparent();
         self.ui.gesture_badges.unparent();
         for icon in self.ui.dial_icons.all() {
@@ -638,4 +644,19 @@ fn put(parent: &gtk::Fixed, child: &impl IsA<gtk::Widget>, rect: &Rect) {
 fn put_in(parent: &gtk::Fixed, child: &impl IsA<gtk::Widget>, rect: &Rect, origin: &Rect) {
     let rect = rect.relative_to(origin);
     parent.put(child, f64::from(rect.x), f64::from(rect.y));
+}
+
+/// Pop down and unparent every popover attached below `widget`.
+fn detach_popovers(widget: &gtk::Widget) {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        // Read the sibling first: unparenting removes `current` from the chain.
+        child = current.next_sibling();
+        if let Some(popover) = current.downcast_ref::<gtk::Popover>() {
+            popover.popdown();
+            popover.unparent();
+        } else {
+            detach_popovers(&current);
+        }
+    }
 }

@@ -29,7 +29,9 @@ icon, its name and an action count. Rows are frameless 36px targets with the
 action icon in a bordered tile and a drag grip that brightens on hover; dragging
 shows the row itself. Searching opens every category with matches, hides the
 rest and shows "No actions match your search." when nothing matches; clearing
-restores the categories as the user left them.
+restores the categories as the user left them. Every key and every dial of
+the shown model takes a drop (36 keys and 6 dials on the XL+, 8 and 4 on the +),
+and the search text and the open categories survive a model change.
 Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
 assigned, with the same save-or-draft rule as keys, and clicking an action with a
@@ -193,7 +195,8 @@ The inspector-below-preview workspace uses vertical scrolling at the default
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
-between Save/Remove actions; its 120px preview remains unchanged.
+between Save/Remove actions; its preview is the key at the shown model's size
+(120px for the +, 112px for the XL+).
 
 The fixed-geometry device chassis sits in its preview card: the chassis plus
 a 14px frame (padding and border), 440x428 at 1x for the Stream Deck +. The card is presented through `ScaledBin`
@@ -210,30 +213,36 @@ arbitrary minimum height.
 (`PreviewLayout::for_model`, `src/preview_layout.rs`, pure geometry shared by
 the widgets and the tests); `PreviewView` (`src/ui/preview.rs`) builds it and,
 when the model changes, replaces only the chassis inside the same card. The
-header, catalog and editor stay. Geometry, in preview pixels at 1x:
+header, catalog and editor stay; a key's open context menu is popped down and
+detached first, so no popover outlives the key it was attached to. Geometry,
+in preview pixels at 1x:
 
 | Model | Chassis | Keys | Touch strip | Dials |
 |-------|---------|------|-------------|-------|
 | Stream Deck + | 426x414 | 8 (4x2), 60px on a 91x67 pitch | 328x41, 4 sections of 82px | 4 knobs of 46px, 91px pitch |
-| Stream Deck + XL | 556x487 | 36 (9x4), 44px on a 52px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
+| Stream Deck + XL | 556x456 | 36 (9x4), 40px on a 46px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
 
 The Stream Deck + keeps the geometry it always had, pixel for pixel. Every
 other model of the registry is laid out by the same generic rules (44px keys on
 a 52px pitch, 76px sections, knobs under their sections, a chassis just wide
 enough for its widest row, margins kept whole so it is symmetric); models
-without a strip or dials omit them. A Neo's information window is drawn as a
+without a strip or dials omit them. The XL+ uses those rules with 40px keys on
+a 46px pitch and a 24px bottom margin, so its four rows still fit the window
+(see below). A Neo's information window is drawn as a
 plain display that cannot be selected, and its two capacitive sensors are not
 drawn because they have no preview control.
 
 The preview is never scaled for a model: the card is the chassis plus 14px
-(570x501 for the XL+) at exactly 1.0x, never scrolls inside itself, and keeps
+(570x470 for the XL+) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the XL+ key at
-44px). At the default 1000x700 window the XL+ card still sits beside the
+40px). At the default 1000x700 window the XL+ card still sits beside the
 352px action catalog (570 + 16 + 352 = 938 of the 968px of usable width), so
 the settings column stays usable; a narrower window wraps the catalog below
 the workspace exactly as it does for the +, and the page scrolls vertically.
-The XL+ preview is 87px taller than the +: the page's own vertical scroll
-absorbs it, never the preview. Dial captions are 72px wide on the XL+ (86px
+The XL+ chassis is 42px taller than the + (456px against 414px); its card
+(570x470) ends inside the 700px viewport of the default window, so the page
+needs no vertical scroll to reach the dials (a test pins this for both
+models). A shorter window scrolls the page, never the preview. Dial captions are 72px wide on the XL+ (86px
 on the +) so neighbours never touch.
 
 The complete configuration shell (header, profile toolbar, page navigation and
@@ -406,7 +415,9 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   the closed Action button show the chosen action's icon, while the Action
   menu row keeps `more`.
 - **Artwork targets:** every row of the Artwork target menu starts with a
-  26x22 mini map of the eight keys over the four strip sections, soft-filled
+  26x22 mini map of the shown model's keys over its strip sections (eight keys
+  over four sections on the +, the 9x4 grid over six sections on the XL+, at the
+  same overall size), soft-filled
   and outlined at half ink with its target filled (the whole strip row for the background),
   and menu rows end with the target's assigned action icon (key press; section
   tap, then hold), refreshed whenever the menu opens.
@@ -487,7 +498,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   the title names what is edited, "Key N on “<view>”", where the view is the
   page indicator's label (profile / folders / page). The editor fields and
   enlarged preview appear only in the popup. A compact two-column body keeps
-  the entire 120px live preview next to the form, with no popup scrolling at
+  the entire live key preview (120px, 112px on the XL+) next to the form, with no popup scrolling at
   640x480 or larger. Only a long multiline text input may scroll internally.
   Use a native font chooser button, a 6–120px size spinner, and one row with
   a linked pair of orientation icon toggles (upright and clockwise-rotated
@@ -498,11 +509,11 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   Tab and arrow keys, and keep tooltips and distinct accessible names.
   Vertical text
   rotates the layout 90 degrees clockwise. White glyphs with a thin black
-  outline sit above the key's background. The enlarged 120px preview and the
+  outline sit above the key's background. The enlarged key preview (the model's key size) and the
   physical key preview show the key as the device does: its artwork, else its
   binding icon tile when the text leaves the icon a band, else the neutral
   black key; the derived picture is never stored. When the Pango ink extents
-  exceed the 116px text area, a warning-toned "Text does not fit; try a
+  exceed the key's text area (the key size less 4px), a warning-toned "Text does not fit; try a
   smaller size" sits under the preview; it is informational. Save text is
   explicit and enabled only for a valid, nonblank value that differs from the
   saved one (Ctrl+Enter saves; plain Enter inserts a line); its tooltip says

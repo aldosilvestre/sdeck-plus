@@ -126,7 +126,7 @@ pub(super) fn preview_of(root: &gtk::Widget) -> gtk::Widget {
         .expect("the preview")
 }
 
-fn class_of(root: &gtk::Widget, class: &str) -> gtk::Widget {
+pub(super) fn class_of(root: &gtk::Widget, class: &str) -> gtk::Widget {
     descendants_of::<gtk::Widget>(root)
         .into_iter()
         .find(|widget| widget.has_css_class(class))
@@ -251,13 +251,56 @@ fn tab_order(
     visited
 }
 
-const PLUS_GOLDEN_HASH: u64 = 0x52d2dfc43ed0b7a7;
+const PLUS_GOLDEN_HASH: u64 = 0x9d8dea7cc9a97e57;
 
-/// Captured from the unmodified Stream Deck + preview (this machine's GTK,
-/// theme and fonts) at the default window size: 520x428 around the 440x428 card.
+/// The look settings the golden is rendered with, so the picture does not
+/// depend on the host's theme, font or display settings (nor on HOME).
+/// Restores what it replaced when dropped.
+struct ExplicitLook {
+    settings: gtk::Settings,
+    saved: Vec<(&'static str, glib::Value)>,
+}
+
+impl ExplicitLook {
+    fn apply() -> Self {
+        let settings = gtk::Settings::default().unwrap();
+        let wanted: [(&'static str, glib::Value); 9] = [
+            ("gtk-theme-name", "Adwaita".to_value()),
+            ("gtk-application-prefer-dark-theme", false.to_value()),
+            ("gtk-font-name", "Sans 10".to_value()),
+            ("gtk-xft-dpi", (96 * 1024).to_value()),
+            ("gtk-xft-antialias", 1.to_value()),
+            ("gtk-xft-hinting", 1.to_value()),
+            ("gtk-xft-hintstyle", "hintslight".to_value()),
+            ("gtk-xft-rgba", "none".to_value()),
+            ("gtk-enable-animations", false.to_value()),
+        ];
+        let mut saved = Vec::new();
+        for (name, value) in wanted {
+            saved.push((name, settings.property_value(name)));
+            settings.set_property_from_value(name, &value);
+        }
+        Self { settings, saved }
+    }
+}
+
+impl Drop for ExplicitLook {
+    fn drop(&mut self) {
+        for (name, value) in &self.saved {
+            self.settings.set_property_from_value(name, value);
+        }
+    }
+}
+
+/// Captured from the unmodified Stream Deck + preview (T4a code) rendered with
+/// [`ExplicitLook`] at the default window size: 520x428 around the 440x428 card.
 #[test]
 fn plus_preview_is_identical_to_the_shipped_one() {
     run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let _look = ExplicitLook::apply();
         let Some(f) = fixture("plus-golden", |_| {}) else {
             return;
         };
