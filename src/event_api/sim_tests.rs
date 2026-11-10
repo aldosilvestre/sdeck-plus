@@ -8,10 +8,10 @@ use crate::device_model::PLUS_XL;
 use crate::layers::Trigger;
 use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
 
-struct Scratch(std::path::PathBuf);
+pub(super) struct Scratch(pub(super) std::path::PathBuf);
 
 impl Scratch {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!("sdeck-sim-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -19,7 +19,12 @@ impl Scratch {
 
     /// A blue picture with a red square in its top-left corner. With `noise`
     /// the rest is pseudo-random, so the JPEG needs many chunks.
-    fn marker(&self, name: &str, (width, height): (u32, u32), noise: bool) -> std::path::PathBuf {
+    pub(super) fn marker(
+        &self,
+        name: &str,
+        (width, height): (u32, u32),
+        noise: bool,
+    ) -> std::path::PathBuf {
         let image = Pixbuf::new(Colorspace::Rgb, false, 8, width as i32, height as i32).unwrap();
         image.fill(0x0000ffff);
         if noise {
@@ -47,14 +52,14 @@ impl Drop for Scratch {
     }
 }
 
-fn is_red(image: &Pixbuf, x: i32, y: i32) -> bool {
+pub(super) fn is_red(image: &Pixbuf, x: i32, y: i32) -> bool {
     let at = (y * image.rowstride() + x * image.n_channels()) as usize;
     let pixels = image.read_pixel_bytes();
     let pixel = &pixels.as_ref()[at..at + 3];
     pixel[0] > 180 && pixel[1] < 90 && pixel[2] < 90
 }
 
-fn connected(model: &'static DeviceModel) -> ConnectionState {
+pub(super) fn connected(model: &'static DeviceModel) -> ConnectionState {
     ConnectionState::Connected(model)
 }
 

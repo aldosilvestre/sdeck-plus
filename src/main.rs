@@ -1638,7 +1638,13 @@ fn start_event_updates(
     _layer_sender: mpsc::Sender<LayerCommand>,
     _app_event_sender: mpsc::Sender<MonitorEvent>,
 ) -> glib::SourceId {
-    let ticks = Rc::new(RefCell::new([0i64; 4]));
+    // One running total per dial of the widest supported model.
+    let dials = sdeck_plus::device_model::DeviceModel::all()
+        .iter()
+        .map(|model| usize::from(model.dials))
+        .max()
+        .unwrap_or_default();
+    let ticks = Rc::new(RefCell::new(vec![0i64; dials]));
     glib::timeout_add_local(Duration::from_millis(40), move || {
         let MonitorWidgets {
             status,
@@ -1719,7 +1725,7 @@ fn start_event_updates(
                                     "DIAL {}\n{} · {} ticks",
                                     index + 1,
                                     if pressed { "PRESSED" } else { "IDLE" },
-                                    ticks.borrow()[index]
+                                    ticks.borrow().get(index).copied().unwrap_or_default()
                                 ));
                                 set_active(label, pressed);
                             }
@@ -1732,12 +1738,15 @@ fn start_event_updates(
                             ticks: delta,
                         } => {
                             let mut totals = ticks.borrow_mut();
-                            totals[index] += i64::from(delta);
+                            let total = totals.get_mut(index).map(|total| {
+                                *total += i64::from(delta);
+                                *total
+                            });
                             if let Some(label) = encoder_labels.get(index) {
                                 label.set_text(&format!(
                                     "DIAL {}\n{} ticks · {delta:+}",
                                     index + 1,
-                                    totals[index]
+                                    total.unwrap_or_default()
                                 ));
                             }
                             if let Some(widget) = encoder_widgets.get(index) {
@@ -4205,9 +4214,11 @@ fn flash(widget: &gtk::Widget, class: &'static str) {
     });
 }
 
-/// The touch strip is 800 px wide and split into four 200 px regions.
+/// The touch strip is split into 200 px regions; sections the preview has no
+/// widget for are ignored.
 fn flash_zones(zones: &[gtk::Widget], from_x: u16, to_x: u16) {
-    for zone in usize::from(from_x / 200).min(3)..=usize::from(to_x / 200).min(3) {
+    let last = zones.len().saturating_sub(1);
+    for zone in usize::from(from_x / 200).min(last)..=usize::from(to_x / 200).min(last) {
         if let Some(widget) = zones.get(zone) {
             flash(widget, "control-touched");
         }
@@ -4410,6 +4421,7 @@ mod tests {
     mod update_check;
     mod update_install;
     mod volume_step_tests;
+    mod xl_event_safety_tests;
 
     include!("button_text_editor_tests.rs");
 

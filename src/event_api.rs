@@ -35,6 +35,12 @@ mod sim_device;
 #[cfg(test)]
 mod sim_tests;
 
+#[cfg(test)]
+mod sim_xl_probes;
+
+#[cfg(test)]
+mod rotation_probes;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     Searching,
