@@ -200,6 +200,8 @@ fn the_table_matches_the_documented_facts() {
     let mini = DeviceModel::by_id("mini").unwrap();
     assert_eq!((mini.input_report_len, mini.key_header_len), (65, 16));
     assert!(!DeviceModel::by_id("xl").unwrap().has_strip());
+    // The Classic LCD takes background images (0x0D), not a window.
+    assert!(!DeviceModel::by_id("classic").unwrap().has_strip());
     assert!(!DeviceModel::by_id("classic").unwrap().has_touch());
 }
 
@@ -681,4 +683,16 @@ fn plus_tables_keep_their_values() {
     assert_eq!((PLUS.keys(), PLUS.dials, PLUS.zones()), (8, 4, 4));
     assert_eq!((PLUS_XL.keys(), PLUS_XL.dials, PLUS_XL.zones()), (36, 6, 6));
     assert_eq!((PLUS.pids, PLUS_XL.pids), (&[0x0084][..], &[0x00C6][..]));
+}
+
+#[test]
+fn by_id_supported_names_only_connectable_models() {
+    for model in each() {
+        assert_eq!(
+            DeviceModel::by_id_supported(model.id),
+            model.is_supported().then_some(model),
+            "{}",
+            model.id
+        );
+    }
 }

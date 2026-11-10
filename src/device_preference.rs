@@ -34,7 +34,7 @@ fn read(path: &Path) -> io::Result<&'static DeviceModel> {
         Ok(contents) => {
             let preference = serde_json::from_slice::<Preference>(&contents)
                 .map_err(|error| invalid(format!("invalid device preference: {error}")))?;
-            DeviceModel::by_id(&preference.model).ok_or_else(|| {
+            DeviceModel::by_id_supported(&preference.model).ok_or_else(|| {
                 invalid(format!(
                     "unknown device model {:?} in device preference",
                     preference.model
@@ -186,5 +186,16 @@ mod tests {
     fn the_file_sits_next_to_tray_json() {
         let tray = crate::tray_preference::path().unwrap();
         assert_eq!(path().unwrap(), tray.with_file_name("device.json"));
+    }
+
+    #[test]
+    fn a_planned_model_is_an_unknown_preference_that_is_kept() {
+        let dir = scratch();
+        let file = dir.join("device.json");
+        let original = br#"{"model":"classic"}"#;
+        fs::write(&file, original).unwrap();
+        assert!(load_from(&file).is_err());
+        assert!(save_to(&file, &PLUS).is_err());
+        assert_eq!(fs::read(&file).unwrap(), original);
     }
 }

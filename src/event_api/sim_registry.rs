@@ -246,3 +246,24 @@ fn a_legacy_mini_is_refused_clearly_and_never_driven() {
     let error = image_output::prepare_jpeg_for(model, ArtworkTarget::Keypad(1), &path).unwrap_err();
     assert!(error.contains("BMP") && error.contains("not implemented"));
 }
+
+#[test]
+fn only_the_two_supported_product_ids_are_ever_discovered() {
+    for pid in 0..=u16::MAX {
+        let expected = match pid {
+            0x0084 => Some("plus"),
+            0x00C6 => Some("plus-xl"),
+            _ => None,
+        };
+        let found = first_supported([(VID, pid)]).map(|(_, model)| model.id);
+        assert_eq!(found, expected, "{pid:04X}");
+        assert_eq!(DeviceModel::by_pid(pid).map(|model| model.id), expected);
+        assert_eq!(first_supported([(VID ^ 1, pid)]), None, "{pid:04X}");
+    }
+    for model in DeviceModel::all().iter().filter(|m| !m.is_supported()) {
+        for pid in model.pids {
+            let found = first_supported([(VID, *pid), (VID, 0x0084)]);
+            assert_eq!(found.map(|(at, m)| (at, m.id)), Some((1, "plus")));
+        }
+    }
+}

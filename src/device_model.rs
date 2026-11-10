@@ -211,8 +211,8 @@ const EXPANDED: DeviceModel = DeviceModel {
     zone_header_len: 16,
 };
 
-/// Planned. Facts from the Stream Deck Classic page; the 480x272 LCD is
-/// modelled as a window without touch whose rotation is unverified.
+/// Planned. Facts from the Stream Deck Classic page. Its 480x272 LCD takes
+/// background images (command 0x02 0x0D), not a window, so no strip is modelled.
 pub static CLASSIC: DeviceModel = DeviceModel {
     id: "classic",
     name: "Stream Deck Classic",
@@ -221,13 +221,6 @@ pub static CLASSIC: DeviceModel = DeviceModel {
     key_cols: 5,
     key_rows: 3,
     key_px: 72,
-    strip: Some(StripSpec {
-        px: (480, 272),
-        zones: 0,
-        touch: false,
-        rotation: Rotation::None,
-        zone_px: (480, 272),
-    }),
     ..EXPANDED
 };
 
@@ -322,6 +315,12 @@ impl DeviceModel {
     /// Any registry entry by id, Planned or not.
     pub fn by_id(id: &str) -> Option<&'static DeviceModel> {
         ALL.into_iter().find(|model| model.id == id)
+    }
+
+    /// A Supported entry by id. Preferences and anything that must name a
+    /// connectable model use this; [`Self::by_id`] also finds Planned ones.
+    pub fn by_id_supported(id: &str) -> Option<&'static DeviceModel> {
+        Self::by_id(id).filter(|model| model.is_supported())
     }
 
     pub fn is_supported(&self) -> bool {

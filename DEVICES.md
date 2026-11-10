@@ -50,7 +50,7 @@ dispatch point. A handler implements `FamilyProtocol`: `decode` (input report to
 ## Steps to add a model
 
 1. Add a `static` entry to `src/device_model.rs` with the facts from the model's
-   HID page and its `doc_url`, `support: Support::Planned`, and list it in `ALL`.
+   HID page and its `doc_url`, `support: Support::Planned`, and list it in `ALL` (update the array length, `&[&DeviceModel; N]`).
    Planned Expanded entries can use `..EXPANDED`.
 2. If it speaks a new family, add a `ProtocolFamily` variant, implement
    `FamilyProtocol` for it and return it from `protocol_for`; set
@@ -63,7 +63,9 @@ dispatch point. A handler implements `FamilyProtocol`: `decode` (input report to
    rotation and chunk headers, input decoding, shutdown blanking). Add
    model-specific checks for anything new.
 5. Verify on hardware if available. Then change `support` to `Supported`, update
-   the pinned set in `exactly_the_plus_and_the_plus_xl_are_supported_today`, and
+   the pinned sets in `exactly_the_plus_and_the_plus_xl_are_supported_today`
+   (`tests/device_registry.rs`) and `models_are_found_by_pid_and_id`
+   (`tests/device_model.rs`), and
    update the docs (T5-style: README, site, packaging text).
 
 Invariant tests in `tests/device_registry.rs` and `src/event_api/sim_registry.rs`
@@ -88,23 +90,30 @@ comparison.
 |----|------|--------|--------|------|------|-----------|---------|---------|
 | plus | Stream Deck + | Supported | Expanded | 0x0084 | 4x2 | 120 JPEG, no rotation | 800x100 touch strip, 4 sections; 4 dials | 0 |
 | plus-xl | Stream Deck + XL | Supported | Expanded | 0x00C6 | 9x4 | 112 JPEG, 90 CCW | 1200x100 touch strip, 6 sections; 6 dials | 0 |
-| classic | Stream Deck Classic | Planned | Expanded | 0x006D 0x0080 0x00A5 0x00B9 | 5x3 | 72 JPEG, 180 | 480x272 window, no touch | 0 |
+| classic | Stream Deck Classic | Planned | Expanded | 0x006D 0x0080 0x00A5 0x00B9 | 5x3 | 72 JPEG, 180 | none (the 480x272 LCD takes background images, 0x0D; not modelled) | 0 |
 | xl | Stream Deck XL | Planned | Expanded | 0x006C 0x008F 0x00BA | 8x4 | 96 JPEG, 180 | none | 0 |
 | neo | Stream Deck Neo | Planned | Expanded | 0x009A | 4x2 | 96 JPEG, 180 | 248x58 window, no touch (0x0B/0x0C) | 2, after the keys |
 | mini | Stream Deck Mini | Planned | Legacy Mini | 0x0063 0x0090 0x00B3 0x00B8 | 3x2 | 80 BMP, 90 CW | none | 0 |
 
-Sources: <https://docs.elgato.com/streamdeck/hid/intro> and the per-model pages
-(`stream-deck-classic`, `stream-deck-xl`, `stream-deck-neo`, `mini`). The `plus`
-and `plus-xl` URLs in the table follow the site's naming pattern and were not
-opened.
+Sources (the `plus` and `plus-xl` pages follow the site's naming pattern and
+were not opened):
+
+- https://docs.elgato.com/streamdeck/hid/intro
+- https://docs.elgato.com/streamdeck/hid/stream-deck-classic
+- https://docs.elgato.com/streamdeck/hid/stream-deck-xl
+- https://docs.elgato.com/streamdeck/hid/stream-deck-neo
+- https://docs.elgato.com/streamdeck/hid/mini
+- https://docs.elgato.com/streamdeck/hid/stream-deck-plus
+- https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl
 
 ## Unverified points
 
 - `key_flip_y` has no Elgato source; it is `false` everywhere.
 - `partial_window_axis_swap`: Elgato says logical coordinates, a third-party
   PR disagrees; `false` until hardware shows otherwise.
-- The Classic and Neo windows: rotation (`None`), and whether the Neo window
-  upload really shares the strip path, are assumptions.
+- The Neo window rotation (`None`) and whether its upload really shares the
+  strip path are assumptions. The Classic LCD background command (0x02 0x0D) is
+  not implemented.
 - Neo sensors: whether they carry images is unknown; they are modelled as extra
   buttons only.
 - `input_report_len` (64) and the header sizes for Classic, XL and Neo are
@@ -116,3 +125,13 @@ Never claim hardware testing without hardware. A simulator proves the wire
 format against our reading of the documentation, nothing more; docs must say
 "implemented from Elgato's HID documentation and validated with a simulator"
 until a real unit confirms it.
+
+## Pitfalls
+
+- `by_id`, stored preferences and bundles can name Planned models. Consumers
+  that need a connectable model must use `by_pid_supported` / `by_id_supported`.
+- Neo sensors arrive as `Event::Key` indexes beyond `keys()`; store validation
+  rejects them, so they cannot be bound until that is decided.
+- Mini needs its own `FamilyProtocol` before it can be promoted.
+- Never call `blank_device` for a family without a handler; the monitor guards
+  this with `ensure_protocol`.

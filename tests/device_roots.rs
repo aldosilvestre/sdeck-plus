@@ -567,3 +567,20 @@ fn the_model_less_import_cannot_overwrite_the_configuration_of_another_model() {
     assert_eq!(tree(&xl), before);
     config_bundle::import(&bundle, &f.0.join("fresh")).unwrap();
 }
+
+#[test]
+fn exporting_an_xl_root_as_another_model_is_refused_and_writes_nothing() {
+    let f = Fixture::new("export-guard");
+    let xl = data_root_in(&f.plus(), &PLUS_XL);
+    let mut layers = use_with_model_apis(&xl, &PLUS_XL);
+    layers
+        .bind("Base", Trigger::KeyPress(3), command())
+        .unwrap();
+    layers.persist().unwrap();
+    let out = f.0.join("out.sdeck-plus.json");
+    assert!(config_bundle::export(&xl, &out).is_err());
+    assert!(!out.exists());
+    assert!(config_bundle::export_for(&xl, &out, &PLUS).is_err());
+    assert!(!out.exists());
+    config_bundle::export_for(&xl, &out, &PLUS_XL).unwrap();
+}

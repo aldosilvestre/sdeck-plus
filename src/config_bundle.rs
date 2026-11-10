@@ -440,6 +440,7 @@ pub fn export(root: &Path, destination: &Path) -> io::Result<()> {
 
 /// [`export`] for a configuration root of `model`.
 pub fn export_for(root: &Path, destination: &Path, model: &'static DeviceModel) -> io::Result<()> {
+    device_roots::ensure_root_fits(root, model)?;
     no_symlinks(root)?;
     if !fs::metadata(root)?.is_dir() {
         return Err(invalid("configuration root is not a directory"));
