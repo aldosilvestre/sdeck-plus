@@ -468,15 +468,12 @@ fn add_row(
             .control_number()
             .and_then(|n| n.checked_sub(1))
             .map(usize::from);
+        let model = ui.model.get();
         match (ui.control_kind(), number) {
-            (ControlKind::Button, Some(index))
-                if index < usize::from(sdeck_plus::device_model::PLUS.keys()) =>
-            {
+            (ControlKind::Button, Some(index)) if index < usize::from(model.keys()) => {
                 assign(action, Target::Key(index));
             }
-            (ControlKind::Encoder, Some(index))
-                if index < usize::from(sdeck_plus::device_model::PLUS.dials) =>
-            {
+            (ControlKind::Encoder, Some(index)) if index < usize::from(model.dials) => {
                 assign(action, Target::Dial(index, ui.event_kind()));
             }
             _ => ui.error("Select a key or a dial before assigning an action."),

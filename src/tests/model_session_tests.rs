@@ -1109,3 +1109,45 @@ fn an_xl_session_saves_xl_keys_through_the_layer_worker_into_the_xl_root_only() 
         assert!(!stored_binding(&harness.roots.data_dir, &PLUS, 1));
     });
 }
+
+#[test]
+fn picker_session_preview_and_header_agree_at_every_model_change() {
+    run_gtk_test(|| {
+        let Some(harness) = start("consistency", |roots| remember(roots, &PLUS_XL)) else {
+            return;
+        };
+        let brand = |harness: &Harness| {
+            header_label(&harness.window, "hardware-brand")
+                .text()
+                .to_string()
+        };
+        let agree = |harness: &Harness, model: &'static DeviceModel| {
+            let picker = harness.session.picker();
+            assert_eq!(harness.model(), model);
+            assert_eq!(
+                picker.models[picker.dropdown.selected() as usize].id,
+                model.id,
+                "picker"
+            );
+            assert_eq!(brand(harness), model.name.to_uppercase(), "preview brand");
+            assert_eq!(harness.session.runtime().preview().unwrap().model(), model);
+        };
+        agree(&harness, &PLUS_XL);
+        harness.preview_as(&PLUS);
+        harness.wait_for_model(&PLUS);
+        agree(&harness, &PLUS);
+        harness.preview_as(&PLUS_XL);
+        harness.wait_for_model(&PLUS_XL);
+        agree(&harness, &PLUS_XL);
+        for model in [&PLUS, &PLUS_XL] {
+            harness.connect(model);
+            harness.wait_for_model(model);
+            agree(&harness, model);
+            let detail = header_label(&harness.window, "muted");
+            let prefix = format!("{} connected", model.name);
+            wait_until("the connected text", move || {
+                detail.text().starts_with(&prefix)
+            });
+        }
+    });
+}

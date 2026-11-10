@@ -894,3 +894,54 @@ fn the_catalog_search_and_open_categories_survive_a_model_switch() {
         );
     });
 }
+
+#[test]
+fn clicking_a_catalog_action_assigns_it_to_every_key_and_dial_of_the_model() {
+    run_gtk_test(|| {
+        for (model, controls) in [
+            (
+                &PLUS,
+                vec![
+                    (ControlRef::Key(8), Trigger::KeyPress(8)),
+                    (ControlRef::Dial(4), Trigger::EncoderPress(4)),
+                ],
+            ),
+            (
+                &PLUS_XL,
+                vec![
+                    (ControlRef::Key(9), Trigger::KeyPress(9)),
+                    (ControlRef::Key(20), Trigger::KeyPress(20)),
+                    (ControlRef::Key(36), Trigger::KeyPress(36)),
+                    (ControlRef::Dial(5), Trigger::EncoderPress(5)),
+                    (ControlRef::Dial(6), Trigger::EncoderPress(6)),
+                ],
+            ),
+        ] {
+            let Some(f) = fixture("catalog-click", model) else {
+                return;
+            };
+            for (control, trigger) in controls {
+                select(&f, control);
+                while requests(&f).try_recv().is_ok() {}
+                let mut buttons = Vec::new();
+                collect_catalog_buttons(f.widgets.root.upcast_ref(), &mut buttons);
+                buttons
+                    .iter()
+                    .find(|b| b.tooltip_text().as_deref() == Some(CATALOG_PLAY))
+                    .expect("the Play / pause row")
+                    .emit_clicked();
+                assert_eq!(
+                    f.layers.borrow().binding("Base", &trigger),
+                    Some(media(MediaCommand::PlayPause)),
+                    "{}: {control:?}",
+                    model.id
+                );
+                assert_ne!(
+                    f.widgets.binding_ui.status.text(),
+                    "Select a key or a dial before assigning an action."
+                );
+                assert!(executed(&f).is_empty(), "assigning never executes");
+            }
+        }
+    });
+}
