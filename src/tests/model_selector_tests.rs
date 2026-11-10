@@ -2,7 +2,7 @@
 //! shown model is chosen, and that a window with one model (or none) looks
 //! exactly as it did before the selector existed. No real device, HOME or
 //! network is involved.
-use super::model_session_tests::{header_label, remember, start, wait_until};
+use super::model_session_tests::{header_label, remember, start, tree, wait_until};
 use super::preview_model_tests::{model_fixture, ExplicitLook};
 use super::two_device_tests::{start_pair, start_pair_with, Pair, PLUS_PATH, XL_PATH};
 use super::*;
@@ -174,32 +174,169 @@ fn the_selector_appears_with_two_models_and_says_current() {
             found.iter().all(|text| !text.contains("Preview")),
             "no 'Preview' anywhere: {found:?}"
         );
+        let sentence = format!("Stream Deck + and Stream Deck + XL {STATUS_SUFFIX}");
+        assert_eq!(status_text(&pair), sentence);
+        let tooltip = header_label(&pair.window, "muted")
+            .tooltip_text()
+            .unwrap()
+            .to_string();
         assert_eq!(
-            status_text(&pair),
-            format!("Stream Deck + and Stream Deck + XL {STATUS_SUFFIX}")
+            tooltip,
+            format!(
+                "{sentence}\nUSB device VID 0FD9 / PID 0084 and 00C6 · HID input and artwork active"
+            ),
+            "the tooltip starts with the whole sentence"
         );
         assert_eq!(header_label(&pair.window, "status").text(), "Connected");
     });
 }
 
 #[test]
-fn the_selector_is_reachable_and_operable_from_the_keyboard() {
+fn the_two_model_status_follows_the_supported_order_not_the_plug_order() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-order") else {
+            return;
+        };
+        // The XL plugs in first.
+        pair.bus.plug(XL_PATH, &SimDevice::new(&PLUS_XL));
+        pair.wait_devices(1);
+        assert_eq!(
+            status_text(&pair),
+            format!("Stream Deck + XL {STATUS_SUFFIX}"),
+            "one model keeps today's text"
+        );
+        assert_eq!(
+            header_label(&pair.window, "muted")
+                .tooltip_text()
+                .unwrap()
+                .as_str(),
+            "USB device VID 0FD9 / PID 00C6 · HID input and artwork active",
+        );
+        pair.bus.plug(PLUS_PATH, &SimDevice::new(&PLUS));
+        pair.wait_devices(2);
+        assert_eq!(
+            status_text(&pair),
+            format!("Stream Deck + and Stream Deck + XL {STATUS_SUFFIX}")
+        );
+        assert_eq!(entries(&pair), ["Stream Deck +", "Stream Deck + XL"]);
+    });
+}
+
+/// The widgets Tab visits, in order, starting from `window`'s first stop.
+fn tab_stops(window: &ApplicationWindow) -> Vec<gtk::Widget> {
+    gtk::prelude::GtkWindowExt::set_focus(window, None::<&gtk::Widget>);
+    let mut stops: Vec<gtk::Widget> = Vec::new();
+    for _ in 0..400 {
+        if !window.child_focus(gtk::DirectionType::TabForward) {
+            break;
+        }
+        let Some(current) = gtk::prelude::GtkWindowExt::focus(window) else {
+            break;
+        };
+        if stops.contains(&current) {
+            break;
+        }
+        stops.push(current);
+    }
+    stops
+}
+
+fn in_selector(pair: &Pair, widget: &gtk::Widget) -> bool {
+    let selector = pair.registry.selector();
+    *widget == selector.dropdown
+        || widget.is_ancestor(&selector.dropdown)
+        || widget.is_ancestor(&selector.root)
+}
+
+#[test]
+fn the_selector_is_a_tab_stop_only_while_it_is_visible() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-tab") else {
+            return;
+        };
+        pair.window.present();
+        pair.bus.plug(PLUS_PATH, &SimDevice::new(&PLUS));
+        pair.wait_devices(1);
+        let stops = tab_stops(&pair.window);
+        assert!(!stops.is_empty(), "Tab visits something");
+        assert!(stops.iter().all(|stop| !in_selector(&pair, stop)));
+        pair.bus.plug(XL_PATH, &SimDevice::new(&PLUS_XL));
+        pair.wait_devices(2);
+        let forward = tab_stops(&pair.window);
+        assert!(
+            forward.iter().any(|stop| in_selector(&pair, stop)),
+            "Tab reaches the selector"
+        );
+        // The selector takes focus, and Tab and Shift+Tab both leave it. (GTK
+        // orders the header by geometry, so which neighbour Shift+Tab reaches
+        // is not pinned down here.)
+        let dropdown = pair.registry.selector().dropdown.clone();
+        for direction in [
+            gtk::DirectionType::TabForward,
+            gtk::DirectionType::TabBackward,
+        ] {
+            assert!(dropdown.grab_focus());
+            assert!(pair.window.child_focus(direction));
+            assert!(gtk::prelude::GtkWindowExt::focus(&pair.window)
+                .is_some_and(|focus| !in_selector(&pair, &focus)));
+        }
+        pair.bus.unplug(XL_PATH);
+        pair.wait_devices(1);
+        assert!(tab_stops(&pair.window)
+            .iter()
+            .all(|stop| !in_selector(&pair, stop)));
+    });
+}
+
+fn first_list_view(widget: &gtk::Widget) -> Option<gtk::ListView> {
+    if let Some(list) = widget.downcast_ref::<gtk::ListView>() {
+        return Some(list.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Some(found) = first_list_view(&current) {
+            return Some(found);
+        }
+        child = current.next_sibling();
+    }
+    None
+}
+
+/// gtk4-rs 0.9 cannot synthesize key events in-process (no
+/// `gtk_test_widget_send_key` binding, and `gdk::KeyEvent` has no constructor),
+/// so this drives what a key press ends in: keyboard focus on the drop-down and
+/// its toggle button's `clicked` (Space/Enter), which opens the list of
+/// entries; then the selection.
+#[test]
+fn the_selector_opens_with_activate_and_a_row_chosen_with_enter_switches_the_model() {
     run_gtk_test(|| {
         let Some(pair) = start_pair("selector-keyboard") else {
             return;
         };
+        pair.window.present();
         let (_plus, _xl) = pair.plug_both();
         let dropdown = pair.registry.selector().dropdown.clone();
         assert!(dropdown.is_focusable() && dropdown.is_sensitive());
         assert!(dropdown.grab_focus(), "the drop-down takes keyboard focus");
-        assert!(dropdown.has_focus() || dropdown.focus_child().is_some());
-        // The stock drop-down opens its list on activation, as Enter does.
-        let popover = dropdown
+        // Space/Enter on the focused toggle button clicks it, which opens the list.
+        let toggle = dropdown
             .first_child()
-            .and_then(|button| button.last_child())
-            .and_then(|child| child.downcast::<gtk::Popover>().ok());
-        dropdown.activate();
-        assert!(popover.is_none_or(|popover| popover.is_visible()));
+            .and_then(|child| child.downcast::<gtk::ToggleButton>().ok())
+            .expect("the drop-down's toggle button");
+        toggle.emit_clicked();
+        pair.settle();
+        let list = first_list_view(dropdown.upcast_ref()).expect("the list of entries");
+        assert!(list.is_mapped(), "activating opens the list");
+        assert_eq!(dropdown.selected(), 0);
+        assert_eq!(list.model().map(|model| model.n_items()), Some(2));
+        // Emitting `activate` on the list or moving its selection model does not
+        // reach the drop-down in-process (tried both), so the final choice goes
+        // through the drop-down's own selection, as the list's handler does.
+        dropdown.set_selected(1);
+        pair.settle();
+        assert_eq!(dropdown.selected(), 1);
+        assert_eq!(pair.registry.model().id, "plus-xl");
+        assert_eq!(remembered(&pair), "{\"model\":\"plus-xl\"}\n");
     });
 }
 
@@ -390,14 +527,13 @@ fn window_hash(window: &ApplicationWindow) -> (i32, i32, u64) {
     )
 }
 
-/// Rendered from the unmodified code of commit 606f5d1 (before any XL work) over
-/// the same fixture, the bundled icons and [`ExplicitLook`], 1000x700: (connected, dark, hash) per
-/// GDK backend, as the pixels depend on it. Without a device the header line
-/// now names both models, so the test puts the original sentence back before
-/// rendering; every other pixel is the original's.
 /// (connected, dark, hash) for the four renders of one backend.
 type Hashes = [(bool, bool, u64); 4];
 
+/// Pixel hashes of the unmodified code of commit 606f5d1 (before any XL work)
+/// rendered on the author's host. They depend on fonts, themes and GDK
+/// backend, so they only mean something on that host: see
+/// [`the_window_with_a_plus_only_is_byte_identical_to_the_one_before_the_xl_work`].
 const GOLDEN: [(&str, Hashes); 2] = [
     (
         "GdkX11Display",
@@ -419,7 +555,20 @@ const GOLDEN: [(&str, Hashes); 2] = [
     ),
 ];
 
+/// Manual check against the code before the XL work; never part of the suite.
+///
+/// To regenerate the goldens for this host: extract commit 606f5d1 with
+/// `git archive 606f5d1 | tar -x -C <empty scratch dir>`, add a test there that
+/// builds the window as `model_fixture` does here (`build_widgets` over a
+/// `LayerStore::open_at` and `ArtworkStore::open_at`, 1000x700, the bundled
+/// icons registered, the same explicit look, and the connection state set to
+/// the same sentence), render `widgets.root` with `rendered_pixels` and print
+/// the FNV-1a hash this file's `hash` computes. Run it with its own
+/// `CARGO_TARGET_DIR` for light/dark x searching/connected on the backend you
+/// use (`GDK_BACKEND=x11` or Wayland), paste the four hashes into `GOLDEN`
+/// under that backend and run this test with `-- --ignored`.
 #[test]
+#[ignore = "host-specific pixel hashes; see the doc comment to regenerate them"]
 fn the_window_with_a_plus_only_is_byte_identical_to_the_one_before_the_xl_work() {
     run_gtk_test(|| {
         if !init_gtk_for_test() {
@@ -502,6 +651,66 @@ fn selector_adds_no_pixels(model: &'static DeviceModel, connected: bool, dark: b
     );
 }
 
+/// Host-independent: the + window's header has no 'Current' or 'Preview' text
+/// and nothing of the selector can take focus.
+#[test]
+fn the_plus_window_has_no_selector_text_and_no_selector_in_the_tab_order() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-structure") else {
+            return;
+        };
+        pair.bus.plug(PLUS_PATH, &SimDevice::new(&PLUS));
+        pair.wait_devices(1);
+        let selector = pair.registry.selector();
+        assert!(!selector.root.is_visible() && !selector.dropdown.is_focusable());
+        // Hidden widgets are skipped by Tab: walk the focusable visible widgets.
+        fn focusable(widget: &gtk::Widget, found: &mut Vec<gtk::Widget>) {
+            if !widget.is_visible() {
+                return;
+            }
+            if widget.is_focusable() {
+                found.push(widget.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                focusable(&current, found);
+                child = current.next_sibling();
+            }
+        }
+        let mut tab = Vec::new();
+        focusable(pair.window.upcast_ref(), &mut tab);
+        assert!(!tab.is_empty());
+        assert!(
+            tab.iter()
+                .all(|widget| !widget.is_ancestor(&selector.root) && *widget != selector.dropdown),
+            "no selector widget is reachable with Tab"
+        );
+        let mut found = Vec::new();
+        let header = selector.root.parent().expect("the header");
+        texts(&header, &mut found);
+        // The caption exists but is not shown; no visible header text says it.
+        fn visible_texts(widget: &gtk::Widget, found: &mut Vec<String>) {
+            if !widget.is_visible() {
+                return;
+            }
+            if let Some(label) = widget.downcast_ref::<Label>() {
+                found.push(label.text().to_string());
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                visible_texts(&current, found);
+                child = current.next_sibling();
+            }
+        }
+        let mut visible = Vec::new();
+        visible_texts(&header, &mut visible);
+        assert!(visible
+            .iter()
+            .all(|text| text != "Current" && !text.contains("Preview")));
+        assert!(found.iter().all(|text| !text.contains("Preview")));
+    });
+}
+
 #[test]
 fn a_hidden_selector_adds_no_pixel_to_the_real_window_with_one_model_or_none() {
     run_gtk_test(|| {
@@ -548,5 +757,201 @@ fn the_header_with_two_models_renders_at_the_minimum_width_in_both_themes() {
                 )));
             }
         }
+    });
+}
+
+// ---- Visibility, sequences and isolation ----
+
+fn flip_counter(pair: &Pair) -> Rc<Cell<u32>> {
+    let flips = Rc::new(Cell::new(0));
+    let counter = flips.clone();
+    pair.registry
+        .selector()
+        .root
+        .connect_visible_notify(move |_| counter.set(counter.get() + 1));
+    flips
+}
+
+#[test]
+fn the_selector_never_flashes_for_one_model_and_toggles_once_per_second_model_plug() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-flips") else {
+            return;
+        };
+        let flips = flip_counter(&pair);
+        let hidden = |pair: &Pair| {
+            !selector_visible(pair) && !pair.registry.selector().dropdown.is_focusable()
+        };
+        assert!(hidden(&pair));
+        for (model, first, second) in [(&PLUS, PLUS_PATH, XL_PATH), (&PLUS_XL, XL_PATH, PLUS_PATH)]
+        {
+            pair.bus.plug(first, &SimDevice::new(model));
+            pair.wait_devices(1);
+            pair.bus.plug(second, &SimDevice::new(model));
+            pair.wait_devices(2);
+            pair.settle();
+            assert!(hidden(&pair), "{} twice", model.name);
+            pair.bus.unplug(second);
+            pair.bus.unplug(first);
+            pair.wait_devices(0);
+        }
+        assert_eq!(flips.get(), 0, "same-model plugs never show the selector");
+        pair.bus.plug(XL_PATH, &SimDevice::new(&PLUS_XL));
+        pair.wait_devices(1);
+        for cycle in 0..10 {
+            pair.bus.plug(PLUS_PATH, &SimDevice::new(&PLUS));
+            pair.wait_devices(2);
+            pair.settle();
+            assert!(selector_visible(&pair), "cycle {cycle}");
+            assert!(pair.registry.selector().dropdown.is_focusable());
+            assert_eq!(entries(&pair), ["Stream Deck +", "Stream Deck + XL"]);
+            pair.bus.unplug(PLUS_PATH);
+            pair.wait_devices(1);
+            pair.settle();
+            assert!(hidden(&pair), "cycle {cycle}");
+        }
+        assert_eq!(flips.get(), 20);
+        // A duplicate while both models are connected adds no entry.
+        pair.bus.plug(PLUS_PATH, &SimDevice::new(&PLUS));
+        pair.bus.plug("/dev/hidraw3", &SimDevice::new(&PLUS));
+        pair.wait_devices(3);
+        pair.settle();
+        assert!(selector_visible(&pair));
+        assert_eq!(entries(&pair), ["Stream Deck +", "Stream Deck + XL"]);
+    });
+}
+
+#[test]
+fn random_plug_unplug_and_pick_sequences_follow_an_independent_model() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-random") else {
+            return;
+        };
+        let paths = [PLUS_PATH, XL_PATH, "/dev/hidraw3", "/dev/hidraw4"];
+        let mut devices: Vec<(&str, &'static DeviceModel)> = Vec::new();
+        let (mut shown, mut last, mut chose) = (P, P, false);
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut random = move |below: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % below
+        };
+        let connected = |devices: &[(&str, &'static DeviceModel)]| -> Vec<&'static DeviceModel> {
+            DeviceModel::supported()
+                .filter(|model| devices.iter().any(|(_, known)| known == model))
+                .collect()
+        };
+        for step in 0..160 {
+            let mut unplugged = false;
+            match random(3) {
+                0 if devices.len() < paths.len() => {
+                    let path = *paths
+                        .iter()
+                        .find(|path| devices.iter().all(|(used, _)| used != *path))
+                        .unwrap();
+                    let model = if random(2) == 0 { P } else { X };
+                    pair.bus.plug(path, &SimDevice::new(model));
+                    devices.push((path, model));
+                    pair.wait_devices(devices.len());
+                }
+                1 if !devices.is_empty() => {
+                    let (path, _) = devices.remove(random(devices.len() as u64) as usize);
+                    pair.bus.unplug(path);
+                    unplugged = true;
+                    pair.wait_devices(devices.len());
+                }
+                2 if connected(&devices).len() >= 2 => {
+                    let model = if random(2) == 0 { P } else { X };
+                    select(&pair, model);
+                    if model != shown {
+                        (chose, last, shown) = (true, model, model);
+                    }
+                    pair.settle();
+                    assert_eq!(pair.registry.model().id, shown.id, "step {step} pick");
+                    continue;
+                }
+                _ => continue,
+            }
+            let now = connected(&devices);
+            if !now.contains(&shown) {
+                chose = false;
+            }
+            let target = if now.is_empty() || (chose && now.contains(&shown)) {
+                shown
+            } else if now.contains(&last) {
+                last
+            } else {
+                now[0]
+            };
+            if target != shown {
+                if unplugged {
+                    last = target;
+                }
+                shown = target;
+            }
+            pair.settle();
+            assert_eq!(
+                pair.registry.model().id,
+                shown.id,
+                "step {step} {devices:?}"
+            );
+            assert_eq!(selector_visible(&pair), now.len() >= 2, "step {step}");
+            assert_eq!(
+                entries(&pair),
+                now.iter().map(|model| model.name).collect::<Vec<_>>(),
+                "step {step}"
+            );
+            if !now.is_empty() && pair.roots.preference.exists() {
+                assert!(remembered(&pair).contains(shown.id), "step {step}");
+            }
+        }
+    });
+}
+
+#[test]
+fn a_malformed_device_json_is_kept_byte_identical_even_after_a_pick() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair_with("selector-badpref", |roots| {
+            std::fs::create_dir_all(roots.preference.parent().unwrap()).unwrap();
+            std::fs::write(&roots.preference, b"{not json").unwrap();
+        }) else {
+            return;
+        };
+        assert_eq!(pair.registry.model().id, "plus");
+        let (_plus, _xl) = pair.plug_both();
+        select(&pair, &PLUS_XL);
+        pair.settle();
+        assert_eq!(pair.registry.model().id, "plus-xl");
+        assert_eq!(std::fs::read(&pair.roots.preference).unwrap(), b"{not json");
+    });
+}
+
+#[test]
+fn switching_back_and_forth_leaves_every_root_byte_identical_and_asks_nothing() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-roots") else {
+            return;
+        };
+        let (_plus, _xl) = pair.plug_both();
+        pair.settle();
+        let plus = pair.runtime(&PLUS);
+        let ui = plus.binding_ui();
+        ui.text_entry.set_text("echo draft");
+        ui.action_picker.set_selected(1);
+        assert!(ui.is_dirty());
+        let (plus_root, xl_root) = (pair.roots.data_dir.clone(), pair.roots.root_for(&PLUS_XL));
+        let (plus_before, xl_before) = (tree(&plus_root), tree(&xl_root));
+        for model in [&PLUS_XL, &PLUS] {
+            select(&pair, model);
+            pair.settle();
+            assert!(plus.binding_ui().is_dirty(), "the + keeps its draft");
+            assert!(gtk::Window::list_toplevels()
+                .iter()
+                .filter_map(|window| window.clone().downcast::<gtk::MessageDialog>().ok())
+                .all(|dialog| !dialog.is_visible()));
+        }
+        assert_eq!(tree(&plus_root), plus_before);
+        assert_eq!(tree(&xl_root), xl_before);
     });
 }

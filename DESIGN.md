@@ -566,7 +566,10 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   last used model; the XL cannot be shown without a device). The header lists
   what is connected: one model reads exactly "<model> connected — keys, dials
   and touch strip are live", two models "Stream Deck + and Stream Deck + XL
-  connected — ...", two units of one model "<model> x2 connected".
+  connected — ...", two units of one model "<model> x2 connected"; models
+  are named in the order Stream Deck +, Stream Deck + XL whichever plugged in
+  first, and with several devices the tooltip of the line starts with the whole
+  sentence (the line itself may be ellipsized), then the USB ids.
   The **Current selector** sits beside the connection badge: the caption
   "Current" (muted, 12px) and a drop-down named "Current device" with the
   tooltip "Choose the Stream Deck to configure". It is visible only while two

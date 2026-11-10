@@ -4681,13 +4681,14 @@ fn show_connected_devices(
     detail: &Label,
     models: &[&'static sdeck_plus::device_model::DeviceModel],
 ) {
-    let mut grouped: Vec<(&'static sdeck_plus::device_model::DeviceModel, usize)> = Vec::new();
-    for model in models {
-        match grouped.iter_mut().find(|(known, _)| known == model) {
-            Some((_, count)) => *count += 1,
-            None => grouped.push((model, 1)),
-        }
-    }
+    // Supported order, whichever plugged in first.
+    let grouped: Vec<(&'static sdeck_plus::device_model::DeviceModel, usize)> =
+        sdeck_plus::device_model::DeviceModel::supported()
+            .filter_map(|model| {
+                let count = models.iter().filter(|known| **known == model).count();
+                (count > 0).then_some((model, count))
+            })
+            .collect();
     let names: Vec<String> = grouped
         .iter()
         .map(|(model, count)| match count {
@@ -4704,16 +4705,13 @@ fn show_connected_devices(
         .iter()
         .map(|(model, _)| format!("{:04X}", model.pid()))
         .collect();
-    paint_status(
-        status,
-        detail,
-        ("Connected", "status-online"),
-        &format!("{list} connected — keys, dials and touch strip are live"),
-        &format!(
-            "USB device VID 0FD9 / PID {} · HID input and artwork active",
-            pids.join(" and ")
-        ),
+    let text = format!("{list} connected — keys, dials and touch strip are live");
+    // The line may be ellipsized: the tooltip carries the whole sentence.
+    let hint = format!(
+        "{text}\nUSB device VID 0FD9 / PID {} · HID input and artwork active",
+        pids.join(" and ")
     );
+    paint_status(status, detail, ("Connected", "status-online"), &text, &hint);
 }
 
 /// The preview control for the zero-based input `index`, if the shown model
