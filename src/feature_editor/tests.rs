@@ -88,7 +88,11 @@ impl FeatureEditor {
                 | FeatureAction::Obs(ObsAction::Scene(_) | ObsAction::ToggleMute(_)) => {
                     vec![true, false, false, false, false, false]
                 }
-                FeatureAction::Timer { .. }
+                FeatureAction::Desktop(DesktopAction::VolumeStep { .. })
+                | FeatureAction::Desktop(DesktopAction::Media(
+                    MediaCommand::VolumeUp | MediaCommand::VolumeDown,
+                ))
+                | FeatureAction::Timer { .. }
                 | FeatureAction::Navigation(NavigationAction::GoToPage(_))
                 | FeatureAction::Device(
                     DeviceAction::Brightness(_) | DeviceAction::AdjustBrightness(_),
@@ -153,6 +157,66 @@ impl FeatureEditor {
         assert!(self.second.text().is_empty());
         assert!(!self.flag.is_active());
         self.assert_picker_ownership();
+    }
+
+    /// Volume step field: shown only for the two volume actions, defaults to 5,
+    /// rejects bad input and writes the legacy shape for the default.
+    pub(crate) fn assert_volume_step_field(&self) {
+        let up = FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeUp));
+        let step =
+            |direction, percent| FeatureAction::Desktop(DesktopAction::volume(direction, percent));
+        for choice in [Choice::VolumeUp, Choice::VolumeDown] {
+            self.reset();
+            self.category.set_selected(choice.category());
+            self.refresh_choices();
+            let index = self.choices().position(|value| value == choice).unwrap();
+            self.action.set_selected(index as u32);
+            assert!(self.number_row.is_visible(), "{choice:?}");
+            assert_eq!(self.number_label.text(), "Step (percent, 1–100)");
+            assert_eq!(self.number.text(), "5");
+            assert_eq!(self.number.placeholder_text().unwrap(), "5");
+            assert!(!self.first_row.is_visible() && !self.direction_row.is_visible());
+        }
+        // The default parses to the legacy action.
+        self.populate(&up);
+        assert_eq!(self.number.text(), "5");
+        assert_eq!(self.parse().unwrap(), up);
+        // Valid custom steps are stored and shown again when re-opened.
+        self.number.set_text("10");
+        assert_eq!(self.parse().unwrap(), step(VolumeDirection::Up, 10));
+        for (direction, percent) in [(VolumeDirection::Down, 1), (VolumeDirection::Up, 100)] {
+            let saved = step(direction, percent);
+            self.populate(&saved);
+            assert_eq!(self.number.text(), percent.to_string());
+            assert_eq!(self.parse().unwrap(), saved);
+        }
+        // Invalid input is refused with the field's own label and message.
+        for (text, expected) in [
+            ("0", "between 1 and 100"),
+            ("101", "between 1 and 100"),
+            ("-3", "Step (percent, 1–100)"),
+            ("abc", "Step (percent, 1–100)"),
+            ("", "Step (percent, 1–100)"),
+            ("256", "Step (percent, 1–100)"),
+        ] {
+            self.number.set_text(text);
+            let error = self.parse().unwrap_err();
+            assert!(error.contains(expected), "{text:?}: {error}");
+        }
+        // Moving to another action hides the field; reset restores the default.
+        self.populate(&FeatureAction::Desktop(DesktopAction::Media(
+            MediaCommand::Mute,
+        )));
+        assert!(!self.number_row.is_visible());
+        self.populate(&FeatureAction::Timer { seconds: 90 });
+        assert!(self.number_row.is_visible());
+        assert_eq!(self.number.text(), "90");
+        assert_eq!(self.number_label.text(), "Duration in seconds (1–86400)");
+        self.populate(&step(VolumeDirection::Down, 33));
+        self.reset();
+        assert!(!self.number_row.is_visible());
+        self.populate(&up);
+        assert_eq!(self.number.text(), "5");
     }
 
     fn assert_picker_ownership(&self) {
@@ -320,6 +384,15 @@ pub(crate) fn examples() -> Vec<FeatureAction> {
         MediaCommand::Mute,
     ] {
         actions.push(FeatureAction::Desktop(DesktopAction::Media(command)));
+    }
+    for (direction, percent) in [
+        (VolumeDirection::Up, 10),
+        (VolumeDirection::Down, 1),
+        (VolumeDirection::Up, 100),
+    ] {
+        actions.push(FeatureAction::Desktop(DesktopAction::volume(
+            direction, percent,
+        )));
     }
     for direction in [
         ScrollDirection::Up,

@@ -4409,6 +4409,7 @@ mod tests {
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
+    mod volume_step_tests;
 
     include!("button_text_editor_tests.rs");
 

@@ -600,3 +600,111 @@ fn malformed_extended_records_are_removed_and_logged_without_blocking_startup() 
     assert!(rewritten.conflicts().is_empty());
     assert_eq!(rewritten.layers()["Base"].bindings.len(), 1);
 }
+
+#[test]
+fn legacy_volume_bindings_resave_byte_identically_and_load_as_step_five() {
+    use crate::desktop_actions::{MediaCommand, VolumeDirection};
+    // Captured from the code before volume steps existed.
+    const GOLDEN: &str = concat!(
+        "streamdeck-layers-v1\n",
+        "active\t42617365\n",
+        "layer\t42617365\n",
+        "binding\t42617365\tk:1\tfeature-v1:7b224465736b746f70223a7b224d65646961223a22566f6c756d655570227d7d\n",
+        "binding\t42617365\tk:2\tfeature-v1:7b224465736b746f70223a7b224d65646961223a22566f6c756d65446f776e227d7d\n",
+    );
+    let fixture = Fixture::new();
+    fs::create_dir_all(&fixture.0).unwrap();
+    fs::write(fixture.0.join("layers.conf"), GOLDEN).unwrap();
+
+    let store = LayerStore::open_at(&fixture.0).unwrap();
+
+    assert!(store.diagnostics().is_empty());
+    let step = |trigger: Trigger| match store.layers()["Base"].bindings[&trigger].clone() {
+        Action::Feature(FeatureAction::Desktop(action)) => action,
+        other => panic!("unexpected {other:?}"),
+    };
+    assert_eq!(
+        step(Trigger::KeyPress(1)),
+        DesktopAction::Media(MediaCommand::VolumeUp)
+    );
+    assert_eq!(
+        step(Trigger::KeyPress(2)).volume_step(),
+        Some((VolumeDirection::Down, 5))
+    );
+    store.persist().unwrap();
+    assert_eq!(
+        fs::read_to_string(fixture.0.join("layers.conf")).unwrap(),
+        GOLDEN
+    );
+
+    // Binding through the editor's canonical constructor also writes the legacy bytes.
+    let other = Fixture::new();
+    let mut fresh = LayerStore::open_at(&other.0).unwrap();
+    for (key, direction) in [(1, VolumeDirection::Up), (2, VolumeDirection::Down)] {
+        fresh
+            .bind(
+                "Base",
+                Trigger::KeyPress(key),
+                Action::Feature(FeatureAction::Desktop(DesktopAction::volume(direction, 5))),
+            )
+            .unwrap();
+    }
+    fresh.persist().unwrap();
+    assert_eq!(
+        fs::read_to_string(other.0.join("layers.conf")).unwrap(),
+        GOLDEN
+    );
+}
+
+#[test]
+fn custom_volume_step_survives_reload() {
+    use crate::desktop_actions::VolumeDirection;
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    let action = Action::Feature(FeatureAction::Desktop(DesktopAction::volume(
+        VolumeDirection::Up,
+        37,
+    )));
+    store
+        .bind("Base", Trigger::EncoderClockwise(1), action.clone())
+        .unwrap();
+    store.persist().unwrap();
+
+    let reloaded = LayerStore::open_at(&fixture.0).unwrap();
+
+    assert_eq!(
+        reloaded.layers()["Base"].bindings[&Trigger::EncoderClockwise(1)],
+        action
+    );
+}
+
+#[test]
+fn hand_edited_out_of_range_volume_step_is_reported_and_never_applied() {
+    let fixture = Fixture::new();
+    fs::create_dir_all(&fixture.0).unwrap();
+    let bad = r#"{"Desktop":{"VolumeStep":{"direction":"Up","percent":101}}}"#;
+    let hex: String = bad.bytes().map(|byte| format!("{byte:02x}")).collect();
+    fs::write(
+        fixture.0.join("layers.conf"),
+        format!(
+            concat!(
+                "streamdeck-layers-v1\n",
+                "active\t42617365\n",
+                "layer\t42617365\n",
+                "binding\t42617365\tk:1\tcommand:72756e\n",
+                "binding\t42617365\tk:2\tfeature-v1:{}\n"
+            ),
+            hex
+        ),
+    )
+    .unwrap();
+
+    let store = LayerStore::open_at(&fixture.0).unwrap();
+
+    assert!(!store.conflicts().is_empty() || !store.diagnostics().is_empty());
+    assert_eq!(store.binding("Base", &Trigger::KeyPress(2)), None);
+    assert_eq!(
+        store.binding("Base", &Trigger::KeyPress(1)),
+        Some(Action::Command("run".into()))
+    );
+}

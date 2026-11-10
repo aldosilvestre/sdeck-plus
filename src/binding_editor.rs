@@ -965,4 +965,19 @@ mod tests {
         assert_eq!(gestures[1].description(), "Tap: Run ls");
         let _ = fs::remove_dir_all(path);
     }
+
+    #[test]
+    fn binding_rows_name_the_volume_step_only_when_it_is_not_the_default() {
+        use crate::{
+            desktop_actions::{DesktopAction, VolumeDirection},
+            features::FeatureAction,
+        };
+        let row = |percent| {
+            action_summary(Some(&Action::Feature(FeatureAction::Desktop(
+                DesktopAction::volume(VolumeDirection::Up, percent),
+            ))))
+        };
+        assert_eq!(row(10), "Volume up 10%");
+        assert_eq!(row(5), "Media VolumeUp");
+    }
 }

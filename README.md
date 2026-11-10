@@ -35,7 +35,7 @@ permissions on its own.
   temperature, device brightness, OBS state and now playing, updated on the
   device.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume
-  control, audio-output switching, sounds, brightness, timers and page returns.
+  control (configurable volume step, default 5%), audio-output switching, sounds, brightness, timers and page returns.
 - **OBS Studio:** switch scenes, toggle recording and streaming, mute inputs and
   show or hide sources over the local WebSocket server.
 - **System tray** with optional start at login.

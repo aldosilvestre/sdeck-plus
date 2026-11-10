@@ -226,7 +226,7 @@
             </button>
             <button type="button" class="ctl key" data-fam="audio" data-kind="Key 6 · Audio" data-title="Rotate audio outputs"
               data-desc="Rotate advances from the current PipeWire output to the next connected one on each press, wrapping after the last."
-              data-ex="Select a fixed output by its stable name|Volume up/down in 5% steps and mute|Choosing or saving never changes audio"
+              data-ex="Select a fixed output by its stable name|Volume up/down with a configurable step (default 5%) and mute|Choosing or saving never changes audio"
               aria-label="Key 6: rotate audio outputs">
               <span class="key-face"><svg aria-hidden="true"><use href="#i-output"/></svg><span class="key-label" data-live="output">Speakers</span></span>
             </button>
@@ -287,7 +287,7 @@
           <div class="dials">
             <button type="button" class="ctl dial" data-dial="volume" data-fam="audio" data-kind="Dial 1" data-title="Volume"
               data-desc="Each dial has independent Press, Clockwise and Counterclockwise bindings. Click to turn it."
-              data-ex="Clockwise: volume up in 5% steps|Counterclockwise: volume down|Press: mute"
+              data-ex="Clockwise: volume up by the step (default 5%)|Counterclockwise: volume down|Press: mute"
               aria-label="Dial 1: volume">
               <span class="knob" aria-hidden="true"></span>
               <span class="dial-label"><svg aria-hidden="true"><use href="#i-speaker"/></svg>Volume</span>
@@ -849,7 +849,7 @@
         </section>
         <section class="panel reveal" id="panel-multimedia" role="tabpanel" aria-labelledby="tab-multimedia" style="--c: var(--fam-audio)">
           <h3><span class="tile-icon" style="--c: var(--fam-audio)"><svg aria-hidden="true"><use href="#i-speaker"/></svg></span>Multimedia</h3>
-          <p>Play/pause, stop, next/previous track, PipeWire volume up/down and mute, fixed or rotating audio output, play a local audio file, stop soundboard playback.</p>
+          <p>Play/pause, stop, next/previous track, PipeWire volume up/down with a configurable step (default 5%) and mute, fixed or rotating audio output, play a local audio file, stop soundboard playback.</p>
           <ul class="action-grid">
             <li><svg aria-hidden="true"><use href="#i-play"/></svg>Play/pause</li>
             <li><svg aria-hidden="true"><use href="#i-stop"/></svg>Stop</li>

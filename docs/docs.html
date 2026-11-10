@@ -368,7 +368,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p><strong>Change audio output</strong> switches the default PipeWire output with <code>wpctl</code>; <strong>Refresh</strong> discovers new outputs with <code>pw-dump</code>.
                  Bindings store the stable device name, so reconnecting does not select a different device; a disconnected saved device reports an error when used.
                  <strong>Rotate</strong> advances from the system's current output to the next connected one on each press, wrapping after the last.
-                 Volume uses the default output in 5% steps, capped at 100%. Media transport uses the session's MPRIS player.</p>
+                 Volume uses the default output; the step of <strong>Volume up</strong> and <strong>Volume down</strong> is configurable from 1 to 100 percent (default 5%), and raising is capped at 100%. Dial turns apply one step per event. Media transport uses the session's MPRIS player.</p>
             </article>
             <article class="card">
               <h4>Text, files, websites and processes</h4>

@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Volume up** and **Volume down** take a step of 1 to 100 percent (default 5%, as before),
+  chosen in the action editor and shown in the binding summary when it is not 5. Dial turns
+  still apply one step per event. Bindings with the default step are saved exactly as before;
+  a `layers.conf` saved with a custom step cannot be read by older versions (default steps
+  remain readable).
+
 ### Fixed
 
 - **Remove binding** clears the whole control (a key's press and hold, a dial's press, turns

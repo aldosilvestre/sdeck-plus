@@ -10,7 +10,7 @@
 use crate::button_text::{ButtonText, TextOrientation, VerticalAlignment};
 use crate::local_artwork::ArtworkTarget;
 use crate::{
-    desktop_actions::{DesktopAction, MediaCommand},
+    desktop_actions::{DesktopAction, MediaCommand, VolumeDirection},
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
     layers::Action,
@@ -222,6 +222,10 @@ impl BindingIcon {
                     MediaCommand::VolumeUp => Self::VolumeUp,
                     MediaCommand::VolumeDown => Self::VolumeDown,
                     MediaCommand::Mute => Self::Mute,
+                },
+                DesktopAction::VolumeStep { direction, .. } => match direction {
+                    VolumeDirection::Up => Self::VolumeUp,
+                    VolumeDirection::Down => Self::VolumeDown,
                 },
                 DesktopAction::PlayAudio { .. } => Self::PlaySound,
                 DesktopAction::StopAudio => Self::Stop,

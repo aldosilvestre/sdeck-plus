@@ -46,6 +46,13 @@ pub enum DesktopAction {
         executable: String,
     },
     Media(MediaCommand),
+    /// Volume change by a non-default step. The default step is stored as the
+    /// legacy `Media(VolumeUp)` / `Media(VolumeDown)` so existing files stay
+    /// byte-identical; build values with [`DesktopAction::volume`].
+    VolumeStep {
+        direction: VolumeDirection,
+        percent: u8,
+    },
     PlayAudio {
         path: PathBuf,
     },
@@ -72,6 +79,18 @@ pub enum MediaCommand {
     Mute,
 }
 
+/// Volume step applied by the legacy `VolumeUp`/`VolumeDown` commands.
+pub const DEFAULT_VOLUME_STEP: u8 = 5;
+/// Largest volume step, in percent.
+pub const MAX_VOLUME_STEP: u8 = 100;
+
+/// Direction of a volume change.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumeDirection {
+    Up,
+    Down,
+}
+
 /// Relative wheel direction, independent of pointer position.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollDirection {
@@ -82,6 +101,37 @@ pub enum ScrollDirection {
 }
 
 impl DesktopAction {
+    /// Canonical volume action: the default step maps to the legacy media
+    /// command so it serializes exactly as before. The step is not checked
+    /// here; [`DesktopAction::validate`] rejects values outside 1-100.
+    pub fn volume(direction: VolumeDirection, percent: u8) -> Self {
+        match (direction, percent) {
+            (VolumeDirection::Up, DEFAULT_VOLUME_STEP) => Self::Media(MediaCommand::VolumeUp),
+            (VolumeDirection::Down, DEFAULT_VOLUME_STEP) => Self::Media(MediaCommand::VolumeDown),
+            _ => Self::VolumeStep { direction, percent },
+        }
+    }
+
+    /// Direction and step of a volume action, including legacy ones (step 5).
+    pub fn volume_step(&self) -> Option<(VolumeDirection, u8)> {
+        match self {
+            Self::Media(MediaCommand::VolumeUp) => Some((VolumeDirection::Up, DEFAULT_VOLUME_STEP)),
+            Self::Media(MediaCommand::VolumeDown) => {
+                Some((VolumeDirection::Down, DEFAULT_VOLUME_STEP))
+            }
+            Self::VolumeStep { direction, percent } => Some((*direction, *percent)),
+            _ => None,
+        }
+    }
+
+    /// Rewrites a default-step `VolumeStep` to its legacy form.
+    pub fn canonical(&self) -> Self {
+        match self {
+            Self::VolumeStep { direction, percent } => Self::volume(*direction, *percent),
+            other => other.clone(),
+        }
+    }
+
     /// Checks action data without invoking a desktop adapter.
     ///
     /// # Errors
@@ -162,6 +212,15 @@ impl DesktopAction {
                     Ok(())
                 }
             }
+            Self::VolumeStep { percent, .. } => {
+                if (1..=MAX_VOLUME_STEP).contains(percent) {
+                    Ok(())
+                } else {
+                    Err(invalid(format!(
+                        "volume step must be between 1 and {MAX_VOLUME_STEP} percent, not {percent}"
+                    )))
+                }
+            }
             Self::Media(_) | Self::StopAudio | Self::CycleAudioOutput => Ok(()),
         }
     }
@@ -177,6 +236,13 @@ impl DesktopAction {
             Self::Website { url } => format!("Website {url}"),
             Self::CloseApplication { executable } => format!("Close {executable}"),
             Self::Media(command) => format!("Media {command:?}"),
+            Self::VolumeStep { direction, percent } => format!(
+                "Volume {} {percent}%",
+                match direction {
+                    VolumeDirection::Up => "up",
+                    VolumeDirection::Down => "down",
+                }
+            ),
             Self::PlayAudio { path } => format!("Play audio {}", path.display()),
             Self::StopAudio => "Stop owned audio".into(),
             Self::SetAudioOutput { name } => format!("Set audio output {name}"),
@@ -184,6 +250,20 @@ impl DesktopAction {
             Self::MouseScroll { direction, ticks } => format!("Scroll {direction:?} {ticks}"),
         }
     }
+}
+
+/// wpctl argv for a volume step; raising keeps the 100% limit.
+fn volume_argv(direction: VolumeDirection, percent: u8) -> Vec<String> {
+    let mut argv = vec!["wpctl".to_string(), "set-volume".into()];
+    if direction == VolumeDirection::Up {
+        argv.extend(["--limit".to_string(), "1.0".into()]);
+    }
+    argv.push("@DEFAULT_AUDIO_SINK@".into());
+    argv.push(match direction {
+        VolumeDirection::Up => format!("{percent}%+"),
+        VolumeDirection::Down => format!("{percent}%-"),
+    });
+    argv
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -306,20 +386,12 @@ impl DesktopRuntime {
                 | MediaCommand::Stop
                 | MediaCommand::Next
                 | MediaCommand::Previous => self.backend.media(*command),
-                MediaCommand::VolumeUp => self.backend.run(&[
-                    "wpctl".into(),
-                    "set-volume".into(),
-                    "--limit".into(),
-                    "1.0".into(),
-                    "@DEFAULT_AUDIO_SINK@".into(),
-                    "5%+".into(),
-                ]),
-                MediaCommand::VolumeDown => self.backend.run(&[
-                    "wpctl".into(),
-                    "set-volume".into(),
-                    "@DEFAULT_AUDIO_SINK@".into(),
-                    "5%-".into(),
-                ]),
+                MediaCommand::VolumeUp => self
+                    .backend
+                    .run(&volume_argv(VolumeDirection::Up, DEFAULT_VOLUME_STEP)),
+                MediaCommand::VolumeDown => self
+                    .backend
+                    .run(&volume_argv(VolumeDirection::Down, DEFAULT_VOLUME_STEP)),
                 MediaCommand::Mute => self.backend.run(&[
                     "wpctl".into(),
                     "set-mute".into(),
@@ -327,6 +399,9 @@ impl DesktopRuntime {
                     "toggle".into(),
                 ]),
             },
+            DesktopAction::VolumeStep { direction, percent } => {
+                self.backend.run(&volume_argv(*direction, *percent))
+            }
             DesktopAction::PlayAudio { path } => self.backend.play_audio(path),
             DesktopAction::StopAudio => self.backend.stop_audio(),
             DesktopAction::SetAudioOutput { name } => self.backend.set_audio_output(name),
@@ -872,6 +947,86 @@ mod tests {
     }
 
     #[test]
+    fn volume_steps_pass_exact_argv_to_wpctl() {
+        // Given steps at both ends and the default.
+        for step in [1u8, 5, 10, 100] {
+            for (direction, expected) in [
+                (
+                    VolumeDirection::Up,
+                    vec![
+                        "wpctl".to_string(),
+                        "set-volume".into(),
+                        "--limit".into(),
+                        "1.0".into(),
+                        "@DEFAULT_AUDIO_SINK@".into(),
+                        format!("{step}%+"),
+                    ],
+                ),
+                (
+                    VolumeDirection::Down,
+                    vec![
+                        "wpctl".to_string(),
+                        "set-volume".into(),
+                        "@DEFAULT_AUDIO_SINK@".into(),
+                        format!("{step}%-"),
+                    ],
+                ),
+            ] {
+                let (mut runtime, mut keyboard, state) = fixture();
+                // When the canonical action for the step is dispatched.
+                runtime
+                    .execute(&DesktopAction::volume(direction, step), &mut keyboard)
+                    .unwrap();
+                // Then wpctl gets the step without a shell; up keeps its limit.
+                assert_eq!(state.lock().unwrap().calls, [Call::Run(expected)]);
+            }
+        }
+    }
+
+    #[test]
+    fn default_step_uses_the_legacy_media_command() {
+        assert_eq!(
+            DesktopAction::volume(VolumeDirection::Up, 5),
+            DesktopAction::Media(MediaCommand::VolumeUp)
+        );
+        assert_eq!(
+            DesktopAction::volume(VolumeDirection::Down, 5),
+            DesktopAction::Media(MediaCommand::VolumeDown)
+        );
+    }
+
+    #[test]
+    fn volume_step_outside_one_to_one_hundred_is_rejected_without_panic() {
+        for percent in [0u8, 101, 255] {
+            let action = DesktopAction::volume(VolumeDirection::Up, percent);
+            let error = action.validate().unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("between 1 and 100"), "{error}");
+        }
+        for percent in [1u8, 100] {
+            DesktopAction::volume(VolumeDirection::Down, percent)
+                .validate()
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn volume_summary_shows_the_step_only_when_it_is_not_the_default() {
+        assert_eq!(
+            DesktopAction::volume(VolumeDirection::Up, 10).summary(),
+            "Volume up 10%"
+        );
+        assert_eq!(
+            DesktopAction::volume(VolumeDirection::Down, 1).summary(),
+            "Volume down 1%"
+        );
+        assert_eq!(
+            DesktopAction::volume(VolumeDirection::Up, 5).summary(),
+            "Media VolumeUp"
+        );
+    }
+
+    #[test]
     fn adapter_errors_propagate_for_system_actions() {
         // Given an unavailable host adapter for each system action.
         for action in [
@@ -954,6 +1109,10 @@ mod tests {
             ]
             .map(DesktopAction::Media),
         );
+        actions.extend([
+            DesktopAction::volume(VolumeDirection::Up, 10),
+            DesktopAction::volume(VolumeDirection::Down, 1),
+        ]);
         actions.extend(
             [
                 ScrollDirection::Up,

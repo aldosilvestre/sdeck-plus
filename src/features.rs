@@ -56,7 +56,11 @@ impl FeatureAction {
 
     pub fn encode(&self) -> io::Result<String> {
         self.validate()?;
-        let value = serde_json::to_string(self).map_err(io::Error::other)?;
+        let value = match self {
+            Self::Desktop(action) => serde_json::to_string(&Self::Desktop(action.canonical())),
+            other => serde_json::to_string(other),
+        }
+        .map_err(io::Error::other)?;
         if value.len() > 4096 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -70,14 +74,17 @@ impl FeatureAction {
         let action: Self = serde_json::from_str(value)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         action.validate()?;
-        Ok(action)
+        Ok(match action {
+            Self::Desktop(desktop) => Self::Desktop(desktop.canonical()),
+            other => other,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::desktop_actions::{MediaCommand, ScrollDirection};
+    use crate::desktop_actions::{MediaCommand, ScrollDirection, VolumeDirection};
 
     #[test]
     fn typed_actions_roundtrip_without_losing_user_fields() {
@@ -94,6 +101,7 @@ mod tests {
                 target: "/home/user/a file.txt".into(),
             }),
             FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeUp)),
+            FeatureAction::Desktop(DesktopAction::volume(VolumeDirection::Down, 10)),
             FeatureAction::Desktop(DesktopAction::CycleAudioOutput),
             FeatureAction::Desktop(DesktopAction::MouseScroll {
                 direction: ScrollDirection::Down,
@@ -116,6 +124,84 @@ mod tests {
             let decoded = FeatureAction::decode(&encoded).unwrap();
             assert_eq!(decoded, action);
         }
+    }
+
+    #[test]
+    fn default_volume_step_encodes_as_the_legacy_shape_byte_for_byte() {
+        let up = FeatureAction::Desktop(DesktopAction::volume(VolumeDirection::Up, 5));
+        let down = FeatureAction::Desktop(DesktopAction::volume(VolumeDirection::Down, 5));
+        assert_eq!(up.encode().unwrap(), r#"{"Desktop":{"Media":"VolumeUp"}}"#);
+        assert_eq!(
+            down.encode().unwrap(),
+            r#"{"Desktop":{"Media":"VolumeDown"}}"#
+        );
+        // A hand-written default-step variant is stored in the legacy form too.
+        let explicit = FeatureAction::Desktop(DesktopAction::VolumeStep {
+            direction: VolumeDirection::Up,
+            percent: 5,
+        });
+        assert_eq!(explicit.encode().unwrap(), up.encode().unwrap());
+    }
+
+    #[test]
+    fn legacy_volume_shapes_decode_as_step_five() {
+        assert_eq!(
+            FeatureAction::decode(r#"{"Desktop":{"Media":"VolumeUp"}}"#)
+                .unwrap()
+                .summary(),
+            "Media VolumeUp"
+        );
+        for (json, direction) in [
+            (r#"{"Desktop":{"Media":"VolumeUp"}}"#, VolumeDirection::Up),
+            (
+                r#"{"Desktop":{"Media":"VolumeDown"}}"#,
+                VolumeDirection::Down,
+            ),
+        ] {
+            let FeatureAction::Desktop(action) = FeatureAction::decode(json).unwrap() else {
+                panic!("desktop action expected");
+            };
+            assert_eq!(action.volume_step(), Some((direction, 5)));
+        }
+    }
+
+    #[test]
+    fn every_volume_step_roundtrips_and_non_default_uses_the_new_shape() {
+        for direction in [VolumeDirection::Up, VolumeDirection::Down] {
+            for percent in 1..=100u8 {
+                let action = FeatureAction::Desktop(DesktopAction::volume(direction, percent));
+                let encoded = action.encode().unwrap();
+                assert_eq!(FeatureAction::decode(&encoded).unwrap(), action);
+                assert_eq!(encoded.contains("VolumeStep"), percent != 5, "{encoded}");
+            }
+        }
+        assert_eq!(
+            FeatureAction::Desktop(DesktopAction::volume(VolumeDirection::Up, 10))
+                .encode()
+                .unwrap(),
+            r#"{"Desktop":{"VolumeStep":{"direction":"Up","percent":10}}}"#
+        );
+    }
+
+    #[test]
+    fn out_of_range_volume_steps_are_rejected_on_encode_and_decode() {
+        for percent in [0u8, 101, 255] {
+            let action =
+                FeatureAction::Desktop(DesktopAction::volume(VolumeDirection::Up, percent));
+            assert!(action.encode().is_err(), "{percent}");
+            let json = format!(
+                r#"{{"Desktop":{{"VolumeStep":{{"direction":"Down","percent":{percent}}}}}}}"#
+            );
+            assert!(FeatureAction::decode(&json).is_err(), "{percent}");
+        }
+        assert!(FeatureAction::decode(
+            r#"{"Desktop":{"VolumeStep":{"direction":"Up","percent":256}}}"#
+        )
+        .is_err());
+        assert!(FeatureAction::decode(
+            r#"{"Desktop":{"VolumeStep":{"direction":"Sideways","percent":10}}}"#
+        )
+        .is_err());
     }
 
     #[test]

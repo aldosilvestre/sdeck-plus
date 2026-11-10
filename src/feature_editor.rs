@@ -2,7 +2,9 @@
 use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation, TextView};
 use sdeck_plus::{
     binding_icons::BindingIcon,
-    desktop_actions::{DesktopAction, MediaCommand, ScrollDirection},
+    desktop_actions::{
+        DesktopAction, MediaCommand, ScrollDirection, VolumeDirection, DEFAULT_VOLUME_STEP,
+    },
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
     obs::ObsAction,
@@ -35,6 +37,8 @@ pub(crate) struct EditorWidgets {
     second: Entry,
     text: TextView,
     number: Entry,
+    /// Whether `number` currently holds a volume step rather than another numeric field.
+    volume_mode: Cell<bool>,
     direction: gtk::DropDown,
     flag: CheckButton,
     first_row: GtkBox,
@@ -165,6 +169,7 @@ impl FeatureEditor {
             second,
             text,
             number,
+            volume_mode: Cell::new(false),
             direction,
             flag,
             first_row,
@@ -375,6 +380,7 @@ impl FeatureEditor {
             Choice::Timer => "90",
             Choice::Brightness => "50",
             Choice::AdjustBrightness => "-5",
+            Choice::VolumeUp | Choice::VolumeDown => "5",
             _ => "",
         }));
         self.browse_file
@@ -419,8 +425,15 @@ impl FeatureEditor {
             Choice::Timer => Some("Duration in seconds (1–86400)"),
             Choice::Brightness => Some("Brightness percent (0–100)"),
             Choice::AdjustBrightness => Some("Adjustment percent (signed)"),
+            Choice::VolumeUp | Choice::VolumeDown => Some("Step (percent, 1–100)"),
             _ => None,
         };
+        let volume = matches!(choice, Choice::VolumeUp | Choice::VolumeDown);
+        if volume != self.volume_mode.replace(volume) {
+            // The entry is shared by every numeric action; start from the new action's default.
+            self.number
+                .set_text(&if volume { DEFAULT_VOLUME_STEP } else { 1 }.to_string());
+        }
         if let Some(label) = numeric {
             self.number_label.set_text(label);
             self.number_row.set_visible(true);
@@ -490,6 +503,7 @@ impl FeatureEditor {
         self.second.set_text("");
         self.text.buffer().set_text("");
         self.number.set_text("1");
+        self.volume_mode.set(false);
         self.direction.set_selected(0);
         self.flag.set_active(false);
         self.category.set_selected(0);
@@ -567,12 +581,14 @@ impl FeatureEditor {
             Choice::Previous => {
                 FeatureAction::Desktop(DesktopAction::Media(MediaCommand::Previous))
             }
-            Choice::VolumeUp => {
-                FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeUp))
-            }
-            Choice::VolumeDown => {
-                FeatureAction::Desktop(DesktopAction::Media(MediaCommand::VolumeDown))
-            }
+            Choice::VolumeUp => FeatureAction::Desktop(DesktopAction::volume(
+                VolumeDirection::Up,
+                numeric.parse().map_err(|error| invalid_number(&error))?,
+            )),
+            Choice::VolumeDown => FeatureAction::Desktop(DesktopAction::volume(
+                VolumeDirection::Down,
+                numeric.parse().map_err(|error| invalid_number(&error))?,
+            )),
             Choice::Mute => FeatureAction::Desktop(DesktopAction::Media(MediaCommand::Mute)),
             Choice::SetAudioOutput => FeatureAction::Desktop(self.audio_output.action()),
             Choice::NextPage => FeatureAction::Navigation(NavigationAction::NextPage),
@@ -620,6 +636,7 @@ impl FeatureEditor {
 
     pub(crate) fn populate(&self, action: &FeatureAction) {
         self.reset();
+        let mut volume_step = None;
         let choice = match action {
             FeatureAction::Desktop(action) => match action {
                 DesktopAction::ShortcutToggle { first, second } => {
@@ -666,6 +683,13 @@ impl FeatureEditor {
                     MediaCommand::VolumeDown => Choice::VolumeDown,
                     MediaCommand::Mute => Choice::Mute,
                 },
+                DesktopAction::VolumeStep { direction, percent } => {
+                    volume_step = Some(*percent);
+                    match direction {
+                        VolumeDirection::Up => Choice::VolumeUp,
+                        VolumeDirection::Down => Choice::VolumeDown,
+                    }
+                }
                 DesktopAction::MouseScroll { direction, ticks } => {
                     self.number.set_text(&ticks.to_string());
                     self.direction.set_selected(match direction {
@@ -747,5 +771,8 @@ impl FeatureEditor {
             }
         }
         self.update_fields();
+        if let Some(percent) = volume_step {
+            self.number.set_text(&percent.to_string());
+        }
     }
 }

@@ -64,6 +64,20 @@ fn every_action_family_maps_to_a_named_icon() {
             desktop(DesktopAction::Media(MediaCommand::VolumeDown)),
             "volume-down",
         ),
+        (
+            desktop(DesktopAction::volume(
+                crate::desktop_actions::VolumeDirection::Up,
+                10,
+            )),
+            "volume-up",
+        ),
+        (
+            desktop(DesktopAction::volume(
+                crate::desktop_actions::VolumeDirection::Down,
+                10,
+            )),
+            "volume-down",
+        ),
         (desktop(DesktopAction::Media(MediaCommand::Mute)), "mute"),
         (desktop(DesktopAction::CycleAudioOutput), "audio-output"),
         (
