@@ -2,18 +2,35 @@
 set -euo pipefail
 
 mode=install
+pinned_tag=''
 case ${1:-} in
     --help|-h)
         printf '%s\n' \
-            'Usage: ./install.sh [--uninstall]' \
+            'Usage: ./install.sh [--uninstall | --tag vX.Y.Z]' \
             'Build and install sdeck-plus for the current Linux user.' \
             'Without a checkout, downloads the latest published vX.Y.Z release (requires curl and tar).' \
             'Release sources and build caches are temporary and removed on exit.' \
+            '--tag vX.Y.Z (or --tag=vX.Y.Z) installs exactly that release; not supported in a checkout.' \
             '--uninstall removes the installed files; configuration and profiles are kept.' \
             'PREFIX sets the executable prefix (default: $HOME/.local).' \
             'XDG_DATA_HOME sets desktop data (default: $HOME/.local/share).' \
             'Requires Rust, a C toolchain, GTK >= 4.8, libudev and GLib build tools.'
         exit 0
+        ;;
+    --tag|--tag=*)
+        tag_argument=$1
+        if [[ $1 == --tag ]]; then
+            pinned_tag=${2:-}
+            shift
+            if (( $# )); then shift; fi
+        else
+            pinned_tag=${1#--tag=}
+            shift
+        fi
+        if [[ ! $pinned_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'Unknown argument: %s. Use --help for usage.\n' "$tag_argument" >&2
+            exit 2
+        fi
         ;;
     --uninstall)
         mode=uninstall
@@ -57,6 +74,10 @@ release_mode=true
 if [[ -n $project_dir && -f $project_dir/Cargo.toml &&
       -f $project_dir/LICENSE && -d $project_dir/assets ]]; then
     release_mode=false
+fi
+if [[ -n $pinned_tag ]] && ! $release_mode; then
+    printf 'Unknown argument: --tag (only supported without a checkout). Use --help for usage.\n' >&2
+    exit 2
 fi
 binary_path="$prefix/bin/sdeck-plus"
 desktop_file="$data_home/applications/dev.streamdeck.EventMonitor.desktop"
@@ -167,15 +188,17 @@ if $release_mode; then
         release_api=${SDECK_PLUS_RELEASE_API:-$release_api}
         archive_base=${SDECK_PLUS_ARCHIVE_BASE:-$archive_base}
     fi
-    if ! release_json=$(curl -fsSL --proto '=https' --proto-redir '=https' \
-        --connect-timeout 15 --max-time 60 "$release_api"); then
-        printf 'Could not fetch the latest published release. Check curl, network access and GitHub Releases.\n' >&2
-        exit 1
-    fi
-    tag_pattern='"tag_name"[[:space:]]*:[[:space:]]*"([^"]*)"'
-    tag=''
-    if [[ $release_json =~ $tag_pattern ]]; then
-        tag=${BASH_REMATCH[1]}
+    tag=$pinned_tag
+    if [[ -z $tag ]]; then
+        if ! release_json=$(curl -fsSL --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 "$release_api"); then
+            printf 'Could not fetch the latest published release. Check curl, network access and GitHub Releases.\n' >&2
+            exit 1
+        fi
+        tag_pattern='"tag_name"[[:space:]]*:[[:space:]]*"([^"]*)"'
+        if [[ $release_json =~ $tag_pattern ]]; then
+            tag=${BASH_REMATCH[1]}
+        fi
     fi
     if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         printf 'Latest release must have a tag of the form vX.Y.Z. A published release is required.\n' >&2

@@ -239,6 +239,60 @@ fn success(o: &Output) {
 }
 
 #[test]
+fn pinned_release_skips_api_and_installs_exact_tag() {
+    for args in [vec!["--tag", "v1.2.3"], vec!["--tag=v1.2.3"]] {
+        let s = Sandbox::new();
+        s.write("api", "must not be read");
+        let o = s.run(false, &args, &[]);
+        success(&o);
+        s.installed();
+        let requests = fs::read_to_string(s.path("requests")).unwrap();
+        assert_eq!(requests.lines().count(), 1);
+        assert!(requests.ends_with("https://fixture.invalid/tags/v1.2.3.tar.gz\n"));
+    }
+}
+
+#[test]
+fn invalid_pinned_arguments_have_no_side_effects() {
+    for args in [
+        vec!["--tag", "v1.2"],
+        vec!["--tag", "1.2.3"],
+        vec!["--tag", "v1.2.3-rc1"],
+        vec!["--tag", "v1.2.3/../x"],
+        vec!["--tag", ""],
+        vec!["--tag"],
+        vec!["--tag="],
+        vec!["--tag", "v1.2.3", "--tag=v1.2.3"],
+    ] {
+        let s = Sandbox::new();
+        let o = s.run(false, &args, &[]);
+        assert_eq!(o.status.code(), Some(2), "{args:?}: {o:?}");
+        assert!(o.stdout.is_empty());
+        let argument = if args.len() > 2 { args[2] } else { args[0] };
+        assert_eq!(
+            String::from_utf8_lossy(&o.stderr),
+            format!("Unknown argument: {argument}. Use --help for usage.\n")
+        );
+        s.no_install();
+        assert!(!s.path("requests").exists());
+    }
+}
+
+#[test]
+fn checkout_rejects_pinned_tag_before_building() {
+    let s = Sandbox::new();
+    let o = s.run(true, &["--tag", "v1.2.3"], &[]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&o.stderr),
+        "Unknown argument: --tag (only supported without a checkout). Use --help for usage.\n"
+    );
+    s.no_install();
+    assert!(!s.path("requests").exists());
+}
+
+#[test]
 fn piped_release_installs_only_deliverables_and_cleans_build_state() {
     let s = Sandbox::new();
     let o = s.run(false, &[], &[]);
