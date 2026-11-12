@@ -208,10 +208,99 @@ through `PluginRegistry::invoke`, after a warning that this **runs the plugin wi
 privileges**; it prints `PLUGIN_INVOKE_OK:` or `PLUGIN_INVOKE_ERROR:`. Without the flag nothing
 is run. The temp root is always removed.
 
+## Adding a plugin from the app (library)
+
+`sdeck_plus::plugins` has a headless API (no GTK) for adding a plugin from a folder or an
+HTTPS repository: `parse_source` -> `stage` -> `install`. Nothing runs plugin code and nothing
+is installed until `install` is called.
+
+**Sources** (`parse_source(&str)`, or `parse_source_in(&str, plugins_root)`). The text is trimmed;
+a leading `https://` (any case) is a repository, anything else is a folder.
+
+- Folder: an absolute path or `~/...` (expanded with `HOME`); a relative path is refused ("use an
+  absolute path"). It must exist and be a directory (resolved with `canonicalize`), and must not
+  be the plugins folder, inside it, or contain it.
+- Repository: scheme exactly `https`; at most 512 characters; no whitespace or control characters;
+  no user name or password (so no secrets in addresses); the host is ASCII letters, digits, dots
+  and hyphens (no IP-literal brackets, no leading `-`) with an optional numeric port; a path of at
+  least one segment of `[A-Za-z0-9._~-]` (a trailing `.git` or `/` is fine, `.` and `..` are not);
+  no query string and no fragment. Other schemes (`http://`, `ssh://`, `git@host:path`, `file://`,
+  `git://`, `ext::`, text starting with `-`) are refused with a message saying that only https
+  repository addresses or folder paths are accepted. `stage` checks the address again, so
+  a hand-built `PluginSource::Repository` is held to the same rules.
+
+**Staging** (`stage(&source, &StageOptions, &CancelToken)`, synchronous: call it from a worker
+thread). It creates a private directory `sdeck-plugin-stage-<pid>-<nanos>-<random>` (mode 0700)
+under the system temp dir (`StageOptions::temp_dir` overrides it); the directory is removed when
+the returned `StagedPlugin` is dropped and on every error path.
+
+- A folder is copied with the validator's limits: regular files only, at most 256 files, 8 MiB
+  per file, 32 MiB in total and 8 directory levels. A symlink, a special file, an unreadable
+  file or a limit violation is an error that names the path (all problems are listed); only
+  `.git` and `__pycache__` directories are skipped. The whole tree is checked before anything
+  is copied.
+- A repository is fetched with the system `git` (`StageOptions::git_program` changes the
+  executable name, default `git`), as an argv list and never through a shell:
+
+  ```text
+  git -c protocol.allow=never -c protocol.https.allow=always -c core.hooksPath=/dev/null
+      -c core.fsmonitor=false -c core.symlinks=false -c credential.helper=
+      -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false
+      -c http.followRedirects=initial
+      clone --depth 1 --no-tags --single-branch --no-recurse-submodules -- <url> <dest>
+  ```
+
+  The environment is cleared and only has `PATH` and `LANG` (when set), `HOME` (a private
+  directory inside the owner-only staging area, so no user configuration is found there), `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=` (empty: no helper, no prompt)
+  and, only when present, `HTTPS_PROXY`, `https_proxy`, `NO_PROXY`, `no_proxy`, `SSL_CERT_FILE`
+  and `SSL_CERT_DIR`. stdin is `/dev/null`; git runs in its own process group. The total deadline
+  is 60 s (`StageOptions::deadline`, 50 ms-300 s) and the downloaded tree, `.git` included, may
+  not exceed 32 MiB (`max_clone_bytes`); either limit, or the `CancelToken`, kills the whole
+  group and reaps it. Diagnostics keep at most 4 KiB of stderr with the address removed. The
+  commit is read with `git -C <dest> rev-parse HEAD` (same `-c` settings and environment) and
+  must be 40 or 64 hex characters; then `.git` is deleted and the rest goes through the same
+  bounded copy, so a cloned symlink or a tree over a limit is rejected. (With
+  `core.symlinks=false` git itself writes a symlink as a plain file.)
+- Validation is the registry's: `manifest.json` is parsed with its size cap, and the staged
+  files are opened with `PluginRegistry::open` under a directory named after the manifest id (the
+  project folder's own name does not matter), which checks the executable's confinement. Every
+  problem is reported. `command` requirements are looked up on `PATH`; missing ones are flagged
+  in the preview but never block the install.
+- The `PluginPreview` has the id, name, version, protocol, actions (id, name, controls, setting
+  id/label/type/required), requirements with a `missing` flag, the source, the commit (repositories
+  only), the file count and the total bytes.
+
+**Installing** (`install(&staged, plugins_root, InstallMode::New | Replace)`):
+
+- The destination is `<plugins_root>/<id>`; the root is created owner-only when missing. A plugin
+  already there is `InstallError::AlreadyInstalled { id, installed_version }` in `New` mode, so a
+  UI can offer Replace.
+- The files are copied into a hidden sibling (`.<id>.new-<pid>-<n>`; the registry skips names
+  starting with `.`) with modes normalised (a file with any execute bit 0755, other files 0644,
+  directories 0755), then moved with one `rename`. The executable path never points at a
+  half-written directory.
+- `Replace` first reads `plugins.json`: if it is invalid the install stops with
+  `InstallError::InvalidState` before anything is touched. Otherwise the plugin id is removed from
+  the enabled list (`PluginRegistry::set_enabled(id, false)`), the old directory is renamed to a
+  hidden `.<id>.old-<pid>-<n>`, the new one is renamed in, and the backup is deleted only after
+  that succeeded. On a failure in between the old directory (and its enabled choice) are put
+  back. `Installed` reports `replaced` and `disabled`.
+- Install never enables a plugin; the user enables it explicitly, also after a replace. A
+  request that is already running keeps the old process (it was started from the old files); the
+  next request uses the new plugin, once enabled. A crash can leave hidden `.<id>.new-*` or
+  `.<id>.old-*` directories; they are ignored and never reused.
+
+**Errors**: `SourceError` (a readable reason), `StageError` (`Source`, `Invalid(problems)`,
+`GitMissing`, `GitFailed { status, diagnostics }`, `DeadlineExceeded`, `TooLarge { limit }`,
+`Cancelled`, `BadCommit`, `Io`) and `InstallError` (`AlreadyInstalled`, `InvalidState`, `Io`).
+All implement `Display` with user-facing text.
+
 ## Tests
 
-`cargo test --offline --test plugin_host`, `--test plugin_bindings`, `--test plugin_requirements`
-and `--test plugin_validate` run generated `/bin/sh`
+`cargo test --offline --test plugin_host`, `--test plugin_bindings`, `--test plugin_requirements`,
+`--test plugin_validate` and `--test plugin_install` (fake git scripts and a local `file://`
+repository only; no network) run generated `/bin/sh`
 fixtures only; `--test plugin_sdk` runs the harmless `examples/plugin-template` through the
 validator (and its Python tests when `python3` exists) and checks that this page and the SDK guide
 state the host's real limits. None needs a display, hardware or network. The worker and sidebar tests live in

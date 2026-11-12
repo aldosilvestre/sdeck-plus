@@ -6,6 +6,7 @@
 //! and only when the plugin is installed, valid and explicitly enabled. See `docs/plugins.md`.
 
 mod host;
+mod install;
 mod manifest;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use host::{InvokeOutcome, MAX_MESSAGE_CHARS, MAX_STDERR_BYTES, MAX_STDOUT_BYTES, MAX_TIMEOUT};
+pub use install::{
+    install, parse_source, parse_source_in, stage, ActionPreview, CancelToken, InstallError,
+    InstallMode, Installed, PluginPreview, PluginSource, RequirementPreview, SettingPreview,
+    SourceError, StageError, StageOptions, StagedPlugin,
+};
 pub use manifest::{
     missing_commands, missing_commands_in, valid_id, PluginAction, PluginControl, PluginManifest,
     Requirement, RequirementKind, SettingField, Settings, MAX_MANIFEST_BYTES, MAX_SETTINGS_BYTES,
