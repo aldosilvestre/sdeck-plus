@@ -1,6 +1,6 @@
 //! The bounded project copy shared by staging and installing: regular files only, with the same
 //! limits as the plugin validator. A violation is an error naming the path, never a silent skip
-//! (only `.git` and `__pycache__` directories are skipped), and nothing is copied unless the
+//! (only `.git` entries and `__pycache__` directories are skipped), and nothing is copied unless the
 //! whole tree passes the scan.
 
 use super::{CancelToken, StageError};
@@ -124,6 +124,10 @@ fn scan(
             }
             plan.dirs.push(child.clone());
             scan(root, &child, depth + 1, plan, cancel)?;
+        } else if kind.is_file() && name == ".git" {
+            // A `.git` file (a worktree or submodule pointer) is as inert and pointless to copy
+            // as the directory.
+            continue;
         } else if kind.is_symlink() {
             plan.problem(format!(
                 "{}: symlinks are not allowed; a plugin must ship regular files",

@@ -7,26 +7,24 @@
 //!     [--settings '<json>'] [--timeout <seconds, default 5, max 60>] [--request-id <id>]
 //! ```
 //!
-//! The project's regular files are copied into a fresh temp root under the plugin id and loaded
-//! with `PluginRegistry::open`, which executes nothing. Output markers: `PLUGIN_VALIDATE_OK:` /
-//! `PLUGIN_VALIDATE_ERROR:` and, only with `--invoke`, `PLUGIN_INVOKE_OK:` / `PLUGIN_INVOKE_ERROR:`.
-//! Exit status: 0 ok, 1 problems or a failed invocation, 2 usage. `--invoke` RUNS the plugin
-//! with your privileges; nothing else here ever does.
+//! This is a thin client of `sdeck_plus::plugins::stage`, the same code the app's Add plugin flow
+//! uses: the project is copied (regular files only, bounded, every copy problem reported) into a
+//! private staging directory and loaded with `PluginRegistry::open`, which executes nothing.
+//! Output markers: `PLUGIN_VALIDATE_OK:` / `PLUGIN_VALIDATE_ERROR:` and, only with `--invoke`,
+//! `PLUGIN_INVOKE_OK:` / `PLUGIN_INVOKE_ERROR:`. Exit status: 0 ok, 1 problems or a failed
+//! invocation, 2 usage. `--invoke` RUNS the plugin with your privileges; nothing else here ever
+//! does.
 
 use sdeck_plus::plugins::{
-    missing_commands, InvokeOptions, PluginBinding, PluginManifest, PluginRegistry, Settings,
-    MAX_MANIFEST_BYTES, MAX_TIMEOUT,
+    install, stage, CancelToken, InstallMode, InvokeOptions, PluginBinding, PluginPreview,
+    PluginRegistry, PluginSource, RequirementKind, Settings, StageError, StageOptions, MAX_TIMEOUT,
 };
 use std::fs;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-const MAX_FILES: usize = 256;
-const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_TOTAL_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_DEPTH: usize = 8;
-const SKIPPED: [&str; 2] = [".git", "__pycache__"];
 const USAGE: &str = "usage: plugin_validate <plugin-dir> [--invoke <action> [--settings '<json>'] \
 [--timeout <1-60 seconds>] [--request-id <id>]]";
 
@@ -96,7 +94,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, Option<Invoke>), String> {
     ))
 }
 
-/// A fresh temp root removed on drop, also when validation fails.
+/// A fresh private temp plugins root removed on drop, also when anything fails.
 struct TempRoot(PathBuf);
 
 impl TempRoot {
@@ -108,7 +106,7 @@ impl TempRoot {
             "sdeck-plugin-validate-{}-{nanos}",
             std::process::id()
         ));
-        fs::create_dir(&path)?;
+        fs::DirBuilder::new().mode(0o700).create(&path)?;
         Ok(Self(path))
     }
 }
@@ -119,92 +117,6 @@ impl Drop for TempRoot {
     }
 }
 
-struct Budget {
-    files: usize,
-    bytes: u64,
-}
-
-/// Copies regular files only. Symlinks, special files, oversized trees and unreadable entries
-/// are reported as problems instead of being followed.
-fn copy_tree(
-    from: &Path,
-    to: &Path,
-    depth: usize,
-    budget: &mut Budget,
-    problems: &mut Vec<String>,
-) {
-    let entries = match fs::read_dir(from) {
-        Ok(entries) => entries,
-        Err(error) => return problems.push(format!("{}: {error}", from.display())),
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let name = entry.file_name();
-        let path = entry.path();
-        let Ok(kind) = entry.file_type() else {
-            problems.push(format!("{}: unreadable file type", path.display()));
-            continue;
-        };
-        if kind.is_dir() {
-            if SKIPPED.iter().any(|skip| name == *skip) {
-                continue;
-            }
-            if depth >= MAX_DEPTH {
-                problems.push(format!(
-                    "{}: nested deeper than {MAX_DEPTH} levels",
-                    path.display()
-                ));
-            } else if fs::create_dir(to.join(&name)).is_ok() {
-                copy_tree(&path, &to.join(&name), depth + 1, budget, problems);
-            }
-        } else if kind.is_symlink() {
-            problems.push(format!(
-                "{}: symlinks are not copied; a plugin must ship regular files",
-                path.display()
-            ));
-        } else if kind.is_file() {
-            let size = entry.metadata().map_or(u64::MAX, |meta| meta.len());
-            budget.files += 1;
-            budget.bytes = budget.bytes.saturating_add(size.min(MAX_FILE_BYTES + 1));
-            if budget.files > MAX_FILES {
-                if budget.files == MAX_FILES + 1 {
-                    problems.push(format!("more than {MAX_FILES} files"));
-                }
-            } else if size > MAX_FILE_BYTES {
-                problems.push(format!(
-                    "{}: larger than {MAX_FILE_BYTES} bytes",
-                    path.display()
-                ));
-            } else if budget.bytes > MAX_TOTAL_BYTES {
-                problems.push(format!(
-                    "{}: project exceeds {MAX_TOTAL_BYTES} bytes",
-                    path.display()
-                ));
-            } else if let Err(error) = fs::copy(&path, to.join(&name)) {
-                problems.push(format!("{}: {error}", path.display()));
-            }
-        } else {
-            problems.push(format!("{}: not a regular file", path.display()));
-        }
-    }
-}
-
-fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
-    use std::io::Read;
-    let path = dir.join("manifest.json");
-    let meta =
-        fs::symlink_metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    if !meta.file_type().is_file() {
-        return Err(format!("{} is not a regular file", path.display()));
-    }
-    let mut bytes = Vec::new();
-    fs::File::open(&path)
-        .and_then(|file| file.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    PluginManifest::parse(&bytes).map_err(|error| error.to_string())
-}
-
 fn name_of<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .ok()
@@ -212,14 +124,14 @@ fn name_of<T: serde::Serialize>(value: &T) -> String {
         .unwrap_or_default()
 }
 
-fn summarize(manifest: &PluginManifest) {
+fn summarize(preview: &PluginPreview, executable: &str) {
     println!("PLUGIN_VALIDATE_OK:");
-    println!("  id: {}", manifest.id);
-    println!("  name: {}", manifest.name);
-    println!("  version: {}", manifest.version);
-    println!("  protocol: {}", manifest.protocol_version);
-    println!("  executable: {}", manifest.executable);
-    for action in &manifest.actions {
+    println!("  id: {}", preview.id);
+    println!("  name: {}", preview.name);
+    println!("  version: {}", preview.version);
+    println!("  protocol: {}", preview.protocol_version);
+    println!("  executable: {executable}");
+    for action in &preview.actions {
         let controls: Vec<String> = action.controls.iter().map(name_of).collect();
         println!(
             "  action: {} ({}) controls: {}",
@@ -227,19 +139,16 @@ fn summarize(manifest: &PluginManifest) {
             action.name,
             controls.join(", ")
         );
-        for field in &action.settings {
-            let mut value = serde_json::to_value(field).unwrap_or_default();
-            let kind = value["type"].as_str().unwrap_or("?").to_owned();
-            let required = value["required"].take().as_bool().unwrap_or(false);
-            let suffix = if required { ", required" } else { "" };
-            println!("    setting: {} ({kind}{suffix})", field.id());
+        for setting in &action.settings {
+            let suffix = if setting.required { ", required" } else { "" };
+            println!("    setting: {} ({}{suffix})", setting.id, setting.kind);
         }
     }
-    if manifest.requirements.is_empty() {
+    if preview.requirements.is_empty() {
         println!("  requirements: none");
     }
-    let missing = missing_commands(&manifest.requirements);
-    for requirement in &manifest.requirements {
+    for entry in &preview.requirements {
+        let requirement = &entry.requirement;
         let mut line = format!(
             "  requirement: {} {}",
             requirement.kind.as_str(),
@@ -251,62 +160,73 @@ fn summarize(manifest: &PluginManifest) {
         if requirement.optional {
             line.push_str(" (optional)");
         }
-        if requirement.kind == sdeck_plus::plugins::RequirementKind::Command {
-            let found = !missing.contains(&requirement);
-            line.push_str(if found {
-                " - found on PATH"
-            } else {
+        if requirement.kind == RequirementKind::Command {
+            line.push_str(if entry.missing {
                 " - MISSING from PATH"
+            } else {
+                " - found on PATH"
             });
         }
         println!("{line}");
     }
 }
 
+fn report(error: &StageError) {
+    match error {
+        StageError::Invalid(problems) => {
+            for problem in problems {
+                println!("PLUGIN_VALIDATE_ERROR: {problem}");
+            }
+        }
+        other => println!("PLUGIN_VALIDATE_ERROR: {other}"),
+    }
+}
+
+/// The project as a stage source: an existing directory (relative paths are fine here).
+fn source_of(dir: &Path) -> Result<PluginSource, String> {
+    let resolved = fs::canonicalize(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    if !resolved.is_dir() {
+        return Err(format!("{} is not a folder", resolved.display()));
+    }
+    Ok(PluginSource::Folder(resolved))
+}
+
 fn validate(dir: &Path, invoke: Option<&Invoke>) -> bool {
-    let manifest = match read_manifest(dir) {
-        Ok(manifest) => manifest,
+    let source = match source_of(dir) {
+        Ok(source) => source,
         Err(error) => {
             println!("PLUGIN_VALIDATE_ERROR: {error}");
             return false;
         }
     };
-    let root = match TempRoot::new() {
-        Ok(root) => root,
+    let staged = match stage(&source, &StageOptions::new(), &CancelToken::new()) {
+        Ok(staged) => staged,
         Err(error) => {
-            println!("PLUGIN_VALIDATE_ERROR: cannot create a temp root: {error}");
+            report(&error);
             return false;
         }
     };
-    let target = root.0.join(&manifest.id);
-    let mut problems = Vec::new();
-    if let Err(error) = fs::create_dir(&target) {
-        problems.push(format!("{}: {error}", target.display()));
-    } else {
-        let mut budget = Budget { files: 0, bytes: 0 };
-        copy_tree(dir, &target, 0, &mut budget, &mut problems);
-    }
-    let mut registry = PluginRegistry::open(&root.0);
-    problems.extend(registry.problems().iter().map(|p| p.error.to_string()));
-    if !problems.is_empty() {
-        for problem in &problems {
-            println!("PLUGIN_VALIDATE_ERROR: {problem}");
-        }
-        return false;
-    }
-    summarize(&manifest);
+    summarize(staged.preview(), &staged.manifest().executable);
     let Some(invoke) = invoke else {
         return true;
     };
+    let id = staged.manifest().id.clone();
     println!(
-        "PLUGIN_INVOKE_WARNING: --invoke RUNS the plugin `{}` with your user's privileges (you asked for it).",
-        manifest.id
+        "PLUGIN_INVOKE_WARNING: --invoke RUNS the plugin `{id}` with your user's privileges (you asked for it).",
     );
-    let binding = PluginBinding::new(&manifest.id, &invoke.action, invoke.settings.clone());
-    let options = InvokeOptions::new(&invoke.request_id).timeout(invoke.timeout);
-    let result = registry
-        .set_enabled(&manifest.id, true)
-        .and_then(|()| registry.invoke(&binding, &options));
+    // Only this private temp root is ever written to or enabled in, never the user's plugins.
+    let result = TempRoot::new()
+        .map_err(|error| format!("cannot create a temp root: {error}"))
+        .and_then(|root| {
+            install(&staged, &root.0, InstallMode::New).map_err(|error| error.to_string())?;
+            let mut registry = PluginRegistry::open(&root.0);
+            let binding = PluginBinding::new(&id, &invoke.action, invoke.settings.clone());
+            let options = InvokeOptions::new(&invoke.request_id).timeout(invoke.timeout);
+            registry
+                .set_enabled(&id, true)
+                .and_then(|()| registry.invoke(&binding, &options))
+                .map_err(|error| error.to_string())
+        });
     match result {
         Ok(outcome) => {
             println!(

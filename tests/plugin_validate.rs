@@ -44,29 +44,41 @@ impl Drop for Scratch {
     }
 }
 
-/// `cargo test` only type-checks examples, so the first call builds this one (offline, same
-/// profile) when it is not linked yet. `None` means it cannot be located or built.
+/// `cargo test` only type-checks examples, so the first call builds this one with the same
+/// profile and asks cargo itself where the result is (`--message-format=json` reports the
+/// `executable` of the `plugin_validate` example artifact). Cargo rebuilds whenever the example
+/// or any library source changed, so a stale binary from an earlier run is never executed. `None`
+/// (a SKIPPED test) only means cargo cannot be started or reports no executable; a build that
+/// fails is a test failure, not a skip.
 fn example() -> Option<PathBuf> {
-    static BUILD: std::sync::Once = std::sync::Once::new();
+    static BUILT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    BUILT.get_or_init(build_example).clone()
+}
+
+fn build_example() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let profile_dir = exe.parent()?.parent()?;
-    let path = profile_dir.join("examples/plugin_validate");
-    BUILD.call_once(|| {
-        let profile = profile_dir.file_name().and_then(|name| name.to_str());
-        let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        build.args(["build", "--offline", "--example", "plugin_validate"]);
-        match profile {
-            Some("debug") => {}
-            Some("release") => {
-                build.arg("--release");
-            }
-            _ => return,
-        }
-        if !path.is_file() {
-            let _ = build.status();
-        }
-    });
-    path.is_file().then_some(path)
+    let profile = exe.parent()?.parent()?.file_name()?.to_str()?.to_owned();
+    let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    build.args([
+        "build",
+        "--offline",
+        "--example",
+        "plugin_validate",
+        "--message-format=json",
+    ]);
+    if profile != "debug" {
+        build.args(["--profile", &profile]);
+    }
+    let output = build.stderr(std::process::Stdio::inherit()).output().ok()?;
+    assert!(output.status.success(), "building the example failed");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-artifact")
+        .filter(|message| message["target"]["name"] == "plugin_validate")
+        .filter(|message| message["target"]["kind"] == json!(["example"]))
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .filter(|path| path.is_file())
 }
 
 macro_rules! binary {
@@ -363,5 +375,62 @@ fn invoke_failures_are_reported_and_exit_one() {
         !scratch.marker().exists(),
         "rejected invocations must not run the plugin"
     );
+    nothing_left(&scratch);
+}
+
+#[test]
+fn copy_problems_name_the_path_and_exit_one_instead_of_being_skipped() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let mut cases: Vec<(&str, PathBuf, &str)> = Vec::new();
+
+    let linked = scratch.project("linked", &manifest("fixture"), "#!/bin/sh\n");
+    fs::create_dir_all(linked.join("lib")).unwrap();
+    symlink("/etc/passwd", linked.join("lib/escape")).unwrap();
+    cases.push(("symlink", linked, "lib/escape"));
+
+    let special = scratch.project("fifo", &manifest("fixture"), "#!/bin/sh\n");
+    let made = Command::new("mkfifo").arg(special.join("pipe")).status();
+    if made.is_ok_and(|status| status.success()) {
+        cases.push(("fifo", special, "pipe: not a regular file"));
+    }
+
+    let locked = scratch.project("locked", &manifest("fixture"), "#!/bin/sh\n");
+    fs::write(locked.join("secret.txt"), "x").unwrap();
+    fs::set_permissions(locked.join("secret.txt"), fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::File::open(locked.join("secret.txt")).is_err() {
+        cases.push(("unreadable", locked, "secret.txt"));
+    }
+
+    let deep = scratch.project("deep", &manifest("fixture"), "#!/bin/sh\n");
+    fs::create_dir_all(deep.join("a/b/c/d/e/f/g/h/i")).unwrap();
+    cases.push(("depth", deep, "deeper than 8"));
+
+    let total = scratch.project("total", &manifest("fixture"), "#!/bin/sh\n");
+    for n in 0..5 {
+        let file = fs::File::create(total.join(format!("part{n}.bin"))).unwrap();
+        file.set_len(7 * 1024 * 1024).unwrap();
+    }
+    cases.push(("total", total, "in total"));
+
+    for (name, path, needle) in cases {
+        let output = run(&binary, &scratch, &[path.to_str().unwrap()]);
+        let text = out(&output);
+        assert_eq!(output.status.code(), Some(1), "{name}: {text}");
+        assert!(text.starts_with("PLUGIN_VALIDATE_ERROR:"), "{name}: {text}");
+        assert!(text.contains(needle), "{name}: {needle}\n{text}");
+        assert!(!text.contains("PLUGIN_VALIDATE_OK"), "{name}: {text}");
+    }
+    nothing_left(&scratch);
+}
+
+#[test]
+fn a_regular_file_named_dot_git_is_skipped_like_the_directory() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let project = scratch.project("p", &manifest("fixture"), "#!/bin/sh\n");
+    fs::write(project.join(".git"), "gitdir: ../elsewhere\n").unwrap();
+    let output = run(&binary, &scratch, &[project.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(0), "{}", out(&output));
     nothing_left(&scratch);
 }

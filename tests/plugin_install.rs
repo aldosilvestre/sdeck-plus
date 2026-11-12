@@ -1169,3 +1169,267 @@ fn hidden_temp_names_are_not_plugins_and_do_not_block_an_install() {
     );
     assert!(PluginRegistry::open(&root).problems().is_empty());
 }
+
+// ---- follow-ups: `.git` entries, exact boundaries, hostile hand-built sources, races -------
+
+/// Sum of the regular file sizes below `dir`, i.e. what the copy counts as the project size.
+fn project_bytes(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let meta = entry.metadata().unwrap();
+            if meta.is_dir() {
+                project_bytes(&entry.path())
+            } else {
+                meta.len()
+            }
+        })
+        .sum()
+}
+
+fn names_below(dir: &Path, found: &mut Vec<String>) {
+    for entry in fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+        found.push(entry.file_name().to_string_lossy().into_owned());
+        if entry.metadata().unwrap().is_dir() {
+            names_below(&entry.path(), found);
+        }
+    }
+}
+
+#[test]
+fn a_dot_git_file_or_directory_is_skipped_at_the_root_and_nested() {
+    // (where, is a directory): each form must be inert, not counted and never installed, even
+    // when it would break a limit (an oversized file, a symlink inside a directory).
+    for (nested, directory) in [(false, false), (false, true), (true, false), (true, true)] {
+        let scratch = Scratch::new();
+        let project = scratch.project("p", "hello", "1.0.0");
+        let parent = if nested {
+            project.join("lib")
+        } else {
+            project.clone()
+        };
+        let entry = parent.join(".git");
+        if directory {
+            fs::create_dir_all(&entry).unwrap();
+            symlink("/nonexistent", entry.join("link")).unwrap();
+        } else {
+            fs::File::create(&entry)
+                .unwrap()
+                .set_len(8 * 1024 * 1024 + 1)
+                .unwrap();
+        }
+        let label = format!("nested={nested} directory={directory}");
+        let staged = stage(&folder(&project), &scratch.options(), &CancelToken::new())
+            .unwrap_or_else(|error| panic!("{label}: {error:?}"));
+        assert_eq!(staged.preview().file_count, 3, "{label}");
+        let root = scratch.plugins();
+        install(&staged, &root, InstallMode::New).unwrap();
+        let mut names = Vec::new();
+        names_below(&root.join("hello"), &mut names);
+        assert!(
+            !names.iter().any(|name| name == ".git"),
+            "{label}: {names:?}"
+        );
+    }
+}
+
+#[test]
+fn a_dot_git_symlink_is_still_an_error() {
+    let scratch = Scratch::new();
+    let project = scratch.project("p", "hello", "1.0.0");
+    symlink("/etc", project.join(".git")).unwrap();
+    assert!(mentions(&rejected(&scratch, &project), ".git"));
+}
+
+#[test]
+fn a_repository_address_of_exactly_512_characters_is_accepted_and_513_is_not() {
+    let base = "https://example.com/";
+    let exact = format!("{base}{}", "a".repeat(512 - base.len()));
+    assert_eq!(exact.chars().count(), 512);
+    assert_eq!(
+        parse_source(&exact).unwrap(),
+        PluginSource::Repository(exact.clone())
+    );
+    let over = format!("{exact}a");
+    assert!(parse_source(&over).is_err());
+}
+
+#[test]
+fn an_ascii_punycode_host_is_accepted() {
+    let address = "https://xn--bcher-kva.example/team/plugin.git";
+    assert_eq!(
+        parse_source(address).unwrap(),
+        PluginSource::Repository(address.into())
+    );
+}
+
+#[test]
+fn a_rejected_hand_built_repository_never_reaches_git() {
+    let scratch = Scratch::new();
+    let log = scratch.0.join("git-was-run");
+    let git = script(
+        &scratch,
+        "git-recorder",
+        &format!("echo \"$@\" >> '{}'", log.display()),
+    );
+    let options = scratch.options().git_program(&git);
+    let too_long = format!("https://example.com/{}", "a".repeat(513));
+    let hostile = [
+        "",
+        "-oProxyCommand=touch x",
+        "--upload-pack=touch x",
+        "ext::sh -c touch% x",
+        "file:///etc/passwd",
+        "http://example.com/a/b",
+        "ssh://git@example.com/a/b",
+        "git@example.com:a/b.git",
+        "git://example.com/a/b",
+        "https://user:pass@example.com/a/b",
+        "https://example.com/a b",
+        "https://example.com/a\nb",
+        "https://example.com/a?x=1",
+        "https://example.com/a#x",
+        "https://example.com/../a",
+        "https://[::1]/a",
+        "https://-example.com/a",
+        "https://example.com",
+        "/tmp/not-a-url",
+        too_long.as_str(),
+    ];
+    for address in hostile {
+        let error = stage(
+            &PluginSource::Repository(address.into()),
+            &options,
+            &CancelToken::new(),
+        )
+        .expect_err(address);
+        assert!(
+            matches!(error, StageError::Source(_)),
+            "{address}: {error:?}"
+        );
+    }
+    assert!(!log.exists(), "git ran for a rejected address");
+    scratch.nothing_staged();
+}
+
+/// A project whose files add up to exactly `total` bytes (sparse fillers, so this is cheap).
+fn project_of_size(scratch: &Scratch, dir: &str, total: u64) -> PathBuf {
+    const PART: u64 = 8 * 1024 * 1024;
+    let project = scratch.project(dir, "hello", "1.0.0");
+    let mut remaining = total - project_bytes(&project);
+    let mut n = 0;
+    while remaining > 0 {
+        let size = remaining.min(PART);
+        fs::File::create(project.join(format!("lib/part{n}.bin")))
+            .unwrap()
+            .set_len(size)
+            .unwrap();
+        remaining -= size;
+        n += 1;
+    }
+    project
+}
+
+#[test]
+fn exactly_32_mib_in_total_is_accepted_and_one_byte_more_is_not() {
+    const TOTAL: u64 = 32 * 1024 * 1024;
+    let scratch = Scratch::new();
+    let project = project_of_size(&scratch, "exact", TOTAL);
+    assert_eq!(project_bytes(&project), TOTAL);
+    let staged = stage(&folder(&project), &scratch.options(), &CancelToken::new()).unwrap();
+    assert_eq!(staged.preview().total_bytes, TOTAL);
+    drop(staged);
+
+    let project = project_of_size(&scratch, "over", TOTAL + 1);
+    assert!(mentions(&rejected(&scratch, &project), "33554432"));
+}
+
+#[test]
+fn directory_depth_8_is_accepted_and_9_is_rejected() {
+    let scratch = Scratch::new();
+    for (levels, accepted) in [(8, true), (9, false)] {
+        let project = scratch.project(&format!("depth{levels}"), "hello", "1.0.0");
+        let mut nested = project.clone();
+        for _ in 0..levels {
+            nested.push("d");
+        }
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("leaf"), "x").unwrap();
+        let result = stage(&folder(&project), &scratch.options(), &CancelToken::new());
+        assert_eq!(result.is_ok(), accepted, "{levels} levels: {result:?}");
+        if let Err(error) = result {
+            assert!(mentions(&invalid(error), "deeper than 8"));
+        }
+    }
+}
+
+#[test]
+fn exactly_256_files_are_accepted_and_257_are_not() {
+    let scratch = Scratch::new();
+    for (count, accepted) in [(256, true), (257, false)] {
+        let project = scratch.project(&format!("files{count}"), "hello", "1.0.0");
+        for n in 0..count - 3 {
+            fs::write(project.join(format!("lib/f{n}")), "x").unwrap();
+        }
+        let result = stage(&folder(&project), &scratch.options(), &CancelToken::new());
+        assert_eq!(result.is_ok(), accepted, "{count} files: {result:?}");
+        if let Err(error) = result {
+            assert!(mentions(&invalid(error), "more than 256 files"));
+        }
+    }
+}
+
+#[test]
+fn eight_racing_new_installs_of_one_id_give_one_winner() {
+    let scratch = Scratch::new();
+    let candidates: Vec<_> = (0..8)
+        .map(|n| staged(&scratch, &format!("racer{n}"), "hello", "1.0.0"))
+        .collect();
+    let root = scratch.plugins();
+    let barrier = std::sync::Barrier::new(candidates.len());
+    let results: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = candidates
+            .iter()
+            .map(|candidate| {
+                let (root, barrier) = (&root, &barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    install(candidate, root, InstallMode::New)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let winners = results.iter().filter(|r| r.is_ok()).count();
+    let refused = results
+        .iter()
+        .filter(|r| matches!(r, Err(InstallError::AlreadyInstalled { .. })))
+        .count();
+    assert_eq!((winners, refused), (1, 7), "{results:?}");
+    assert!(hidden_leftovers(&root).is_empty());
+    let registry = PluginRegistry::open(&root);
+    assert!(registry.problems().is_empty(), "{:?}", registry.problems());
+    assert!(registry.plugin("hello").is_some());
+}
+
+#[test]
+fn foreign_hidden_directories_neither_block_an_install_nor_are_problems() {
+    let scratch = Scratch::new();
+    let root = scratch.plugins();
+    fs::create_dir_all(root.join(".foreign/nested")).unwrap();
+    fs::write(root.join(".foreign/nested/data"), "x").unwrap();
+    fs::create_dir_all(root.join(".hello")).unwrap();
+    fs::write(root.join(".hidden-file"), "x").unwrap();
+    assert!(PluginRegistry::open(&root).problems().is_empty());
+    install(
+        &staged(&scratch, "one", "hello", "1.0.0"),
+        &root,
+        InstallMode::New,
+    )
+    .unwrap();
+    let registry = PluginRegistry::open(&root);
+    assert!(registry.problems().is_empty(), "{:?}", registry.problems());
+    assert!(registry.plugin("hello").is_some());
+    assert!(root.join(".foreign/nested/data").is_file());
+}

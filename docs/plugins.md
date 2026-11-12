@@ -198,15 +198,20 @@ cargo run --offline --example plugin_validate -- <plugin-dir> --invoke <action> 
     [--settings '<json>'] [--timeout <seconds, default 5, max 60>] [--request-id <id>]
 ```
 
-It copies the project's regular files (no symlinks; at most 256 files, 8 MiB per file, 32 MiB
-in total; `.git` and `__pycache__` skipped) into a fresh temp root under the plugin id and runs
-`PluginRegistry::open`, which executes nothing. It prints `PLUGIN_VALIDATE_OK:` with the id,
-version, protocol, actions (controls, settings) and requirements (commands with a `PATH`
-check), or one `PLUGIN_VALIDATE_ERROR:` line per problem. Exit status: 0 ok, 1 problems, 2 usage.
-With `--invoke` it also enables the plugin in the temp root and performs ONE real invocation
-through `PluginRegistry::invoke`, after a warning that this **runs the plugin with your
-privileges**; it prints `PLUGIN_INVOKE_OK:` or `PLUGIN_INVOKE_ERROR:`. Without the flag nothing
-is run. The temp root is always removed.
+The validator is a thin client of the install library (`sdeck_plus::plugins::stage`), so it
+applies the same checks as the app's Add plugin flow. It copies the project's regular files (no
+symlinks; at most 256 files, 8 MiB per file, 32 MiB in total, 8 directory levels; `.git`, whether
+a directory or a regular file, and `__pycache__` directories are skipped) into a private staging
+directory under the plugin id and runs `PluginRegistry::open`, which executes nothing. Copy
+errors are never swallowed: every unreadable file, symlink, special file or limit violation is
+reported with its path. It prints `PLUGIN_VALIDATE_OK:` with the id, version, protocol,
+actions (controls, settings) and requirements (commands with a `PATH` check), or one
+`PLUGIN_VALIDATE_ERROR:` line per problem. Exit status: 0 ok, 1 problems, 2 usage.
+With `--invoke` it also installs the staged copy into a fresh private temp plugins folder,
+enables it there only, and performs ONE real invocation through `PluginRegistry::invoke`, after a
+warning that this **runs the plugin with your privileges**; it prints `PLUGIN_INVOKE_OK:` or
+`PLUGIN_INVOKE_ERROR:`. Without the flag nothing is run, and your own plugins folder is never
+touched. The staging and temp folders are always removed.
 
 ## Adding a plugin from the app (library)
 
@@ -237,8 +242,8 @@ the returned `StagedPlugin` is dropped and on every error path.
 - A folder is copied with the validator's limits: regular files only, at most 256 files, 8 MiB
   per file, 32 MiB in total and 8 directory levels. A symlink, a special file, an unreadable
   file or a limit violation is an error that names the path (all problems are listed); only
-  `.git` and `__pycache__` directories are skipped. The whole tree is checked before anything
-  is copied.
+  `.git` entries (a directory or a regular file) and `__pycache__` directories are skipped. The
+  whole tree is checked before anything is copied.
 - A repository is fetched with the system `git` (`StageOptions::git_program` changes the
   executable name, default `git`), as an argv list and never through a shell:
 
