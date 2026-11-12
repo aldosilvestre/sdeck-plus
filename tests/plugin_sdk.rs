@@ -4,8 +4,8 @@
 //! the network.
 
 use sdeck_plus::plugins::{
-    MAX_MANIFEST_BYTES, MAX_MESSAGE_CHARS, MAX_SETTINGS_BYTES, MAX_STDERR_BYTES, MAX_STDOUT_BYTES,
-    MAX_TIMEOUT, PROTOCOL_VERSION,
+    PluginManifest, MAX_MANIFEST_BYTES, MAX_MESSAGE_CHARS, MAX_SETTINGS_BYTES, MAX_STDERR_BYTES,
+    MAX_STDOUT_BYTES, MAX_TIMEOUT, PROTOCOL_VERSION,
 };
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
@@ -554,4 +554,119 @@ fn the_documents_link_to_each_other_and_ids_stay_unique() {
     assert!(docs.contains(SDK_PAGE) && docs.contains("Add plugin"));
     let plugins = read("docs/plugins.md");
     assert!(plugins.contains("## Add plugin dialog") && plugins.contains(SDK_PAGE));
+}
+
+// ---- the agent skill file ---------------------------------------------------------------------
+
+const SKILL: &str = "docs/SKILL.md";
+
+/// The body of the fenced block that opens with exactly "```<info>" (for example "```python run"),
+/// up to its closing fence.
+fn fenced_block<'a>(text: &'a str, info: &str) -> &'a str {
+    let opening = format!("```{info}\n");
+    let start = text
+        .find(&opening)
+        .unwrap_or_else(|| panic!("{SKILL} has no fenced block opened with ```{info}"))
+        + opening.len();
+    let end = text[start..].find("\n```").expect("unterminated fence");
+    &text[start..start + end]
+}
+
+#[test]
+fn the_skill_has_valid_frontmatter() {
+    let text = read(SKILL);
+    let rest = text
+        .strip_prefix("---\n")
+        .expect("frontmatter must open the file");
+    let (front, body) = rest.split_once("\n---\n").expect("frontmatter must close");
+    assert!(
+        front.contains("\nname: sdeck-plus-plugin-author\n")
+            || front.starts_with("name: sdeck-plus-plugin-author\n")
+    );
+    let description = front
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .expect("a description");
+    assert!(description.starts_with("\"Trigger: "), "{description}");
+    assert!(description.ends_with('"'), "{description}");
+    assert!(front.contains("license: MIT"));
+    assert!(front.contains("author:") && front.contains("version:"));
+    assert!(body.trim_start().starts_with("## Activation contract"));
+}
+
+#[test]
+fn the_skill_states_the_real_numbers_and_rules() {
+    let text = read(SKILL);
+    for (needle, what) in expected_numbers() {
+        assert!(
+            text.contains(&needle),
+            "{SKILL} does not state {what}: `{needle}`"
+        );
+    }
+    for (_, declaration, needle) in INSTALL_DECLARATIONS {
+        assert!(
+            text.contains(needle),
+            "{SKILL} lacks `{needle}` ({declaration})"
+        );
+    }
+    for name in FORWARDED_ENV {
+        assert!(text.contains(name), "{SKILL} does not list {name}");
+    }
+    for needle in [
+        "cargo run --offline --example plugin_validate",
+        "--invoke",
+        "PLUGIN_VALIDATE_OK",
+        "Add plugin",
+        "Update plugins",
+        "NEVER enable",
+        "python3 -B -I -m unittest discover -s tests",
+        "0600",
+        "4.5 s",
+        "queue of eight",
+    ] {
+        assert!(text.contains(needle), "{SKILL} lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_skill_example_is_the_template_and_its_manifest_parses() {
+    let text = read(SKILL);
+    assert_eq!(
+        fenced_block(&text, "python run").trim(),
+        read("examples/plugin-template/run").trim(),
+        "the `python run` block must stay identical to examples/plugin-template/run"
+    );
+    let manifest = fenced_block(&text, "json manifest.json");
+    assert_eq!(
+        manifest.trim(),
+        read("examples/plugin-template/manifest.json").trim()
+    );
+    let parsed = PluginManifest::parse(manifest.as_bytes()).expect("the manifest example parses");
+    assert_eq!(parsed.id, "hello");
+}
+
+#[test]
+fn the_skill_is_linked_and_has_no_secrets_or_home_paths() {
+    for document in ["docs/plugins.md", "docs/plugin-sdk.html", "README.md"] {
+        assert!(
+            read(document).contains("SKILL.md"),
+            "{document} must link to {SKILL}"
+        );
+    }
+    let text = read(SKILL);
+    assert!(!text.contains("/home/"), "no absolute home paths");
+    for token in [
+        "ghp_",
+        "github_pat_",
+        "xoxb-",
+        "sk_live",
+        "sk-ant",
+        "AKIA",
+        "-----BEGIN",
+    ] {
+        assert!(
+            !text.contains(token),
+            "{SKILL} contains a secret-like `{token}`"
+        );
+    }
 }
