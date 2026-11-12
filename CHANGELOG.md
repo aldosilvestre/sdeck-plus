@@ -43,6 +43,11 @@ All notable changes to this project are documented here. The format follows
 
 - The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
   about the toolbar's Add plugin button and the plugins folder.
+- The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |
+  Repository** selector that adapts the hints and Browse, and a plugin card (monogram, version, id
+  and source chips, files, size and commit, collapsible actions and requirements) with the
+  run-with-your-privileges warning and the replace notice pinned above the footer. Errors appear
+  in a callout. Behaviour is unchanged.
 - The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
   `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
   Their manifests need a build that knows `requirements`; older builds reject unknown fields.

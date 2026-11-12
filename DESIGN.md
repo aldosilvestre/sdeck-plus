@@ -64,24 +64,53 @@ kept verbatim until another action is chosen. Secondary
 organization and artwork tools use progressive disclosure.
 
 **Add plugin dialog.** A modal window transient for the main window, one instance at a
-time (pressing the button again presents it). It opens with the entry focused, Enter in the
-entry runs the check and Escape closes it. Top to bottom: a short explanation ("Add a plugin
-from a folder on this computer or from an HTTPS repository address. Nothing runs until you
-enable it."), the **Plugin source** entry (placeholder "Folder path or https:// repository
-address") with **Browse…** (a modal folder chooser that fills the entry), **Check plugin**
-with a Cancel button, spinner and status text while a check runs, a list of alert-role
-error labels, a scrolling preview card, the pinned notices, and Close plus Install (or
-Replace). The card shows name, id and version; the source (folder path, or repository
-address with the first 10 characters of the downloaded commit); file count and size; each
-action with its controls and settings; and the requirements with a "Missing: <command>" alert
-for a required command not on `PATH` (it never blocks installing). The pinned notices under
-the card always state that the plugin runs with the user's privileges once enabled and that
-its code should be read first, and, when the id is installed, its version and that replacing
-disables it until it is enabled again.
+time (pressing the button again presents it), 660 x 760 by default and resizable (it still
+fits at 520 px wide). It opens with the entry focused, Enter in the entry runs the check and
+Escape closes it. Top to bottom: an in-content header row (the window's title bar: an "Add
+plugin" heading and a Close icon button), a short explanation ("Add a plugin from a folder on
+this computer or from an HTTPS repository address. Nothing runs until you enable it.", shown
+until a preview exists), the **Plugin source** block, a status row, a scrolling area, the
+pinned callouts and the footer.
 
-States: **idle** (Install disabled), **checking** (entry, Browse and Check disabled; spinner,
+The source block has a **Folder | Repository** selector (linked toggle buttons, Folder by
+default, operable with Tab and Space), one entry, **Browse…** and **Check plugin**. The selector
+only changes the entry's placeholder and the helper line under it, and hides Browse for
+Repository; it never changes what is checked (the text decides). Typing or pasting an
+`https://` address selects Repository, and typing an absolute or `~` path selects Folder, so
+the selector never contradicts the text. Check plugin has the primary look while the entry has
+text and there is no preview; once a preview exists Install or Replace is the primary action.
+While a check or install runs the status row shows a spinner, the text and Cancel.
+
+The scrolling area holds the error callout, the "No plugin checked yet" empty state (idle
+only) and the preview card. The error callout (tinted `desk_error` fill, `desk_error` left
+edge, ink text, an icon on every row) is a list of alert-role sentences: a headline, up to 8
+problems and "And N more problems.". The preview card has a monogram tile (the first letter of
+the name on a `desk_selection` tile with a `desk_violet` edge), the name as a title, chips for
+`v<version>`, `id <id>` and the source (Folder or Repository, with an icon), the source line
+(folder path or repository address, wrapping, full text as tooltip), a four-cell stats row
+(Files, Size, Commit, Actions; the commit is the first 10 characters of the downloaded commit,
+and a folder shows a muted "n/a") and two native expanders. **Actions** (open by default, except when a required command is
+missing, so the Requirements rows fit) lists each action with chips for its controls (Key, Dial turn, Dial press, Touch strip) and a
+muted settings line. **Requirements** shows "X of Y found" (counting commands, the only kind
+that is looked up) and is collapsed when every required command is found and opened
+automatically when one is missing, and the card is then scrolled (on the frame clock, after layout)
+so the first Missing row is fully visible; each row has a status chip: Found, "Missing: <command>"
+(a required command not on `PATH`, an alert that never blocks installing), "Optional, not
+found" or "Not checked" (services and files are not looked up).
+
+The pinned callouts sit between the scrolling area and the footer and never scroll away: the
+privileges warning (amber `desk_warning` edge and icon; ink text) always states that the plugin
+runs with the user's privileges once enabled and that its code should be read first, and, when
+the id is installed, a replace notice (`desk_cyan` edge) gives the installed version and says
+that replacing disables the plugin until it is enabled again. The footer has Close and Install
+(or Replace); while Install cannot be pressed, a helper line there says "Check a plugin to
+enable Install." Focus is the 2px `desk_cyan` outline on every control; colours come from the
+`desk_*` tokens only, so the dark and light palettes both apply.
+
+States: **idle** (Install disabled), **checking** (entry, selector, Browse and Check disabled; spinner,
 Cancel), **valid preview** (Install enabled for exactly the text in the entry; editing the
-entry or Browse drops the preview and the staged copy and returns to idle), **invalid** (one or
+entry or Browse drops the preview and the staged copy and returns to idle; switching the
+selector does not), **invalid** (one or
 more readable sentences, Install disabled; nothing is installed or left staged), **replace**
 (valid preview of an id that is already installed; the button reads Replace) and
 **installing** (everything disabled; spinner). An AlreadyInstalled answer from a race moves the
@@ -101,14 +130,13 @@ finished worker later (a cancelled check leaves no staging directory; an install
 started completes, then the sidebar is rescanned and the status line reports it). Errors are sentences, never debug output.
 Everything shown from a plugin or from git (names, labels, requirement text, git's message) is
 displayed literally (no markup) with control, zero-width and bidirectional-format characters
-removed; a long preview heading is ellipsized with the full text as its tooltip. Releasing a
+removed; a long plugin name, version or id chip is ellipsized with the full text as its tooltip. Releasing a
 staged copy (closing, Escape, editing, a failed replace, the main window closing) never blocks
 the GTK thread: the directory is deleted on a short-lived thread, and an install that finishes
 or fails after the dialog closed is reported on the status line.
 
-Known limits: Replace overwrites whatever version is installed at that moment, which may differ
-from the one the preview showed if another install ran in between; a very long unbroken name can
-make the dialog wider than its default; the staged copy is validated and copied at check time, so
+Known limits: a collapsed section's rows are not in the widget tree until it opens; with many requirements at 520 px wide the last optional rows can sit under the pinned callouts until scrolled; the repository error offers no "choose a folder instead" shortcut (the message says to); Replace overwrites whatever version is installed at that moment, which may differ
+from the one the preview showed if another install ran in between; the staged copy is validated and copied at check time, so
 later edits to the source folder are not installed (the previewed bytes are).
 
 

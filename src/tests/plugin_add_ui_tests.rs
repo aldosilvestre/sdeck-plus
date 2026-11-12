@@ -261,16 +261,81 @@ fn install_caption(dialog: &AddPluginDialog) -> String {
         .to_string()
 }
 
+/// Renders the dialog in the dark and the light palette (the host theme decides which one
+/// `install_light_overrides` applies) into `STREAMDECK_CATALOG_QA_DIR`.
 fn capture(dialog: &AddPluginDialog, name: &str) {
     let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") else {
         return;
     };
     let window = dialog.window();
-    wait_for_frame(&window);
     std::fs::create_dir_all(&directory).unwrap();
-    rendered_texture(&window, &window)
-        .save_to_png(Path::new(&directory).join(format!("add-plugin-{name}.png")))
-        .unwrap();
+    let settings = gtk::Settings::default().unwrap();
+    let theme = settings.gtk_theme_name();
+    let was_dark = settings.is_gtk_application_prefer_dark_theme();
+    for (variant, dark) in [("dark", true), ("light", false)] {
+        settings.set_gtk_theme_name(Some(if dark { "Adwaita-dark" } else { "Adwaita" }));
+        settings.set_gtk_application_prefer_dark_theme(dark);
+        wait_for_frame(&window);
+        rendered_texture(&window, &window)
+            .save_to_png(Path::new(&directory).join(format!("add-plugin-{name}-{variant}.png")))
+            .unwrap();
+    }
+    settings.set_gtk_theme_name(theme.as_deref());
+    settings.set_gtk_application_prefer_dark_theme(was_dark);
+}
+
+/// Every widget below `widget` (itself included) that carries the CSS class `class`.
+fn with_class(widget: &gtk::Widget, class: &str) -> Vec<gtk::Widget> {
+    fn walk(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+        if widget.has_css_class(class) {
+            found.push(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(next) = child {
+            walk(&next, class, found);
+            child = next.next_sibling();
+        }
+    }
+    let mut found = Vec::new();
+    walk(widget, class, &mut found);
+    found
+}
+
+/// The value shown in the stats cell named `name` (Files, Size, Commit, Actions).
+fn stat_value(dialog: &AddPluginDialog, name: &str) -> String {
+    let cells = with_class(dialog.card().upcast_ref(), "plugin-stat");
+    assert_eq!(cells.len(), 4, "the stats row has four cells");
+    cells
+        .iter()
+        .find_map(|cell| {
+            let labels = labels_in(cell);
+            (labels[0].text() == name).then(|| labels[1].text().to_string())
+        })
+        .unwrap_or_else(|| panic!("no stats cell {name}"))
+}
+
+/// The control chips of the action row named `name`.
+fn action_row(dialog: &AddPluginDialog, name: &str) -> Vec<String> {
+    // Actions start collapsed when a required command is missing; a collapsed expander's
+    // rows are not in the tree walk, so open it first.
+    with_class(dialog.card().upcast_ref(), "plugin-section")
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<gtk::Expander>().ok())
+        .next()
+        .expect("the actions section")
+        .set_expanded(true);
+    let actions = with_class(dialog.card().upcast_ref(), "plugin-rows")
+        .into_iter()
+        .next()
+        .expect("the actions list");
+    let mut rows = with_class(&actions, "plugin-row");
+    rows.retain(|row| labels_in(row).first().is_some_and(|l| l.text() == name));
+    assert_eq!(rows.len(), 1, "one row for {name}");
+    with_class(&rows[0], "plugin-chip")
+        .iter()
+        .flat_map(labels_in)
+        .map(|label| label.text().to_string())
+        .collect()
 }
 
 fn plugins_json(scratch: &Scratch) -> Option<String> {
@@ -358,7 +423,7 @@ fn the_add_button_sits_next_to_update_plugins_and_opens_one_dialog() {
             assert!(window.transient_for().is_some(), "transient for the app");
             assert_eq!(
                 dialog.entry().placeholder_text().unwrap().as_str(),
-                "Folder path or https:// repository address"
+                "Absolute folder path, for example /home/you/sdeck-plugin-hello"
             );
             let focus = gtk::prelude::GtkWindowExt::focus(&window).expect("initial focus");
             assert!(
@@ -430,18 +495,19 @@ fn a_folder_is_checked_previewed_and_installed_disabled() {
                     error_texts(dialog)
                 );
                 assert!(!dialog.spinner_spinning());
+                // The fixture lacks a required command, so Actions start collapsed.
+                assert!(!expander_in(dialog, "Actions").is_expanded());
+                expander_in(dialog, "Actions").set_expanded(true);
                 let texts = card_texts(dialog);
                 let has = |needle: &str| texts.iter().any(|t| t == needle);
-                assert!(has("Name: Fixture") && has("Id: newplug") && has("Version: 2.0.0"));
-                assert!(
-                    has(&format!("Source: {}", canonical.display())),
-                    "{texts:?}"
-                );
-                assert!(
-                    texts.iter().any(|t| t.starts_with("Files: 3 (")),
-                    "{texts:?}"
-                );
-                assert!(has("Send: Key · Dial press"), "{texts:?}");
+                assert!(has("Fixture") && has("id newplug") && has("v2.0.0"));
+                assert!(has("Folder"), "the source pill: {texts:?}");
+                assert!(has(&canonical.display().to_string()), "{texts:?}");
+                assert_eq!(stat_value(dialog, "Files"), "3");
+                assert!(stat_value(dialog, "Size").ends_with("bytes"), "{texts:?}");
+                assert_eq!(stat_value(dialog, "Commit"), "n/a");
+                assert_eq!(stat_value(dialog, "Actions"), "1");
+                assert_eq!(action_row(dialog, "Send"), ["Key", "Dial press"]);
                 assert!(texts
                     .iter()
                     .any(|t| t.starts_with("Settings: Channel (text, required)")));
@@ -726,12 +792,9 @@ fn a_repository_is_fetched_by_git_off_the_gtk_thread_and_shows_its_commit() {
                     error_texts(dialog)
                 );
                 let texts = card_texts(dialog);
-                assert!(
-                    texts
-                        .iter()
-                        .any(|t| t == &format!("Source: {URL} (commit 0123456789)")),
-                    "{texts:?}"
-                );
+                assert!(texts.iter().any(|t| t == URL), "{texts:?}");
+                assert!(texts.iter().any(|t| t == "Repository"), "{texts:?}");
+                assert_eq!(stat_value(dialog, "Commit"), "0123456789");
                 dialog.install_button().emit_clicked();
                 wait_until("the install", || !dialog.window().is_visible());
                 let hub = &widgets.binding_ui.plugins;
@@ -1363,6 +1426,590 @@ fn failures_say_what_phase_they_happened_in() {
                 assert!(!errors.contains("check"), "{errors}");
                 assert!(scratch.installed_names().is_empty());
                 scratch.nothing_staged();
+            },
+        )
+    });
+}
+
+/// A project shaped like the design artboard's plugin: four control kinds, a long settings
+/// line and requirements that are all found (`sh`, `env`).
+fn rich_project(
+    scratch: &Scratch,
+    dir: &str,
+    id: &str,
+    requirements: serde_json::Value,
+) -> PathBuf {
+    let path = scratch.project(dir, id, "0.2.0");
+    let manifest = serde_json::json!({
+        "id": id, "version": "0.2.0", "protocol_version": 1, "name": "zeta chat",
+        "executable": "run",
+        "actions": [
+            {"id": "mute", "name": "Toggle mute", "controls": ["key", "dial_press"], "settings": []},
+            {"id": "volume", "name": "Volume", "controls": ["dial_turn"], "settings": []},
+            {"id": "send", "name": "Send bot message",
+             "controls": ["key", "dial_turn", "dial_press", "touch"],
+             "settings": [
+                {"type": "text", "id": "channel", "label": "Channel id", "required": true},
+                {"type": "text", "id": "message", "label": "Message", "required": true},
+                {"type": "boolean", "id": "everyone", "label": "Mention everyone"}
+             ]}
+        ],
+        "requirements": requirements
+    });
+    std::fs::write(path.join("manifest.json"), manifest.to_string()).unwrap();
+    path
+}
+
+fn all_found() -> serde_json::Value {
+    serde_json::json!([
+        {"kind": "command", "name": "sh"},
+        {"kind": "command", "name": "env", "optional": true}
+    ])
+}
+
+/// Presses a toggle the way the keyboard does (its `activate` action, which clicks after a
+/// short press feedback) and waits for the main loop to deliver it.
+fn press(button: &gtk::ToggleButton) {
+    assert!(button.activate(), "the toggle is activatable");
+    wait_until("the toggle to switch", || button.is_active());
+}
+
+fn expander_in(dialog: &AddPluginDialog, title: &str) -> gtk::Expander {
+    with_class(dialog.card().upcast_ref(), "plugin-section")
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<gtk::Expander>().ok())
+        .find(|expander| {
+            expander
+                .label_widget()
+                .is_some_and(|heading| labels_in(&heading)[0].text() == title)
+        })
+        .unwrap_or_else(|| panic!("no section {title}"))
+}
+
+#[test]
+fn the_source_selector_defaults_to_folder_and_only_changes_hints_and_browse() {
+    run_gtk_test(|| {
+        with_dialog(
+            "selector",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                let (folder, repo) = (dialog.folder_kind(), dialog.repo_kind());
+                assert!(folder.is_active() && !repo.is_active(), "Folder by default");
+                assert!(folder.is_focusable() && repo.is_focusable());
+                assert_eq!(
+                    dialog.entry().placeholder_text().unwrap().as_str(),
+                    "Absolute folder path, for example /home/you/sdeck-plugin-hello"
+                );
+                assert!(dialog.browse_button().is_visible());
+                assert!(dialog.hint().text().contains("plugin's own project folder"));
+                // Keyboard activation (Space/Enter on a focused toggle) is the widget's
+                // `activate` action.
+                press(&repo);
+                assert!(repo.is_active() && !folder.is_active());
+                assert_eq!(
+                    dialog.entry().placeholder_text().unwrap().as_str(),
+                    "https://github.com/owner/plugin"
+                );
+                assert_eq!(
+                    dialog.hint().text().as_str(),
+                    "Public HTTPS repositories only; the plugin must be at the repository root."
+                );
+                assert!(
+                    !dialog.browse_button().is_visible(),
+                    "Browse is for folders"
+                );
+                press(&folder);
+                assert!(folder.is_active() && dialog.browse_button().is_visible());
+                // The text wins over the selector.
+                dialog
+                    .entry()
+                    .set_text("https://example.invalid/team/plugin.git");
+                assert!(repo.is_active(), "an https:// address selects Repository");
+                dialog.entry().set_text("/tmp/some/plugin");
+                assert!(folder.is_active(), "an absolute path selects Folder");
+                dialog
+                    .entry()
+                    .set_text("https://example.invalid/team/plugin.git");
+                dialog.entry().set_text("~/plugins/hello");
+                assert!(folder.is_active(), "so does ~");
+                dialog.entry().set_text("");
+                press(&repo);
+                dialog.entry().set_text("some words");
+                assert!(repo.is_active(), "other text leaves the choice alone");
+                // The selector never changes what is checked: a folder path is still checked
+                // as a folder with Repository selected by hand.
+                let project = scratch.project("proj", "kindless", "1.0.0");
+                dialog.entry().set_text(&project.to_string_lossy());
+                assert!(folder.is_active());
+                press(&repo);
+                dialog.check_button().emit_clicked();
+                assert!(!repo.is_sensitive() && !folder.is_sensitive(), "busy");
+                wait_until("the check", || dialog.state_phase() != Phase::Checking);
+                assert_eq!(
+                    dialog.state_phase(),
+                    Phase::Preview,
+                    "{:?}",
+                    error_texts(dialog)
+                );
+                assert!(card_texts(dialog).iter().any(|t| t == "Folder"));
+                assert_eq!(stat_value(dialog, "Commit"), "n/a");
+                assert!(repo.is_sensitive() && folder.is_sensitive());
+                // Switching the selector keeps the preview: only the text invalidates it.
+                press(&folder);
+                assert_eq!(dialog.state_phase(), Phase::Preview);
+            },
+        )
+    });
+}
+
+#[test]
+fn the_check_button_is_primary_only_with_text_and_no_preview() {
+    run_gtk_test(|| {
+        with_dialog(
+            "primary",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                let check = dialog.check_button();
+                assert!(!check.has_css_class("suggested-action"), "no text yet");
+                assert!(
+                    dialog.empty_state().is_visible(),
+                    "idle says nothing is checked"
+                );
+                dialog.entry().set_text("/nowhere");
+                assert!(check.has_css_class("suggested-action"));
+                dialog.entry().set_text("");
+                assert!(!check.has_css_class("suggested-action"));
+                let project = scratch.project("proj", "prim", "1.0.0");
+                run_check(dialog, &project.to_string_lossy());
+                assert_eq!(dialog.state_phase(), Phase::Preview);
+                assert!(!dialog.empty_state().is_visible());
+                assert!(
+                    !check.has_css_class("suggested-action"),
+                    "Install is the primary action once there is a preview"
+                );
+            },
+        )
+    });
+}
+
+#[test]
+fn the_preview_card_shows_identity_stats_actions_and_requirements() {
+    run_gtk_test(|| {
+        with_dialog(
+            "card",
+            |scratch| {
+                let project = rich_project(scratch, "remote", "zeta", all_found());
+                scratch.options().git_program(scratch.git(&project, 0))
+            },
+            |_widgets, scratch, dialog| {
+                run_check(dialog, URL);
+                assert_eq!(
+                    dialog.state_phase(),
+                    Phase::Preview,
+                    "{:?}",
+                    error_texts(dialog)
+                );
+                let card = dialog.card();
+                let tile =
+                    labels_in(with_class(card.upcast_ref(), "plugin-monogram")[0].upcast_ref());
+                assert_eq!(tile[0].text(), "Z", "first letter, upper-cased");
+                let title = with_class(card.upcast_ref(), "control-heading");
+                let title = title[0].downcast_ref::<Label>().unwrap();
+                assert_eq!(title.text(), "zeta chat");
+                assert_eq!(title.accessible_role(), gtk::AccessibleRole::Heading);
+                let chips: Vec<String> = with_class(card.upcast_ref(), "plugin-meta")
+                    .iter()
+                    .flat_map(labels_in)
+                    .map(|label| label.text().to_string())
+                    .collect();
+                assert_eq!(chips, ["v0.2.0", "id zeta", "Repository"]);
+                let address = labels_in(card.upcast_ref())
+                    .into_iter()
+                    .find(|label| label.text() == URL)
+                    .expect("the source line");
+                assert_eq!(address.tooltip_text().as_deref(), Some(URL));
+                assert!(address.wraps(), "long addresses wrap");
+                assert_eq!(stat_value(dialog, "Files"), "3");
+                assert_eq!(stat_value(dialog, "Commit"), "0123456789", "10 of 40");
+                assert_eq!(stat_value(dialog, "Actions"), "3");
+                assert!(stat_value(dialog, "Size").ends_with("bytes"));
+                assert_eq!(action_row(dialog, "Toggle mute"), ["Key", "Dial press"]);
+                assert_eq!(action_row(dialog, "Volume"), ["Dial turn"]);
+                assert_eq!(
+                    action_row(dialog, "Send bot message"),
+                    ["Key", "Dial turn", "Dial press", "Touch strip"]
+                );
+                assert!(card_texts(dialog).iter().any(|t| t
+                    == "Settings: Channel id (text, required), Message (text, required), Mention everyone (boolean)"));
+                let actions = expander_in(dialog, "Actions");
+                assert!(actions.is_expanded(), "actions are open by default");
+                assert!(with_class(card.upcast_ref(), "plugin-missing-row").is_empty());
+                assert!(actions.is_focusable(), "keyboard operable");
+                let requirements = expander_in(dialog, "Requirements");
+                assert!(!requirements.is_expanded(), "everything required is found");
+                let heading = labels_in(&requirements.label_widget().unwrap());
+                assert_eq!(heading[1].text(), "2 of 2 found");
+                // A collapsed expander keeps its content out of the widget tree walk, so read
+                // the child directly.
+                let rows: Vec<String> = labels_in(&requirements.child().unwrap())
+                    .iter()
+                    .map(|label| label.text().to_string())
+                    .collect();
+                assert_eq!(rows.iter().filter(|t| *t == "Found").count(), 2, "{rows:?}");
+                assert!(rows.iter().all(|t| !t.starts_with("Missing")));
+                requirements.set_expanded(true);
+                capture(dialog, "preview");
+                dialog.window().close();
+                scratch.nothing_staged();
+            },
+        )
+    });
+}
+
+#[test]
+fn a_missing_required_command_opens_the_requirements_with_the_exact_text() {
+    run_gtk_test(|| {
+        with_dialog(
+            "missing",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                let requirements = serde_json::json!([
+                    {"kind": "command", "name": "sh"},
+                    {"kind": "command", "name": "sdeck-absent-tool"},
+                    {"kind": "command", "name": "sdeck-absent-optional", "optional": true},
+                    {"kind": "file", "name": "token", "optional": true}
+                ]);
+                let project = rich_project(scratch, "need", "need", requirements);
+                run_check(dialog, &project.to_string_lossy());
+                assert_eq!(
+                    dialog.state_phase(),
+                    Phase::Preview,
+                    "{:?}",
+                    error_texts(dialog)
+                );
+                let section = expander_in(dialog, "Requirements");
+                assert!(
+                    section.is_expanded(),
+                    "opened because a required command is missing"
+                );
+                assert!(section.child().unwrap().is_child_visible());
+                let heading = labels_in(&section.label_widget().unwrap());
+                assert_eq!(heading[1].text(), "1 of 3 found");
+                let texts = card_texts(dialog);
+                assert!(texts.iter().any(|t| t == "Missing: sdeck-absent-tool"));
+                assert!(texts.iter().any(|t| t == "Optional, not found"));
+                assert!(texts.iter().any(|t| t == "Not checked"));
+                assert!(texts
+                    .iter()
+                    .any(|t| t.starts_with("A missing command does not stop")));
+                let alert: Vec<Label> = labels_in(dialog.card().upcast_ref())
+                    .into_iter()
+                    .filter(|label| label.accessible_role() == gtk::AccessibleRole::Alert)
+                    .collect();
+                assert_eq!(alert.len(), 1, "only the required command is an alert");
+                assert!(
+                    dialog.install_button().is_sensitive(),
+                    "never blocks the install"
+                );
+                capture(dialog, "missing");
+            },
+        )
+    });
+}
+
+#[test]
+fn the_callouts_are_pinned_outside_the_scrolled_area() {
+    run_gtk_test(|| {
+        with_dialog(
+            "pinned",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                installed(scratch, "old", "dup", "1.0.0");
+                let project = rich_project(scratch, "new", "dup", all_found());
+                run_check(dialog, &project.to_string_lossy());
+                assert_eq!(dialog.state_phase(), Phase::Replace);
+                let scroller = dialog.scroller();
+                let pinned = dialog.pinned();
+                assert!(!pinned.is_ancestor(&scroller), "pinned is not scrolled");
+                assert!(dialog.card().is_ancestor(&scroller), "the card scrolls");
+                let callouts = with_class(pinned.upcast_ref(), "plugin-callout");
+                assert_eq!(callouts.len(), 2, "replace notice and privileges warning");
+                let first = labels_in(&callouts[0]);
+                assert_eq!(first[0].text(), "Replacing disables the plugin");
+                assert!(
+                    first[1]
+                        .text()
+                        .contains("already installed (version 1.0.0)")
+                        && first[1]
+                            .text()
+                            .contains("disables it until you enable it again"),
+                    "{}",
+                    first[1].text()
+                );
+                assert!(callouts[0].has_css_class("info") && callouts[1].has_css_class("warning"));
+                let window = dialog.window();
+                wait_for_frame(&window);
+                let body = window.child().unwrap();
+                let top_of =
+                    |widget: &gtk::Widget| widget.compute_bounds(&body).expect("laid out").y();
+                let before: Vec<f32> = callouts.iter().map(top_of).collect();
+                let adjustment = scroller.vadjustment();
+                assert!(
+                    adjustment.upper() > adjustment.page_size(),
+                    "the card overflows"
+                );
+                adjustment.set_value(adjustment.upper());
+                wait_for_frame(&window);
+                let after: Vec<f32> = callouts.iter().map(top_of).collect();
+                assert_eq!(before, after, "scrolling never moves the callouts");
+                assert!(callouts.iter().all(|c| c.is_mapped() && c.height() > 0));
+                capture(dialog, "replace");
+            },
+        )
+    });
+}
+
+#[test]
+fn the_error_callout_lists_alert_sentences_and_goes_away_with_the_next_edit() {
+    run_gtk_test(|| {
+        with_dialog(
+            "errcallout",
+            |scratch| scratch.options().git_program(scratch.0.join("no-such-git")),
+            |_widgets, scratch, dialog| {
+                assert!(!dialog.error_callout().is_visible());
+                let project = scratch.project("bad", "bad", "1.0.0");
+                std::fs::write(project.join("manifest.json"), r#"{"id":"bad"}"#).unwrap();
+                run_check(dialog, &project.to_string_lossy());
+                let callout = dialog.error_callout();
+                assert!(callout.is_visible() && callout.has_css_class("error"));
+                let errors = error_texts(dialog);
+                assert_eq!(
+                    errors[0],
+                    "This does not follow the plugin format. Nothing was installed."
+                );
+                assert!(errors.len() > 1 && errors.len() <= 9, "{errors:?}");
+                assert!(dialog.why().is_visible(), "says what Install needs");
+                assert_eq!(
+                    dialog.why().text().as_str(),
+                    "Check a plugin to enable Install."
+                );
+                capture(dialog, "err-format");
+                dialog.entry().set_text("x");
+                assert!(!callout.is_visible(), "an edit clears the callout");
+                run_check(dialog, URL);
+                assert_eq!(error_texts(dialog).len(), 1);
+                assert!(error_texts(dialog)[0].starts_with("Repository addresses need git"));
+                capture(dialog, "err-git");
+            },
+        )
+    });
+}
+
+#[test]
+fn the_window_defaults_to_660_by_760_and_nothing_is_clipped_there_or_at_520() {
+    run_gtk_test(|| {
+        with_dialog(
+            "sizes",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                let window = dialog.window();
+                assert_eq!(window.default_size(), (660, 760));
+                installed(scratch, "old", "dup", "1.0.0");
+                let long = "a-very-long-plugin-name-that-has-to-be-ellipsised-not-wide";
+                let project = rich_project(scratch, "new", "dup", all_found());
+                let mut manifest: serde_json::Value = serde_json::from_str(
+                    &std::fs::read_to_string(project.join("manifest.json")).unwrap(),
+                )
+                .unwrap();
+                manifest["name"] = long.into();
+                std::fs::write(project.join("manifest.json"), manifest.to_string()).unwrap();
+                run_check(dialog, &project.to_string_lossy());
+                assert_eq!(dialog.state_phase(), Phase::Replace);
+                let body = window.child().unwrap();
+                let (min_width, ..) = body.measure(gtk::Orientation::Horizontal, -1);
+                assert!(
+                    min_width <= 520,
+                    "the content fits 520 px: needs {min_width}"
+                );
+                let (min_height, ..) = body.measure(gtk::Orientation::Vertical, 660);
+                assert!(
+                    min_height <= 760,
+                    "the content fits 760 px: needs {min_height}"
+                );
+                for width in [660, 520] {
+                    window.set_default_size(width, 760);
+                    wait_until("the window to take its size", || {
+                        window.width() == width && window.height() > 0
+                    });
+                    wait_for_frame(&window);
+                    let inside = |widget: &gtk::Widget, what: &str| {
+                        let bounds = widget
+                            .compute_bounds(&body)
+                            .unwrap_or_else(|| panic!("{what} is not laid out"));
+                        assert!(
+                            bounds.x() >= 0.0
+                                && bounds.y() >= 0.0
+                                && bounds.x() + bounds.width() <= body.width() as f32 + 0.5
+                                && bounds.y() + bounds.height() <= body.height() as f32 + 0.5,
+                            "{what} is clipped at {width}: {bounds:?} in {}x{}",
+                            body.width(),
+                            body.height()
+                        );
+                        assert!(
+                            bounds.width() > 0.0 && bounds.height() > 0.0,
+                            "{what} is empty"
+                        );
+                    };
+                    inside(dialog.entry().upcast_ref(), "the entry");
+                    inside(dialog.check_button().upcast_ref(), "Check plugin");
+                    inside(dialog.browse_button().upcast_ref(), "Browse");
+                    inside(dialog.install_button().upcast_ref(), "Replace");
+                    inside(dialog.scroller().upcast_ref(), "the scrolled preview");
+                    inside(dialog.pinned().upcast_ref(), "the callouts");
+                    for footer in with_class(body.upcast_ref(), "plugin-add-footer") {
+                        inside(&footer, "the footer");
+                    }
+                    let scroller = dialog.scroller();
+                    assert!(
+                        dialog.card().width() <= scroller.width(),
+                        "the card fits its scroller"
+                    );
+                    assert!(scroller.height() >= 160, "the card keeps room at {width}");
+                    capture_sized(dialog, "sized", width);
+                }
+            },
+        )
+    });
+}
+
+/// `capture` for a named width: only the dark variant matters for the clipping review.
+fn capture_sized(dialog: &AddPluginDialog, name: &str, width: i32) {
+    capture(dialog, &format!("{name}-{width}"));
+}
+
+#[test]
+fn every_state_is_rendered_for_review() {
+    run_gtk_test(|| {
+        with_dialog(
+            "states",
+            |scratch| {
+                let project = rich_project(scratch, "remote", "zeta", all_found());
+                scratch.options().git_program(scratch.git(&project, 0))
+            },
+            |_widgets, _scratch, dialog| {
+                // Renders only when STREAMDECK_CATALOG_QA_DIR is set; otherwise the walk just
+                // proves each state can be reached.
+                capture(dialog, "idle-folder");
+                press(&dialog.repo_kind());
+                capture(dialog, "idle-repository");
+                run_check(dialog, URL);
+                assert_eq!(dialog.state_phase(), Phase::Preview);
+                capture(dialog, "preview-repository");
+            },
+        );
+        with_dialog(
+            "checking",
+            |scratch| scratch.options().git_program(scratch.hanging_git()),
+            |_widgets, scratch, dialog| {
+                dialog.entry().set_text(URL);
+                dialog.check_button().emit_clicked();
+                wait_until("the clone to start", || {
+                    std::fs::read_to_string(scratch.pid_file())
+                        .is_ok_and(|text| !text.trim().is_empty())
+                });
+                assert!(dialog.spinner_spinning());
+                capture(dialog, "checking");
+                dialog.cancel_button().emit_clicked();
+                wait_until("the cancel", || dialog.state_phase() != Phase::Checking);
+            },
+        );
+    });
+}
+
+/// Whether the first missing-requirement row lies fully inside the scrolled viewport.
+fn missing_row_visible(dialog: &AddPluginDialog) -> bool {
+    let scroller = dialog.scroller();
+    let Some(row) = with_class(dialog.card().upcast_ref(), "plugin-missing-row")
+        .into_iter()
+        .next()
+    else {
+        return false;
+    };
+    row.is_mapped()
+        && row.compute_bounds(&scroller).is_some_and(|b| {
+            b.height() > 0.0
+                && b.y() >= 0.0
+                && b.y() + b.height() <= scroller.height() as f32
+                && b.x() >= 0.0
+                && b.x() + b.width() <= scroller.width() as f32
+        })
+}
+
+#[test]
+fn the_missing_required_command_is_visible_without_scrolling_at_660_and_520() {
+    run_gtk_test(|| {
+        with_dialog(
+            "missingvisible",
+            |scratch| scratch.options(),
+            |_widgets, scratch, dialog| {
+                let requirements = serde_json::json!([
+                    {"kind": "command", "name": "sh"},
+                    {"kind": "command", "name": "sdeck-absent-tool"},
+                    {"kind": "command", "name": "sdeck-absent-one", "optional": true},
+                    {"kind": "command", "name": "sdeck-absent-two", "optional": true}
+                ]);
+                let project = rich_project(scratch, "need", "need", requirements);
+                let window = dialog.window();
+                for width in [660, 520] {
+                    window.set_default_size(width, 760);
+                    run_check(dialog, &project.to_string_lossy());
+                    assert_eq!(
+                        dialog.state_phase(),
+                        Phase::Preview,
+                        "{:?}",
+                        error_texts(dialog)
+                    );
+                    assert!(!expander_in(dialog, "Actions").is_expanded());
+                    wait_until("the missing row to be visible", || {
+                        window.width() == width && missing_row_visible(dialog)
+                    });
+                    let pinned = dialog.pinned();
+                    assert!(
+                        !pinned.is_ancestor(&dialog.scroller()),
+                        "callouts stay pinned"
+                    );
+                    assert!(pinned.is_visible());
+                    capture(dialog, &format!("missing-{width}"));
+                    // The user can reopen Actions.
+                    let actions = expander_in(dialog, "Actions");
+                    actions.set_expanded(true);
+                    assert!(actions.is_expanded());
+                    dialog.entry().set_text("");
+                }
+            },
+        )
+    });
+}
+
+#[test]
+fn the_checking_phase_shows_a_mapped_spinning_spinner() {
+    run_gtk_test(|| {
+        with_dialog(
+            "spinshown",
+            |scratch| scratch.options().git_program(scratch.hanging_git()),
+            |_widgets, scratch, dialog| {
+                assert!(!dialog.spinner_shown(), "no spinner while idle");
+                dialog.entry().set_text(URL);
+                dialog.check_button().emit_clicked();
+                wait_until("the clone to start", || {
+                    std::fs::read_to_string(scratch.pid_file())
+                        .is_ok_and(|text| !text.trim().is_empty())
+                });
+                wait_for_frame(&dialog.window());
+                assert!(dialog.spinner_shown(), "visible, mapped and spinning");
+                dialog.cancel_button().emit_clicked();
+                wait_until("the cancel", || dialog.state_phase() != Phase::Checking);
+                assert!(!dialog.spinner_shown());
             },
         )
     });
