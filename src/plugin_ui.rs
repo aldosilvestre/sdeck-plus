@@ -319,6 +319,9 @@ struct EditorState {
     actions: RefCell<Vec<PluginAction>>,
     /// A saved binding the installed plugins cannot show; kept verbatim until another action is chosen.
     preserved: RefCell<Option<PluginBinding>>,
+    /// The saved binding `populate` showed and the user has not replaced; a rescan that makes it
+    /// unavailable must keep it instead of falling back to the first plugin and action.
+    saved: RefCell<Option<PluginBinding>>,
     quiet: Cell<bool>,
     changed: RefCell<Vec<Callback>>,
 }
@@ -368,6 +371,7 @@ impl PluginEditor {
             plugin_ids: RefCell::default(),
             actions: RefCell::default(),
             preserved: RefCell::default(),
+            saved: RefCell::default(),
             quiet: Cell::new(false),
             changed: RefCell::default(),
         }));
@@ -420,6 +424,7 @@ impl PluginEditor {
     /// The user picked another plugin or action: any kept binding is replaced.
     fn user_chose(&self, plugin_changed: bool) {
         self.0.preserved.borrow_mut().take();
+        self.0.saved.borrow_mut().take();
         let plugin = self.selected_plugin();
         let action = if plugin_changed {
             None
@@ -451,6 +456,16 @@ impl PluginEditor {
         match kept {
             Some(binding) => self.populate(&binding),
             None => {
+                let saved = self.0.saved.borrow().clone();
+                if let Some(saved) = saved.filter(|saved| {
+                    !matches!(
+                        self.0.hub.binding_state(saved),
+                        BindingState::Available | BindingState::Disabled
+                    )
+                }) {
+                    self.populate(&saved);
+                    return;
+                }
                 let (plugin, action) = (self.selected_plugin(), self.selected_action_id());
                 let settings = self.current_settings();
                 self.show(plugin.as_deref(), action.as_deref(), Some(&settings));
@@ -655,6 +670,7 @@ impl PluginEditor {
             );
         if shown {
             self.0.preserved.borrow_mut().take();
+            *self.0.saved.borrow_mut() = Some(binding.clone());
             return;
         }
         let state = if matches!(state, BindingState::Available | BindingState::Disabled) {
@@ -683,12 +699,14 @@ impl PluginEditor {
     /// Starts a fresh draft for `plugin/action` (catalog assignment).
     pub(crate) fn select(&self, plugin: &str, action: &str) {
         self.0.preserved.borrow_mut().take();
+        self.0.saved.borrow_mut().take();
         self.show(Some(plugin), Some(action), None);
         self.emit();
     }
 
     pub(crate) fn reset(&self) {
         self.0.preserved.borrow_mut().take();
+        self.0.saved.borrow_mut().take();
         self.show(None, None, None);
     }
 

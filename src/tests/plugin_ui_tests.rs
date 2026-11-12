@@ -436,3 +436,91 @@ fn plugin_actions_run_on_the_plugin_worker_and_never_the_layer_worker() {
         })
     });
 }
+
+fn demo_binding(level: u64) -> PluginBinding {
+    PluginBinding::new(
+        "demo",
+        "send",
+        serde_json::json!({"channel": "general", "level": level, "loud": false})
+            .as_object()
+            .cloned()
+            .unwrap(),
+    )
+}
+
+#[test]
+fn a_saved_binding_whose_plugin_disappears_on_rescan_is_kept_until_another_action_is_chosen() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-rescan-gone", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("rescan-gone");
+            let ui = &widgets.binding_ui;
+            ui.plugins.load(root.0.clone());
+            let saved = demo_binding(42);
+            ui.plugin_editor.populate(&saved);
+            assert_eq!(ui.plugin_editor.binding().unwrap(), saved);
+            std::fs::remove_dir_all(root.0.join("demo")).unwrap();
+            ui.plugins.rescan();
+            assert_eq!(ui.plugin_editor.binding().unwrap(), saved);
+            assert!(ui.plugin_editor.snapshot().starts_with("kept:demo/send"));
+            assert!(
+                ui.plugin_editor.notice().contains("not installed"),
+                "{}",
+                ui.plugin_editor.notice()
+            );
+            ui.plugin_editor.select("lights", "toggle");
+            let chosen = ui.plugin_editor.binding().unwrap();
+            assert_eq!(
+                (chosen.plugin_id.as_str(), chosen.action_id.as_str()),
+                ("lights", "toggle")
+            );
+        })
+    });
+}
+
+#[test]
+fn a_saved_binding_whose_action_or_settings_stop_fitting_on_rescan_is_kept_verbatim() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-rescan-changed", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("rescan-changed");
+            let ui = &widgets.binding_ui;
+            ui.plugins.load(root.0.clone());
+            let saved = demo_binding(200);
+            ui.plugin_editor.populate(&saved);
+            assert_eq!(ui.plugin_editor.binding().unwrap(), saved);
+            let manifest = root.0.join("demo/manifest.json");
+            let original = std::fs::read_to_string(&manifest).unwrap();
+            std::fs::write(&manifest, original.replace("\"max\":255", "\"max\":50")).unwrap();
+            ui.plugins.rescan();
+            assert_eq!(ui.plugin_editor.binding().unwrap(), saved);
+            assert!(ui.plugin_editor.snapshot().starts_with("kept:demo/send"));
+            assert!(!ui.plugin_editor.notice().is_empty());
+            // The action disappears entirely while another one stays installed.
+            std::fs::write(
+                &manifest,
+                original.replace("\"id\":\"send\"", "\"id\":\"other\""),
+            )
+            .unwrap();
+            ui.plugins.rescan();
+            assert_eq!(ui.plugin_editor.binding().unwrap(), saved);
+            assert!(!ui.plugin_editor.notice().is_empty());
+        })
+    });
+}
+
+#[test]
+fn a_rescan_keeps_the_users_edits_while_the_saved_binding_is_still_available() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-rescan-valid", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("rescan-valid");
+            let ui = &widgets.binding_ui;
+            ui.plugins.load(root.0.clone());
+            ui.plugin_editor.populate(&demo_binding(42));
+            ui.plugin_editor.set_text("channel", "edited");
+            ui.plugins.rescan();
+            let binding = ui.plugin_editor.binding().unwrap();
+            assert_eq!(binding.settings["channel"], "edited");
+            assert_eq!(binding.settings["level"], 42);
+            assert!(!ui.plugin_editor.snapshot().starts_with("kept:"));
+        })
+    });
+}
