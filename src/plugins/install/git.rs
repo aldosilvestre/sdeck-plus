@@ -232,6 +232,13 @@ impl SystemGit {
         let out = stdout.map_or_else(Vec::new, |handle| handle.join().unwrap_or_default());
         let err = stderr.map_or_else(Vec::new, |handle| handle.join().unwrap_or_default());
         if status.success() {
+            // The size is only sampled while git runs: a clone that finishes between two samples
+            // must be measured once more now that every descendant is dead.
+            if let Some(watch) = &watch {
+                if tree_bytes(watch.dir) > watch.limit {
+                    return Err(StageError::TooLarge { limit: watch.limit });
+                }
+            }
             return Ok(out);
         }
         Err(StageError::GitFailed {

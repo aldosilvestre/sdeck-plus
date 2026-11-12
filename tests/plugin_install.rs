@@ -909,6 +909,33 @@ fn the_size_ceiling_kills_the_clone() {
 }
 
 #[test]
+fn a_clone_over_the_ceiling_that_exits_at_once_is_still_rejected() {
+    // Native review R3-clone-ceiling / R4-clone-ceiling-exit: the size is only sampled while git
+    // runs, so a clone that finishes between samples must be measured once more on exit. The
+    // working tree is a valid project; the excess is a pack in `.git` that staging would delete.
+    let scratch = Scratch::new();
+    let fixture = scratch.project("fixture", "cloned", "2.0.0");
+    let git = script(
+        &scratch,
+        "git-big",
+        &format!(
+            "for a; do dest=$a; done\ncase \" $* \" in\n*\" clone \"*) mkdir \"$dest\" && cp -R '{fixture}'/. \"$dest\" \\\n  && mkdir \"$dest/.git\" && head -c 300000 /dev/zero > \"$dest/.git/pack\";;\n*\" rev-parse \"*) echo '{HASH}';;\nesac",
+            fixture = fixture.display()
+        ),
+    );
+    let options = scratch.options().git_program(&git).max_clone_bytes(100_000);
+    let error = stage(
+        &PluginSource::Repository(URL.into()),
+        &options,
+        &CancelToken::new(),
+    )
+    .map(|_| ())
+    .unwrap_err();
+    assert_eq!(error, StageError::TooLarge { limit: 100_000 });
+    scratch.nothing_staged();
+}
+
+#[test]
 fn cancelling_mid_clone_kills_reaps_and_cleans() {
     let scratch = Scratch::new();
     let git = hanging_git(&scratch, "");
