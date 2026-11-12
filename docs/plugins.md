@@ -129,6 +129,10 @@ returned truncated (4096 bytes). Exit status must be 0.
 into `<data dir>/sdeck-plus/plugins/discord/` and enable it explicitly; see its `README.md` for the
 token file rules and limits.
 
+`extensions/mergbw/` is a second demonstration plugin that writes MeRGBW packets to a Bluetooth
+hexagon light through BlueZ (`busctl`). Its protocol comes from jmbwell/mergbw and is unverified on
+a TG609; see its `README.md` for the limits (5 s first press, connection stays open).
+
 ## Tests
 
 `cargo test --offline --test plugin_host` and `--test plugin_bindings` run generated `/bin/sh`
