@@ -23,9 +23,26 @@ All notable changes to this project are documented here. The format follows
   project in `examples/plugin-template`. A test keeps the guide's limits equal to the code's.
   Limits: the Discord plugin has never been verified against a live Discord or Hyprland session,
   and on the MeRGBW light only power-off was observed to work (TG609).
+- **Add plugin dialog:** an **Add plugin** button (+) on the **Plugins** heading of the Actions
+  sidebar adds a plugin from an absolute folder path or the `https://` address of a repository.
+  Before anything is installed the candidate is checked with the validator's rules (manifest,
+  executable confinement, limits, no symlinks; missing commands only warn) and previewed with its
+  id, version, source, downloaded commit, files, actions and requirements. Install never enables
+  the plugin; replacing an installed id needs an explicit **Replace** and disables it until it is
+  enabled again. Installs run one at a time and closing the dialog cancels.
+- **Shared install library** (`sdeck_plus::plugins::{parse_source, stage, install}`): repositories
+  are fetched only over HTTPS with the system `git` (shallow clone of the default branch, no
+  submodules, hooks, LFS or user git configuration, 60 s deadline, 32 MiB ceiling, `.git`
+  removed); `plugin_validate` now uses the same staging, so both report the same problems.
+  Limits: only public HTTPS repositories with the plugin at the repository root; no SSH, branch
+  or tag selection, removal from the app or automatic updates. A real HTTPS clone is not exercised
+  by the automated tests (a fake git and a local repository only), and keyboard and screen-reader
+  behaviour of the dialog was not verified with real input.
 
 ### Changed
 
+- The **Plugins** heading of the sidebar is always visible (it holds the add button) and, with no
+  plugins, shows a hint about the add button and the plugins folder.
 - The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
   `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
   Their manifests need a build that knows `requirements`; older builds reject unknown fields.

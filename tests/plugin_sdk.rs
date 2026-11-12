@@ -384,3 +384,174 @@ fn the_sdk_page_covers_the_sections_in_order() {
         last = at;
     }
 }
+
+// ---- adding a plugin from the app ------------------------------------------------------------
+
+/// The install limits are private to the library (`pub(super)`/private constants), so they cannot
+/// be imported like the host limits above. Each entry names the source line that declares it and
+/// `the_install_numbers_match_their_declarations` re-reads that file, so a changed value fails
+/// here instead of silently drifting from the documentation. GAP: make them public to drop this.
+const INSTALL_DECLARATIONS: [(&str, &str, &str); 7] = [
+    // (file, exact declaration, text both documents must contain)
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_FILES: usize = 256;",
+        "256 files",
+    ),
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;",
+        "8 MiB per file",
+    ),
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_DEPTH: usize = 8;",
+        "8 directory levels",
+    ),
+    (
+        "src/plugins/install/source.rs",
+        "const MAX_ADDRESS_CHARS: usize = 512;",
+        "512 characters",
+    ),
+    (
+        "src/plugins/install.rs",
+        "const DEFAULT_DEADLINE: Duration = Duration::from_secs(60);",
+        "60 s deadline",
+    ),
+    (
+        "src/plugins/install.rs",
+        "const DEFAULT_MAX_CLONE_BYTES: u64 = 32 * 1024 * 1024;",
+        "32 MiB ceiling",
+    ),
+    (
+        "src/plugin_add_ui.rs",
+        "const MAX_LISTED_PROBLEMS: usize = 8;",
+        "first 8 problems",
+    ),
+];
+
+/// Messages of the Add plugin dialog (`src/plugin_add_ui.rs`) that the SDK page quotes.
+const DIALOG_MESSAGES: [&str; 6] = [
+    "This does not follow the plugin format. Nothing was installed.",
+    "Repository addresses need git, and git could not be started.",
+    "The enabled-plugins file cannot be read",
+    "use an absolute path for a folder",
+    "only https:// repository addresses or absolute folder paths are accepted",
+    "is already installed.",
+];
+
+#[test]
+fn the_install_numbers_match_their_declarations() {
+    for (file, declaration, _) in INSTALL_DECLARATIONS {
+        assert!(
+            read(file).contains(declaration),
+            "{file} no longer declares `{declaration}`: update the documents and this table"
+        );
+    }
+}
+
+#[test]
+fn the_sdk_page_states_the_install_limits() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    for (_, declaration, needle) in INSTALL_DECLARATIONS {
+        assert!(
+            page.contains(needle),
+            "the SDK page does not state `{needle}` ({declaration})"
+        );
+    }
+}
+
+#[test]
+fn the_contract_states_the_clone_and_address_limits() {
+    let text = read("docs/plugins.md");
+    for needle in ["512 characters", "60 s", "32 MiB", "256 files"] {
+        assert!(text.contains(needle), "docs/plugins.md lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_sdk_page_documents_the_add_plugin_dialog() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    let ui = read("src/plugin_add_ui.rs");
+    let sidebar = read("src/plugin_ui.rs");
+    assert!(
+        sidebar.contains("\"Add plugin\""),
+        "the button's accessible name moved: update the guard"
+    );
+    assert!(
+        page.contains("<strong>Add plugin</strong>"),
+        "no Add plugin button"
+    );
+    for button in ["Check plugin", "Install", "Replace"] {
+        assert!(
+            page.contains(button),
+            "the SDK page does not name `{button}`"
+        );
+    }
+    // The app capitalises the first letter of library messages, so compare in lowercase.
+    let (ui, source, page) = (
+        ui.to_lowercase(),
+        read("src/plugins/install/source.rs").to_lowercase(),
+        page.to_lowercase(),
+    );
+    for message in DIALOG_MESSAGES {
+        let message = message.to_lowercase();
+        assert!(
+            ui.contains(&message) || source.contains(&message),
+            "`{message}` is not a message of the app any more"
+        );
+        assert!(
+            page.contains(&message),
+            "the SDK page does not quote `{message}`"
+        );
+    }
+}
+
+#[test]
+fn the_sdk_page_states_the_repository_rules_and_the_limits() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    for needle in [
+        "repository root",
+        "https://",
+        "--depth 1",
+        "no submodules",
+        "no LFS",
+        "default branch",
+        "Not supported yet",
+    ] {
+        assert!(page.contains(needle), "the SDK page lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_documents_link_to_each_other_and_ids_stay_unique() {
+    for name in ["docs.html", "index.html"] {
+        let page = read(&format!("docs/{name}"));
+        let ids = attribute_values(&page, "id");
+        let unique: BTreeSet<&String> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "duplicate ids in docs/{name}");
+        for href in attribute_values(&page, "href") {
+            if href.starts_with("https://") || href.starts_with("mailto:") {
+                continue;
+            }
+            if let Some(fragment) = href.strip_prefix('#') {
+                assert!(
+                    ids.iter().any(|id| id == fragment),
+                    "{name}: no target for #{fragment}"
+                );
+                continue;
+            }
+            let file = href.split('#').next().unwrap_or_default();
+            if !file.is_empty() && !file.starts_with("assets/") {
+                assert!(
+                    root().join("docs").join(file).exists(),
+                    "{name}: missing {href}"
+                );
+            }
+        }
+    }
+    let docs = read("docs/docs.html");
+    assert!(docs.contains(SDK_PAGE) && docs.contains("Add plugin"));
+    let plugins = read("docs/plugins.md");
+    assert!(plugins.contains("## Add plugin dialog") && plugins.contains(SDK_PAGE));
+}

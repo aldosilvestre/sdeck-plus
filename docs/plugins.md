@@ -301,6 +301,20 @@ the returned `StagedPlugin` is dropped and on every error path.
 `Cancelled`, `BadCommit`, `Io`) and `InstallError` (`AlreadyInstalled`, `InvalidState`, `Io`).
 All implement `Display` with user-facing text.
 
+## Add plugin dialog
+
+The Actions sidebar always shows a **Plugins** heading with an icon-only **Add plugin** button
+(`src/plugin_add_ui.rs`, behaviour contract in `DESIGN.md`). The dialog is a thin, asynchronous
+client of the library above: it checks the entry with `parse_source_in` and `stage` on a worker
+thread, shows the `PluginPreview`, and calls `install` only for a preview of exactly the text in
+the entry; Replace is offered only after `AlreadyInstalled` and needs its own press. It never
+enables or runs a plugin, installs are serialised across the app, and closing the dialog cancels
+the check and deletes the staged copy. Every `SourceError`, `StageError` and `InstallError` is
+shown as a readable sentence. The author-facing description, with the dialog's messages and the
+repository rules, is in [the SDK guide](plugin-sdk.html#installing). Not supported yet: SSH or
+private repositories, choosing a branch, tag or commit, removing a plugin from the app and
+automatic updates.
+
 ## Tests
 
 `cargo test --offline --test plugin_host`, `--test plugin_bindings`, `--test plugin_requirements`,
