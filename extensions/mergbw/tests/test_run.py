@@ -441,6 +441,273 @@ class FailureTests(unittest.TestCase):
             self.assertGreater(kwargs["timeout"], 0)
 
 
+ATT_0E = "Call failed: Operation failed with ATT error 0x0e (Unlikely Error)"
+
+
+class ScriptedBus:
+    """busctl fake: per-call outcomes for WriteValue, scripted reads, simulated call duration."""
+
+    def __init__(self, clock, reads, writes=(), call_seconds=0.0):
+        self.clock = clock
+        self.reads = list(reads)
+        self.writes = list(writes)  # None = success, str = stderr of a failing call, "timeout"
+        self.call_seconds = call_seconds
+        self.log = []  # "GET" / "CONNECT" / "WRITE"
+
+    def __call__(self, argv, **kwargs):
+        if self.call_seconds > kwargs["timeout"]:  # the real runner kills the call at its timeout
+            self.clock.now += kwargs["timeout"]
+            self.log.append("GET" if "GetManagedObjects" in argv else "WRITE")
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        self.clock.now += self.call_seconds
+        if "GetManagedObjects" in argv:
+            self.log.append("GET")
+            out = self.reads.pop(0) if len(self.reads) > 1 else self.reads[0]
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        if "Connect" in argv:
+            self.log.append("CONNECT")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        self.log.append("WRITE")
+        outcome = self.writes.pop(0) if self.writes else None
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if outcome is not None:
+            return subprocess.CompletedProcess(argv, 1, "", outcome)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def writes_made(self):
+        return self.log.count("WRITE")
+
+
+class ReadinessTests(unittest.TestCase):
+    def test_stale_pre_connect_snapshot_never_allows_a_write(self):
+        clock = Clock()
+        stale = objects_json(connected=False, resolved=True)
+        bus = ScriptedBus(clock, [stale, objects_json(connected=True, resolved=False),
+                                  objects_json(connected=True, resolved=True)])
+        reply = invoke("power-on", {"address": ADDRESS}, bus, clock=clock)
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(bus.log, ["GET", "CONNECT", "GET", "GET", "WRITE"])
+        self.assertEqual(len(clock.sleeps), 1)
+
+    def test_one_extra_read_per_poll(self):
+        clock = Clock()
+        unresolved = objects_json(connected=True, resolved=False)
+        bus = ScriptedBus(clock, [objects_json(connected=False, resolved=True), unresolved,
+                                  unresolved, unresolved, objects_json()])
+        reply = invoke("power-on", {"address": ADDRESS}, bus, clock=clock)
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(bus.log, ["GET", "CONNECT", "GET", "GET", "GET", "GET", "WRITE"])
+        self.assertEqual(len(clock.sleeps), 3)
+
+    def test_connected_but_unresolved_connect_not_called_and_waits(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json(connected=True, resolved=False), objects_json()])
+        self.assertTrue(invoke("power-on", {"address": ADDRESS}, bus, clock=clock)["ok"])
+        self.assertEqual(bus.log, ["GET", "GET", "WRITE"])
+
+    def test_connected_and_resolved_writes_right_after_first_read(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json()])
+        self.assertTrue(invoke("power-on", {"address": ADDRESS}, bus, clock=clock)["ok"])
+        self.assertEqual(bus.log, ["GET", "WRITE"])
+
+    def test_budget_ending_before_ready_reports_connect_timeout(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json(connected=False, resolved=True),
+                                  objects_json(connected=True, resolved=False)])
+        reply = invoke("power-on", {"address": ADDRESS}, bus, clock=clock)
+        self.assertFalse(reply["ok"])
+        self.assertIn("could not connect in time; close the MeRGBW app and try again",
+                      reply["error"])
+        self.assertEqual(bus.writes_made(), 0)
+        self.assertLessEqual(clock.now - 100.0, 4.5)
+
+
+class RetryTests(unittest.TestCase):
+    def go(self, writes, action="set-scene", settings=None, reads=None, call_seconds=0.0,
+           clock=None):
+        clock = clock or Clock()
+        bus = ScriptedBus(clock, reads or [objects_json()], writes, call_seconds)
+        settings = settings or {"address": ADDRESS, "scene": 2}
+        return invoke(action, settings, bus, clock=clock), bus, clock
+
+    def test_att_0e_then_success_retries_once_after_a_fresh_read(self):
+        reply, bus, _ = self.go([None, ATT_0E, None, None])
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(bus.log, ["GET", "WRITE", "WRITE", "GET", "WRITE", "WRITE"])
+        self.assertIn("after 1 retry", reply["message"])
+        self.assertIn("3 command packets", reply["message"])
+
+    def test_retry_repeats_the_same_packet(self):
+        runner = FakeBus([objects_json()])
+        seen = []
+
+        def wrapped(argv, **kw):
+            if "WriteValue" in argv:
+                seen.append(argv)
+                if len(seen) == 1:
+                    return subprocess.CompletedProcess(argv, 1, "", ATT_0E)
+            return runner(argv, **kw)
+
+        reply = invoke("set-brightness", {"address": ADDRESS, "brightness": 30}, wrapped)
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(seen, [write_argv(run_mod.brightness_packet(300))] * 2)
+
+    def test_no_retry_without_failure_message(self):
+        reply, _, _ = self.go([None, None, None], action="power-on",
+                              settings={"address": ADDRESS})
+        self.assertNotIn("retry", reply["message"])
+
+    def test_att_0e_twice_fails_naming_the_step_and_sends_nothing_more(self):
+        reply, bus, _ = self.go([None, ATT_0E, ATT_0E])
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 2/3", reply["error"])
+        self.assertIn("0x0e", reply["error"])
+        self.assertEqual(bus.writes_made(), 3)
+        self.assertEqual(bus.log.count("GET"), 2)
+
+    def test_second_rejection_in_a_request_is_not_retried_again(self):
+        reply, bus, _ = self.go([ATT_0E, None, ATT_0E])
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 2/3", reply["error"])
+        self.assertEqual(bus.writes_made(), 3)
+
+    def test_other_att_code_is_not_retried(self):
+        reply, bus, _ = self.go(["Call failed: Operation failed with ATT error 0x0a"])
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 1/3", reply["error"])
+        self.assertEqual(bus.writes_made(), 1)
+
+    def test_plain_busctl_failure_is_not_retried(self):
+        reply, bus, _ = self.go(["Failed to connect to bus"])
+        self.assertFalse(reply["ok"])
+        self.assertEqual(bus.writes_made(), 1)
+        self.assertEqual(bus.log.count("GET"), 1)
+
+    def test_timeout_is_not_retried(self):
+        reply, bus, _ = self.go(["timeout"])
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 1/3", reply["error"])
+        self.assertEqual(bus.writes_made(), 1)
+
+    def test_0x0e_outside_an_att_error_is_not_retried(self):
+        reply, bus, _ = self.go(["error code 0x0e without the protocol name"])
+        self.assertFalse(reply["ok"])
+        self.assertEqual(bus.writes_made(), 1)
+
+    def test_connect_failure_is_never_retried(self):
+        clock = Clock()
+
+        calls = []
+
+        def runner(argv, **kw):
+            calls.append(argv)
+            if "Connect" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", ATT_0E)
+            return subprocess.CompletedProcess(
+                argv, 0, objects_json(connected=False, resolved=False), "")
+
+        reply = invoke("power-on", {"address": ADDRESS}, runner, clock=clock)
+        self.assertFalse(reply["ok"])
+        self.assertEqual(calls, [GET, CONNECT])
+
+    def test_no_retry_when_less_than_one_second_remains(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json()], [ATT_0E])
+
+        def runner(argv, **kw):
+            result = bus(argv, **kw)
+            if "WriteValue" in argv:
+                clock.now += 3.6  # leaves 0.9 s of the 4.5 s budget
+            return result
+
+        reply = invoke("power-on", {"address": ADDRESS}, runner, clock=clock)
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 1/1", reply["error"])
+        self.assertEqual(bus.writes_made(), 1)
+        self.assertEqual(bus.log.count("GET"), 1)
+
+    def test_retry_allowed_with_exactly_one_second_remaining(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json()], [ATT_0E, None])
+
+        def runner(argv, **kw):
+            result = bus(argv, **kw)
+            if "WriteValue" in argv and bus.writes_made() == 1:
+                clock.now += 3.5
+            return result
+
+        reply = invoke("power-on", {"address": ADDRESS}, runner, clock=clock)
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(bus.writes_made(), 2)
+
+    def test_retry_waits_for_services_within_the_budget(self):
+        reads = [objects_json(), objects_json(connected=False, resolved=False),
+                 objects_json(connected=True, resolved=False), objects_json()]
+        reply, bus, clock = self.go([ATT_0E, None, None, None], reads=reads)
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(bus.log[:5], ["GET", "WRITE", "GET", "GET", "GET"])
+        self.assertEqual(bus.writes_made(), 4)
+
+    def test_retry_that_cannot_become_ready_fails_without_writing(self):
+        reads = [objects_json(), objects_json(connected=False, resolved=False)]
+        reply, bus, clock = self.go([ATT_0E], reads=reads)
+        self.assertFalse(reply["ok"])
+        self.assertIn("write packet 1/3", reply["error"])
+        self.assertEqual(bus.writes_made(), 1)
+        self.assertLessEqual(clock.now - 100.0, 4.5)
+
+    def test_worst_case_elapsed_time_stays_within_the_budget(self):
+        for call_seconds in (0.0, 0.3, 0.9, 1.7):
+            with self.subTest(call_seconds=call_seconds):
+                reads = [objects_json(connected=False, resolved=False),
+                         objects_json(connected=True, resolved=False)]
+                reply, bus, clock = self.go([ATT_0E, ATT_0E, ATT_0E], reads=reads,
+                                            call_seconds=call_seconds)
+                self.assertLessEqual(clock.now - 100.0, 4.5 + 1e-9)
+                self.assertLessEqual(bus.writes_made(), 2)
+                for sleep in clock.sleeps:
+                    self.assertLessEqual(sleep, 0.25)
+
+    def test_error_text_for_a_rejection_stays_short_and_unechoed(self):
+        raw = f"Call failed: Operation failed with ATT error 0x0e {SECRET}\n" + "z" * 5000
+        reply, _, _ = self.go([raw, raw])
+        self.assertFalse(reply["ok"])
+        self.assertLessEqual(len(reply["error"]), 300)
+        self.assertNotIn("zzzz", reply["error"])
+
+
+class ColorBrightnessTests(unittest.TestCase):
+    def packets(self, settings):
+        return run_mod.build_packets("set-color", {"address": ADDRESS, **settings})[1]
+
+    def test_without_brightness_only_power_and_colour(self):
+        self.assertEqual(self.packets({"hue": 10}), [
+            run_mod.power_packet(True), run_mod.color_packet(10, 1000)])
+
+    def test_with_brightness_it_comes_last_scaled(self):
+        self.assertEqual(self.packets({"hue": 10, "brightness": 30}), [
+            run_mod.power_packet(True), run_mod.color_packet(10, 1000),
+            run_mod.brightness_packet(300)])
+
+    def test_zero_brightness_is_still_explicit(self):
+        self.assertEqual(len(self.packets({"brightness": 0})), 3)
+
+    def test_two_writes_without_and_three_with_brightness(self):
+        clock = Clock()
+        bus = ScriptedBus(clock, [objects_json()])
+        invoke("set-color", {"address": ADDRESS}, bus, clock=clock)
+        self.assertEqual(bus.writes_made(), 2)
+        bus = ScriptedBus(clock, [objects_json()])
+        invoke("set-color", {"address": ADDRESS, "brightness": 50}, bus, clock=clock)
+        self.assertEqual(bus.writes_made(), 3)
+
+    def test_set_brightness_keeps_its_default(self):
+        packets = run_mod.build_packets("set-brightness", {"address": ADDRESS})[1]
+        self.assertEqual(packets, [run_mod.brightness_packet(1000)])
+
+
 class FramingTests(unittest.TestCase):
     def raw(self, text, runner=None):
         runner = runner or FakeBus([objects_json()])

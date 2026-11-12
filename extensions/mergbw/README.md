@@ -23,7 +23,7 @@ dial press.
 | Action | Extra settings | What is written |
 |---|---|---|
 | `power-on` / `power-off` | none | One power packet. |
-| `set-color` | `hue` 0-359 (0), `saturation` 0-100 (100), `brightness` 0-100 (100) | Power on, colour, then brightness. |
+| `set-color` | `hue` 0-359 (0), `saturation` 0-100 (100), `brightness` 0-100 (optional, no default) | Power on, then colour. A brightness packet follows only when you set `brightness`, so choosing a colour leaves the current brightness alone. |
 | `set-brightness` | `brightness` 0-100 (100) | One brightness packet; power state untouched. |
 | `set-scene` | `scene` 1-117 (2) | Power on, then the scene packet and a second packet with the reference's default value `0x3200`. The reference is uncertain what that second packet means, so it is not a setting. |
 
@@ -38,6 +38,13 @@ Percentages are sent as value x 10.
 
 ## Limits
 
+- The light drops its Bluetooth link when idle, so the first press after a pause reconnects and
+  may take longer. Readiness is always decided from a fresh BlueZ read (connected **and**
+  services resolved) before the first write, never from a snapshot taken before connecting.
+- A write the light rejects with ATT error `0x0e` (seen right after a reconnect) is retried
+  **once** per press, after another fresh readiness check, and only if at least 1 s of the 4.5 s
+  budget is left; the success message then says "after 1 retry". Timeouts, other errors and
+  connect failures are never retried.
 - Connecting and resolving services can exceed the host's 5 s request limit on the **first press**;
   the plugin stops at 4.5 s, and a later press then works.
 - The plugin does not disconnect afterwards, so the light stays connected to this computer and the

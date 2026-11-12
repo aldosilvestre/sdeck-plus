@@ -28,6 +28,9 @@ DEVICE_IFACE = "org.bluez.Device1"
 CHAR_IFACE = "org.bluez.GattCharacteristic1"
 SCENE_SECOND_VALUE = 0x3200  # meaning/scale uncertain in the reference; its default is sent as is
 
+ATT_REJECTION = re.compile(r"\bATT\b.*\b0x0e\b", re.IGNORECASE)
+RETRY_MIN_SECONDS = 1.0
+
 ADDRESS = re.compile(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}")
 OBJECT_PATH = re.compile(r"/org/bluez/hci[0-9]+/dev_[0-9A-F_]+(/service[0-9a-f]+/char[0-9a-f]+)?")
 REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
@@ -37,6 +40,10 @@ UNVERIFIED = "protocol from jmbwell/mergbw, unverified on a TG609"
 
 class PluginFailure(Exception):
     """A failure whose short text is safe to show to the user."""
+
+
+class DeviceRejection(PluginFailure):
+    """busctl reported ATT error 0x0e: a definite device rejection, never a timeout."""
 
 
 def clip(text):
@@ -173,7 +180,8 @@ class Bus:
             raise PluginFailure(f"{step}: busctl could not be started") from None
         if result.returncode != 0:
             detail = safe_line(result.stderr)
-            raise PluginFailure(f"{step}: busctl failed" + (f" ({detail})" if detail else ""))
+            failure = DeviceRejection if ATT_REJECTION.search(detail) else PluginFailure
+            raise failure(f"{step}: busctl failed" + (f" ({detail})" if detail else ""))
         return result.stdout or ""
 
     def managed_objects(self, step):
@@ -237,10 +245,33 @@ def find_characteristic(objects, device_path):
     raise PluginFailure("write characteristic fff3 not found on the device")
 
 
+def is_ready(interfaces):
+    return (
+        prop(interfaces, DEVICE_IFACE, "Connected") is True
+        and prop(interfaces, DEVICE_IFACE, "ServicesResolved") is True
+    )
+
+
+def wait_until_ready(bus, path):
+    """Polls FRESH managed objects until the device is connected with services resolved."""
+    while True:
+        objects = bus.managed_objects("wait for services")
+        ifaces = objects.get(path)
+        if ifaces is None:
+            raise PluginFailure("device disappeared from BlueZ while connecting")
+        if is_ready(ifaces):
+            return objects
+        if bus.remaining() <= POLL_SECONDS:
+            raise PluginFailure("could not connect in time; close the MeRGBW app and try again")
+        bus.wait_for_sleep()
+
+
 def connect_and_resolve(bus, address):
-    """Returns (device path, managed objects) once the device is connected with services resolved."""
+    """Returns (device path, managed objects) once a fresh read shows it connected and resolved."""
     objects = bus.managed_objects("find device")
     path, ifaces = find_device(objects, address)
+    if is_ready(ifaces):
+        return path, objects
     if prop(ifaces, DEVICE_IFACE, "Connected") is not True:
         try:
             bus.call("connect", ["call", "org.bluez", path, DEVICE_IFACE, "Connect"])
@@ -248,37 +279,48 @@ def connect_and_resolve(bus, address):
             raise PluginFailure(
                 f"{failure}; could not connect in time; close the MeRGBW app and try again"
             ) from None
-    while True:
-        if prop(ifaces, DEVICE_IFACE, "ServicesResolved") is True:
-            return path, objects
-        if bus.remaining() <= POLL_SECONDS:
-            raise PluginFailure(
-                "could not connect in time; close the MeRGBW app and try again"
-            )
-        bus.wait_for_sleep()
-        objects = bus.managed_objects("wait for services")
-        ifaces = objects.get(path)
-        if ifaces is None:
-            raise PluginFailure("device disappeared from BlueZ while connecting")
+    # Never trust the snapshot above once a connect was needed or services were pending.
+    return path, wait_until_ready(bus, path)
 
 
-def write_packets(bus, characteristic, packets):
+def write_packet(bus, step, characteristic, data):
+    bus.call(
+        step,
+        [
+            "call",
+            "org.bluez",
+            characteristic,
+            CHAR_IFACE,
+            "WriteValue",
+            "aya{sv}",
+            str(len(data)),
+            *[str(byte) for byte in data],
+            "0",
+        ],
+    )
+
+
+def write_packets(bus, path, characteristic, packets):
+    """Writes in order; ATT 0x0e is retried once per request. Returns the retries used."""
     total = len(packets)
+    retries = 0
     for index, data in enumerate(packets, start=1):
-        bus.call(
-            f"write packet {index}/{total}",
-            [
-                "call",
-                "org.bluez",
-                characteristic,
-                CHAR_IFACE,
-                "WriteValue",
-                "aya{sv}",
-                str(len(data)),
-                *[str(byte) for byte in data],
-                "0",
-            ],
-        )
+        step = f"write packet {index}/{total}"
+        try:
+            write_packet(bus, step, characteristic, data)
+        except DeviceRejection as rejection:
+            if retries or bus.remaining() < RETRY_MIN_SECONDS:
+                raise PluginFailure(str(rejection)) from None
+            retries += 1
+            try:
+                characteristic = find_characteristic(wait_until_ready(bus, path), path)
+            except PluginFailure as failure:
+                raise PluginFailure(f"{step}: retry not possible: {failure}") from None
+            try:
+                write_packet(bus, step, characteristic, data)
+            except PluginFailure as failure:
+                raise PluginFailure(f"{failure} (after 1 retry)") from None
+    return retries
 
 
 def control_light(action, settings, environ, run, monotonic, sleep):
@@ -286,10 +328,12 @@ def control_light(action, settings, environ, run, monotonic, sleep):
     bus = Bus(environ, run, monotonic, sleep)
     path, objects = connect_and_resolve(bus, address)
     characteristic = find_characteristic(objects, path)
-    write_packets(bus, characteristic, packets)
+    retries = write_packets(bus, path, characteristic, packets)
     count = len(packets)
+    retried = " (after 1 retry)" if retries else ""
     return (
-        f"Wrote {count} command packet{'s' if count != 1 else ''} to the light's characteristic; "
+        f"Wrote {count} command packet{'s' if count != 1 else ''}{retried} "
+        "to the light's characteristic; "
         f"the light's state is not confirmed ({UNVERIFIED})"
     )
 

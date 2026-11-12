@@ -140,7 +140,7 @@ fn actions_controls_and_defaults_are_as_specified() {
     );
     assert_eq!(
         integer_field(&manifest, "set-color", "brightness"),
-        (0, 100, Some(100))
+        (0, 100, None)
     );
     assert_eq!(
         integer_field(&manifest, "set-brightness", "brightness"),
@@ -161,7 +161,10 @@ fn host_accepts_defaults_and_rejects_out_of_range_values() {
         .unwrap();
     assert_eq!(filled["hue"], json!(0));
     assert_eq!(filled["saturation"], json!(100));
-    assert_eq!(filled["brightness"], json!(100));
+    assert!(
+        filled.get("brightness").is_none(),
+        "set-color brightness is opt-in: no default is filled in"
+    );
     assert!(matches!(
         color.validate_settings(&Settings::new()),
         Err(PluginError::InvalidSettings(_))
