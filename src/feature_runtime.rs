@@ -285,6 +285,7 @@ pub(crate) struct FeatureRuntime {
     sleeping: Rc<Cell<bool>>,
     device: Rc<RefCell<Option<mpsc::Sender<DeviceAction>>>>,
     events: Rc<RefCell<Option<mpsc::Sender<MonitorEvent>>>>,
+    plugins: Rc<RefCell<Option<crate::plugin_runtime::PluginSender>>>,
     page_controls: page_controls::PageControls,
     touchscreen_controls: touchscreen::TouchscreenControls,
     organization_management: GtkBox,
@@ -435,6 +436,7 @@ impl FeatureRuntime {
             sleeping: Rc::new(Cell::new(false)),
             device: Rc::new(RefCell::new(None)),
             events: Rc::new(RefCell::new(None)),
+            plugins: Rc::new(RefCell::new(None)),
             page_controls,
             touchscreen_controls: touchscreen::TouchscreenControls::new(),
             organization_management,
@@ -916,6 +918,42 @@ impl FeatureRuntime {
         self.refresh_application_editor();
     }
 
+    /// Starts the session's plugin worker for the loaded plugin root, if there is one.
+    pub(crate) fn start_plugins(
+        &self,
+        events: &mpsc::Sender<MonitorEvent>,
+    ) -> std::io::Result<Option<crate::plugin_runtime::PluginWorker>> {
+        let Some(root) = self.ui.plugins.root() else {
+            return Ok(None);
+        };
+        let (sender, worker) = crate::plugin_runtime::spawn_for_root(root, events.clone())?;
+        *self.plugins.borrow_mut() = Some(sender);
+        Ok(Some(worker))
+    }
+
+    /// Hands a snapshot of the binding to the plugin worker without waiting for it.
+    fn submit_plugin(&self, binding: &sdeck_plus::plugins::PluginBinding) {
+        use crate::plugin_runtime::Rejected;
+        let name = format!("{}/{}", binding.plugin_id, binding.action_id);
+        let result = self
+            .plugins
+            .borrow()
+            .as_ref()
+            .map(|sender| sender.submit(binding));
+        match result {
+            Some(Ok(id)) => self
+                .status
+                .set_text(&format!("Plugin {name} queued ({id}).")),
+            Some(Err(Rejected::Busy)) => self.report(
+                &format!("Plugin {name} was not queued: too many plugin requests are waiting."),
+                true,
+            ),
+            Some(Err(Rejected::Stopped)) | None => {
+                self.report("Plugin actions are unavailable.", true)
+            }
+        }
+    }
+
     pub(crate) fn organization_available(&self) -> bool {
         self.organization.borrow().is_some()
     }
@@ -1181,6 +1219,7 @@ impl FeatureRuntime {
                         self.status.set_text("Desktop action queued.");
                     }
                 }
+                FeatureAction::Plugin(binding) => self.submit_plugin(&binding),
                 FeatureAction::Obs(action) => {
                     if !self.obs_valid.get() {
                         self.report("OBS settings are unavailable.", true);

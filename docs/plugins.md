@@ -95,7 +95,36 @@ returned truncated (4096 bytes). Exit status must be 0.
   escape the group; this is a limit of process groups, not a sandbox.
 - Plugin credentials and service state are the plugin's own concern; the host stores none.
 
+## In the app
+
+- **Root**: `<data dir>/sdeck-plus/plugins`, where the data dir is `$XDG_DATA_HOME` (absolute) or
+  `$HOME/.local/share`, the same convention as the rest of the app's data. It is global: every
+  device model sees the same plugins, and `plugins.json` there is the one enabled list. It is
+  not part of exported bundles.
+- **Sidebar**: each valid plugin is its own collapsible item in the Actions catalog, titled with
+  its name plus "(disabled)" while off. The body shows the untrusted-code warning, an explicit
+  "Enable" check box and the plugin's actions with the controls they support. Malformed plugin
+  folders and an invalid `plugins.json` are shown above the items; "Rescan plugins" rereads the
+  folder. Nothing is enabled or run by browsing.
+- **Form**: choosing an action opens the generic "Plugin action" form generated from the
+  manifest fields (text, bounded integer, boolean). Only actions whose `controls` include the
+  selected control (key, dial turn, dial press, touch strip) can be assigned; others are dimmed.
+- **Storage**: a binding is the feature action `{"Plugin":{"plugin_id","action_id","settings"}}`
+  inside `layers.conf`. Its shape is validated without the manifest (ids, settings that are
+  text up to 1024 characters, integers or booleans, at most 16 settings) so it survives a
+  missing or disabled plugin through load, save, export and import. The stored JSON is capped at
+  4096 bytes on encode and decode. Unknown fields are rejected.
+- **Running**: only a control press or "Test action" runs a plugin, through a dedicated
+  `plugin-worker` thread (bounded queue of 8; a full queue refuses the request and says so).
+  Each request carries an immutable copy of the binding and an id `sdeck-N`, uses the 5 second
+  deadline, and is never retried. The worker rereads manifests and `plugins.json` per request.
+  At shutdown queued requests are dropped and a running one is waited for at most 6 seconds.
+  Results and errors arrive on the same status line as other actions.
+- Windows with several device models each keep their own view of the folder; enabling in one
+  becomes visible in another after "Rescan plugins", although runs always use the file on disk.
+
 ## Tests
 
-`cargo test --offline --test plugin_host` runs generated `/bin/sh` fixtures only; it needs no
-display, hardware or network.
+`cargo test --offline --test plugin_host` and `--test plugin_bindings` run generated `/bin/sh`
+fixtures only; they need no display, hardware or network. The worker and sidebar tests live in
+the binary (`cargo test --bin sdeck-plus plugin`; GTK ones need a display).

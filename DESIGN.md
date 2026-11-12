@@ -37,7 +37,21 @@ Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
 assigned, with the same save-or-draft rule as keys, and clicking an action with a
 dial selected uses the event chosen in the inspector. The touch strip retains
-its existing action selector. Secondary
+its existing action selector. **Plugins** (see `docs/plugins.md`) add one collapsible
+item per installed plugin below the built-in categories, never a shared "Plugins"
+category: the header shows the plugin name (with "(disabled)" while it is off) and
+the body leads with the untrusted-code warning (process separation is not
+sandboxing) and an explicit "Enable <name>" check box, then the plugin's actions
+with the controls they support as the row subtitle. A strip above the items holds
+**Rescan plugins**, malformed-plugin and invalid enabled-state messages (labels with
+the alert role, error colour) or the empty-state hint naming the plugin folder.
+Actions of a disabled plugin, or that do not fit the selected control (key, dial
+turn, dial press, touch strip), are dimmed with an explanatory tooltip. Assigning one
+always opens the generic **Plugin action** form (plugin and action drop-downs, then
+a text entry, a bounded spin button or a check box per manifest field, labelled for
+assistive technology) and stays a draft until Save binding; plugins cannot add their
+own widgets. A saved binding whose plugin is missing or changed shows a notice and is
+kept verbatim until another action is chosen. Secondary
 organization and artwork tools use progressive disclosure.
 
 Touchscreen configuration is profile-owned and has its own page selection,

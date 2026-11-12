@@ -1,16 +1,19 @@
 //! Copy action templates onto keys without executing them or moving artwork.
 use crate::*;
 use feature_editor::choice::Choice;
+use sdeck_plus::plugins::PluginControl;
 
-#[derive(Clone, Copy, glib::Boxed)]
+#[derive(Clone, glib::Boxed)]
 #[boxed_type(name = "SdeckCatalogAction")]
 struct CatalogAction {
     picker: u32,
     feature: Option<Choice>,
+    /// A plugin action (plugin id, action id); it always needs the form and an explicit save.
+    plugin: Option<(String, String)>,
 }
 
 impl CatalogAction {
-    fn ready(self) -> bool {
+    fn ready(&self) -> bool {
         matches!(
             self.feature,
             Some(
@@ -46,7 +49,7 @@ impl CatalogAction {
 #[derive(Clone, Default)]
 pub(crate) struct CatalogMemory {
     query: Rc<RefCell<String>>,
-    open: Rc<RefCell<std::collections::HashMap<&'static str, bool>>>,
+    open: Rc<RefCell<std::collections::HashMap<String, bool>>>,
 }
 
 pub(crate) fn connect(
@@ -77,6 +80,25 @@ pub(crate) fn connect(
         let confirm_ui = ui.clone();
         let confirm_keys = keys.clone();
         let apply: Assign = Rc::new(move |action, target| {
+            if let Some((plugin, id)) = &action.plugin {
+                let event = match target {
+                    Target::Key(_) => EventKind::ButtonPress,
+                    Target::Dial(_, event) => event,
+                };
+                let kind = match target {
+                    Target::Key(_) => ControlKind::Button,
+                    Target::Dial(..) => ControlKind::Encoder,
+                };
+                let control = plugin_ui::plugin_control(kind, event);
+                if !ui.plugins.supports(plugin, id, control) {
+                    ui.error(&format!(
+                        "That plugin action cannot be assigned to a {}.",
+                        plugin_ui::control_name(control).to_lowercase()
+                    ));
+                    return false;
+                }
+                ui.plugins.set_control(Some(control));
+            }
             let (kind, index, widget) = match target {
                 Target::Key(index) => (ControlKind::Button, index, index),
                 Target::Dial(index, _) => (ControlKind::Encoder, index, dial_offset + index),
@@ -93,9 +115,15 @@ pub(crate) fn connect(
             heading.set_text(&control_heading(kind, Some(number)));
             ui.load_selected_binding(&layers);
             ui.clear_action_fields();
+            if action.plugin.is_some() {
+                ui.ensure_plugin_row();
+            }
             ui.action_picker.set_selected(action.picker);
             if let Some(choice) = action.feature {
                 ui.feature_editor.select_catalog_choice(choice);
+            }
+            if let Some((plugin, id)) = &action.plugin {
+                ui.plugin_editor.select(plugin, id);
             }
             ui.update_action_visibility();
             if action.ready() {
@@ -137,7 +165,7 @@ pub(crate) fn connect(
                     confirm_discard(
                         &anchor,
                         Rc::new(move || {
-                            apply(action, target);
+                            apply(action.clone(), target);
                         }),
                     );
                     return true;
@@ -162,11 +190,13 @@ pub(crate) fn connect(
     .into_iter()
     .map(|(label, picker)| {
         (
-            label,
+            label.to_owned(),
+            None,
             BindingIcon::for_action_type(picker),
             CatalogAction {
                 picker,
                 feature: None,
+                plugin: None,
             },
         )
     })
@@ -176,7 +206,7 @@ pub(crate) fn connect(
         "Basic",
         BindingIcon::for_action_type(1),
         basic,
-        true,
+        Extras::open(true),
         &wiring,
     ));
     for (category, label) in ["System", "Multimedia", "Organization", "Device", "OBS"]
@@ -194,11 +224,13 @@ pub(crate) fn connect(
             })
             .map(|choice| {
                 (
-                    choice.label(),
+                    choice.label().to_owned(),
+                    None,
                     choice.binding_icon(),
                     CatalogAction {
                         picker: 5,
                         feature: Some(choice),
+                        plugin: None,
                     },
                 )
             })
@@ -208,21 +240,65 @@ pub(crate) fn connect(
             label,
             Choice::category_icon(category as u32),
             entries,
-            false,
+            Extras::open(false),
             &wiring,
         ));
+    }
+    // Every plugin is its own sidebar item below the built-in categories.
+    let plugin_region = GtkBox::new(Orientation::Vertical, 6);
+    list.append(&plugin_region);
+    let plugin_sections: Rc<RefCell<Vec<Section>>> = Rc::default();
+    let build_plugins = {
+        let (region, built) = (plugin_region.downgrade(), plugin_sections.clone());
+        let (memory, ui, assign) = (memory.clone(), ui.clone(), assign.clone());
+        move || {
+            let Some(region) = region.upgrade() else {
+                return false;
+            };
+            populate_plugins(
+                &region,
+                &built,
+                &Wiring {
+                    memory: &memory,
+                    ui: &ui,
+                    assign: &assign,
+                },
+            );
+            // A filter typed before the rebuild still applies to the new items.
+            let query = memory.query.borrow().to_lowercase();
+            for section in built.borrow().iter() {
+                section.filter(&query);
+            }
+            true
+        }
+    };
+    build_plugins();
+    ui.plugins.on_change(build_plugins);
+    {
+        let built = plugin_sections.clone();
+        let (ui_hub, weak) = (ui.plugins.clone(), plugin_region.downgrade());
+        ui.plugins.on_control(move || {
+            if weak.upgrade().is_none() {
+                return false;
+            }
+            for section in built.borrow().iter() {
+                section.dim_unfit(ui_hub.control());
+            }
+            true
+        });
     }
     let empty = ui::helper("No actions match your search.");
     empty.add_css_class("catalog-empty");
     empty.set_visible(false);
     list.append(&empty);
     let remembered_query = memory.query.clone();
+    let search_plugins = plugin_sections.clone();
     search.connect_search_changed(move |search| {
         *remembered_query.borrow_mut() = search.text().to_string();
         let query = search.text().to_lowercase();
         // Every section must be filtered, so this cannot short-circuit.
         let mut found = false;
-        for section in &sections {
+        for section in sections.iter().chain(search_plugins.borrow().iter()) {
             found |= section.filter(&query);
         }
         empty.set_visible(!found);
@@ -300,7 +376,7 @@ pub(crate) fn connect(
             // A dial has three events, so ask which one this action belongs to.
             let assign = assign.clone();
             choose_event(&dial, move |event| {
-                assign(action, Target::Dial(index, event));
+                assign(action.clone(), Target::Dial(index, event));
             });
             true
         });
@@ -325,27 +401,54 @@ struct Wiring<'a> {
     assign: &'a Assign,
 }
 
+/// What only some sections have: a remembered-state key and the widgets heading a plugin.
+#[derive(Default)]
+struct Extras<'a> {
+    expanded: bool,
+    preface: Option<&'a GtkBox>,
+    key: Option<String>,
+}
+
+impl Extras<'_> {
+    fn open(expanded: bool) -> Self {
+        Self {
+            expanded,
+            ..Self::default()
+        }
+    }
+}
+
 /// One collapsible category: a header toggle and its action rows.
 struct Section {
     container: GtkBox,
     header: Button,
     revealer: gtk::Revealer,
     chevron: gtk::Image,
-    rows: Vec<(Button, &'static str)>,
+    rows: Vec<(Button, String)>,
+    /// Plugin rows only: what each row needs, to dim the ones the selected control cannot take.
+    fit: Vec<Option<(bool, Vec<PluginControl>)>>,
     expanded: Rc<Cell<bool>>,
 }
 
 impl Section {
     fn new(
         list: &GtkBox,
-        title: &'static str,
+        title: &str,
         icon: BindingIcon,
-        entries: Vec<(&'static str, BindingIcon, CatalogAction)>,
-        expanded: bool,
+        entries: Vec<(String, Option<String>, BindingIcon, CatalogAction)>,
+        extras: Extras,
         wiring: &Wiring,
     ) -> Self {
         let Wiring { memory, ui, assign } = wiring;
-        let expanded = memory.open.borrow().get(title).copied().unwrap_or(expanded);
+        let Extras {
+            expanded,
+            preface,
+            key,
+        } = extras;
+        // Remembered open state is keyed apart from the title, which can show a status.
+        let key = key.unwrap_or_else(|| title.to_owned());
+        let title = title.to_owned();
+        let expanded = memory.open.borrow().get(&key).copied().unwrap_or(expanded);
         let container = GtkBox::new(Orientation::Vertical, 2);
         container.add_css_class("catalog-section");
         let header = Button::new();
@@ -354,7 +457,7 @@ impl Section {
         header.set_tooltip_text(Some(&format!("Show or hide {title} actions")));
         let line = GtkBox::new(Orientation::Horizontal, 8);
         line.append(&binding_icon::binding_icon(icon));
-        let name = Label::new(Some(title));
+        let name = Label::new(Some(&title));
         name.set_xalign(0.0);
         name.set_hexpand(true);
         name.add_css_class("catalog-category-name");
@@ -368,9 +471,22 @@ impl Section {
         container.append(&header);
         let body = GtkBox::new(Orientation::Vertical, 2);
         body.add_css_class("catalog-rows");
+        if let Some(preface) = preface {
+            body.append(preface);
+        }
         let rows: Vec<_> = entries
             .into_iter()
-            .map(|(label, icon, action)| add_row(&body, label, icon, action, ui, (*assign).clone()))
+            .map(|(label, subtitle, icon, action)| {
+                add_row(
+                    &body,
+                    label,
+                    subtitle.as_deref(),
+                    icon,
+                    action,
+                    ui,
+                    (*assign).clone(),
+                )
+            })
             .collect();
         let revealer = gtk::Revealer::builder()
             .transition_type(gtk::RevealerTransitionType::SlideDown)
@@ -384,6 +500,7 @@ impl Section {
             revealer,
             chevron,
             rows,
+            fit: Vec::new(),
             expanded: Rc::new(Cell::new(expanded)),
         };
         section.apply(expanded);
@@ -394,7 +511,7 @@ impl Section {
         section.header.connect_clicked(move |_| {
             let open = !state.get();
             state.set(open);
-            remembered.borrow_mut().insert(title, open);
+            remembered.borrow_mut().insert(key.clone(), open);
             if let (Some(revealer), Some(chevron)) = (revealer.upgrade(), chevron.upgrade()) {
                 revealer.set_reveal_child(open);
                 chevron.set_icon_name(Some(chevron_name(open)));
@@ -406,6 +523,26 @@ impl Section {
     fn apply(&self, open: bool) {
         self.revealer.set_reveal_child(open);
         self.chevron.set_icon_name(Some(chevron_name(open)));
+    }
+
+    /// Dim plugin rows that are disabled or do not fit the control being edited.
+    fn dim_unfit(&self, control: Option<PluginControl>) {
+        for ((row, label), fit) in self.rows.iter().zip(&self.fit) {
+            let Some((enabled, controls)) = fit else {
+                continue;
+            };
+            let fits = control.is_none_or(|control| controls.contains(&control));
+            row.set_sensitive(*enabled && fits);
+            row.set_tooltip_text(Some(&if !enabled {
+                "Enable this plugin to assign its actions.".to_owned()
+            } else if !fits {
+                "This action does not support the selected control.".to_owned()
+            } else {
+                format!(
+                    "Drag {label} onto a key or dial, or click to assign to the selected control."
+                )
+            }));
+        }
     }
 
     /// Show only matching rows; an empty query restores the user's own open/closed state.
@@ -427,6 +564,68 @@ impl Section {
     }
 }
 
+/// Rebuilds the plugin sidebar items: a shared toolbar, then one collapsible item per plugin.
+fn populate_plugins(region: &GtkBox, built: &RefCell<Vec<Section>>, wiring: &Wiring) {
+    while let Some(child) = region.first_child() {
+        region.remove(&child);
+    }
+    built.borrow_mut().clear();
+    let hub = &wiring.ui.plugins;
+    region.append(&plugin_ui::toolbar(hub));
+    let fail: Rc<dyn Fn(&str)> = {
+        let ui = wiring.ui.clone();
+        Rc::new(move |message| ui.error(message))
+    };
+    for (manifest, enabled) in hub.plugins() {
+        let preface = plugin_ui::preface(hub, &manifest, enabled, fail.clone());
+        let entries = manifest
+            .actions
+            .iter()
+            .map(|action| {
+                let controls: Vec<_> = action
+                    .controls
+                    .iter()
+                    .map(|control| plugin_ui::control_name(*control))
+                    .collect();
+                (
+                    action.name.clone(),
+                    Some(controls.join(" · ")),
+                    BindingIcon::More,
+                    CatalogAction {
+                        picker: plugin_ui::PLUGIN_PICKER,
+                        feature: None,
+                        plugin: Some((manifest.id.clone(), action.id.clone())),
+                    },
+                )
+            })
+            .collect();
+        let title = if enabled {
+            manifest.name.clone()
+        } else {
+            format!("{} (disabled)", manifest.name)
+        };
+        let mut section = Section::new(
+            region,
+            &title,
+            BindingIcon::More,
+            entries,
+            Extras {
+                expanded: false,
+                preface: Some(&preface),
+                key: Some(format!("plugin:{}", manifest.id)),
+            },
+            wiring,
+        );
+        section.fit = manifest
+            .actions
+            .iter()
+            .map(|action| Some((enabled, action.controls.clone())))
+            .collect();
+        section.dim_unfit(hub.control());
+        built.borrow_mut().push(section);
+    }
+}
+
 fn chevron_name(open: bool) -> &'static str {
     if open {
         "pan-down-symbolic"
@@ -437,23 +636,25 @@ fn chevron_name(open: bool) -> &'static str {
 
 fn add_row(
     list: &GtkBox,
-    label: &'static str,
+    label: String,
+    subtitle: Option<&str>,
     icon: BindingIcon,
     action: CatalogAction,
     ui: &BindingUi,
     assign: Assign,
-) -> (Button, &'static str) {
+) -> (Button, String) {
     let row = row_button(
-        label,
-        None,
+        &label,
+        subtitle,
         icon,
         &format!("Drag {label} onto a key or dial, or click to assign to the selected control."),
     );
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY)
         .build();
+    let dragged = action.clone();
     source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&action.to_value()))
+        Some(gtk::gdk::ContentProvider::for_value(&dragged.to_value()))
     });
     let weak = row.downgrade();
     source.connect_drag_begin(move |source, _| {
@@ -471,10 +672,10 @@ fn add_row(
         let model = ui.model.get();
         match (ui.control_kind(), number) {
             (ControlKind::Button, Some(index)) if index < usize::from(model.keys()) => {
-                assign(action, Target::Key(index));
+                assign(action.clone(), Target::Key(index));
             }
             (ControlKind::Encoder, Some(index)) if index < usize::from(model.dials) => {
-                assign(action, Target::Dial(index, ui.event_kind()));
+                assign(action.clone(), Target::Dial(index, ui.event_kind()));
             }
             _ => ui.error("Select a key or a dial before assigning an action."),
         }

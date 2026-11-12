@@ -42,6 +42,8 @@ pub enum ActionKind {
     Shortcut,
     EmitLegacy,
     Extended,
+    /// An action offered by an external plugin, configured in the plugin editor.
+    Plugin,
 }
 
 /// The control kinds `model` has: its keys, plus dials and touch strip when present.
@@ -264,6 +266,7 @@ pub fn action_from_fields(
         ActionKind::Extended => {
             return Err("configure the selected action in its category fields".into())
         }
+        ActionKind::Plugin => return Err("configure the selected plugin action in its form".into()),
     };
     crate::layers::normalize_keyboard_action(action).map_err(|error| EditorError(error.to_string()))
 }

@@ -2,10 +2,12 @@
 
 use crate::{
     desktop_actions::DesktopAction, device_control::DeviceAction, obs::ObsAction,
-    organization::NavigationAction,
+    organization::NavigationAction, plugins::PluginBinding,
 };
 use serde::{Deserialize, Serialize};
 use std::io;
+
+const MAX_STORED_ACTION: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TouchscreenAction {
@@ -20,7 +22,11 @@ pub enum FeatureAction {
     Touchscreen(TouchscreenAction),
     Device(DeviceAction),
     Obs(ObsAction),
-    Timer { seconds: u32 },
+    /// An action offered by an external plugin; valid even when the plugin is not installed.
+    Plugin(PluginBinding),
+    Timer {
+        seconds: u32,
+    },
     CancelTimer,
 }
 
@@ -31,6 +37,9 @@ impl FeatureAction {
             Self::Navigation(action) => action.validate(),
             Self::Device(action) => action.validate(),
             Self::Obs(action) => action.validate(),
+            Self::Plugin(binding) => binding
+                .validate()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string())),
             Self::Timer { seconds } if !(1..=86_400).contains(seconds) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Timer duration must be between 1 second and 24 hours",
@@ -49,6 +58,7 @@ impl FeatureAction {
             }
             Self::Device(action) => action.summary(),
             Self::Obs(action) => action.summary(),
+            Self::Plugin(binding) => format!("Plugin {}: {}", binding.plugin_id, binding.action_id),
             Self::Timer { seconds } => format!("Timer {seconds}s"),
             Self::CancelTimer => "Cancel timer".into(),
         }
@@ -61,7 +71,7 @@ impl FeatureAction {
             other => serde_json::to_string(other),
         }
         .map_err(io::Error::other)?;
-        if value.len() > 4096 {
+        if value.len() > MAX_STORED_ACTION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Action settings exceed the 4096-byte storage limit",
@@ -73,6 +83,13 @@ impl FeatureAction {
     pub fn decode(value: &str) -> io::Result<Self> {
         let action: Self = serde_json::from_str(value)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        // Plugin settings are third-party sized; hold them to the limit encode enforces.
+        if matches!(action, Self::Plugin(_)) && value.len() > MAX_STORED_ACTION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Action settings exceed the 4096-byte storage limit",
+            ));
+        }
         action.validate()?;
         Ok(match action {
             Self::Desktop(desktop) => Self::Desktop(desktop.canonical()),

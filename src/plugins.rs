@@ -25,6 +25,8 @@ pub use manifest::{
 const STATE_FILE: &str = "plugins.json";
 const MAX_STATE_BYTES: u64 = 16 * 1024;
 const MAX_PLUGINS: usize = 64;
+const MAX_BINDING_SETTINGS: usize = 16;
+const MAX_BINDING_TEXT: usize = 1024;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Everything that can go wrong while discovering, configuring or invoking a plugin.
@@ -108,6 +110,41 @@ impl PluginBinding {
             action_id: action_id.into(),
             settings,
         }
+    }
+
+    /// Checks the binding's shape without a manifest, so it stays valid while its plugin is
+    /// missing or disabled: ids, plain setting values (text, integer, boolean) and total size.
+    /// Field-level limits are checked against the manifest by [`PluginRegistry::validate_binding`].
+    pub fn validate(&self) -> Result<(), PluginError> {
+        let invalid = |message: String| PluginError::InvalidSettings(message);
+        valid_id(&self.plugin_id).map_err(|m| invalid(format!("plugin id: {m}")))?;
+        valid_id(&self.action_id).map_err(|m| invalid(format!("action id: {m}")))?;
+        if self.settings.len() > MAX_BINDING_SETTINGS {
+            return Err(invalid(format!(
+                "more than {MAX_BINDING_SETTINGS} settings"
+            )));
+        }
+        for (key, value) in &self.settings {
+            valid_id(key).map_err(|m| invalid(format!("setting `{key}`: {m}")))?;
+            let plain = match value {
+                serde_json::Value::Bool(_) => true,
+                serde_json::Value::Number(number) => number.is_i64(),
+                serde_json::Value::String(text) => text.chars().count() <= MAX_BINDING_TEXT,
+                _ => false,
+            };
+            if !plain {
+                return Err(invalid(format!(
+                    "setting `{key}` must be text up to {MAX_BINDING_TEXT} characters, an integer or a boolean"
+                )));
+            }
+        }
+        let size = serde_json::to_vec(&self.settings).map_or(usize::MAX, |bytes| bytes.len());
+        if size > MAX_SETTINGS_BYTES {
+            return Err(invalid(format!(
+                "settings exceed the {MAX_SETTINGS_BYTES}-byte limit"
+            )));
+        }
+        Ok(())
     }
 }
 

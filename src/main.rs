@@ -33,6 +33,8 @@ mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
+mod plugin_runtime;
+mod plugin_ui;
 mod shortcut_reference;
 mod timer_artwork;
 mod tray;
@@ -235,6 +237,8 @@ struct DeviceLifecycle {
     polling: Option<glib::SourceId>,
     /// One per session, in the order the sessions were built.
     workers: Vec<LayerWorker>,
+    /// One plugin worker per session; stopped together, then joined with a bounded wait.
+    plugin_workers: Vec<plugin_runtime::PluginWorker>,
     focus: Option<sdeck_plus::app_focus::FocusObserver>,
 }
 
@@ -251,6 +255,9 @@ impl DeviceLifecycle {
                 eprintln!("Layer shutdown delivery failed: {error}");
             }
         }
+        for worker in &self.plugin_workers {
+            worker.request_stop();
+        }
         if let Some(hid) = &self.hid {
             hid.request_stop();
         }
@@ -264,6 +271,11 @@ impl DeviceLifecycle {
         for worker in self.workers.drain(..) {
             if worker.handle.join().is_err() {
                 eprintln!("Layer worker panicked during shutdown");
+            }
+        }
+        for mut worker in self.plugin_workers.drain(..) {
+            if !worker.shutdown() {
+                eprintln!("A plugin request was still running at shutdown");
             }
         }
     }
@@ -593,6 +605,11 @@ fn build_session(
     );
     // Editing is switched off on the body alone: the header stays usable.
     body.attach(host.viewport, body.root.upcast_ref());
+    match body.feature_runtime.start_plugins(&events) {
+        Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
+        Ok(None) => {}
+        Err(error) => eprintln!("Could not start the plugin worker: {error}"),
+    }
     body.feature_runtime
         .configure(organization, obs, device_sender, events);
     if !body.feature_runtime.organization_available() {
@@ -1110,6 +1127,9 @@ fn build_body(
         modifier_row,
     );
     // Everything below, summaries included, describes the model of these stores.
+    // Tests never read the user's plugin folder; they load a temporary root themselves.
+    #[cfg(not(test))]
+    binding_ui.plugins.load_default();
     binding_ui.set_model(layers.borrow().model());
     binding_ui.refresh_layer_targets(&layers.borrow().names());
     binding_ui.update_for_control(false);
@@ -1246,6 +1266,7 @@ fn build_body(
         });
     settings_card.append(&action_fields);
     settings_card.append(&binding_ui.feature_editor.root);
+    settings_card.append(&*binding_ui.plugin_editor);
     let options_heading = inspector_heading("Options");
     binding_ui
         .return_toggle
@@ -2032,6 +2053,9 @@ struct BindingUi {
     args_row: GtkBox,
     modifier_row: GtkBox,
     feature_editor: feature_editor::FeatureEditor,
+    /// The session's view of installed plugins and the form for their actions.
+    plugins: plugin_ui::PluginHub,
+    plugin_editor: plugin_ui::PluginEditor,
     action_guidance: Label,
     hold_toggle: CheckButton,
     hold_reset: Rc<Cell<bool>>,
@@ -2177,6 +2201,7 @@ impl BindingUi {
         shortcut_preview.set_xalign(0.0);
         shortcut_preview.set_visible(false);
         modifier_row.append(&shortcut_preview);
+        let plugins = plugin_ui::PluginHub::default();
         let ui = Self {
             layer_picker,
             layer_model,
@@ -2203,6 +2228,8 @@ impl BindingUi {
             args_row,
             modifier_row,
             feature_editor: feature_editor::FeatureEditor::new(),
+            plugin_editor: plugin_ui::PluginEditor::new(&plugins),
+            plugins,
             action_guidance,
             hold_toggle: sdeck_plus::key_hold_editor::hold_toggle(),
             hold_reset: Rc::new(Cell::new(false)),
@@ -2272,6 +2299,17 @@ impl BindingUi {
             removed: Rc::new(RefCell::new(None)),
         };
         ui.connect_dirty_tracking();
+        let weak = ui.action_picker.downgrade();
+        let hub = ui.plugins.clone();
+        ui.plugins.on_change(move || {
+            let Some(picker) = weak.upgrade() else {
+                return false;
+            };
+            if !hub.plugins().is_empty() {
+                add_plugin_row(&picker);
+            }
+            true
+        });
         let picker = ui.action_picker.downgrade();
         ui.feature_editor.connect_icon_changed(move |icon| {
             let icon = icon.unwrap_or(BindingIcon::More);
@@ -2574,7 +2612,7 @@ impl BindingUi {
             ActionKind::OpenApplication => "Enter the executable path and one argument per line.",
             ActionKind::Shortcut => "Type a key or full chord. The checkboxes add modifiers.",
             ActionKind::EmitLegacy => "Send a named internal event. Mainly used by older bindings.",
-            ActionKind::Extended => "",
+            ActionKind::Extended | ActionKind::Plugin => "",
         });
         if matches!(kind, ActionKind::Shortcut) {
             self.action_guidance.set_markup(
@@ -2584,7 +2622,7 @@ impl BindingUi {
         // "Do nothing" needs no explaining on a key, whose selectors are hidden.
         let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
         self.action_guidance
-            .set_visible(!matches!(kind, ActionKind::Extended) && !idle_key);
+            .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
         if let Some(label) = self
             .text_row
             .first_child()
@@ -2597,12 +2635,16 @@ impl BindingUi {
                 ActionKind::None
                 | ActionKind::MoveToLayer
                 | ActionKind::OpenApplication
-                | ActionKind::Extended => "",
+                | ActionKind::Extended
+                | ActionKind::Plugin => "",
             });
         }
         self.feature_editor
             .root
             .set_visible(matches!(kind, ActionKind::Extended));
+        self.plugin_editor
+            .set_visible(matches!(kind, ActionKind::Plugin));
+        self.sync_plugin_control();
         self.layer_target_row
             .set_visible(matches!(kind, ActionKind::MoveToLayer));
         self.application_row
@@ -2626,7 +2668,8 @@ impl BindingUi {
             ActionKind::None
             | ActionKind::MoveToLayer
             | ActionKind::OpenApplication
-            | ActionKind::Extended => "",
+            | ActionKind::Extended
+            | ActionKind::Plugin => "",
         }));
     }
 
@@ -2637,7 +2680,22 @@ impl BindingUi {
         self.return_target.set_selected(0);
     }
 
+    /// Adds the "Plugin action" row once a plugin exists or a plugin binding is shown, so
+    /// an installation without plugins offers no empty choice.
+    fn ensure_plugin_row(&self) {
+        add_plugin_row(&self.action_picker);
+    }
+
+    /// Tells the plugin editor and sidebar which control (and event) is being edited.
+    fn sync_plugin_control(&self) {
+        self.plugins.set_control(Some(plugin_ui::plugin_control(
+            self.control_kind(),
+            self.event_kind(),
+        )));
+    }
+
     fn load_selected_binding(&self, layers: &RefCell<LayerStore>) {
+        self.sync_plugin_control();
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
         self.clear_action_fields();
@@ -2702,6 +2760,12 @@ impl BindingUi {
             self.info_source.selected().to_string(),
             self.info_location.text().to_string(),
             self.feature_editor.snapshot(),
+            // The plugin list can change under an idle editor; only a plugin draft counts.
+            if self.action_kind() == ActionKind::Plugin {
+                self.plugin_editor.snapshot()
+            } else {
+                String::new()
+            },
         ]
         .join("\u{1f}")
     }
@@ -2782,6 +2846,7 @@ impl BindingUi {
         self.args_view
             .buffer()
             .connect_changed(move |_| args_notify());
+        self.plugin_editor.connect_changed(notify.clone());
         self.feature_editor.connect_changed(notify);
     }
 
@@ -2860,6 +2925,15 @@ impl BindingUi {
         layers: &RefCell<LayerStore>,
     ) -> Result<(String, Trigger, Action), String> {
         let (layer, trigger) = self.selected_layer_and_trigger(layers)?;
+        if matches!(self.action_kind(), ActionKind::Plugin) {
+            return Ok((
+                layer,
+                trigger,
+                Action::Feature(sdeck_plus::features::FeatureAction::Plugin(
+                    self.plugin_editor.binding()?,
+                )),
+            ));
+        }
         if matches!(self.action_kind(), ActionKind::Extended) {
             return Ok((
                 layer,
@@ -2923,6 +2997,7 @@ impl BindingUi {
         self.populate_info(None, "");
         self.populate_return(None);
         self.feature_editor.reset();
+        self.plugin_editor.reset();
         self.text_entry.set_text("");
         self.application_entry.set_text("");
         let buffer = self.args_view.buffer();
@@ -2936,6 +3011,11 @@ impl BindingUi {
     fn populate_action(&self, action: &Action) {
         match action {
             Action::None => self.action_picker.set_selected(7),
+            Action::Feature(sdeck_plus::features::FeatureAction::Plugin(binding)) => {
+                self.ensure_plugin_row();
+                self.action_picker.set_selected(plugin_ui::PLUGIN_PICKER);
+                self.plugin_editor.populate(binding);
+            }
             Action::Feature(feature) => {
                 self.action_picker.set_selected(
                     if matches!(
@@ -3022,6 +3102,7 @@ impl BindingUi {
             4 => ActionKind::EmitLegacy,
             5 | 6 => ActionKind::Extended,
             7 => ActionKind::None,
+            plugin_ui::PLUGIN_PICKER => ActionKind::Plugin,
             _ => ActionKind::MoveToLayer,
         }
     }
@@ -3041,6 +3122,17 @@ impl BindingUi {
             modifiers.push("ALT".into());
         }
         modifiers
+    }
+}
+
+/// Appends the "Plugin action" choice once; it is always the row after "None".
+fn add_plugin_row(picker: &gtk::DropDown) {
+    if let Some(model) = picker
+        .model()
+        .and_then(|model| model.downcast::<gtk::StringList>().ok())
+        .filter(|model| model.n_items() == plugin_ui::PLUGIN_PICKER)
+    {
+        model.append("Plugin action");
     }
 }
 
@@ -4954,6 +5046,7 @@ mod tests {
     mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
+    mod plugin_ui_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]

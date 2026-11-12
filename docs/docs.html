@@ -183,6 +183,7 @@
             <li><a href="#profiles-pages-folders">Profiles, pages and folders</a></li>
             <li><a href="#appearance">Appearance</a></li>
             <li><a href="#obs-studio">OBS Studio</a></li>
+            <li><a href="#plugins">Plugins</a></li>
             <li><a href="#data-tray-lifecycle">Data, tray and lifecycle</a></li>
           </ol>
         </li>
@@ -713,6 +714,26 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>Only loopback endpoints are accepted. Requests run on a worker with bounded waits, and authentication, connection and request errors appear in the window.
                  Credentials are stored in owner-only <code>obs.json</code>, not in bindings, and are masked in the editor and diagnostics.
                  The app does not enable the OBS server or change its configuration.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="plugins" style="--c: var(--fam-obs)">
+          <h3>Plugins</h3>
+          <div class="cards">
+            <article class="card wide">
+              <h4>External plugins</h4>
+              <p>A plugin is a separate program that adds actions. Each installed plugin appears as its own collapsible item in the <strong>Actions</strong> catalog, below the
+                 built-in categories, with its status. Plugins live in <code>$XDG_DATA_HOME/sdeck-plus/plugins/&lt;id&gt;/</code> (or
+                 <code>$HOME/.local/share/sdeck-plus/plugins/&lt;id&gt;/</code>), shared by every device model. The app only reads each <code>manifest.json</code> while browsing and
+                 never installs or enables anything by itself; <strong>Rescan plugins</strong> reads the folder again. Folders with a bad manifest are listed with the reason and
+                 do not affect the others or the built-in actions.</p>
+              <p><strong>Plugins run with your user's privileges. Process separation is not sandboxing</strong>, so tick <strong>Enable</strong> only for plugins you trust.
+                 Actions of a disabled plugin are listed but cannot be assigned or run. Assign an action like any other, complete its generated form (text, bounded number or
+                 check box fields) and <strong>Save binding</strong>; saving never runs the plugin, only <strong>Test action</strong> or the control does. Each press runs the plugin
+                 once on its own worker with a 5 second deadline, so a slow plugin cannot delay built-in actions, and errors appear in the status line.</p>
+              <p>Bindings keep the plugin and action ids and the field values. If the plugin is missing or no longer offers the action, the binding is kept as saved and the editor
+                 says why. Exported bundles contain the bindings only, never plugin programs or the enabled list. See <code>docs/plugins.md</code> for the manifest and protocol.</p>
             </article>
           </div>
         </div>

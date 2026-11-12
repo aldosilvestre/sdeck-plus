@@ -257,6 +257,7 @@ impl BindingIcon {
                 ObsAction::ToggleMute(_) => Self::MicrophoneMute,
                 ObsAction::SourceVisibility { .. } => Self::Visibility,
             },
+            FeatureAction::Plugin(_) => Self::More,
             FeatureAction::Timer { .. } => Self::Timer,
             FeatureAction::CancelTimer => Self::CancelTimer,
         }
@@ -275,6 +276,7 @@ impl BindingIcon {
             5 => Self::More,
             6 => Self::PlaySound,
             7 => Self::NoAction,
+            8 => Self::More,
             _ => Self::Generic,
         }
     }
