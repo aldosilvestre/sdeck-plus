@@ -146,7 +146,7 @@ returned truncated (4096 bytes). Exit status must be 0.
 - **Sidebar**: each valid plugin is its own collapsible item in the Actions catalog, titled with
   its name plus "(disabled)" while off. The body shows the untrusted-code warning, an explicit
   "Enable" check box and the plugin's actions with the controls they support. Malformed plugin
-  folders and an invalid `plugins.json` are shown above the items; "Rescan plugins" rereads the
+  folders and an invalid `plugins.json` are shown above the items; "Update plugins" (the icon at the right end of the binding toolbar) rereads the
   folder. Nothing is enabled or run by browsing.
 - **Form**: choosing an action opens the generic "Plugin action" form generated from the
   manifest fields (text, bounded integer, boolean). Only actions whose `controls` include the
@@ -163,17 +163,22 @@ returned truncated (4096 bytes). Exit status must be 0.
   At shutdown queued requests are dropped and a running one is waited for at most 6 seconds.
   Results and errors arrive on the same status line as other actions.
 - Windows with several device models each keep their own view of the folder; enabling in one
-  becomes visible in another after "Rescan plugins", although runs always use the file on disk.
+  becomes visible in another after "Update plugins", although runs always use the file on disk.
 
-## Bundled demo
+## Reference plugins
 
-`extensions/discord/` is a demonstration plugin (Hyprland shortcut actions and a bot message). Copy it
-into `<data dir>/sdeck-plus/plugins/discord/` and enable it explicitly; see its `README.md` for the
-token file rules and limits.
+The demonstration plugins are not part of this repository; each one is its own project (one
+repository per plugin) that declares what it needs in `manifest.json` and in its README:
 
-`extensions/mergbw/` is a second demonstration plugin that writes MeRGBW packets to a Bluetooth
-hexagon light through BlueZ (`busctl`). Its protocol comes from jmbwell/mergbw and is unverified on
-a TG609; see its `README.md` for the limits (5 s first press, connection stays open).
+- `sdeck-plugin-discord`: Hyprland shortcut actions and a bot message. See its `README.md` for the
+  token file rules and limits.
+- `sdeck-plugin-mergbw`: writes MeRGBW packets to a Bluetooth hexagon light through BlueZ
+  (`busctl`). Its protocol comes from jmbwell/mergbw; see its `README.md` for what was and was not
+  verified on a Hexagon Light TG609, and for the limits (5 s first press, connection stays open).
+
+Both are local Git projects for now (no remote repository has been published). To use one, copy
+its `manifest.json` and `run` into `<data dir>/sdeck-plus/plugins/<id>/`, update the plugins in
+the app and enable it explicitly.
 
 ## Validating a plugin project
 
