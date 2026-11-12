@@ -3,7 +3,7 @@
 //! enabled state; a plugin runs solely through the plugin worker (`plugin_runtime`).
 use gtk::{prelude::*, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use sdeck_plus::binding_editor::{ControlKind, EventKind};
-use sdeck_plus::plugins::{missing_commands, Requirement};
+use sdeck_plus::plugins::{missing_commands, Requirement, StageOptions};
 use sdeck_plus::plugins::{
     PluginAction, PluginBinding, PluginControl, PluginManifest, PluginRegistry, SettingField,
     Settings,
@@ -12,7 +12,11 @@ use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
-    rc::Rc,
+    rc::{Rc, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 /// The action-type row the plugin editor answers to (after "None").
@@ -78,6 +82,27 @@ struct HubState {
     control: Cell<Option<PluginControl>>,
     changed: RefCell<Vec<Listener>>,
     control_changed: RefCell<Vec<Listener>>,
+    /// Set while an install runs on a worker; installs are one at a time because the library
+    /// does not serialise replacements of the same plugin.
+    installing: Arc<AtomicBool>,
+    add_dialog: RefCell<Weak<crate::plugin_add_ui::State>>,
+    /// Staging options tests inject (a fake git, a scratch temp directory); never configuration.
+    stage_override: RefCell<Option<StageOptions>>,
+    #[cfg(test)]
+    install_delay: Cell<std::time::Duration>,
+    #[cfg(test)]
+    worker_panics: Cell<bool>,
+    #[cfg(test)]
+    spawn_fails: Cell<bool>,
+}
+
+/// Held by the worker that installs; releases the hub's install slot when dropped.
+pub(crate) struct InstallGuard(Arc<AtomicBool>);
+
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// One session's view of the plugin registry. Nothing is read until a root is loaded, so
@@ -119,6 +144,69 @@ impl PluginHub {
             .borrow()
             .as_ref()
             .map(|registry| registry.root().to_owned())
+    }
+
+    /// Takes the single install slot; `None` while another install is running.
+    pub(crate) fn try_begin_install(&self) -> Option<InstallGuard> {
+        self.0
+            .installing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| InstallGuard(self.0.installing.clone()))
+    }
+
+    /// How the add dialog stages candidates: defaults, aimed at this hub's plugins folder.
+    pub(crate) fn stage_options(&self) -> StageOptions {
+        let options = self.0.stage_override.borrow().clone().unwrap_or_default();
+        match self.root() {
+            Some(root) => options.plugins_root(root),
+            None => options,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn use_stage_options(&self, options: StageOptions) {
+        *self.0.stage_override.borrow_mut() = Some(options);
+    }
+
+    /// Test hook: the install worker waits this long before installing.
+    #[cfg(test)]
+    pub(crate) fn set_install_delay(&self, delay: std::time::Duration) {
+        self.0.install_delay.set(delay);
+    }
+
+    /// Test hooks: the next workers panic / thread creation fails.
+    #[cfg(test)]
+    pub(crate) fn set_worker_panics(&self, on: bool) {
+        self.0.worker_panics.set(on);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn worker_panics(&self) -> bool {
+        self.0.worker_panics.get()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_spawn_fails(&self, on: bool) {
+        self.0.spawn_fails.set(on);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spawn_fails(&self) -> bool {
+        self.0.spawn_fails.get()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_delay(&self) -> std::time::Duration {
+        self.0.install_delay.get()
+    }
+
+    pub(crate) fn add_dialog(&self) -> Option<Rc<crate::plugin_add_ui::State>> {
+        self.0.add_dialog.borrow().upgrade()
+    }
+
+    pub(crate) fn set_add_dialog(&self, dialog: &Rc<crate::plugin_add_ui::State>) {
+        *self.0.add_dialog.borrow_mut() = Rc::downgrade(dialog);
     }
 
     pub(crate) fn rescan(&self) {
@@ -236,25 +324,38 @@ pub(crate) fn rescan_button(hub: &PluginHub) -> Button {
     rescan
 }
 
-/// Where the plugin entries of the sidebar begin: a divider, a "Plugins" heading, then plugin
-/// problems or the empty-state hint. `None` while there is no plugin folder, no plugin and no
-/// problem, so the built-in categories stand alone.
-pub(crate) fn heading(hub: &PluginHub) -> Option<GtkBox> {
+/// Where the plugin entries of the sidebar begin: a divider, a "Plugins" heading row with the
+/// icon-only "Add plugin…" button, then plugin problems or the empty-state hint. Always shown,
+/// so adding a plugin is discoverable before any plugin exists. `installed` receives the message
+/// of a finished install.
+pub(crate) fn heading(hub: &PluginHub, installed: crate::plugin_add_ui::Notify) -> GtkBox {
     let problems = hub.problems();
     let root = hub.root();
-    if root.is_none() && problems.is_empty() && hub.plugins().is_empty() {
-        return None;
-    }
     let bar = GtkBox::new(Orientation::Vertical, 6);
     bar.add_css_class("plugin-toolbar");
     bar.append(&gtk::Separator::new(Orientation::Horizontal));
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    row.add_css_class("plugin-heading-row");
     let title = Label::builder()
         .label("Plugins")
         .xalign(0.0)
+        .hexpand(true)
         .accessible_role(gtk::AccessibleRole::Heading)
         .build();
     title.add_css_class("plugin-heading");
-    bar.append(&title);
+    row.append(&title);
+    let add = crate::ui::icon_button("list-add-symbolic", "Add plugin…");
+    add.update_property(&[gtk::accessible::Property::Label("Add plugin")]);
+    add.add_css_class("plugin-add");
+    let hub_for_add = hub.clone();
+    add.connect_clicked(move |button| {
+        let parent = button
+            .root()
+            .and_then(|root| root.downcast::<gtk::Window>().ok());
+        crate::plugin_add_ui::open(parent.as_ref(), &hub_for_add, installed.clone());
+    });
+    row.append(&add);
+    bar.append(&row);
     for problem in problems {
         let label = Label::builder()
             .label(&problem)
@@ -267,15 +368,16 @@ pub(crate) fn heading(hub: &PluginHub) -> Option<GtkBox> {
         bar.append(&label);
     }
     if hub.plugins().is_empty() {
-        let place = root.map_or_else(
-            || "the plugin folder".into(),
-            |root| root.display().to_string(),
-        );
-        bar.append(&crate::ui::helper(&format!(
-            "No plugins found. Put a plugin folder in {place} and use Update plugins."
-        )));
+        let hint = match root {
+            Some(root) => format!(
+                "No plugins yet. Use the add button, or copy a plugin folder into {} and use Update plugins.",
+                root.display()
+            ),
+            None => "No plugins yet. Use the add button to add one.".to_owned(),
+        };
+        bar.append(&crate::ui::helper(&hint));
     }
-    Some(bar)
+    bar
 }
 
 /// The warning and the explicit enable switch at the top of one plugin's sidebar item.

@@ -571,9 +571,14 @@ fn populate_plugins(region: &GtkBox, built: &RefCell<Vec<Section>>, wiring: &Wir
     }
     built.borrow_mut().clear();
     let hub = &wiring.ui.plugins;
-    if let Some(heading) = plugin_ui::heading(hub) {
-        region.append(&heading);
-    }
+    let installed: plugin_add_ui::Notify = {
+        let ui = wiring.ui.clone();
+        Rc::new(move |message, failed| {
+            ui.status.set_text(message);
+            crate::ui::feedback(&ui.status, failed);
+        })
+    };
+    region.append(&plugin_ui::heading(hub, installed));
     let fail: Rc<dyn Fn(&str)> = {
         let ui = wiring.ui.clone();
         Rc::new(move |message| ui.error(message))

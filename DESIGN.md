@@ -47,12 +47,14 @@ with the controls they support as the row subtitle. A plugin that declares
 version, "(optional)", description as tooltip) with an alert-role error line such as
 "Missing: hyprctl" for each required command not found on `PATH`; it is rechecked on
 every rescan, never blocks enabling or assigning, and runs nothing. A thin divider and a small muted
-**Plugins** heading (heading role, not clickable) mark where the plugin entries begin;
-it is shown only while a plugin folder, a plugin or a plugin problem exists, so the
-built-in categories stand alone otherwise. Under it come malformed-plugin and invalid
-enabled-state messages (labels with the alert role, error colour) or the empty-state
-hint naming the plugin folder. Rescanning is not in the sidebar: see the binding
-toolbar below.
+**Plugins** heading row (heading role label, not clickable) mark where the plugin entries
+begin. The row is always shown, so adding a plugin is discoverable before any plugin
+exists, and ends with an icon-only **Add plugin…** button (`list-add-symbolic`; tooltip
+"Add plugin…", accessible name "Add plugin") that opens the add dialog below. Under the
+row come malformed-plugin and invalid enabled-state messages (labels with the alert role,
+error colour) or the empty-state hint ("No plugins yet. Use the add button, or copy a plugin
+folder into <folder> and use Update plugins."; "No plugins yet. Use the add button to add one." when no folder is known). Rescanning is not in the sidebar: see the
+binding toolbar below.
 Actions of a disabled plugin, or that do not fit the selected control (key, dial
 turn, dial press, touch strip), are dimmed with an explanatory tooltip. Assigning one
 always opens the generic **Plugin action** form (plugin and action drop-downs, then
@@ -61,6 +63,55 @@ assistive technology) and stays a draft until Save binding; plugins cannot add t
 own widgets. A saved binding whose plugin is missing or changed shows a notice and is
 kept verbatim until another action is chosen. Secondary
 organization and artwork tools use progressive disclosure.
+
+**Add plugin dialog.** A modal window transient for the main window, one instance at a
+time (pressing the button again presents it). It opens with the entry focused, Enter in the
+entry runs the check and Escape closes it. Top to bottom: a short explanation ("Add a plugin
+from a folder on this computer or from an HTTPS repository address. Nothing runs until you
+enable it."), the **Plugin source** entry (placeholder "Folder path or https:// repository
+address") with **Browse…** (a modal folder chooser that fills the entry), **Check plugin**
+with a Cancel button, spinner and status text while a check runs, a list of alert-role
+error labels, a scrolling preview card, the pinned notices, and Close plus Install (or
+Replace). The card shows name, id and version; the source (folder path, or repository
+address with the first 10 characters of the downloaded commit); file count and size; each
+action with its controls and settings; and the requirements with a "Missing: <command>" alert
+for a required command not on `PATH` (it never blocks installing). The pinned notices under
+the card always state that the plugin runs with the user's privileges once enabled and that
+its code should be read first, and, when the id is installed, its version and that replacing
+disables it until it is enabled again.
+
+States: **idle** (Install disabled), **checking** (entry, Browse and Check disabled; spinner,
+Cancel), **valid preview** (Install enabled for exactly the text in the entry; editing the
+entry or Browse drops the preview and the staged copy and returns to idle), **invalid** (one or
+more readable sentences, Install disabled; nothing is installed or left staged), **replace**
+(valid preview of an id that is already installed; the button reads Replace) and
+**installing** (everything disabled; spinner). An AlreadyInstalled answer from a race moves the
+dialog to replace with an explanation instead of failing silently. On success the dialog closes,
+the sidebar is rescanned so the plugin appears as its own disabled item, and the status line
+says "Installed <name> <version>. It is disabled: enable it in the Plugins section." (a
+replacement also says it was disabled and must be enabled again).
+
+Safety rules: only `https://` repository addresses are accepted and are fetched with the
+system git (hardened by the library; a missing git is explained and a folder suggested);
+checking and installing run on a worker thread, never the GTK thread; a candidate is validated
+with the registry rules before anything is installed; installed plugins are never enabled;
+Replace is used only after an explicit press on a valid preview and disables the plugin;
+installs are serialised through one hub-wide slot (a second request is refused); closing the
+dialog never blocks: it cancels a running check and returns, and the main-loop poll joins the
+finished worker later (a cancelled check leaves no staging directory; an install already
+started completes, then the sidebar is rescanned and the status line reports it). Errors are sentences, never debug output.
+Everything shown from a plugin or from git (names, labels, requirement text, git's message) is
+displayed literally (no markup) with control, zero-width and bidirectional-format characters
+removed; a long preview heading is ellipsized with the full text as its tooltip. Releasing a
+staged copy (closing, Escape, editing, a failed replace, the main window closing) never blocks
+the GTK thread: the directory is deleted on a short-lived thread, and an install that finishes
+or fails after the dialog closed is reported on the status line.
+
+Known limits: Replace overwrites whatever version is installed at that moment, which may differ
+from the one the preview showed if another install ran in between; a very long unbroken name can
+make the dialog wider than its default; the staged copy is validated and copied at check time, so
+later edits to the source folder are not installed (the previewed bytes are).
+
 
 Touchscreen configuration is profile-owned and has its own page selection,
 independent of keypad pages and folders. Only the touch inspector shows the

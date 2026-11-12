@@ -402,6 +402,10 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .catalog-action:hover .catalog-icon { border-color: @desk_cyan; }
 .binding-toolbar { padding-bottom: 8px; border-bottom: 1px solid alpha(@desk_edge, 0.8); margin-bottom: 4px; }
 .plugin-heading { color: @desk_muted; font-size: 11px; font-weight: 700; padding: 2px 8px 0 8px; }
+.plugin-heading-row { padding-right: 4px; }
+button.plugin-add { min-width: 28px; min-height: 28px; padding: 2px; }
+.plugin-add-dialog .plugin-preview { padding: 2px 2px 8px 2px; }
+.plugin-add-dialog .plugin-preview .section-label { font-size: 13px; padding-top: 6px; }
 .binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
 popover.organize-popover > contents { border-radius: 14px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 14px 34px alpha(black, 0.28); }

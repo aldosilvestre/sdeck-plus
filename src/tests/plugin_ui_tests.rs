@@ -258,10 +258,10 @@ fn the_rescan_control_is_an_icon_at_the_right_end_of_the_binding_toolbar() {
 }
 
 #[test]
-fn the_plugin_heading_marks_where_plugins_begin_and_is_absent_without_plugins() {
+fn the_plugin_heading_marks_where_plugins_begin_and_is_visible_without_plugins() {
     run_gtk_test(|| {
         catalog_fixture("plugin-heading", |widgets, _layers, _requests| {
-            assert!(plugin_headings(widgets).is_empty(), "no plugin folder");
+            assert_eq!(plugin_headings(widgets).len(), 1, "always visible");
             let built_in = headers(widgets);
             let root = PluginRoot::new("heading");
             widgets.binding_ui.plugins.load(root.0.clone());
@@ -275,6 +275,7 @@ fn the_plugin_heading_marks_where_plugins_begin_and_is_absent_without_plugins() 
             // The heading's block and the first plugin item are siblings, the heading first.
             let region = heading
                 .parent()
+                .and_then(|row| row.parent())
                 .and_then(|bar| bar.parent())
                 .expect("region");
             let position = |inner: &gtk::Widget| {

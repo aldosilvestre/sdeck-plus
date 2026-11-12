@@ -33,6 +33,7 @@ mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
+mod plugin_add_ui;
 mod plugin_runtime;
 mod plugin_ui;
 mod shortcut_reference;
@@ -5052,6 +5053,7 @@ mod tests {
     mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
+    mod plugin_add_ui_tests;
     mod plugin_ui_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
@@ -7932,7 +7934,7 @@ mod tests {
     }
 
     fn rendered_texture(
-        window: &ApplicationWindow,
+        window: &impl IsA<gtk::Native>,
         widget: &impl IsA<gtk::Widget>,
     ) -> gtk::gdk::Texture {
         let widget = widget.as_ref();
