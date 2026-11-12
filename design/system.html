@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>sdeck-plus design system</title>
+<style>
+.theme-dark{color-scheme:dark;--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--selection:#4e426d;--cyan:#85dce8;--error:#fb7185;--success:#7de2b3;--warning:#f9cc7a;--violet-hover:#c7b6f5;--violet-active:#a58cde;--pop:0 8px 24px rgba(21,25,31,.55);--toast:0 4px 16px rgba(0,0,0,.30)}
+.theme-light{color-scheme:light;--bg:#f3f5f7;--surface:#ffffff;--field:#f7f8fa;--hover:#e6eaef;--edge:#d7dde4;--control-edge:#7a8491;--ink:#242c35;--muted:#536170;--violet:#6746bb;--selection:#e8e1f6;--cyan:#0e7183;--error:#c0243f;--success:#1b7f55;--warning:#9a6a00;--violet-hover:#5939a9;--violet-active:#4c2f95;--pop:0 8px 24px rgba(36,44,53,.18);--toast:0 4px 16px rgba(36,44,53,.18)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;width:1440px;font:14px/1.45 system-ui,"Cantarell",sans-serif;background:#15191f;color:#f1f4f7}
+header.top{padding:32px 48px 8px}
+header.top h1{margin:0;font-size:20px;font-weight:700}
+header.top p{margin:4px 0 0;color:#b0bac6;font-size:13px}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.panel{background:var(--bg);color:var(--ink);padding:32px 48px 48px}
+.panel>h2{margin:0 0 4px;font-size:18px;font-weight:700}
+.panel>p.helper{margin:0 0 24px}
+h3{font-size:14px;font-weight:600;margin:28px 0 10px}
+.helper,.muted{color:var(--muted);font-size:13px}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.sw{background:var(--surface);border:1px solid var(--edge);border-radius:10px;overflow:hidden}
+.sw i{display:block;height:36px;border-bottom:1px solid var(--edge)}
+.sw b{display:block;padding:6px 8px 0;font:600 12px monospace}
+.sw span{display:block;padding:0 8px 6px;font:12px monospace;color:var(--muted)}
+.type>div{display:flex;align-items:baseline;gap:16px;padding:6px 0;border-bottom:1px solid var(--edge)}
+.type code{flex:0 0 150px;font:12px monospace;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.demo{width:92px;height:56px;background:var(--surface);border:1px solid var(--edge);display:grid;place-items:center;font:12px monospace;color:var(--muted)}
+.space{display:flex;align-items:flex-end;gap:12px}
+.space div{display:flex;flex-direction:column;align-items:center;gap:4px;width:30px}
+.space i{display:block;background:var(--violet);width:24px}
+.space span{font:12px monospace;color:var(--muted)}
+.btn{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:6px 12px;min-height:20px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:none}
+.btn:hover{background:var(--hover)}
+.btn:disabled{color:var(--muted);cursor:default}
+.btn.flat{background:transparent;border-color:transparent}
+.btn.flat:hover{background:var(--hover)}
+.btn.suggested{background:var(--violet);color:var(--bg);border-color:transparent;font-weight:600}
+.btn.suggested:hover{background:var(--violet-hover)}
+.btn.suggested:active{background:var(--violet-active)}
+.btn.suggested:disabled{background:var(--field);color:var(--muted);border-color:var(--edge)}
+.btn.destructive{color:var(--error);background:color-mix(in srgb,var(--error) 14%,transparent);border-color:color-mix(in srgb,var(--error) 50%,transparent);font-weight:600}
+.btn.icon{width:34px;height:34px;padding:0;justify-content:center}
+.btn:focus-visible,.seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.entry{display:flex;align-items:center;background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:0 10px;width:330px;height:34px}
+.entry input{all:unset;flex:1;color:var(--ink);caret-color:var(--cyan);font-size:14px}
+.entry input::placeholder{color:var(--muted)}
+.entry:focus-within,.entry.is-focus{box-shadow:inset 0 0 0 1px var(--cyan)}
+.card{background:var(--surface);border:1px solid var(--edge);border-radius:14px;padding:12px;box-shadow:inset 0 1px color-mix(in srgb,var(--ink) 2.5%,transparent)}
+.chip{font:12px monospace;padding:3px 8px;border-radius:6px;background:var(--field);border:1px solid var(--edge);color:var(--ink)}
+.count{font-size:11px;color:var(--muted);padding:1px 7px;border-radius:999px;background:var(--field)}
+.fe{color:var(--error)}.fs{color:var(--success)}.fw{color:var(--warning)}
+.status{padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;display:inline-block}
+.status.idle{color:var(--warning);background:color-mix(in srgb,var(--warning) 16%,transparent);border:1px solid color-mix(in srgb,var(--warning) 55%,transparent)}
+.status.online{color:var(--success);background:color-mix(in srgb,var(--success) 16%,transparent);border:1px solid color-mix(in srgb,var(--success) 55%,transparent)}
+.status.error{color:var(--error);background:color-mix(in srgb,var(--error) 16%,transparent);border:1px solid color-mix(in srgb,var(--error) 55%,transparent)}
+.note{padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--field) 90%,transparent);border-left:3px solid var(--cyan);max-width:360px}
+.toast{background:var(--hover);border:1px solid var(--edge);border-radius:12px;padding:12px 16px;box-shadow:var(--toast);display:inline-block}
+.seg{display:inline-flex}
+.seg button{font:inherit;color:var(--muted);background:var(--field);border:1px solid var(--control-edge);padding:5px 14px;cursor:pointer;border-radius:0}
+.seg button+button{border-left-width:0}
+.seg button:first-child{border-radius:8px 0 0 8px}
+.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button[aria-pressed=true]{background:var(--selection);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--violet)}
+.list{background:var(--field);border:1px solid var(--edge);border-radius:10px;width:300px}
+.list div{min-height:40px;padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--edge);font-weight:600}
+.list div:last-child{border-bottom:0}
+.list svg{color:var(--violet)}
+.shadowbox{width:150px;height:72px;background:var(--surface);border:1px solid var(--edge);border-radius:14px;display:grid;place-items:center;font:12px monospace;color:var(--muted);text-align:center}
+.plug{color:var(--muted);font-size:11px;font-weight:700}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.space{align-items:flex-end}
+.focus-demo{display:flex;gap:16px;align-items:center}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+</svg>
+<header class="top">
+<h1>sdeck-plus design system</h1>
+<p>Rendered from src/ui.css (dark, default), src/ui-light.css (light overrides) and DESIGN.md. Values are recorded in design/system.md.</p>
+</header>
+<main class="panels">
+
+<section class="panel theme-dark" aria-labelledby="dk">
+<h2 id="dk">Dark (default)</h2>
+<p class="helper">src/ui.css</p>
+
+<h3>Colors</h3>
+<div class="swatches">
+<div class="sw"><i style="background:#15191f"></i><b>desk_bg</b><span>#15191f</span></div>
+<div class="sw"><i style="background:#20262e"></i><b>desk_surface</b><span>#20262e</span></div>
+<div class="sw"><i style="background:#191e25"></i><b>desk_field</b><span>#191e25</span></div>
+<div class="sw"><i style="background:#303943"></i><b>desk_hover</b><span>#303943</span></div>
+<div class="sw"><i style="background:#353e49"></i><b>desk_edge</b><span>#353e49</span></div>
+<div class="sw"><i style="background:#76828f"></i><b>desk_control_edge</b><span>#76828f</span></div>
+<div class="sw"><i style="background:#f1f4f7"></i><b>desk_ink</b><span>#f1f4f7</span></div>
+<div class="sw"><i style="background:#b0bac6"></i><b>desk_muted</b><span>#b0bac6</span></div>
+<div class="sw"><i style="background:#b6a1ef"></i><b>desk_violet</b><span>#b6a1ef</span></div>
+<div class="sw"><i style="background:#4e426d"></i><b>desk_selection</b><span>#4e426d</span></div>
+<div class="sw"><i style="background:#85dce8"></i><b>desk_cyan</b><span>#85dce8</span></div>
+<div class="sw"><i style="background:#fb7185"></i><b>desk_error</b><span>#fb7185</span></div>
+<div class="sw"><i style="background:#7de2b3"></i><b>desk_success</b><span>#7de2b3</span></div>
+<div class="sw"><i style="background:#f9cc7a"></i><b>desk_warning</b><span>#f9cc7a</span></div>
+</div>
+
+<h3>Components</h3>
+<div class="row">
+<button class="btn">Button</button>
+<button class="btn suggested">Suggested</button>
+<button class="btn destructive">Destructive</button>
+<button class="btn flat">Flat</button>
+<button class="btn" disabled>Disabled</button>
+<button class="btn suggested" disabled>Install</button>
+<button class="btn icon" aria-label="Add plugin"><svg class="i"><use href="#i-plus"/></svg></button>
+</div>
+<div class="row" style="margin-top:14px">
+<div class="entry"><input aria-label="Entry" placeholder="Folder path or https:// repository address"></div>
+<div class="entry is-focus"><input aria-label="Focused entry" value="Focused entry"></div>
+<div class="seg" role="group" aria-label="Segmented tabs"><button type="button" aria-pressed="true">Folder</button><button type="button" aria-pressed="false">Repository</button></div>
+</div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<div class="card" style="width:300px"><b style="font-weight:600">Card</b><p class="helper" style="margin:4px 0 8px">14px radius, 12px padding.</p><span class="chip">discord</span> <span class="count">3</span></div>
+<div class="list"><div><svg class="i"><use href="#i-folder"/></svg>Boxed list row</div><div><svg class="i"><use href="#i-folder"/></svg>Second row</div></div>
+</div>
+<div class="row" style="margin-top:14px">
+<span class="fe">Missing: python3</span><span class="fs">Installed</span><span class="fw">Runs with your privileges</span>
+</div>
+<div class="row" style="margin-top:14px">
+<span class="status online">Connected</span><span class="status idle">Waiting</span><span class="status error">Failed</span>
+</div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<div class="note">Profile note: 3px cyan left edge on a field fill.</div>
+<div class="toast">Toast: 12px radius</div>
+</div>
+</section>
+
+<section class="panel theme-light" aria-labelledby="lt">
+<h2 id="lt">Light</h2>
+<p class="helper">src/ui-light.css</p>
+
+<h3>Colors</h3>
+<div class="swatches">
+<div class="sw"><i style="background:#f3f5f7"></i><b>desk_bg</b><span>#f3f5f7</span></div>
+<div class="sw"><i style="background:#ffffff"></i><b>desk_surface</b><span>#ffffff</span></div>
+<div class="sw"><i style="background:#f7f8fa"></i><b>desk_field</b><span>#f7f8fa</span></div>
+<div class="sw"><i style="background:#e6eaef"></i><b>desk_hover</b><span>#e6eaef</span></div>
+<div class="sw"><i style="background:#d7dde4"></i><b>desk_edge</b><span>#d7dde4</span></div>
+<div class="sw"><i style="background:#7a8491"></i><b>desk_control_edge</b><span>#7a8491</span></div>
+<div class="sw"><i style="background:#242c35"></i><b>desk_ink</b><span>#242c35</span></div>
+<div class="sw"><i style="background:#536170"></i><b>desk_muted</b><span>#536170</span></div>
+<div class="sw"><i style="background:#6746bb"></i><b>desk_violet</b><span>#6746bb</span></div>
+<div class="sw"><i style="background:#e8e1f6"></i><b>desk_selection</b><span>#e8e1f6</span></div>
+<div class="sw"><i style="background:#0e7183"></i><b>desk_cyan</b><span>#0e7183</span></div>
+<div class="sw"><i style="background:#c0243f"></i><b>desk_error</b><span>#c0243f</span></div>
+<div class="sw"><i style="background:#1b7f55"></i><b>desk_success</b><span>#1b7f55</span></div>
+<div class="sw"><i style="background:#9a6a00"></i><b>desk_warning</b><span>#9a6a00</span></div>
+</div>
+
+<h3>Components</h3>
+<div class="row">
+<button class="btn">Button</button>
+<button class="btn suggested">Suggested</button>
+<button class="btn destructive">Destructive</button>
+<button class="btn flat">Flat</button>
+<button class="btn" disabled>Disabled</button>
+<button class="btn suggested" disabled>Install</button>
+<button class="btn icon" aria-label="Add plugin"><svg class="i"><use href="#i-plus"/></svg></button>
+</div>
+<div class="row" style="margin-top:14px">
+<div class="entry"><input aria-label="Entry" placeholder="Folder path or https:// repository address"></div>
+<div class="entry is-focus"><input aria-label="Focused entry" value="Focused entry"></div>
+<div class="seg" role="group" aria-label="Segmented tabs"><button type="button" aria-pressed="true">Folder</button><button type="button" aria-pressed="false">Repository</button></div>
+</div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<div class="card" style="width:300px"><b style="font-weight:600">Card</b><p class="helper" style="margin:4px 0 8px">14px radius, 12px padding.</p><span class="chip">discord</span> <span class="count">3</span></div>
+<div class="list"><div><svg class="i"><use href="#i-folder"/></svg>Boxed list row</div><div><svg class="i"><use href="#i-folder"/></svg>Second row</div></div>
+</div>
+<div class="row" style="margin-top:14px">
+<span class="fe">Missing: python3</span><span class="fs">Installed</span><span class="fw">Runs with your privileges</span>
+</div>
+<div class="row" style="margin-top:14px">
+<span class="status online">Connected</span><span class="status idle">Waiting</span><span class="status error">Failed</span>
+</div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<div class="note">Profile note: 3px cyan left edge on a field fill.</div>
+<div class="toast">Toast: 12px radius</div>
+</div>
+</section>
+
+<section class="panel theme-dark" style="grid-column:1/3;display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px;padding-top:8px;border-top:1px solid #353e49" aria-label="Type, spacing, radius, shadow and focus">
+<div>
+<h3>Type scale (GTK system font)</h3>
+<div class="type">
+<div><code>20 / 700 .title</code><span style="font-size:20px;font-weight:700">Add plugin</span></div>
+<div><code>18 / 700 control</code><span style="font-size:18px;font-weight:700">Plugin action</span></div>
+<div><code>14 / 600 section</code><span style="font-size:14px;font-weight:600">Plugin source</span></div>
+<div><code>14 / 400 body</code><span>Nothing runs until you enable it.</span></div>
+<div><code>13 / 400 helper</code><span class="helper">Public HTTPS repositories only.</span></div>
+<div><code>12 mono chip</code><span class="chip">a3f9c1e2b4</span></div>
+<div><code>11 / 700 heading</code><span class="plug">PLUGINS</span></div>
+</div>
+</div>
+<div>
+<h3>Spacing (declared paddings)</h3>
+<div class="space">
+<div><i style="height:2px"></i><span>2</span></div><div><i style="height:4px"></i><span>4</span></div><div><i style="height:6px"></i><span>6</span></div><div><i style="height:8px"></i><span>8</span></div><div><i style="height:10px"></i><span>10</span></div><div><i style="height:12px"></i><span>12</span></div><div><i style="height:14px"></i><span>14</span></div><div><i style="height:16px"></i><span>16</span></div><div><i style="height:20px"></i><span>20</span></div>
+</div>
+<h3>Radius</h3>
+<div class="row">
+<div class="demo" style="border-radius:6px">6 chip</div>
+<div class="demo" style="border-radius:8px">8 control</div>
+<div class="demo" style="border-radius:10px">10 list</div>
+<div class="demo" style="border-radius:12px">12 toast</div>
+<div class="demo" style="border-radius:14px">14 card</div>
+</div>
+</div>
+<div>
+<h3>Shadows</h3>
+<div class="row">
+<div class="shadowbox" style="box-shadow:0 8px 24px rgba(21,25,31,.55)">popover<br>0 8px 24px</div>
+<div class="shadowbox" style="box-shadow:0 4px 16px rgba(0,0,0,.30)">toast<br>0 4px 16px</div>
+</div>
+<h3>Focus</h3>
+<div class="focus-demo">
+<button class="btn" style="outline:2px solid #85dce8;outline-offset:-2px">Keyboard focus</button>
+<span class="helper">2px cyan outline, offset -2px</span>
+</div>
+</div>
+</section>
+</main>
+</body>
+</html>

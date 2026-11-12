@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add plugin: Source and review</title>
+<style>
+:root{color-scheme:dark;--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--selection:#4e426d;--cyan:#85dce8;--error:#fb7185;--success:#7de2b3;--warning:#f9cc7a;--violet-hover:#c7b6f5;--violet-active:#a58cde;--pop:0 8px 24px rgba(21,25,31,.55);--toast:0 4px 16px rgba(0,0,0,.30)}
+[data-theme=light]{color-scheme:light;--bg:#f3f5f7;--surface:#ffffff;--field:#f7f8fa;--hover:#e6eaef;--edge:#d7dde4;--control-edge:#7a8491;--ink:#242c35;--muted:#536170;--violet:#6746bb;--selection:#e8e1f6;--cyan:#0e7183;--error:#c0243f;--success:#1b7f55;--warning:#9a6a00;--violet-hover:#5939a9;--violet-active:#4c2f95;--pop:0 8px 24px rgba(36,44,53,.18);--toast:0 4px 16px rgba(36,44,53,.18)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--field);color:var(--ink);font:14px/1.45 system-ui,"Cantarell",sans-serif;min-height:100vh}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.spin{animation:spin .9s linear infinite;color:var(--cyan)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+/* board controls (not part of the dialog) */
+.board{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 16px 12px;background:var(--surface);border-bottom:1px solid var(--edge)}
+.board .lbl{width:100%;font-size:11px;font-weight:700;color:var(--muted)}
+.board .btn{padding:4px 10px;font-size:13px}
+.board .btn[aria-pressed=true]{background:var(--selection);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--violet)}
+.board .sp{flex:1}
+.stage{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px 20px 24px}
+/* controls */
+.btn{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:6px 12px;min-height:20px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;box-shadow:none}
+.btn:hover{background:var(--hover)}
+.btn:disabled{color:var(--muted);cursor:default;background:var(--field)}
+.btn.flat{background:transparent;border-color:transparent}
+.btn.flat:hover{background:var(--hover)}
+.btn.suggested{background:var(--violet);color:var(--bg);border-color:transparent;font-weight:600}
+.btn.suggested:hover{background:var(--violet-hover)}
+.btn.suggested:active{background:var(--violet-active)}
+.btn.suggested:disabled{background:var(--field);color:var(--muted);border-color:var(--edge)}
+.btn.icon{width:30px;height:30px;padding:0;border-color:transparent;background:transparent}
+.btn.icon:hover{background:var(--hover)}
+.btn:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.entry{display:flex;align-items:center;background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:0 10px;height:34px;flex:1;min-width:0}
+.entry input{all:unset;flex:1;min-width:0;color:var(--ink);caret-color:var(--cyan);font-size:14px;height:32px}
+.entry input::placeholder{color:var(--muted)}
+.entry input:focus-visible{outline:none}
+.entry:focus-within{box-shadow:inset 0 0 0 1px var(--cyan)}
+.entry.disabled{color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--edge);border-radius:14px;padding:12px;box-shadow:inset 0 1px color-mix(in srgb,var(--ink) 2.5%,transparent)}
+.chip{font:12px monospace;padding:3px 8px;border-radius:6px;background:var(--field);border:1px solid var(--edge);color:var(--ink);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.chip.ok{color:var(--success)}.chip.bad{color:var(--error)}.chip.dim{color:var(--muted)}
+.count{font-size:11px;color:var(--muted);padding:1px 7px;border-radius:999px;background:var(--field);white-space:nowrap}
+.ok{color:var(--success)}.bad{color:var(--error)}
+.helper{color:var(--muted);font-size:13px;margin:0}
+.section-label{font-size:14px;font-weight:600;margin:0}
+.control-heading{font-size:18px;font-weight:700;margin:0}
+.field-label{font-size:14px}
+/* dialog frame */
+.win{width:640px;max-height:720px;min-height:440px;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--edge);border-radius:14px;box-shadow:var(--pop);overflow:hidden}
+.titlebar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 8px 16px;border-bottom:1px solid var(--edge)}
+.titlebar h1{margin:0;font-size:14px;font-weight:600}
+.scroll{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.footer{border-top:1px solid var(--edge);padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.footer .btns{display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.footer .btns .why{flex:1;margin:0}
+.row{display:flex;gap:8px;align-items:center}
+.progress{display:flex;align-items:center;gap:8px}
+.progress span{flex:1}
+.errors{background:color-mix(in srgb,var(--error) 16%,transparent);border:1px solid color-mix(in srgb,var(--error) 55%,transparent);border-radius:8px;padding:10px 12px}
+.errors ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.errors li{display:flex;gap:8px;align-items:flex-start}
+.errors li svg{color:var(--error);margin-top:2px}
+.errors li:first-child{font-weight:600}
+.errors .btn{margin-top:8px}
+.notice{display:flex;gap:8px;align-items:flex-start;margin:0;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--field) 90%,transparent);border-left:3px solid var(--warning)}
+.notice svg{color:var(--warning);margin-top:2px}
+.toast{background:var(--hover);border:1px solid var(--edge);border-radius:12px;padding:12px 16px;box-shadow:var(--toast);width:640px;margin:0}
+
+.steps{display:flex;align-items:center;gap:10px;list-style:none;margin:0;padding:0}
+.step{display:flex;align-items:center;gap:8px;color:var(--muted);font-weight:600;font-size:13px}
+.step .num{width:22px;height:22px;border-radius:999px;border:1px solid var(--control-edge);display:grid;place-items:center;font-size:12px}
+.step .ck{display:none}
+.step[aria-current=step]{color:var(--ink)}
+.step[aria-current=step] .num{background:var(--selection);box-shadow:inset 0 0 0 1px var(--violet);color:var(--ink);border-color:transparent}
+.win[data-phase=review] .step[data-step="1"] .num{background:var(--violet);color:var(--bg);border-color:transparent}
+.win[data-phase=review] .step[data-step="1"] .n{display:none}
+.win[data-phase=review] .step[data-step="1"] .ck{display:block}
+.steps .line{flex:1;height:1px;background:var(--edge)}
+.intro{margin:0}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.seg{display:inline-flex}
+.seg button{font:inherit;color:var(--muted);background:var(--field);border:1px solid var(--control-edge);padding:5px 12px;cursor:pointer;border-radius:0;display:inline-flex;align-items:center;gap:6px}
+.seg button+button{border-left-width:0}
+.seg button:first-child{border-radius:8px 0 0 8px}
+.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button:hover{background:var(--hover);color:var(--ink)}
+.seg button[aria-checked=true]{background:var(--selection);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--violet)}
+.seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.src{display:flex;flex-direction:column;gap:8px}
+.win[data-phase=review] .intro{display:none}
+.win[data-phase=review] #check.suggested{background:var(--field);color:var(--ink);border-color:var(--control-edge);font-weight:400}
+.win[data-phase=review] #check.suggested:hover{background:var(--hover)}
+.win[data-phase=review] #hint,.win[data-phase=review] #srclabel{display:none}
+.rv-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.rv-id{font:12px monospace;color:var(--muted)}
+.kv{display:grid;grid-template-columns:72px 1fr;gap:4px 12px;margin:10px 0 4px}
+.kv dt{color:var(--muted);font-size:13px}
+.kv dd{margin:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;word-break:break-all}
+.sub{font-size:13px;font-weight:600;margin:12px 0 2px;display:flex;gap:8px;align-items:center}
+.rows{list-style:none;margin:0;padding:0}
+.rows li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:7px 0;border-top:1px solid var(--edge);align-items:center}
+.rows li:first-child{border-top:0}
+.rows .nm{font-weight:600}
+.rows .ctl{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.rows .set{grid-column:1/3}
+.rows .st{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.rows .req{font-weight:400}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M12 8v4M12 15.5v.01"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="i-git" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 3-3 4-12 6"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M8 10l4 4 4-4"/></symbol>
+<symbol id="i-dash" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+<symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+<symbol id="i-spin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" opacity=".25"/><path d="M21 12a9 9 0 0 0-9-9"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></symbol>
+</svg>
+<nav class="board" aria-label="Artboard controls, not part of the dialog"><span class="lbl">ARTBOARD CONTROLS: STATE AND THEME (NOT PART OF THE DIALOG)</span><button type="button" class="btn" data-state="idle" aria-pressed="false">Idle</button><button type="button" class="btn" data-state="checking" aria-pressed="false">Checking</button><button type="button" class="btn" data-state="preview" aria-pressed="false">Preview</button><button type="button" class="btn" data-state="missing" aria-pressed="false">Preview, missing requirement</button><button type="button" class="btn" data-state="replace" aria-pressed="false">Replace</button><button type="button" class="btn" data-state="err-format" aria-pressed="false">Error: invalid format</button><button type="button" class="btn" data-state="err-git" aria-pressed="false">Error: git missing</button><span class="sp"></span><button type="button" class="btn" id="theme" aria-pressed="false">Light theme</button></nav>
+<main class="stage">
+
+<div class="win" id="win" role="dialog" aria-modal="true" aria-labelledby="wt" data-state="preview" data-phase="review">
+<header class="titlebar"><h1 id="wt">Add plugin</h1><button type="button" class="btn icon" id="close" aria-label="Close"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg></button></header>
+<div class="scroll">
+<p class="intro">Add a plugin from a folder on this computer or from an HTTPS repository address. Nothing runs until you enable it.</p>
+<ol class="steps" aria-label="Progress">
+<li class="step" data-step="1" id="st1"><span class="num"><span class="n">1</span><svg class="i ck" aria-hidden="true" focusable="false"><use href="#i-check"/></svg></span>Source</li>
+<li class="line" aria-hidden="true"></li>
+<li class="step" data-step="2" id="st2"><span class="num">2</span>Review</li>
+</ol>
+<section class="card src" aria-labelledby="s1">
+<div class="head"><h2 class="section-label" id="s1">Plugin source</h2>
+<div class="seg" role="radiogroup" aria-label="Source type">
+<button type="button" role="radio" id="seg-folder" aria-checked="false"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>Folder</button>
+<button type="button" role="radio" id="seg-repo" aria-checked="true"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-git"/></svg>Repository</button>
+</div></div>
+<label class="field-label" for="src" id="srclabel">HTTPS repository address</label>
+<div class="row"><div class="entry"><input id="src" type="text" autocomplete="off" spellcheck="false" placeholder="https://github.com/user/plugin"></div>
+<button type="button" class="btn" id="browse"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>Browse…</button>
+<button type="button" class="btn suggested" id="check">Check plugin</button></div>
+<p class="helper" id="hint">Only https:// addresses. The repository is downloaded with git; nothing is installed yet.</p>
+<div class="progress" data-show="checking" role="group" aria-label="Check progress"><svg class="i spin" aria-hidden="true" focusable="false"><use href="#i-spin"/></svg><span>Checking the plugin…</span><button type="button" class="btn" id="cancel">Cancel</button></div>
+<div class="errors" data-show="err-format err-git">
+<div data-show="err-format" role="alert"><ul>
+<li><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg><span>This does not follow the plugin format. Nothing was installed.</span></li>
+<li><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg><span>The manifest does not name an executable to run.</span></li>
+<li><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg><span>Action "send-message" does not list any controls.</span></li>
+</ul></div>
+<div data-show="err-git" role="alert"><ul>
+<li><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg><span>Repository addresses need git, and git could not be started. Install git, or choose a folder on this computer instead.</span></li>
+</ul><button type="button" class="btn" id="usefolder"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>Choose a folder instead</button></div>
+</div>
+</section>
+<section class="card" aria-labelledby="s2" data-show="preview missing replace">
+<h2 class="section-label" id="s2">Review</h2>
+<div class="rv-head" style="margin-top:8px"><h3 class="control-heading">Discord</h3><span class="chip">0.2.0</span><span class="rv-id">id discord</span></div>
+<dl class="kv">
+<dt>Source</dt><dd>https://github.com/example/sdeck-plugin-discord <span class="chip" title="Commit">a3f9c1e2b4</span></dd>
+<dt>Files</dt><dd>7 files, 41 KiB</dd>
+</dl>
+<h3 class="sub">Actions <span class="count">3</span></h3>
+<ul class="rows" aria-label="Actions">
+<li><span class="nm">Toggle mute</span><span class="ctl"><span class="chip">Key</span><span class="chip">Dial press</span></span></li>
+<li><span class="nm">Toggle deafen</span><span class="ctl"><span class="chip">Key</span><span class="chip">Dial press</span></span></li>
+<li><span class="nm">Send bot message</span><span class="ctl"><span class="chip">Key</span><span class="chip">Dial press</span><span class="chip">Touch strip</span></span>
+<span class="helper set">Settings: Channel id (text, required), Message (text, required), Mention everyone (checkbox)</span></li>
+</ul>
+<h3 class="sub">Requires</h3>
+<ul class="rows" aria-label="Requirements">
+<li><span class="nm req">command: python3</span>
+<span class="st ok" data-show="preview replace"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Found</span><span class="st bad" data-show="missing" role="alert"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-x"/></svg>Missing: python3</span></li>
+<li><span class="nm req">command: hyprctl <span class="helper" style="display:inline">(optional)</span></span><span class="st ok"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Found</span></li>
+<li><span class="nm req">file: bot token <span class="helper" style="display:inline">(optional)</span></span><span class="st helper"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-info"/></svg>Not found: bot token</span></li>
+</ul>
+<p class="helper" data-show="missing" style="margin-top:6px">A missing command does not stop the install; the plugin will fail until it is installed.</p>
+</section>
+</div>
+<footer class="footer">
+<div class="notices" data-show="preview missing replace" style="display:flex;flex-direction:column;gap:6px">
+<p class="notice" data-show="replace"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-info"/></svg><span>This plugin is already installed (version 0.1.0). Replacing it swaps in the files above and disables it until you enable it again in the Plugins section.</span></p>
+<p class="notice"><svg class="i " aria-hidden="true" focusable="false"><use href="#i-alert"/></svg><span>Once enabled, this plugin runs with your user's privileges. Read its code before you enable it.</span></p>
+</div>
+<div class="btns"><p class="helper why" data-show="idle checking err-format err-git">Check a plugin to enable Install.</p>
+<button type="button" class="btn" id="close2">Close</button>
+<button type="button" class="btn suggested" id="install" data-show="idle checking preview missing err-format err-git">Install</button>
+<button type="button" class="btn suggested" id="replace" data-show="replace">Replace</button></div>
+</footer>
+</div>
+<p class="vh" id="live" role="status" aria-live="polite"></p>
+
+<p class="toast" id="toast" role="status" hidden></p>
+</main>
+<script>
+function boot(cfg){
+  var $=function(i){return document.getElementById(i)};
+  var win=$('win'),entry=$('src'),check=$('check'),browse=$('browse'),install=$('install'),replace=$('replace'),live=$('live'),toast=$('toast');
+  var timer=null,seg='repo';
+  var REPO='https://github.com/example/sdeck-plugin-discord',FOLDER='/home/aldo/plugins/discord-draft';
+  var S={
+    'idle':{phase:'idle',value:'',live:'Nothing checked yet.'},
+    'checking':{phase:'checking',value:REPO,seg:'repo',live:'Checking the plugin…'},
+    'preview':{phase:'review',value:REPO,seg:'repo',live:'Discord 0.2.0 passed the check. Install is available.'},
+    'missing':{phase:'review',value:REPO,seg:'repo',live:'Discord 0.2.0 passed the check. Missing: python3. Install is available.'},
+    'replace':{phase:'review',value:REPO,seg:'repo',live:'Discord is already installed (version 0.1.0). Replace is available.'},
+    'err-format':{phase:'error',value:FOLDER,seg:'folder',live:'This does not follow the plugin format. Nothing was installed.'},
+    'err-git':{phase:'error',value:REPO,seg:'repo',live:'Repository addresses need git, and git could not be started.'}
+  };
+  function setSeg(s){
+    seg=s;
+    if(cfg.seg){cfg.seg(s)}
+  }
+  function setState(name,keepValue){
+    var st=S[name];if(!st)return;
+    clearTimeout(timer);
+    win.dataset.state=name;win.dataset.phase=st.phase;
+    document.querySelectorAll('[data-show]').forEach(function(el){el.hidden=el.dataset.show.split(' ').indexOf(name)<0});
+    document.querySelectorAll('.board [data-state]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.state===name))});
+    if(st.seg){setSeg(st.seg)}
+    if(!keepValue){entry.value=st.value}
+    var busy=name==='checking';
+    entry.disabled=busy;if(browse)browse.disabled=busy;
+    check.disabled=busy||!entry.value;
+    install.disabled=!(name==='preview'||name==='missing');
+    live.textContent=st.live;
+    toast.hidden=true;
+    if(cfg.onState)cfg.onState(name);
+    history.replaceState(null,'','#'+name+(document.documentElement.dataset.theme==='light'?',light':''));
+  }
+  function runCheck(){
+    setState('checking',true);
+    timer=setTimeout(function(){setState('preview',true)},1400);
+  }
+  document.querySelectorAll('.board [data-state]').forEach(function(b){b.addEventListener('click',function(){setState(b.dataset.state)})});
+  $('theme').addEventListener('click',function(){
+    var light=document.documentElement.dataset.theme!=='light';
+    document.documentElement.dataset.theme=light?'light':'dark';
+    this.setAttribute('aria-pressed',String(light));this.textContent=light?'Dark theme':'Light theme';
+    history.replaceState(null,'','#'+win.dataset.state+(light?',light':''));
+  });
+  entry.addEventListener('input',function(){
+    if(win.dataset.state!=='idle'){setState('idle',true)}
+    check.disabled=!entry.value;
+  });
+  entry.addEventListener('keydown',function(e){if(e.key==='Enter'&&entry.value&&!check.disabled){e.preventDefault();runCheck()}});
+  check.addEventListener('click',runCheck);
+  $('cancel').addEventListener('click',function(){setState('idle',true);live.textContent='Check cancelled.'});
+  function done(){
+    toast.textContent=win.dataset.state==='replace'?'Installed Discord 0.2.0, replacing the previous version. The plugin was disabled: enable it again in the Plugins section.':'Installed Discord 0.2.0. It is disabled: enable it in the Plugins section.';
+    toast.hidden=false;
+  }
+  install.addEventListener('click',done);replace.addEventListener('click',done);
+  var uf=$('usefolder');if(uf){uf.addEventListener('click',function(){setState('idle');if(cfg.seg)setSeg('folder');entry.focus()})}
+  if(cfg.init)cfg.init(setSeg);
+  var h=(location.hash||'').slice(1).split(',');
+  if(h.indexOf('light')>=0){document.documentElement.dataset.theme='light';$('theme').setAttribute('aria-pressed','true');$('theme').textContent='Dark theme'}
+  setState(S[h[0]]?h[0]:'preview');
+}
+
+
+boot({
+  seg:function(s){
+    var f=s==='folder';
+    document.getElementById('seg-folder').setAttribute('aria-checked',String(f));
+    document.getElementById('seg-repo').setAttribute('aria-checked',String(!f));
+    document.getElementById('srclabel').textContent=f?'Plugin folder on this computer':'HTTPS repository address';
+    document.getElementById('src').placeholder=f?'/home/you/plugins/discord':'https://github.com/user/plugin';
+    document.getElementById('hint').textContent=f?'Choose the folder that contains the plugin\u2019s manifest.json, or type its path.':'Only https:// addresses. The repository is downloaded with git; nothing is installed yet.';
+    document.getElementById('browse').hidden=!f;
+  },
+  onState:function(n){
+    var rev=document.getElementById('win').dataset.phase==='review';
+    document.getElementById('st1').removeAttribute('aria-current');document.getElementById('st2').removeAttribute('aria-current');
+    document.getElementById(rev?'st2':'st1').setAttribute('aria-current','step');
+  },
+  init:function(setSeg){
+    ['folder','repo'].forEach(function(k){document.getElementById('seg-'+k).addEventListener('click',function(){
+      document.querySelector('.board [data-state=idle]').click();
+      document.getElementById('src').value='';
+      document.getElementById('check').disabled=true;
+      setSeg(k);
+      document.getElementById('seg-'+k).focus();
+    })});
+  }
+});
+
+</script>
+</body>
+</html>

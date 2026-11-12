@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "02-plugin-card.html",
+  "handoffs": {
+    "02-plugin-card.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-12T21:00:38.308Z",
+      "startedAt": "2026-11-12T21:00:41.330Z",
+      "implementedAt": null,
+      "note": "Implementing direction 02 (Plugin card) with the Folder | Repository selector from 01, as GTK widgets and CSS tokens."
+    }
+  }
+}
