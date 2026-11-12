@@ -121,6 +121,7 @@
         <li><a href="./#actions">Actions</a></li>
         <li><a href="#install">Install</a></li>
         <li><a href="docs.html" aria-current="page">Documentation</a></li>
+        <li><a href="plugin-sdk.html">Plugin SDK</a></li>
         <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
       </ul>
     </nav>
@@ -194,6 +195,7 @@
             <li><a href="#dev-simulated">Simulated devices</a></li>
             <li><a href="#dev-device-checks">Real-device checks</a></li>
             <li><a href="#dev-event-api">In-process event API</a></li>
+            <li><a href="#dev-plugins">Writing a plugin</a></li>
             <li><a href="#dev-code">Code organization</a></li>
           </ol>
         </li>
@@ -733,7 +735,8 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  check box fields) and <strong>Save binding</strong>; saving never runs the plugin, only <strong>Test action</strong> or the control does. Each press runs the plugin
                  once on its own worker with a 5 second deadline, so a slow plugin cannot delay built-in actions, and errors appear in the status line.</p>
               <p>Bindings keep the plugin and action ids and the field values. If the plugin is missing or no longer offers the action, the binding is kept as saved and the editor
-                 says why. Exported bundles contain the bindings only, never plugin programs or the enabled list. See <code>docs/plugins.md</code> for the manifest and protocol.</p>
+                 says why. Exported bundles contain the bindings only, never plugin programs or the enabled list. See <code>docs/plugins.md</code> for the host contract.</p>
+              <p><strong>Writing a plugin?</strong> The <a href="plugin-sdk.html">plugin SDK guide</a> covers the project layout, the manifest, the protocol, the limits, security and testing, and <code>examples/plugin-template</code> is a starter project you can copy.</p>
             </article>
           </div>
         </div>
@@ -898,6 +901,10 @@ cargo run --offline --example plugin_validate -- /path/to/plugin-project</code><
                  Internal events use the <code>MonitorEvent::AppEvent</code> channel. There is no TCP, HTTP or WebSocket listener.</p>
               <p>The protocol decoder validates the report ID and declared little-endian payload length before decoding input.</p>
             </article>
+            <article class="card wide" id="dev-plugins">
+              <h4>Writing a plugin</h4>
+              <p>Plugins are separate projects, one repository each, so adding one never touches this repository. The <a href="plugin-sdk.html">plugin SDK guide</a> is the author-facing documentation; <code>docs/plugins.md</code> is the host contract. Start from <code>examples/plugin-template</code> (a copyable Python 3 project with its own unit tests), check it with <code>cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt;</code> and keep the guide honest with <code>cargo test --offline --test plugin_sdk</code>, which runs the template through the validator and compares the guide's limits with the code.</p>
+            </article>
             <article class="card wide" id="dev-code">
               <h4>Code organization</h4>
               <div class="table-scroll">
@@ -949,6 +956,7 @@ cargo run --offline --example plugin_validate -- /path/to/plugin-project</code><
         <ul>
           <li><a href="#configuration">Configuration</a></li>
           <li><a href="#development">Development</a></li>
+          <li><a href="plugin-sdk.html">Plugin SDK</a></li>
           <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
           <li><a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/CHANGELOG.md">Changelog</a></li>
         </ul>

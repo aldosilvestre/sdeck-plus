@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Starter plugin for sdeck-plus (protocol v1, standard library only).
+
+Reads one JSON request line on stdin and writes exactly one JSON response line on stdout.
+Diagnostics, if any, go to stderr. It only builds a greeting: no side effects.
+"""
+
+import json
+import re
+import sys
+
+PROTOCOL_VERSION = 1
+MAX_REQUEST_BYTES = 64 * 1024
+MAX_NAME = 32
+MAX_MESSAGE = 512  # the host rejects longer message/error texts
+REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+class PluginFailure(Exception):
+    """A problem to report to the user as ok:false (never an exit code)."""
+
+
+def settings_for_say_hello(settings):
+    """Validates untrusted settings again (the host already did) and fills in the defaults."""
+    if not isinstance(settings, dict):
+        raise PluginFailure("settings must be an object")
+    unknown = sorted(set(settings) - {"name", "shout"})
+    if unknown:
+        raise PluginFailure(f"unknown setting `{unknown[0]}`")
+    name = settings.get("name", "world")
+    if not isinstance(name, str) or not name.strip():
+        raise PluginFailure("name must be non-empty text")
+    if len(name) > MAX_NAME or any(not c.isprintable() for c in name):
+        raise PluginFailure(f"name must be at most {MAX_NAME} printable characters")
+    shout = settings.get("shout", False)
+    if not isinstance(shout, bool):
+        raise PluginFailure("shout must be true or false")
+    return name, shout
+
+
+def say_hello(settings):
+    name, shout = settings_for_say_hello(settings)
+    greeting = f"Hello, {name}!"
+    return greeting.upper() if shout else greeting
+
+
+ACTIONS = {"say-hello": say_hello}
+
+
+def handle(request):
+    if request.get("type") != "invoke":
+        raise PluginFailure("unsupported request type")
+    action = ACTIONS.get(request.get("action"))
+    if action is None:
+        raise PluginFailure("unknown action")
+    return action(request.get("settings", {}))
+
+
+def reply(stdout, request_id, ok, text):
+    body = {"protocol_version": PROTOCOL_VERSION, "request_id": request_id, "ok": ok}
+    body["message" if ok else "error"] = text[:MAX_MESSAGE]
+    stdout.write(json.dumps(body) + "\n")
+    stdout.flush()
+
+
+def main(argv=None, stdin=None, stdout=None, environ=None):
+    """Always returns 0: failures are answered with ok:false, never with a traceback."""
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    request_id = "unknown"
+    try:
+        try:
+            request = json.loads(stdin.readline(MAX_REQUEST_BYTES + 1))
+        except ValueError:
+            raise PluginFailure("request is not valid JSON") from None
+        if not isinstance(request, dict):
+            raise PluginFailure("request must be a JSON object")
+        candidate = request.get("request_id")
+        if isinstance(candidate, str) and REQUEST_ID.fullmatch(candidate):
+            request_id = candidate
+        if type(request.get("protocol_version")) is not int or request["protocol_version"] != 1:
+            raise PluginFailure("unsupported protocol_version")
+        reply(stdout, request_id, True, handle(request))
+    except PluginFailure as failure:
+        reply(stdout, request_id, False, str(failure))
+    except Exception as error:  # last resort: no traceback, no error text
+        print(f"internal error: {type(error).__name__}", file=sys.stderr)
+        reply(stdout, request_id, False, "internal error in the plugin")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

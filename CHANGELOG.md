@@ -5,6 +5,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **External plugins:** separate programs add actions without recompiling the app. Each valid
+  plugin is its own item under a **Plugins** heading of the Actions catalog, with an explicit
+  **Enable** check box (nothing is enabled by default), a generated settings form, and an
+  **Update plugins** icon in the binding toolbar that rereads the plugin folder. A supervised
+  host starts the plugin once per press with a cleared environment, bounded output and a fixed
+  5 s deadline, in its own process group that is killed afterwards, on a dedicated worker, and
+  never retries. Process separation is **not** a sandbox: plugins run with your privileges.
+- Optional manifest `requirements` (commands, services, files): shown in the plugin's sidebar
+  item; only commands are looked up on `PATH` and the app never installs or runs anything.
+- `plugin_validate` example (`cargo run --offline --example plugin_validate -- <dir>`) checks a
+  plugin project without running it; its explicit `--invoke` mode runs the plugin once.
+- **Plugin SDK:** a guide for plugin authors (`docs/plugin-sdk.html`, linked from the
+  documentation and the site map), the host contract in `docs/plugins.md`, and a copyable starter
+  project in `examples/plugin-template`. A test keeps the guide's limits equal to the code's.
+  Limits: the Discord plugin has never been verified against a live Discord or Hyprland session,
+  and on the MeRGBW light only power-off was observed to work (TG609).
+
+### Changed
+
+- The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
+  `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
+  Their manifests need a build that knows `requirements`; older builds reject unknown fields.
+
+### Removed
+
+- The `extensions/` folder and the two demo-plugin integration tests (`discord_extension`,
+  `mergbw_extension`) are gone from this repository; their coverage moved to the plugin projects'
+  own tests and the validator.
+
 ## [0.2.0] - 2026-11-10
 
 Support for the Stream Deck + XL and for several Stream Decks at once (package version `0.2.0`).

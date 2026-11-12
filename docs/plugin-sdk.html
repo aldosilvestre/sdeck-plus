@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sdeck-plus plugin SDK: write a plugin for the Stream Deck + app</title>
+<meta name="description" content="Write a plugin for sdeck-plus: project layout, manifest.json reference, the one-line JSON protocol, exact limits and environment, security rules, dependency declaration, testing with the validator, installing and a copyable starter template.">
+<link rel="canonical" href="https://aldosilvestre.github.io/sdeck-plus/plugin-sdk.html">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0a10" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="sdeck-plus">
+<meta property="og:url" content="https://aldosilvestre.github.io/sdeck-plus/plugin-sdk.html">
+<meta property="og:title" content="sdeck-plus plugin SDK">
+<meta property="og:description" content="Write your own plugin for sdeck-plus: manifest, protocol, limits, security and a starter template.">
+<meta property="og:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="sdeck-plus plugin SDK">
+<meta name="twitter:description" content="Write your own plugin for sdeck-plus: manifest, protocol, limits, security and a starter template.">
+<meta name="twitter:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
+<meta name="twitter:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  /* Runs before paint: theme choice and JS flag. */
+  (function () {
+    var root = document.documentElement;
+    root.classList.add("js");
+    try {
+      var forced = /[?&]theme=(light|dark)(?:&|$)/.exec(location.search);
+      var theme = forced ? forced[1] : localStorage.getItem("sdeck-plus-theme");
+      if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+    } catch (e) { /* storage unavailable: follow the system theme */ }
+  })();
+</script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="docs-page">
+<svg xmlns="http://www.w3.org/2000/svg" class="visually-hidden" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="duo" d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  </defs>
+</svg>
+<a class="skip-link" href="#doc-content">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="./#features">Features</a></li>
+        <li><a href="./#actions">Actions</a></li>
+        <li><a href="docs.html#install">Install</a></li>
+        <li><a href="docs.html">Documentation</a></li>
+        <li><a href="plugin-sdk.html" aria-current="page">Plugin SDK</a></li>
+        <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
+      </ul>
+    </nav>
+    <div class="header-tools">
+      <button class="icon-btn theme-toggle" type="button" aria-label="Switch to dark theme">
+        <svg class="i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+      <button class="icon-btn menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+        <svg class="i-menu" aria-hidden="true"><use href="#i-menu"/></svg>
+        <svg class="i-close" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="doc-hero" aria-labelledby="doc-title">
+    <div class="wrap doc-hero-grid">
+      <div>
+        <p class="eyebrow">Plugin SDK</p>
+        <h1 id="doc-title">Write a plugin for <span class="grad">sdeck-plus</span>.</h1>
+        <p class="lead">Everything an author needs to add actions without recompiling the app: the project layout, the manifest, the one-line JSON protocol, the exact limits, the security rules and a starter template you can copy.</p>
+      </div>
+      <div class="search" role="search">
+        <label for="doc-search">Filter this guide</label>
+        <div class="search-field">
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="doc-search" type="search" autocomplete="off" spellcheck="false" placeholder="Try “request_id”, “timeout” or “token”" aria-describedby="search-status">
+          <kbd aria-hidden="true">/</kbd>
+        </div>
+        <p class="search-status" id="search-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap doc-layout">
+    <details class="toc" id="toc" open>
+      <summary>On this page <svg aria-hidden="true"><use href="#i-chev-down"/></svg></summary>
+      <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#quick-start">Quick start</a></li>
+        <li><a href="#layout">Project layout and conventions</a></li>
+        <li><a href="#manifest">manifest.json reference</a></li>
+        <li><a href="#settings">Settings and the editor form</a></li>
+        <li><a href="#protocol">Protocol v1</a></li>
+        <li><a href="#limits">Limits and environment</a></li>
+        <li><a href="#security">Security and credentials</a></li>
+        <li><a href="#dependencies">Declaring dependencies</a></li>
+        <li><a href="#testing">Testing</a></li>
+        <li><a href="#installing">Installing and updating</a></li>
+        <li><a href="#compatibility">Compatibility and versioning</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#reference-plugins">Reference plugins</a></li>
+        <li><a href="#checklist">Publishing checklist</a></li>
+      </ol>
+    </details>
+
+    <div class="doc-content" id="doc-content">
+
+      <section class="doc-section" id="overview" aria-labelledby="overview-title">
+        <header>
+          <p class="eyebrow">Start here</p>
+          <h2 id="overview-title">Overview</h2>
+          <p>A plugin is a small external program. The app starts it once for every key press or dial event that is bound to one of its actions, hands it one JSON request and reads back one JSON answer. Nothing keeps running in between.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-media)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>What a plugin is</h4>
+              <ul>
+                <li><strong>Any language.</strong> A plugin is an executable file plus a <code>manifest.json</code>. It reads one line from stdin and writes one line to stdout, so a shell script, Python, Go or Rust binary all work. The template and both reference plugins use Python 3 and its standard library only.</li>
+                <li><strong>One request per process.</strong> Each press, dial turn, dial press or touch event starts a fresh process, which exits when it has answered. Keep no state in memory; keep any state in files you own.</li>
+                <li><strong>Actions come from the manifest.</strong> The app reads <code>manifest.json</code> only, lists the actions in the <strong>Actions</strong> catalog under a <strong>Plugins</strong> heading, and builds the settings form from the field definitions. Your code never draws a window.</li>
+                <li><strong>Runs sequentially on its own worker.</strong> Plugin requests are queued (eight waiting at most) and run one at a time with a fixed 5 s deadline each, so a slow plugin cannot delay built-in actions. Every dial event starts a process, so bind a dial turn only to an action that is cheap and quick.</li>
+              </ul>
+            </article>
+            <article class="card wide">
+              <h4>Trust model</h4>
+              <p><strong>A plugin runs with your user's privileges. Process separation is not a sandbox.</strong> It can read your files and use your network like any program you start. The app therefore never enables a plugin by itself: it is <strong>disabled by default</strong>, and the user must tick <strong>Enable</strong> after reading the warning. Saving a binding never runs a plugin; only <strong>Test action</strong> or the physical control does. The app never installs packages or changes permissions for a plugin, and a missing dependency never blocks enabling. Write your plugin so that a user who reads <code>run</code> finds nothing surprising.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="quick-start" aria-labelledby="quick-start-title">
+        <header>
+          <p class="eyebrow">Ten minutes</p>
+          <h2 id="quick-start-title">Quick start</h2>
+          <p>Start from the template in <code>examples/plugin-template</code> of an sdeck-plus checkout. It defines an <code>hello</code> plugin with one action, <code>say-hello</code>, that only returns a greeting.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-load)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>From a copy to a working action</h4>
+              <ol>
+                <li><strong>Create the project.</strong> Copy the template out of the checkout and make it its own repository:
+                  <div class="code-block">
+<pre><code>cp -r examples/plugin-template ~/src/sdeck-plugin-greeter
+cd ~/src/sdeck-plugin-greeter &amp;&amp; git init</code></pre>
+                  </div>
+                </li>
+                <li><strong>Edit <code>manifest.json</code>.</strong> Set <code>id</code> (here <code>greeter</code>), <code>name</code>, <code>version</code>, your actions with their settings, and the <code>requirements</code> your code needs. See the <a href="#manifest">reference</a>.</li>
+                <li><strong>Write <code>run</code>.</strong> Keep the framing of the template (one request line in, one response line out, failures as <code>ok:false</code>) and replace the action. Keep it executable (<code>chmod 755 run</code>).</li>
+                <li><strong>Validate it without running it.</strong> From the sdeck-plus checkout:
+                  <div class="code-block">
+<pre><code>cargo run --offline --example plugin_validate -- ~/src/sdeck-plugin-greeter</code></pre>
+                  </div>
+                  It prints <code>PLUGIN_VALIDATE_OK:</code> with the actions and requirements, or one <code>PLUGIN_VALIDATE_ERROR:</code> line per problem.
+                </li>
+                <li><strong>Optionally run one action.</strong> This <em>runs your plugin</em> once with your privileges:
+                  <div class="code-block">
+<pre><code>cargo run --offline --example plugin_validate -- ~/src/sdeck-plugin-greeter \
+  --invoke say-hello --settings '{"name":"Ada"}'</code></pre>
+                  </div>
+                </li>
+                <li><strong>Install it.</strong> The folder name must equal the manifest <code>id</code>:
+                  <div class="code-block">
+<pre><code>dest="${XDG_DATA_HOME:-$HOME/.local/share}/sdeck-plus/plugins/greeter"
+mkdir -p "$dest"
+cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
+                  </div>
+                </li>
+                <li><strong>Enable and test it in the app.</strong> Press <strong>Update plugins</strong> (the icon at the right end of the binding toolbar), open the plugin under <strong>Plugins</strong> in the Actions catalog, tick <strong>Enable</strong>, assign an action to a control, fill in the form, <strong>Save binding</strong> and press <strong>Test action</strong>. The result appears in the status line.</li>
+              </ol>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="layout" aria-labelledby="layout-title">
+        <header>
+          <p class="eyebrow">Structure</p>
+          <h2 id="layout-title">Project layout and repository conventions</h2>
+          <p>One repository per plugin. A new plugin is a new project, not a folder inside sdeck-plus.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-web)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Files</h4>
+              <div class="code-block">
+<pre><code>sdeck-plugin-&lt;id&gt;/
+├── manifest.json     # required at runtime
+├── run               # required at runtime: the executable named by the manifest
+├── README.md         # what it does, a Dependencies section, install steps, limits
+├── LICENSE
+└── tests/            # your unit tests (development only)</code></pre>
+              </div>
+              <ul>
+                <li><strong>Name:</strong> <code>sdeck-plugin-&lt;id&gt;</code> is the suggested repository name, where <code>&lt;id&gt;</code> is the manifest <code>id</code> (the installed folder is named after the id, not the repository).</li>
+                <li><strong>At runtime only two files matter:</strong> <code>manifest.json</code> and the executable. Everything else is for development; an installed plugin is just those two files in <code>plugins/&lt;id&gt;/</code>. The executable may be any relative path inside the plugin folder (<code>run</code> by convention), but it must stay inside it, so ship helper files next to it only if you also copy them.</li>
+                <li><strong>README.md</strong> states what each action does, the <strong>Dependencies</strong> table, the credential files the user must create, install and test commands, and honest limits (see <a href="#checklist">the checklist</a>).</li>
+                <li><strong>Add a <code>.gitignore</code></strong> for <code>__pycache__/</code> and <code>*.pyc</code>, and keep secrets and tokens out of the repository.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="manifest" aria-labelledby="manifest-title">
+        <header>
+          <p class="eyebrow">Reference</p>
+          <h2 id="manifest-title">manifest.json reference</h2>
+          <p>At most 64 KiB. Unknown fields are rejected at every level, so a typo is an error, not a silent no-op. Parsing the manifest never launches your executable.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-system)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Example</h4>
+              <div class="code-block">
+<pre><code>{
+  "id": "hello", "version": "0.1.0", "protocol_version": 1, "name": "Hello",
+  "executable": "run",
+  "requirements": [
+    {"kind": "command", "name": "python3", "version": "&gt;= 3.8"}
+  ],
+  "actions": [{
+    "id": "say-hello", "name": "Say hello", "description": "Returns a greeting.",
+    "controls": ["key", "dial_press"],
+    "settings": [
+      {"type": "text", "id": "name", "label": "Name", "max_length": 32, "default": "world"},
+      {"type": "boolean", "id": "shout", "label": "Shout", "default": false}
+    ]
+  }]
+}</code></pre>
+              </div>
+            </article>
+            <article class="card wide" id="manifest-fields">
+              <h4>Top-level fields</h4>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Field</th><th>Type</th><th>Rule</th></tr>
+                  <tr><th><code>id</code></th><td>string, required</td><td>1-48 characters of <code>[a-z0-9_-]</code>, starting with a letter or digit. Must equal the plugin's folder name once installed.</td></tr>
+                  <tr><th><code>version</code></th><td>string, required</td><td>1-32 printable characters. Free text (semantic versioning is recommended); shown as <code>v&lt;version&gt;</code>.</td></tr>
+                  <tr><th><code>protocol_version</code></th><td>integer, required</td><td>Must be <code>1</code>.</td></tr>
+                  <tr><th><code>name</code></th><td>string, required</td><td>1-64 printable characters, not blank. The sidebar title.</td></tr>
+                  <tr><th><code>executable</code></th><td>string, required</td><td>Plain relative path, at most 128 characters, no <code>..</code>, no absolute path. It must resolve (symlinks included) to an executable regular file inside the plugin folder; this is checked at discovery and again at every run.</td></tr>
+                  <tr><th><code>actions</code></th><td>array, required</td><td>1 to 32 actions, unique ids.</td></tr>
+                  <tr><th><code>requirements</code></th><td>array, optional</td><td>Default none; at most 16. See <a href="#dependencies">Declaring dependencies</a>.</td></tr>
+                </table>
+              </div>
+              <p>The app lists at most 64 plugin folders; the rest are reported as skipped.</p>
+            </article>
+            <article class="card wide" id="manifest-actions">
+              <h4>Actions and controls</h4>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Field</th><th>Type</th><th>Rule</th></tr>
+                  <tr><th><code>id</code></th><td>string, required</td><td>Same rule as the plugin id; unique within the plugin. This is what the request's <code>action</code> carries.</td></tr>
+                  <tr><th><code>name</code></th><td>string, required</td><td>1-64 printable characters, not blank.</td></tr>
+                  <tr><th><code>description</code></th><td>string, optional</td><td>At most 256 characters.</td></tr>
+                  <tr><th><code>controls</code></th><td>array, required</td><td>At least one of <code>key</code>, <code>dial_turn</code>, <code>dial_press</code>, <code>touch</code> (the touch strip). The editor only lets the user assign the action to controls listed here.</td></tr>
+                  <tr><th><code>settings</code></th><td>array, optional</td><td>Default empty; at most 16 fields, unique ids. See below.</td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card wide" id="manifest-fields-types">
+              <h4>Setting field types</h4>
+              <p>Every field has <code>type</code>, <code>id</code> (same rule as other ids, unique within the action), <code>label</code> (1-64 printable characters, shown in the form) and <code>required</code> (default <code>false</code>), plus:</p>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Type</th><th>Extra fields</th><th>Accepted value</th></tr>
+                  <tr><th><code>text</code></th><td><code>max_length</code> (default 256, 1-1024), <code>default</code> (string)</td><td>A string of at most <code>max_length</code> characters with no control characters. When <code>required</code> it must not be blank. The saved binding keeps text up to 1024 characters.</td></tr>
+                  <tr><th><code>integer</code></th><td><code>min</code> and <code>max</code> (both mandatory, <code>min</code> &le; <code>max</code>), <code>default</code> (integer)</td><td>A 64-bit integer within <code>[min, max]</code>; the form shows a bounded number field.</td></tr>
+                  <tr><th><code>boolean</code></th><td><code>default</code> (boolean)</td><td><code>true</code> or <code>false</code>; the form shows a check box.</td></tr>
+                </table>
+              </div>
+              <p>A <code>default</code> must itself satisfy the field's limits, or the manifest is rejected. There are no other field types: a list, a secret or a file picker is not available, which is deliberate (see <a href="#security">Security</a>).</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="settings" aria-labelledby="settings-title">
+        <header>
+          <p class="eyebrow">Reference</p>
+          <h2 id="settings-title">Settings and the editor form</h2>
+          <p>The user fills in a form the app generates from your field definitions. The values travel with the binding and reach your plugin in the request.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-audio)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Who validates what</h4>
+              <ul>
+                <li><strong>The host validates first.</strong> Before it starts your process it checks the settings against the manifest: unknown keys, wrong types and out-of-bound values are rejected; defaults are filled in; a missing required field without a default is rejected; the serialized payload must fit in 4096 bytes. A rejected binding never starts the plugin.</li>
+                <li><strong>The plugin MUST validate again.</strong> Treat the settings as untrusted input anyway: someone can run your executable by hand, a future host build could differ, and a bug on either side must not become a command injection. Check every key and type, apply your own defaults and refuse anything unexpected with <code>ok:false</code>.</li>
+                <li><strong>Absent is possible.</strong> An optional field with no value and no default is omitted from <code>settings</code>. Do not assume a key exists.</li>
+                <li><strong>Unknown settings are rejected</strong>, never ignored. Reject them in your plugin too, so a misspelled key is reported rather than silently dropped.</li>
+                <li><strong>Settings are stored in plain text.</strong> They are saved in <code>layers.conf</code> and exported in bundles. Never ask for a password or token as a setting (see <a href="#security">Security</a>).</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="protocol" aria-labelledby="protocol-title">
+        <header>
+          <p class="eyebrow">Contract</p>
+          <h2 id="protocol-title">Protocol v1</h2>
+          <p>One request line on stdin, one response line on stdout, exit status 0. Anything else is an error the user sees.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-obs)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Request and response</h4>
+              <p>The host writes one JSON line to stdin, then closes it (EOF):</p>
+              <div class="code-block">
+<pre><code>{"protocol_version":1,"type":"invoke","request_id":"sdeck-7","action":"say-hello","settings":{"name":"Ada","shout":false}}</code></pre>
+              </div>
+              <p>Your plugin answers with exactly one JSON line on stdout, then exits with status 0:</p>
+              <div class="code-block">
+<pre><code>{"protocol_version":1,"request_id":"sdeck-7","ok":true,"message":"Hello, Ada!"}
+{"protocol_version":1,"request_id":"sdeck-7","ok":false,"error":"name must be non-empty text"}</code></pre>
+              </div>
+              <ul>
+                <li><strong><code>request_id</code> is echoed unchanged.</strong> It is 1-64 characters of <code>[A-Za-z0-9._-]</code> chosen by the host (the app uses <code>sdeck-N</code>). A different value is an error.</li>
+                <li><strong>Required response fields:</strong> <code>protocol_version</code> (1), <code>request_id</code> and <code>ok</code>. <strong>Optional:</strong> <code>message</code> and <code>error</code>, strings of at most 512 characters. Unknown response fields are rejected. On success the <code>message</code> is shown in the status line; on failure the <code>error</code> is (without one the user sees "plugin reported failure").</li>
+                <li><strong>Exactly one stdout line</strong>, UTF-8, no banner, no progress output, no second JSON object. Blank lines are ignored; any other extra line is an error.</li>
+                <li><strong>stderr is for diagnostics only</strong>: the first 4096 bytes are kept and shown with a non-zero exit. Never write secrets or the user's message text there.</li>
+                <li><strong>Exit status 0, even for failure.</strong> Report failures as <code>ok:false</code> with a helpful <code>error</code>. A non-zero exit is treated as a crash and its stdout is not used.</li>
+                <li><strong>Always answer.</strong> Catch unexpected exceptions, answer <code>ok:false</code> with a generic message and never print a traceback to stdout. If the request cannot be parsed, answer with its <code>request_id</code> when you can still read it.</li>
+                <li><strong>Read one line, bounded.</strong> The request is a single line; read it with a size bound instead of reading until a stream you do not control ends.</li>
+              </ul>
+            </article>
+            <article class="card wide" id="protocol-outcomes">
+              <h4>What the host does with each outcome</h4>
+              <p>These are the <code>PluginError</code> values of the host. The app shows them on the status line as <em>Plugin &lt;id&gt;/&lt;action&gt; failed: &lt;message&gt; (request &lt;request_id&gt;)</em>.</p>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Outcome</th><th>When</th><th>Message shown</th></tr>
+                  <tr><th><code>Reported</code></th><td>You answered <code>ok:false</code></td><td><code>plugin reported an error: &lt;your error&gt;</code></td></tr>
+                  <tr><th><code>NonZeroExit</code></th><td>Exit status is not 0 (checked before stdout is read)</td><td><code>plugin exited with Some(1): &lt;stderr&gt;</code></td></tr>
+                  <tr><th><code>MalformedResponse</code></th><td>Stdout is not UTF-8, is empty, has more than one line, is not the JSON shape above, has another <code>protocol_version</code>, or a text over 512 characters</td><td><code>malformed plugin response: &lt;detail&gt;</code></td></tr>
+                  <tr><th><code>RequestIdMismatch</code></th><td>The echoed <code>request_id</code> differs</td><td><code>plugin answered a different request</code></td></tr>
+                  <tr><th><code>OutputTooLarge</code></th><td>Stdout grows beyond 16 KiB (the process is killed)</td><td><code>plugin output exceeded the size limit</code></td></tr>
+                  <tr><th><code>Timeout</code></th><td>Spawn, exchange and exit take longer than the deadline (the process group is killed)</td><td><code>plugin timed out</code></td></tr>
+                </table>
+              </div>
+              <p>Before any process starts, the host can also refuse the request: the plugin is not installed (<code>Missing</code>), disabled (<code>Disabled</code>), no longer offers the action (<code>UnknownAction</code>), the settings do not fit (<code>InvalidSettings</code>), the executable is missing, not executable or resolves outside the plugin folder (<code>UnsafeExecutable</code>), or the process cannot start (<code>Spawn</code>). A request is never retried by the host.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="limits" aria-labelledby="limits-title">
+        <header>
+          <p class="eyebrow">Reference</p>
+          <h2 id="limits-title">Limits and environment</h2>
+          <p>The numbers below are enforced by the host today. They are the public constants of <code>sdeck_plus::plugins</code> where one exists.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-web)">
+          <div class="cards">
+            <article class="card wide" id="limits-table">
+              <h4>Limits</h4>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>What</th><th>Limit</th></tr>
+                  <tr><th><code>manifest.json</code></th><td>64 KiB</td></tr>
+                  <tr><th>Settings payload (serialized, defaults included)</th><td>4096 bytes</td></tr>
+                  <tr><th>One saved text setting</th><td>1024 characters (and at most 16 settings per binding)</td></tr>
+                  <tr><th>Your stdout</th><td>16 KiB; more kills the process (<code>OutputTooLarge</code>)</td></tr>
+                  <tr><th>Your stderr</th><td>4096 bytes kept, the rest is read and dropped</td></tr>
+                  <tr><th><code>message</code> and <code>error</code></th><td>512 characters each</td></tr>
+                  <tr><th>Request deadline</th><td>Covers spawn, exchange and exit. The host API defaults to 5 s and accepts at most 60 s (the validator's <code>--timeout</code>). <strong>The app always uses a fixed 5 s deadline today.</strong> A manifest cannot yet ask for a longer deadline, so design every action to finish well within 5 s.</td></tr>
+                  <tr><th>Queue</th><td>Eight requests wait behind the one running; a ninth is refused with a status message. Requests run one at a time.</td></tr>
+                  <tr><th>Shutdown</th><td>Queued requests are dropped; a running one is waited for at most 6 s.</td></tr>
+                  <tr><th>Counts</th><td>64 plugins, 32 actions per plugin, 16 fields per action, 16 requirements; ids up to 48 characters</td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card wide" id="environment">
+              <h4>The process you get</h4>
+              <ul>
+                <li><strong>Cleared environment.</strong> Your process starts with an empty environment plus only these eight variables, and only when the app itself has them set: <code>PATH</code>, <code>HOME</code>, <code>LANG</code>, <code>XDG_RUNTIME_DIR</code>, <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code>, <code>WAYLAND_DISPLAY</code>, <code>DBUS_SESSION_BUS_ADDRESS</code>. Any of them can be absent, so read with a fallback.</li>
+                <li><strong>Everything else must be derived.</strong> Nothing else is inherited. Example: Hyprland's <code>HYPRLAND_INSTANCE_SIGNATURE</code> is not forwarded, so a plugin that calls <code>hyprctl</code> must find the running instance itself (the Discord reference plugin looks in <code>$XDG_RUNTIME_DIR/hypr/</code>). Never ask the user to add variables to the app's environment.</li>
+                <li><strong>Working directory</strong> is the plugin's own folder. Do not rely on it for user data.</li>
+                <li><strong>No shell and no terminal.</strong> stdin carries the request, stdout the response, stderr the diagnostics.</li>
+                <li><strong>Own process group, killed afterwards.</strong> The process runs in its own group. When it exits, times out or errors, the host kills the whole group and reaps it, so background children do not outlive the request. Do not try to daemonize; a descendant that creates its own session can escape, which is a limit of process groups, not a promise.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="security" aria-labelledby="security-title">
+        <header>
+          <p class="eyebrow">Responsibility</p>
+          <h2 id="security-title">Security and credentials</h2>
+          <p>The host bounds time, output and file layout. Everything your plugin does with the user's account is your responsibility.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-obs)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Rules for plugin authors</h4>
+              <ul>
+                <li><strong>Process separation is not a sandbox.</strong> Your code can do anything the user can. Say in your README what it touches, and keep that small.</li>
+                <li><strong>Never put secrets in bindings or settings.</strong> Bindings are saved in plain text in <code>layers.conf</code> and exported in configuration bundles. Tokens, passwords and API keys never belong in a settings field, a default or the manifest.</li>
+                <li><strong>Use the token-file pattern.</strong> The user creates a file you document, for example <code>$XDG_CONFIG_HOME/sdeck-plus/plugins/&lt;id&gt;/token</code> (falling back to <code>$HOME/.config/...</code>). Before using it, require a regular file (not a symlink) owned by the user with no group or other permissions (mode 0600), and bound its size. On failure name the path and the rule, never the contents. Document the creation:
+                  <div class="code-block">
+<pre><code>mkdir -p ~/.config/sdeck-plus/plugins/&lt;id&gt;
+install -m 600 /dev/null ~/.config/sdeck-plus/plugins/&lt;id&gt;/token
+$EDITOR ~/.config/sdeck-plus/plugins/&lt;id&gt;/token   # paste the token only</code></pre>
+                  </div>
+                </li>
+                <li><strong>Argument lists, never a shell.</strong> Start subprocesses with an argv list and no shell (<code>subprocess.run([...])</code> without <code>shell=True</code>). Never build a command string from settings.</li>
+                <li><strong>Validate untrusted input before any subprocess</strong> or file or network access: allow-list characters, bound lengths, reject control characters, and check the action name.</li>
+                <li><strong>Bound time and output.</strong> Give every subprocess, connection and read its own timeout inside your 5 s budget, and cap what you read back.</li>
+                <li><strong>Never echo secrets.</strong> Not in <code>message</code>, <code>error</code> or stderr. The response text appears in the status line and may be logged by the user's tools; keep the user's own message text out of diagnostics too.</li>
+                <li><strong>No retries for ambiguous side effects.</strong> The host never retries. If a request may or may not have taken effect (a message sent, a toggle flipped), do not repeat it. Retry only an operation that is safe to repeat, once, and only while the time budget allows.</li>
+                <li><strong>Be honest in the message.</strong> Say "sent" when you only sent; say "confirmed" only if you checked.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="dependencies" aria-labelledby="dependencies-title">
+        <header>
+          <p class="eyebrow">Reference</p>
+          <h2 id="dependencies-title">Declaring dependencies</h2>
+          <p>List what your plugin needs in the manifest, so the user sees it before enabling, and repeat it in the README. Declaring never installs or runs anything.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-load)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>The <code>requirements</code> list</h4>
+              <div class="code-block">
+<pre><code>"requirements": [
+  {"kind": "command", "name": "python3", "version": "&gt;= 3.8"},
+  {"kind": "command", "name": "hyprctl", "optional": true, "description": "Only the shortcut actions"},
+  {"kind": "service", "name": "bluetooth", "optional": true},
+  {"kind": "file", "name": "~/.config/sdeck-plus/plugins/hello/token", "description": "Your token, mode 0600"}
+]</code></pre>
+              </div>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Field</th><th>Rule</th></tr>
+                  <tr><th><code>kind</code></th><td><code>command</code> (an executable looked up on <code>PATH</code>), <code>service</code> (a daemon, system service or app) or <code>file</code> (a file the user provides). Required.</td></tr>
+                  <tr><th><code>name</code></th><td>1-64 printable characters. For <code>command</code> a bare name of <code>[A-Za-z0-9._+-]</code>, no slash. Required; (<code>kind</code>, <code>name</code>) must be unique.</td></tr>
+                  <tr><th><code>description</code></th><td>Up to 200 printable characters; shown as a tooltip.</td></tr>
+                  <tr><th><code>version</code></th><td>Up to 32 printable characters, such as <code>&gt;= 3.9</code>. Informational: it is never compared.</td></tr>
+                  <tr><th><code>optional</code></th><td>Boolean, default <code>false</code>. Mark a dependency optional when only some actions need it.</td></tr>
+                </table>
+              </div>
+              <ul>
+                <li><strong>Shown:</strong> the plugin's sidebar item has a compact <strong>Requires</strong> list (kind, name, version, "(optional)", description as a tooltip).</li>
+                <li><strong>Checked:</strong> only <code>command</code> entries, by looking for a regular file with an execute bit in each absolute <code>PATH</code> directory. A missing required command shows <code>Missing: &lt;name&gt;</code> as an alert; a missing optional one shows <code>Not found: &lt;name&gt;</code> without an alert. The check repeats on every <strong>Update plugins</strong>. <code>service</code> and <code>file</code> entries are informational.</li>
+                <li><strong>Never done:</strong> the app does not install packages, change permissions, run the commands, start services, or block enabling because of a missing requirement. Your plugin reports its own failures when it runs.</li>
+                <li><strong>In the README</strong>, add a <code>## Dependencies</code> section with the same entries as a table (kind, name, needed for, notes), so people reading the repository see them without the app.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="testing" aria-labelledby="testing-title">
+        <header>
+          <p class="eyebrow">Quality</p>
+          <h2 id="testing-title">Testing</h2>
+          <p>Test the plugin by itself first, then with the validator, then in the app.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-media)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>1. Unit-test the plugin with injected dependencies</h4>
+              <p>Give <code>main</code> its collaborators as parameters, as the template and both reference plugins do: <code>main(argv=None, stdin=None, stdout=None, environ=None)</code>, plus an injectable runner or opener for anything that spawns a process or opens a connection. Tests then call <code>main</code> with in-memory streams, a fake environment in a temporary directory and a fake runner that records the argument lists. Assert the exact argv, that no shell is used, the response framing, the <code>request_id</code> echo, every rejected input, and that errors never contain a secret. No test should need the network, a real config directory or the real desktop.</p>
+              <div class="code-block">
+<pre><code>python3 -B -I -m unittest discover -s tests -v</code></pre>
+              </div>
+            </article>
+            <article class="card wide" id="testing-validator">
+              <h4>2. Validate the project with the validator</h4>
+              <div class="code-block">
+<pre><code>cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt;
+cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt; --invoke &lt;action&gt; \
+    [--settings '&lt;json&gt;'] [--timeout &lt;seconds&gt;] [--request-id &lt;id&gt;]</code></pre>
+              </div>
+              <ul>
+                <li><strong>Without <code>--invoke</code> nothing is run.</strong> It copies the project's regular files into a temporary plugin root (no symlinks; at most 256 files, 8 MiB per file and 32 MiB in total; <code>.git</code> and <code>__pycache__</code> are skipped), opens it with the real host code and prints <code>PLUGIN_VALIDATE_OK:</code> (id, version, protocol, actions with controls and settings, requirements with a <code>PATH</code> check) or one <code>PLUGIN_VALIDATE_ERROR:</code> line per problem. The directory name need not equal the id. The temporary root is always removed.</li>
+                <li><strong><code>--invoke</code> RUNS your plugin once</strong> with your privileges, after printing a warning. It enables the plugin in the temporary root and calls the real host, so the outcome is what the app would see: <code>PLUGIN_INVOKE_OK:</code> with the message, or <code>PLUGIN_INVOKE_ERROR:</code> with the host error. <code>--timeout</code> defaults to 5 seconds (maximum 60) and <code>--request-id</code> to <code>validate-1</code>. Use it only on a plugin you trust and, if the action has side effects, with settings you accept.</li>
+                <li><strong>Exit status:</strong> 0 ok, 1 problems or a failed invocation, 2 usage.</li>
+              </ul>
+            </article>
+            <article class="card wide">
+              <h4>3. Try it in the app</h4>
+              <p>Install it (see <a href="#installing">Installing and updating</a>), enable it and assign each action to each control it declares. Use <strong>Test action</strong> to run it from the editor, then press the real control. Check the status line for the message, the failure texts and a request that exceeds 5 s. A manual test is the only way to confirm what the plugin does to the outside world; the unit tests use fakes. State in your README what you did and did not verify.</p>
+              <p>sdeck-plus itself guards the template and this page with <code>cargo test --offline --test plugin_sdk</code>.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="installing" aria-labelledby="installing-title">
+        <header>
+          <p class="eyebrow">Using it</p>
+          <h2 id="installing-title">Installing and updating</h2>
+          <p>There is no package format: a plugin is two files in the app's data folder.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-system)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Install, enable, update</h4>
+              <ul>
+                <li><strong>Copy</strong> <code>manifest.json</code> and <code>run</code> to <code>&lt;data dir&gt;/sdeck-plus/plugins/&lt;id&gt;/</code>, where the data dir is <code>$XDG_DATA_HOME</code> (absolute) or <code>$HOME/.local/share</code>. The folder name must equal the manifest <code>id</code>, and the executable must keep its execute bit. The folder is shared by every device model.</li>
+                <li><strong>Update plugins.</strong> The app reads the folder when it starts and when the user presses the <strong>Update plugins</strong> icon at the right end of the binding toolbar (hover text: <em>Update plugins</em>). Discovery only reads manifests; it never runs anything.</li>
+                <li><strong>Where it appears.</strong> Under the <strong>Plugins</strong> heading of the Actions catalog, each valid plugin is its own collapsible item titled with its name (plus "(disabled)" while off), with the untrusted-code warning, the <strong>Enable</strong> check box, the <strong>Requires</strong> list and its actions. A folder that fails validation is listed above the items with the reason.</li>
+                <li><strong>Disabled by default.</strong> Installing never enables. Until the user ticks <strong>Enable</strong>, its actions are listed but cannot be assigned or run. The enabled list lives in <code>plugins.json</code> in the plugin root, written only by the app.</li>
+                <li><strong>Updating.</strong> Overwrite the files and press <strong>Update plugins</strong>. Every run rereads the manifest and the enabled list from disk, so a new <code>run</code> applies at the next press; the sidebar and form change after the refresh. Bump <code>version</code> whenever the manifest changes.</li>
+                <li><strong>Removing.</strong> Delete the folder. Existing bindings are kept, and the editor says the plugin is not installed until it returns.</li>
+                <li><strong>Not exported.</strong> Configuration bundles contain bindings only, never plugin programs, credentials or the enabled list.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="compatibility" aria-labelledby="compatibility-title">
+        <header>
+          <p class="eyebrow">Planning</p>
+          <h2 id="compatibility-title">Compatibility and versioning</h2>
+          <p>Protocol 1 is the only protocol. The manifest grows by adding optional fields.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-audio)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>What can change under you</h4>
+              <ul>
+                <li><strong>Protocol 1.</strong> <code>protocol_version</code> must be <code>1</code> in the manifest, the request and every response.</li>
+                <li><strong>Additive manifest fields.</strong> New manifest fields will be optional additions that do not change protocol 1. <code>requirements</code> is the first of them.</li>
+                <li><strong>Older builds reject newer manifests.</strong> Because unknown manifest fields are rejected, an sdeck-plus build that predates a field refuses a manifest that uses it, and shows the folder as skipped with the parser's message. If you want to support older builds, leave out optional fields such as <code>requirements</code> and keep the README's Dependencies table.</li>
+                <li><strong>Versioning your plugin.</strong> Bump <code>version</code> whenever the manifest changes (new action, field or requirement), note the minimum sdeck-plus version in the README when you use a newer field, and keep action and field ids stable: bindings store them, and a removed action leaves the binding in the "no longer offers" state.</li>
+                <li><strong>This page states today's numbers.</strong> Check the changelog when you update the app.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="troubleshooting" aria-labelledby="troubleshooting-title">
+        <header>
+          <p class="eyebrow">When it does not work</p>
+          <h2 id="troubleshooting-title">Troubleshooting</h2>
+          <p>The messages below are the ones the app and the validator print.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-obs)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Symptom, cause, fix</h4>
+              <div class="table-scroll">
+                <table class="ref-table">
+                  <tr><th>Message</th><th>Cause</th><th>Fix</th></tr>
+                  <tr><td><code>Plugin folder "&lt;dir&gt;" was skipped: invalid plugin manifest: ...</code></td><td>A manifest rule failed: unknown field, bad id, limits, duplicate ids, <code>unsupported protocol_version</code>.</td><td>Run the validator; fix the named field. An older app build also says <code>unknown field</code> for newer fields.</td></tr>
+                  <tr><td><code>manifest id `a` does not match directory `b`</code></td><td>The installed folder name differs from the <code>id</code>.</td><td>Rename the folder to the id.</td></tr>
+                  <tr><td><code>unsafe plugin executable: run: not an executable regular file</code></td><td>The file lacks the execute bit or is not a regular file.</td><td><code>chmod 755 run</code>; copy with <code>install -m 755</code>.</td></tr>
+                  <tr><td><code>unsafe plugin executable: run: not found</code> / <code>resolves outside the plugin directory</code></td><td>The executable path is wrong, or a symlink leaves the plugin folder.</td><td>Install the real file inside the folder; fix <code>executable</code>.</td></tr>
+                  <tr><td><code>Plugin "&lt;id&gt;" is not installed. The saved action ... are kept</code></td><td>A binding names a plugin that is not in the folder.</td><td>Install it and press <strong>Update plugins</strong>, or choose another action.</td></tr>
+                  <tr><td><code>plugin `&lt;id&gt;` is disabled</code></td><td>The user has not enabled the plugin.</td><td>Open its item under <strong>Plugins</strong> and tick <strong>Enable</strong>.</td></tr>
+                  <tr><td><code>invalid plugin settings: unknown setting `x`</code> / <code>field `x` is required</code> / <code>must be between a and b</code></td><td>The binding does not fit the manifest (for example after an update).</td><td>Open the action in the editor and save it again.</td></tr>
+                  <tr><td><code>cannot start plugin: No such file or directory (os error 2)</code></td><td>The shebang interpreter is not on the app's <code>PATH</code>.</td><td>Use <code>#!/usr/bin/env python3</code> and install the interpreter; see the <strong>Requires</strong> list.</td></tr>
+                  <tr><td><code>Missing: python3</code> (alert in the sidebar)</td><td>A required command is not on <code>PATH</code>.</td><td>Install it yourself; the app never does. Enabling is still possible.</td></tr>
+                  <tr><td><code>plugin timed out</code></td><td>More than the fixed 5 s deadline.</td><td>Give each step its own bound and do less per press. A manifest cannot ask for more time yet.</td></tr>
+                  <tr><td><code>plugin exited with Some(1): ...</code></td><td>The process crashed or exited non-zero; the text is its stderr.</td><td>Catch exceptions, answer <code>ok:false</code> and exit 0.</td></tr>
+                  <tr><td><code>malformed plugin response: stdout must contain exactly one JSON line</code></td><td>A stray <code>print</code>, banner or second object on stdout.</td><td>Send diagnostics to stderr only.</td></tr>
+                  <tr><td><code>malformed plugin response: unknown field ...</code> or <code>missing field ...</code></td><td>The response has extra or missing keys.</td><td>Send only <code>protocol_version</code>, <code>request_id</code>, <code>ok</code>, <code>message</code> or <code>error</code>.</td></tr>
+                  <tr><td><code>plugin answered a different request</code></td><td><code>request_id</code> not echoed exactly.</td><td>Copy it from the request.</td></tr>
+                  <tr><td><code>plugin output exceeded the size limit</code></td><td>More than 16 KiB on stdout.</td><td>Return a short message.</td></tr>
+                  <tr><td><code>Plugin &lt;id&gt;/&lt;action&gt; was not queued: too many plugin requests are waiting.</code></td><td>Eight requests are already queued, often from a dial turn.</td><td>Make actions faster; avoid <code>dial_turn</code> for slow actions.</td></tr>
+                  <tr><td><code>plugin reported an error: ...</code></td><td>Your plugin answered <code>ok:false</code>.</td><td>Read your own message; this is the normal failure path.</td></tr>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="reference-plugins" aria-labelledby="reference-plugins-title">
+        <header>
+          <p class="eyebrow">Worked examples</p>
+          <h2 id="reference-plugins-title">Reference plugins</h2>
+          <p>Two plugins, each its own local Git project (<code>sdeck-plugin-discord</code> and <code>sdeck-plugin-mergbw</code>). No remote repository has been published for either yet.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-media)">
+          <div class="cards">
+            <article class="card">
+              <h4>sdeck-plugin-discord</h4>
+              <p>Three actions: mute and deafen shortcuts sent to the Discord window with <code>hyprctl dispatch sendshortcut</code> (Hyprland), and a message posted as your own bot. Python 3, standard library only.</p>
+              <ul>
+                <li><strong>Derives its environment:</strong> it finds Hyprland's instance in <code>$XDG_RUNTIME_DIR/hypr/</code> because the host does not forward the signature.</li>
+                <li><strong>Token file</strong> with owner-only permissions, never a setting, never echoed; <strong>no retry</strong> for the ambiguous send.</li>
+                <li><strong>Bounded time</strong> on every subprocess and request.</li>
+                <li><strong>Limits stated:</strong> never verified against a live Discord or a real Hyprland session; the tests use fakes only.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>sdeck-plugin-mergbw</h4>
+              <p>Writes MeRGBW-style packets to a Bluetooth hexagon light through BlueZ's <code>busctl</code>. Python 3, standard library only.</p>
+              <ul>
+                <li><strong>Bounded time:</strong> it stops at 4.5 s of the 5 s deadline, so the first press after a pause may fail and the next works.</li>
+                <li><strong>One bounded retry,</strong> only for the ATT error <code>0x0e</code> that is safe to repeat, after a fresh readiness check and only if at least 1 s is left.</li>
+                <li><strong>Fake runner tests</strong> stand in for <code>busctl</code>.</li>
+                <li><strong>Records what was verified:</strong> on one TG609 only power-off was observed to work; the other packets were accepted but their effect was not reported, and the retry has not been re-tested live.</li>
+              </ul>
+            </article>
+            <article class="card wide">
+              <h4>Lessons from both</h4>
+              <ul>
+                <li>Derive what the host does not forward instead of requiring user setup.</li>
+                <li>Bound every wait inside the 5 s budget and say what happens on the first slow press.</li>
+                <li>Retry once, and only an operation that is safe to repeat.</li>
+                <li>Test with a fake runner and fake environment, and write down what real-world behaviour you did not verify.</li>
+                <li>Declare <code>requirements</code>, and mirror them in the README's Dependencies section.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="checklist" aria-labelledby="checklist-title">
+        <header>
+          <p class="eyebrow">Before you share it</p>
+          <h2 id="checklist-title">Publishing checklist</h2>
+          <p>Short, so you can run through it before every release.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-load)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Checklist</h4>
+              <ul class="req-list">
+                <li>Repository named <code>sdeck-plugin-&lt;id&gt;</code>, with <code>manifest.json</code>, an executable <code>run</code>, <code>README.md</code>, <code>LICENSE</code> and <code>tests/</code>.</li>
+                <li><code>plugin_validate</code> prints <code>PLUGIN_VALIDATE_OK:</code>, and <code>--invoke</code> works for each action you can safely run.</li>
+                <li>Unit tests pass without network, a real config folder or the real desktop.</li>
+                <li>The plugin re-validates every setting, answers exactly one line, echoes <code>request_id</code> and exits 0 for failures.</li>
+                <li>No secret in settings, defaults, messages, stderr or the repository; credentials use a documented owner-only file.</li>
+                <li>Every wait is bounded and fits within 5 s; side effects are never retried blindly.</li>
+                <li><code>requirements</code> in the manifest and a <strong>Dependencies</strong> section in the README match.</li>
+                <li>The README states the install steps, the minimum sdeck-plus version, and what you did and did not verify on real hardware or services.</li>
+                <li><code>version</code> bumped for every manifest change; a license you are comfortable with (the template uses MIT).</li>
+              </ul>
+              <p>Back to the <a href="docs.html#plugins">Plugins section</a> of the documentation, or the <a href="#quick-start">quick start</a>.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <div class="no-results" id="no-results" hidden>
+        <p><strong>No sections match your filter.</strong></p>
+        <p>Try a shorter word, or clear the filter to show everything.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
+        <p>Native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.</p>
+      </div>
+      <nav aria-label="Product">
+        <h2>Product</h2>
+        <ul>
+          <li><a href="./#features">Features</a></li>
+          <li><a href="./#actions">Actions</a></li>
+          <li><a href="./#gallery">Gallery</a></li>
+          <li><a href="docs.html#install">Install</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Resources">
+        <h2>Resources</h2>
+        <ul>
+          <li><a href="docs.html#configuration">Configuration</a></li>
+          <li><a href="docs.html#plugins">Plugins</a></li>
+          <li><a href="docs.html#development">Development</a></li>
+          <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
+          <li><a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/CHANGELOG.md">Changelog</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="footer-legal">
+      <span>sdeck-plus · MIT License · © 2026 Aldo Silvestre</span>
+      <span>Not affiliated with Elgato or Corsair.</span>
+    </div>
+  </div>
+</footer>
+<a class="icon-btn to-top" href="#main" aria-label="Back to top"><svg aria-hidden="true"><use href="#i-arrow-up"/></svg></a>
+<p class="visually-hidden" id="live-status" role="status" aria-live="polite"></p>
+</body>
+</html>

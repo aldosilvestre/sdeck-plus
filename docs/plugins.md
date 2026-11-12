@@ -1,5 +1,11 @@
 # External plugins (host core)
 
+> **Writing a plugin?** Start with the author-facing SDK guide, [`plugin-sdk.html`](plugin-sdk.html)
+> (published with the documentation site): quick start, manifest reference, protocol, limits,
+> security rules, testing and a copyable starter project in `examples/plugin-template`. This page
+> is the host-side reference; the guide links here instead of repeating it, and
+> `cargo test --offline --test plugin_sdk` checks that both state the same limits.
+
 Plugins are separate programs that add actions without recompiling the app. This page is the
 contract for the host in `src/plugins.rs`. **Process separation is not sandboxing**: a plugin runs
 with your user's privileges, so enable only plugins you trust.
@@ -119,9 +125,9 @@ returned truncated (4096 bytes). Exit status must be 0.
 |---|---|
 | `ok:false` | `Reported(error)` |
 | non-zero exit | `NonZeroExit { code, diagnostics }` |
-| bad/extra stdout, wrong version | `MalformedResponse` |
+| bad/extra stdout, unknown or missing fields, wrong version, text over 512 characters | `MalformedResponse` |
 | different `request_id` | `RequestIdMismatch` |
-| stdout over 16 KiB | `OutputTooLarge` |
+| stdout over 16 KiB (the process is killed) | `OutputTooLarge` |
 | total time exceeded | `Timeout` |
 
 ## Supervision
@@ -158,8 +164,8 @@ returned truncated (4096 bytes). Exit status must be 0.
   4096 bytes on encode and decode. Unknown fields are rejected.
 - **Running**: only a control press or "Test action" runs a plugin, through a dedicated
   `plugin-worker` thread (bounded queue of 8; a full queue refuses the request and says so).
-  Each request carries an immutable copy of the binding and an id `sdeck-N`, uses the 5 second
-  deadline, and is never retried. The worker rereads manifests and `plugins.json` per request.
+  Each request carries an immutable copy of the binding and an id `sdeck-N`, uses the fixed 5
+  second deadline (a manifest cannot ask for a longer one yet), and is never retried. The worker rereads manifests and `plugins.json` per request.
   At shutdown queued requests are dropped and a running one is waited for at most 6 seconds.
   Results and errors arrive on the same status line as other actions.
 - Windows with several device models each keep their own view of the folder; enabling in one
@@ -176,7 +182,8 @@ repository per plugin) that declares what it needs in `manifest.json` and in its
   (`busctl`). Its protocol comes from jmbwell/mergbw; see its `README.md` for what was and was not
   verified on a Hexagon Light TG609, and for the limits (5 s first press, connection stays open).
 
-Both are local Git projects for now (no remote repository has been published). To use one, copy
+Both are local Git projects for now (no remote repository has been published). The starter
+project for new plugins is `examples/plugin-template` in this repository. To use one, copy
 its `manifest.json` and `run` into `<data dir>/sdeck-plus/plugins/<id>/`, update the plugins in
 the app and enable it explicitly.
 
@@ -205,5 +212,7 @@ is run. The temp root is always removed.
 
 `cargo test --offline --test plugin_host`, `--test plugin_bindings`, `--test plugin_requirements`
 and `--test plugin_validate` run generated `/bin/sh`
-fixtures only; they need no display, hardware or network. The worker and sidebar tests live in
+fixtures only; `--test plugin_sdk` runs the harmless `examples/plugin-template` through the
+validator (and its Python tests when `python3` exists) and checks that this page and the SDK guide
+state the host's real limits. None needs a display, hardware or network. The worker and sidebar tests live in
 the binary (`cargo test --bin sdeck-plus plugin`; GTK ones need a display).
