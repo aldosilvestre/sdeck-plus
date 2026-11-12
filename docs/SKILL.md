@@ -349,9 +349,11 @@ most 256 files, and the unit tests pass.
 
 Prefer, in this order:
 
-**(a) The user adds it in the app.** The Plugins heading of the Actions catalog has an icon-only
-**Add plugin** button (+ at its right end). The dialog takes an absolute folder path (or `~/...`; a
-relative path is refused) or an `https://` repository address, then **Check plugin**. The app copies or
+**(a) The user adds it in the app.** The binding toolbar has an icon-only **Add plugin** button (+)
+right before the **Update plugins** icon at its right end. The dialog has a **Folder | Repository**
+selector (it follows what is typed and only changes the hints and the Browse button) and takes an
+absolute folder path (or `~/...`; a relative path is refused) or an `https://` repository address,
+then **Check plugin**. The app copies or
 downloads it into a private temporary folder, validates it with the validator's code and shows a preview;
 it runs nothing. **Install** places it in the plugins folder DISABLED. If the id is already installed the
 button reads **Replace**, which swaps the files and disables the plugin until the user presses Enable
