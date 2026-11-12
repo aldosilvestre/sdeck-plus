@@ -303,8 +303,8 @@ All implement `Display` with user-facing text.
 
 ## Add plugin dialog
 
-The Actions sidebar always shows a **Plugins** heading with an icon-only **Add plugin** button
-(`src/plugin_add_ui.rs`, behaviour contract in `DESIGN.md`). The dialog is a thin, asynchronous
+The binding toolbar always shows an icon-only **Add plugin** button, immediately left of
+**Update plugins** (the Actions sidebar keeps a **Plugins** heading) (`src/plugin_add_ui.rs`, behaviour contract in `DESIGN.md`). The dialog is a thin, asynchronous
 client of the library above: it checks the entry with `parse_source_in` and `stage` on a worker
 thread, shows the `PluginPreview`, and calls `install` only for a preview of exactly the text in
 the entry; Replace is offered only after `AlreadyInstalled` and needs its own press. It never

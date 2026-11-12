@@ -49,11 +49,10 @@ version, "(optional)", description as tooltip) with an alert-role error line suc
 every rescan, never blocks enabling or assigning, and runs nothing. A thin divider and a small muted
 **Plugins** heading row (heading role label, not clickable) mark where the plugin entries
 begin. The row is always shown, so adding a plugin is discoverable before any plugin
-exists, and ends with an icon-only **Add plugin…** button (`list-add-symbolic`; tooltip
-"Add plugin…", accessible name "Add plugin") that opens the add dialog below. Under the
-row come malformed-plugin and invalid enabled-state messages (labels with the alert role,
-error colour) or the empty-state hint ("No plugins yet. Use the add button, or copy a plugin
-folder into <folder> and use Update plugins."; "No plugins yet. Use the add button to add one." when no folder is known). Rescanning is not in the sidebar: see the
+exists, and shows only the label: the add button lives in the binding toolbar (see below).
+Under the row come malformed-plugin and invalid enabled-state messages (labels with the alert role,
+error colour) or the empty-state hint ("No plugins yet. Use the Add plugin button in the toolbar, or copy a plugin
+folder into <folder> and use Update plugins."; "No plugins yet. Use the Add plugin button in the toolbar to add one." when no folder is known). Adding and rescanning are not in the sidebar: see the
 binding toolbar below.
 Actions of a disabled plugin, or that do not fit the selected control (key, dial
 turn, dial press, touch strip), are dimmed with an explanatory tooltip. Assigning one
@@ -572,12 +571,14 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   and test caption. The status line and Undo remove sit directly under it. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
-  The same row ends with **Update plugins**, an icon-only refresh button of the
-  same size, pushed to the right by an expanding gap and a thin vertical divider so
-  it reads as separate from the three binding tools. Its tooltip is exactly
-  "Update plugins" (also its accessible name); it rereads the plugin folder and
-  never runs a plugin. The toolbar is always visible, for keys, dials and the
-  touch strip alike, so the control is always reachable.
+  The same row ends with **Add plugin…** and **Update plugins**, two icon-only buttons of the
+  same size and normal toolbar spacing, add (`list-add-symbolic`) immediately before
+  refresh so refresh stays right-most, pushed to the right by an expanding gap and a thin
+  vertical divider so they read as separate from the three binding tools. Add plugin's
+  tooltip is "Add plugin…" (accessible name "Add plugin"); it opens the add dialog below.
+  Update plugins' tooltip is exactly "Update plugins" (also its accessible name); it rereads
+  the plugin folder and never runs a plugin. The toolbar is always visible, for keys, dials
+  and the touch strip alike, so both controls are always reachable.
   Test action remains neutral and explicitly
   labeled, with guidance that testing executes and saving only persists.
 - **Button text and image:** right-clicking a key selects it and opens a small

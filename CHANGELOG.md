@@ -23,8 +23,8 @@ All notable changes to this project are documented here. The format follows
   project in `examples/plugin-template`. A test keeps the guide's limits equal to the code's.
   Limits: the Discord plugin has never been verified against a live Discord or Hyprland session,
   and on the MeRGBW light only power-off was observed to work (TG609).
-- **Add plugin dialog:** an **Add plugin** button (+) on the **Plugins** heading of the Actions
-  sidebar adds a plugin from an absolute folder path or the `https://` address of a repository.
+- **Add plugin dialog:** an **Add plugin** button (+) in the binding toolbar, next to
+  **Update plugins**, adds a plugin from an absolute folder path or the `https://` address of a repository.
   Before anything is installed the candidate is checked with the validator's rules (manifest,
   executable confinement, limits, no symlinks; missing commands only warn) and previewed with its
   id, version, source, downloaded commit, files, actions and requirements. Install never enables
@@ -41,8 +41,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- The **Plugins** heading of the sidebar is always visible (it holds the add button) and, with no
-  plugins, shows a hint about the add button and the plugins folder.
+- The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
+  about the toolbar's Add plugin button and the plugins folder.
 - The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
   `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
   Their manifests need a build that knows `requirements`; older builds reject unknown fields.

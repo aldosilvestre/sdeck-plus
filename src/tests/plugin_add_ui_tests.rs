@@ -278,11 +278,12 @@ fn plugins_json(scratch: &Scratch) -> Option<String> {
 }
 
 #[test]
-fn the_add_button_sits_in_the_always_visible_heading_row_and_opens_one_dialog() {
+fn the_add_button_sits_next_to_update_plugins_and_opens_one_dialog() {
     run_gtk_test(|| {
         catalog_fixture("add-button", |widgets, _layers, _requests| {
             let hub = &widgets.binding_ui.plugins;
-            // No plugin folder and no plugin: the heading and its button are still there.
+            // No plugin folder and no plugin: the heading is still there and the add button lives
+            // in the binding toolbar, right before Update plugins.
             let heading: Vec<Label> = labels_in(widgets.root.upcast_ref())
                 .into_iter()
                 .filter(|label| label.has_css_class("plugin-heading"))
@@ -294,16 +295,25 @@ fn the_add_button_sits_in_the_always_visible_heading_row_and_opens_one_dialog() 
             assert_eq!(image.icon_name().as_deref(), Some("list-add-symbolic"));
             assert_eq!(add.tooltip_text().as_deref(), Some("Add plugin…"));
             assert!(add.is_focusable() && add.is_sensitive());
-            let row = add.parent().expect("heading row");
-            assert_eq!(heading[0].parent().as_ref(), Some(&row));
-            assert_eq!(row.last_child().as_ref(), Some(add.upcast_ref()));
+            let row = add.parent().expect("toolbar row");
+            assert_ne!(
+                heading[0].parent().as_ref(),
+                Some(&row),
+                "the heading row holds only the label"
+            );
+            let reload = add.next_sibling().expect("Update plugins follows");
+            assert_eq!(reload.tooltip_text().as_deref(), Some("Update plugins"));
+            assert_eq!(row.last_child().as_ref(), Some(&reload));
             assert_eq!(heading[0].accessible_role(), gtk::AccessibleRole::Heading);
             let hint = labels_in(widgets.root.upcast_ref())
                 .into_iter()
                 .map(|label| label.text().to_string())
                 .find(|text| text.starts_with("No plugins yet"))
                 .expect("empty-state hint");
-            assert_eq!(hint, "No plugins yet. Use the add button to add one.");
+            assert_eq!(
+                hint,
+                "No plugins yet. Use the Add plugin button in the toolbar to add one."
+            );
             let root = Scratch::new("hint");
             hub.load(root.plugins());
             let rooted = labels_in(widgets.root.upcast_ref())
@@ -314,18 +324,17 @@ fn the_add_button_sits_in_the_always_visible_heading_row_and_opens_one_dialog() 
             assert_eq!(
                 rooted,
                 format!(
-                    "No plugins yet. Use the add button, or copy a plugin folder into {} and use Update plugins.",
+                    "No plugins yet. Use the Add plugin button in the toolbar, or copy a plugin folder into {} and use Update plugins.",
                     root.plugins().display()
                 )
             );
 
             if let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") {
-                let bar = row.parent().expect("heading block");
                 let native = widgets.root.native().expect("native");
                 wait_for_frame(&widgets.root);
                 std::fs::create_dir_all(&directory).unwrap();
-                rendered_texture(&native, &bar)
-                    .save_to_png(Path::new(&directory).join("add-plugin-heading.png"))
+                rendered_texture(&native, &row)
+                    .save_to_png(Path::new(&directory).join("add-plugin-toolbar.png"))
                     .unwrap();
             }
             // Loading rebuilt the sidebar, so the button is a new widget.

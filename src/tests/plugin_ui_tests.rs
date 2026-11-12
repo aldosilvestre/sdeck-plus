@@ -195,6 +195,16 @@ fn update_plugins(widgets: &MonitorWidgets) -> Button {
     found.into_iter().next().unwrap()
 }
 
+/// The one add control, found by its tooltip.
+fn add_plugin(widgets: &MonitorWidgets) -> Button {
+    let found: Vec<Button> = all::<Button>(widgets)
+        .into_iter()
+        .filter(|b| b.tooltip_text().as_deref() == Some("Add plugin…"))
+        .collect();
+    assert_eq!(found.len(), 1, "exactly one add control");
+    found.into_iter().next().unwrap()
+}
+
 fn tool(widgets: &MonitorWidgets, name: &str) -> Button {
     all::<Button>(widgets)
         .into_iter()
@@ -213,7 +223,7 @@ fn plugin_headings(widgets: &MonitorWidgets) -> Vec<Label> {
 }
 
 #[test]
-fn the_rescan_control_is_an_icon_at_the_right_end_of_the_binding_toolbar() {
+fn the_add_and_rescan_controls_are_icons_at_the_right_end_of_the_binding_toolbar() {
     run_gtk_test(|| {
         catalog_fixture("plugin-rescan-toolbar", |widgets, _layers, _requests| {
             let rescan = update_plugins(widgets);
@@ -236,7 +246,30 @@ fn the_rescan_control_is_an_icon_at_the_right_end_of_the_binding_toolbar() {
             assert_eq!(remove.parent().as_ref(), Some(&row));
             assert_eq!(row.last_child().as_ref(), Some(rescan.upcast_ref()));
             assert_eq!(rescan.halign(), gtk::Align::End);
+            let add = add_plugin(widgets);
+            assert!(add.label().is_none(), "icon only");
+            let image = add.child().and_downcast::<gtk::Image>().expect("icon");
+            assert_eq!(image.icon_name().as_deref(), Some("list-add-symbolic"));
+            assert!(add.is_focusable() && add.is_sensitive());
+            assert_eq!(add.parent().as_ref(), Some(&row), "same toolbar row");
+            assert_eq!(
+                add.next_sibling().as_ref(),
+                Some(rescan.upcast_ref()),
+                "add sits immediately before reload"
+            );
             let bounds = |b: &Button| b.compute_bounds(&widgets.root);
+            let (add_box, rescan_box_now) = (bounds(&add).unwrap(), bounds(&rescan).unwrap());
+            let gap = rescan_box_now.x() - (add_box.x() + add_box.width());
+            assert!(
+                (0.0..=8.5).contains(&gap),
+                "the normal toolbar spacing between add and reload: {gap}"
+            );
+            let remove_box_now = bounds(&tool(widgets, "Remove binding")).unwrap();
+            assert!(
+                add_box.x() > remove_box_now.x() + remove_box_now.width() + 8.0,
+                "add is in the right-aligned group, apart from Remove"
+            );
+            assert_eq!(add.height(), rescan.height(), "add height");
             let (rescan_box, remove_box) = (bounds(&rescan).unwrap(), bounds(&remove).unwrap());
             assert!(
                 rescan_box.x() > remove_box.x() + remove_box.width() + 8.0,
@@ -258,6 +291,45 @@ fn the_rescan_control_is_an_icon_at_the_right_end_of_the_binding_toolbar() {
 }
 
 #[test]
+fn the_toolbar_add_button_opens_one_dialog_and_the_hint_points_at_it() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-add-toolbar", |widgets, _layers, _requests| {
+            let hub = &widgets.binding_ui.plugins;
+            let hint = || {
+                texts(widgets)
+                    .into_iter()
+                    .find(|text| text.starts_with("No plugins yet"))
+                    .expect("empty-state hint")
+            };
+            assert_eq!(
+                hint(),
+                "No plugins yet. Use the Add plugin button in the toolbar to add one."
+            );
+            let add = add_plugin(widgets);
+            assert!(plugin_add_ui::current(hub).is_none());
+            add.emit_clicked();
+            let dialog = plugin_add_ui::current(hub).expect("dialog opened");
+            add.emit_clicked();
+            let again = plugin_add_ui::current(hub).expect("still open");
+            assert_eq!(dialog.window(), again.window(), "one instance at a time");
+            assert!(
+                dialog.window().transient_for().is_some(),
+                "app is the parent"
+            );
+            let titled = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|window| window.downcast::<gtk::Window>().ok())
+                .filter(|w| w.is_visible() && w.title().as_deref() == Some("Add plugin"))
+                .count();
+            assert_eq!(titled, 1);
+            dialog.window().close();
+            // Reachable with a dial selected too, like reload.
+            assert!(add_plugin(widgets).is_sensitive());
+        })
+    });
+}
+
+#[test]
 fn the_plugin_heading_marks_where_plugins_begin_and_is_visible_without_plugins() {
     run_gtk_test(|| {
         catalog_fixture("plugin-heading", |widgets, _layers, _requests| {
@@ -270,6 +342,19 @@ fn the_plugin_heading_marks_where_plugins_begin_and_is_visible_without_plugins()
             let heading = &found[0];
             assert_eq!(heading.text(), "Plugins");
             assert_eq!(heading.accessible_role(), gtk::AccessibleRole::Heading);
+            let row = heading.parent().expect("heading row");
+            assert_eq!(row.first_child().as_ref(), Some(heading.upcast_ref()));
+            assert_eq!(
+                row.last_child().as_ref(),
+                Some(heading.upcast_ref()),
+                "the heading row shows only the label"
+            );
+            assert!(
+                !all::<Button>(widgets)
+                    .iter()
+                    .any(|b| b.is_ancestor(&row) || b.parent().as_ref() == Some(&row)),
+                "no button in the heading row"
+            );
             let mut buttons = Vec::new();
             collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
             // The heading's block and the first plugin item are siblings, the heading first.

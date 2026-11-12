@@ -324,11 +324,27 @@ pub(crate) fn rescan_button(hub: &PluginHub) -> Button {
     rescan
 }
 
-/// Where the plugin entries of the sidebar begin: a divider, a "Plugins" heading row with the
-/// icon-only "Add plugin…" button, then plugin problems or the empty-state hint. Always shown,
-/// so adding a plugin is discoverable before any plugin exists. `installed` receives the message
-/// of a finished install.
-pub(crate) fn heading(hub: &PluginHub, installed: crate::plugin_add_ui::Notify) -> GtkBox {
+/// The icon-only "Add plugin…" control, left of the rescan control in the binding toolbar. It
+/// opens the single add dialog over the window it sits in; `installed` receives the message of
+/// a finished install.
+pub(crate) fn add_button(hub: &PluginHub, installed: crate::plugin_add_ui::Notify) -> Button {
+    let add = crate::ui::icon_button("list-add-symbolic", "Add plugin…");
+    add.update_property(&[gtk::accessible::Property::Label("Add plugin")]);
+    add.set_halign(gtk::Align::End);
+    let hub = hub.clone();
+    add.connect_clicked(move |button| {
+        let parent = button
+            .root()
+            .and_then(|root| root.downcast::<gtk::Window>().ok());
+        crate::plugin_add_ui::open(parent.as_ref(), &hub, installed.clone());
+    });
+    add
+}
+
+/// Where the plugin entries of the sidebar begin: a divider, a "Plugins" heading row, then
+/// plugin problems or the empty-state hint. Always shown, so the way to add a plugin (the
+/// toolbar's Add plugin button) is explained before any plugin exists.
+pub(crate) fn heading(hub: &PluginHub) -> GtkBox {
     let problems = hub.problems();
     let root = hub.root();
     let bar = GtkBox::new(Orientation::Vertical, 6);
@@ -344,17 +360,6 @@ pub(crate) fn heading(hub: &PluginHub, installed: crate::plugin_add_ui::Notify) 
         .build();
     title.add_css_class("plugin-heading");
     row.append(&title);
-    let add = crate::ui::icon_button("list-add-symbolic", "Add plugin…");
-    add.update_property(&[gtk::accessible::Property::Label("Add plugin")]);
-    add.add_css_class("plugin-add");
-    let hub_for_add = hub.clone();
-    add.connect_clicked(move |button| {
-        let parent = button
-            .root()
-            .and_then(|root| root.downcast::<gtk::Window>().ok());
-        crate::plugin_add_ui::open(parent.as_ref(), &hub_for_add, installed.clone());
-    });
-    row.append(&add);
     bar.append(&row);
     for problem in problems {
         let label = Label::builder()
@@ -370,10 +375,10 @@ pub(crate) fn heading(hub: &PluginHub, installed: crate::plugin_add_ui::Notify) 
     if hub.plugins().is_empty() {
         let hint = match root {
             Some(root) => format!(
-                "No plugins yet. Use the add button, or copy a plugin folder into {} and use Update plugins.",
+                "No plugins yet. Use the Add plugin button in the toolbar, or copy a plugin folder into {} and use Update plugins.",
                 root.display()
             ),
-            None => "No plugins yet. Use the add button to add one.".to_owned(),
+            None => "No plugins yet. Use the Add plugin button in the toolbar to add one.".to_owned(),
         };
         bar.append(&crate::ui::helper(&hint));
     }
