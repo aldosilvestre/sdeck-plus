@@ -882,11 +882,12 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
 cargo run --offline --example verify_streamdeck -- --input
 cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
 cargo run --offline --example verify_desktop
-dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav</code></pre>
+dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav
+cargo run --offline --example plugin_validate -- /path/to/plugin-project</code></pre>
               </div>
               <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
                  through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
-                 silent audio file and the <code>mpv-mpris</code> plugin.</p>
+                 silent audio file and the <code>mpv-mpris</code> plugin. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
             </article>
             <article class="card wide" id="dev-event-api">
               <h4>In-process event API</h4>

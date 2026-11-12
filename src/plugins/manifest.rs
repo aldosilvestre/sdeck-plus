@@ -19,6 +19,7 @@ const MAX_ACTIONS: usize = 32;
 const MAX_FIELDS: usize = 16;
 const MAX_TEXT_LENGTH: usize = 1024;
 const DEFAULT_TEXT_LENGTH: usize = 256;
+const MAX_REQUIREMENTS: usize = 16;
 
 /// Physical control kinds an action can be bound to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +221,121 @@ impl PluginAction {
     }
 }
 
+/// What a declared requirement is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequirementKind {
+    /// An executable the plugin runs, looked up by bare name on `PATH`.
+    Command,
+    /// A system service, daemon or application the plugin talks to (informational).
+    Service,
+    /// A file the user provides and the plugin reads (informational).
+    File,
+}
+
+impl RequirementKind {
+    /// The manifest spelling, also used as the label in the sidebar.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::Service => "service",
+            Self::File => "file",
+        }
+    }
+}
+
+/// One dependency a plugin declares. Declaring never installs or runs anything.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Requirement {
+    pub kind: RequirementKind,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Informational text such as `>= 3.9`; never compared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub optional: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl Requirement {
+    fn validate(&self) -> Result<(), String> {
+        let name = &self.name;
+        if name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
+            return Err("requirement names must be 1-64 printable characters".into());
+        }
+        let bare = name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c));
+        if self.kind == RequirementKind::Command && !bare {
+            return Err(format!(
+                "command requirement `{name}` must be a bare command name of [A-Za-z0-9._+-]"
+            ));
+        }
+        let printable = |text: &str, limit: usize| {
+            text.chars().count() <= limit && !text.chars().any(char::is_control)
+        };
+        if self
+            .description
+            .as_deref()
+            .is_some_and(|text| !printable(text, 200))
+        {
+            return Err(format!(
+                "requirement `{name}` description must be at most 200 printable characters"
+            ));
+        }
+        if self
+            .version
+            .as_deref()
+            .is_some_and(|text| !printable(text, 32))
+        {
+            return Err(format!(
+                "requirement `{name}` version must be at most 32 printable characters"
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The `command` requirements that no `PATH` directory provides, in declaration order.
+///
+/// Only looks: for each absolute `PATH` entry it asks `std::fs::metadata` whether `<entry>/<name>`
+/// is a regular file with an execute bit. Relative and empty entries are skipped, symlinks are
+/// resolved the way `metadata` resolves them (so a link to an executable counts, a dangling link
+/// does not), and nothing is ever executed or spawned. Optional requirements are included; the
+/// caller decides how to present them.
+pub fn missing_commands_in<'a>(
+    requirements: &'a [Requirement],
+    path: &std::ffi::OsStr,
+) -> Vec<&'a Requirement> {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .collect();
+    requirements
+        .iter()
+        .filter(|requirement| requirement.kind == RequirementKind::Command)
+        .filter(|requirement| {
+            !dirs.iter().any(|dir| {
+                std::fs::metadata(dir.join(&requirement.name))
+                    .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            })
+        })
+        .collect()
+}
+
+/// [`missing_commands_in`] against the process `PATH` (nothing is missing-by-default: an unset
+/// `PATH` finds nothing).
+pub fn missing_commands(requirements: &[Requirement]) -> Vec<&Requirement> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    missing_commands_in(requirements, &path)
+}
+
 /// A validated `plugins/<id>/manifest.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -231,6 +347,9 @@ pub struct PluginManifest {
     /// Path relative to the plugin directory.
     pub executable: String,
     pub actions: Vec<PluginAction>,
+    /// Declared dependencies; at most 16, shown in the sidebar and never installed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<Requirement>,
 }
 
 impl PluginManifest {
@@ -250,6 +369,11 @@ impl PluginManifest {
     /// Looks an action up by id.
     pub fn action(&self, id: &str) -> Option<&PluginAction> {
         self.actions.iter().find(|action| action.id == id)
+    }
+
+    /// Declared `command` requirements not found on the process `PATH`.
+    pub fn missing_commands(&self) -> Vec<&Requirement> {
+        missing_commands(&self.requirements)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -307,6 +431,20 @@ impl PluginManifest {
                         action.id
                     ));
                 }
+            }
+        }
+        if self.requirements.len() > MAX_REQUIREMENTS {
+            return Err(format!("more than {MAX_REQUIREMENTS} requirements"));
+        }
+        let mut seen = BTreeSet::new();
+        for requirement in &self.requirements {
+            requirement.validate()?;
+            if !seen.insert((requirement.kind, requirement.name.as_str())) {
+                return Err(format!(
+                    "duplicate requirement {} `{}`",
+                    requirement.kind.as_str(),
+                    requirement.name
+                ));
             }
         }
         Ok(())

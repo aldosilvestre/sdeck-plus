@@ -3,6 +3,7 @@
 //! enabled state; a plugin runs solely through the plugin worker (`plugin_runtime`).
 use gtk::{prelude::*, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use sdeck_plus::binding_editor::{ControlKind, EventKind};
+use sdeck_plus::plugins::{missing_commands, Requirement};
 use sdeck_plus::plugins::{
     PluginAction, PluginBinding, PluginControl, PluginManifest, PluginRegistry, SettingField,
     Settings,
@@ -302,12 +303,61 @@ pub(crate) fn preface(
         }
     });
     preface.append(&toggle);
+    if let Some(block) = requirements_block(manifest) {
+        preface.append(&block);
+    }
     if !enabled {
         preface.append(&crate::ui::helper(
             "Disabled: its actions are listed but cannot be assigned or run.",
         ));
     }
     preface
+}
+
+/// The compact "Requires" list of one plugin: each declared requirement with its kind, name,
+/// version and an "(optional)" marker (description as tooltip), plus an alert for every required
+/// command that no `PATH` directory provides. Built from a fresh lookup each time the sidebar is
+/// rebuilt (every rescan or refresh); it only looks at files and never blocks enabling or
+/// assigning. `None` when the plugin declares nothing.
+pub(crate) fn requirements_block(manifest: &PluginManifest) -> Option<GtkBox> {
+    if manifest.requirements.is_empty() {
+        return None;
+    }
+    let missing: Vec<&Requirement> = missing_commands(&manifest.requirements);
+    let block = GtkBox::new(Orientation::Vertical, 2);
+    block.add_css_class("plugin-requirements");
+    block.append(&crate::ui::helper("Requires"));
+    for requirement in &manifest.requirements {
+        let mut text = format!("{}: {}", requirement.kind.as_str(), requirement.name);
+        if let Some(version) = &requirement.version {
+            text.push_str(&format!(" {version}"));
+        }
+        if requirement.optional {
+            text.push_str(" (optional)");
+        }
+        let row = crate::ui::helper(&text);
+        row.set_tooltip_text(requirement.description.as_deref());
+        block.append(&row);
+        if missing.contains(&requirement) {
+            if requirement.optional {
+                block.append(&crate::ui::helper(&format!(
+                    "Not found: {}",
+                    requirement.name
+                )));
+            } else {
+                let alert = Label::builder()
+                    .label(format!("Missing: {}", requirement.name))
+                    .wrap(true)
+                    .xalign(0.0)
+                    .max_width_chars(38)
+                    .accessible_role(gtk::AccessibleRole::Alert)
+                    .build();
+                alert.add_css_class("feedback-error");
+                block.append(&alert);
+            }
+        }
+    }
+    Some(block)
 }
 
 enum Input {

@@ -18,8 +18,9 @@ use std::time::Duration;
 
 pub use host::{InvokeOutcome, MAX_MESSAGE_CHARS, MAX_STDERR_BYTES, MAX_STDOUT_BYTES, MAX_TIMEOUT};
 pub use manifest::{
-    valid_id, PluginAction, PluginControl, PluginManifest, SettingField, Settings,
-    MAX_MANIFEST_BYTES, MAX_SETTINGS_BYTES, PROTOCOL_VERSION,
+    missing_commands, missing_commands_in, valid_id, PluginAction, PluginControl, PluginManifest,
+    Requirement, RequirementKind, SettingField, Settings, MAX_MANIFEST_BYTES, MAX_SETTINGS_BYTES,
+    PROTOCOL_VERSION,
 };
 
 const STATE_FILE: &str = "plugins.json";

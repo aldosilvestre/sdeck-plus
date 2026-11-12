@@ -638,3 +638,105 @@ fn a_rescan_keeps_the_users_edits_while_the_saved_binding_is_still_available() {
         })
     });
 }
+
+/// Rewrites the `demo` plugin's manifest so it declares `requirements`.
+fn declare(root: &PluginRoot, requirements: &str) {
+    let path = root.0.join("demo/manifest.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = match text.find(",\"requirements\"") {
+        Some(at) => format!("{}}}", &text[..at]),
+        None => text,
+    };
+    let text = text.trim_end().trim_end_matches('}').to_owned();
+    std::fs::write(path, format!("{text},\"requirements\":{requirements}}}")).unwrap();
+}
+
+fn missing_alerts(widgets: &MonitorWidgets) -> Vec<String> {
+    all::<Label>(widgets)
+        .into_iter()
+        .filter(|label| label.accessible_role() == gtk::AccessibleRole::Alert)
+        .map(|label| label.text().to_string())
+        .filter(|text| text.starts_with("Missing: "))
+        .collect()
+}
+
+#[test]
+fn a_plugin_without_requirements_shows_no_requires_block() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-no-requires", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("no-requires");
+            widgets.binding_ui.plugins.load(root.0.clone());
+            assert!(!texts(widgets).iter().any(|text| text == "Requires"));
+            assert!(missing_alerts(widgets).is_empty());
+        })
+    });
+}
+
+#[test]
+fn the_requires_block_lists_requirements_and_flags_a_missing_required_command() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-requires", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("requires");
+            declare(
+                &root,
+                r#"[{"kind":"command","name":"sdeck-absent-tool","version":">= 3.9","description":"Does the work"},
+                    {"kind":"command","name":"sdeck-absent-extra","optional":true},
+                    {"kind":"command","name":"sh"},
+                    {"kind":"service","name":"bluetooth"},
+                    {"kind":"file","name":"token","optional":true}]"#,
+            );
+            let hub = &widgets.binding_ui.plugins;
+            hub.load(root.0.clone());
+            let shown = texts(widgets);
+            assert_eq!(shown.iter().filter(|t| *t == "Requires").count(), 1);
+            for expected in [
+                "command: sdeck-absent-tool >= 3.9",
+                "command: sdeck-absent-extra (optional)",
+                "command: sh",
+                "service: bluetooth",
+                "file: token (optional)",
+            ] {
+                assert!(shown.iter().any(|t| t == expected), "{expected}: {shown:?}");
+            }
+            let tip = all::<Label>(widgets)
+                .into_iter()
+                .find(|l| l.text() == "command: sdeck-absent-tool >= 3.9")
+                .unwrap();
+            assert_eq!(tip.tooltip_text().as_deref(), Some("Does the work"));
+            // Only the required, missing command is an alert; the optional one is plain text.
+            assert_eq!(missing_alerts(widgets), vec!["Missing: sdeck-absent-tool"]);
+            assert!(shown.iter().any(|t| t == "Not found: sdeck-absent-extra"));
+            // Missing requirements block neither enabling nor assigning.
+            enable(widgets, "Enable Demo (v1.0.0)");
+            assert!(hub
+                .plugins()
+                .iter()
+                .any(|(m, enabled)| m.id == "demo" && *enabled));
+            assert!(row(widgets, "Send message").is_sensitive());
+            assert!(!root.ran());
+        })
+    });
+}
+
+#[test]
+fn the_requires_block_is_rechecked_on_every_rescan_and_runs_nothing() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-requires-rescan", |widgets, _layers, _requests| {
+            let root = PluginRoot::new("requires-rescan");
+            declare(&root, r#"[{"kind":"command","name":"sdeck-absent-tool"}]"#);
+            widgets.binding_ui.plugins.load(root.0.clone());
+            assert_eq!(missing_alerts(widgets), vec!["Missing: sdeck-absent-tool"]);
+            declare(&root, r#"[{"kind":"command","name":"sh"}]"#);
+            update_plugins(widgets).emit_clicked();
+            assert!(missing_alerts(widgets).is_empty());
+            assert!(texts(widgets).iter().any(|t| t == "command: sh"));
+            declare(&root, r#"[{"kind":"command","name":"sdeck-absent-other"}]"#);
+            update_plugins(widgets).emit_clicked();
+            assert_eq!(missing_alerts(widgets), vec!["Missing: sdeck-absent-other"]);
+            declare(&root, "[]");
+            update_plugins(widgets).emit_clicked();
+            assert!(!texts(widgets).iter().any(|text| text == "Requires"));
+            assert!(!root.ran());
+        })
+    });
+}

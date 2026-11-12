@@ -51,6 +51,48 @@ with your user's privileges, so enable only plugins you trust.
   out-of-bound values are rejected, defaults are filled in, and the payload must stay within
   4096 bytes (the stored-action bound).
 
+### Requirements (optional)
+
+A plugin may declare what it needs with a top-level `requirements` array (default: none; a
+manifest without it behaves exactly as before; protocol_version stays 1). At most 16 entries:
+
+```json
+"requirements": [
+  {"kind": "command", "name": "hyprctl", "description": "Hyprland control", "version": ">= 0.40"},
+  {"kind": "service", "name": "bluetooth", "optional": true},
+  {"kind": "file", "name": "~/.config/demo/token"}
+]
+```
+
+| Field | Rule |
+|---|---|
+| `kind` | `command`, `service` or `file` (required) |
+| `name` | 1-64 printable characters (required). For `command`: a bare name matching `^[A-Za-z0-9._+-]{1,64}$`, no slash |
+| `description` | optional, at most 200 printable characters; shown as a tooltip |
+| `version` | optional, at most 32 printable characters, informational text such as `>= 3.9`; never compared |
+| `optional` | optional boolean, default false |
+
+`command` is an executable the plugin runs, looked up on `PATH`; `service` is a system service,
+daemon or app the plugin talks to; `file` is a file the user provides. Only `command` is checked.
+Unknown kinds or fields, a duplicate (`kind`, `name`) pair and over-long or control-character
+text are rejected with the manifest error, like the rest of the manifest.
+
+- **Shown**: the plugin's sidebar item has a compact "Requires" list (kind, name, version,
+  "(optional)", description as tooltip). Each required `command` not found on `PATH` gets an
+  alert line such as `Missing: hyprctl`; a missing optional command shows `Not found: <name>`
+  without an alert. The check runs again on every rescan or refresh. A plugin without
+  requirements shows nothing extra.
+- **Checked**: `sdeck_plus::plugins::missing_commands` (process `PATH`) and `missing_commands_in`
+  (explicit `PATH`) only look: each absolute `PATH` entry is asked, through `std::fs::metadata`,
+  for a regular file named `name` with an execute bit. Relative and empty entries are skipped. A
+  symlink counts as `metadata` resolves it (a link to an executable is found, a dangling link
+  is not). Nothing is executed or spawned.
+- **Not done**: the app never installs packages, changes permissions, runs the commands or
+  starts services, and a missing requirement never blocks enabling or assigning the plugin;
+  the plugin reports its own failures when run.
+- **Compatibility**: unknown manifest fields are rejected, so an app build that predates
+  `requirements` rejects a manifest that has it (shown as a skipped plugin folder).
+
 ## Invocation protocol (version 1)
 
 One child process per request, run by `PluginRegistry::invoke(&binding, &InvokeOptions)` only when
@@ -133,8 +175,30 @@ token file rules and limits.
 hexagon light through BlueZ (`busctl`). Its protocol comes from jmbwell/mergbw and is unverified on
 a TG609; see its `README.md` for the limits (5 s first press, connection stays open).
 
+## Validating a plugin project
+
+`examples/plugin_validate.rs` checks a plugin project directory (manifest.json and the
+executable at the directory root; the directory name need not equal the id):
+
+```bash
+cargo run --offline --example plugin_validate -- <plugin-dir>
+cargo run --offline --example plugin_validate -- <plugin-dir> --invoke <action> \
+    [--settings '<json>'] [--timeout <seconds, default 5, max 60>] [--request-id <id>]
+```
+
+It copies the project's regular files (no symlinks; at most 256 files, 8 MiB per file, 32 MiB
+in total; `.git` and `__pycache__` skipped) into a fresh temp root under the plugin id and runs
+`PluginRegistry::open`, which executes nothing. It prints `PLUGIN_VALIDATE_OK:` with the id,
+version, protocol, actions (controls, settings) and requirements (commands with a `PATH`
+check), or one `PLUGIN_VALIDATE_ERROR:` line per problem. Exit status: 0 ok, 1 problems, 2 usage.
+With `--invoke` it also enables the plugin in the temp root and performs ONE real invocation
+through `PluginRegistry::invoke`, after a warning that this **runs the plugin with your
+privileges**; it prints `PLUGIN_INVOKE_OK:` or `PLUGIN_INVOKE_ERROR:`. Without the flag nothing
+is run. The temp root is always removed.
+
 ## Tests
 
-`cargo test --offline --test plugin_host` and `--test plugin_bindings` run generated `/bin/sh`
+`cargo test --offline --test plugin_host`, `--test plugin_bindings`, `--test plugin_requirements`
+and `--test plugin_validate` run generated `/bin/sh`
 fixtures only; they need no display, hardware or network. The worker and sidebar tests live in
 the binary (`cargo test --bin sdeck-plus plugin`; GTK ones need a display).

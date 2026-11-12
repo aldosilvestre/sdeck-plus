@@ -42,7 +42,11 @@ item per installed plugin below the built-in categories, never a shared "Plugins
 category: the header shows the plugin name (with "(disabled)" while it is off) and
 the body leads with the untrusted-code warning (process separation is not
 sandboxing) and an explicit "Enable <name>" check box, then the plugin's actions
-with the controls they support as the row subtitle. A thin divider and a small muted
+with the controls they support as the row subtitle. A plugin that declares
+`requirements` also shows a compact **Requires** list under the check box (kind, name,
+version, "(optional)", description as tooltip) with an alert-role error line such as
+"Missing: hyprctl" for each required command not found on `PATH`; it is rechecked on
+every rescan, never blocks enabling or assigning, and runs nothing. A thin divider and a small muted
 **Plugins** heading (heading role, not clickable) mark where the plugin entries begin;
 it is shown only while a plugin folder, a plugin or a plugin problem exists, so the
 built-in categories stand alone otherwise. Under it come malformed-plugin and invalid
