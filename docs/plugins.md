@@ -5,6 +5,10 @@
 > security rules, testing and a copyable starter project in `examples/plugin-template`. This page
 > is the host-side reference; the guide links here instead of repeating it, and
 > `cargo test --offline --test plugin_sdk` checks that both state the same limits.
+>
+> **Using an AI agent to write one?** Give it [`SKILL.md`](SKILL.md): a self-contained agent skill
+> (requirements, project layout, manifest, protocol, limits, tests, validation and a hand-off that
+> never enables the plugin).
 
 Plugins are separate programs that add actions without recompiling the app. This page is the
 contract for the host in `src/plugins.rs`. **Process separation is not sandboxing**: a plugin runs

@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Agent skill file:** `docs/SKILL.md` lets an AI agent write, test, validate and hand off an
+  sdeck-plus plugin (it never enables the plugin); `tests/plugin_sdk.rs` checks it against the code.
 - **External plugins:** separate programs add actions without recompiling the app. Each valid
   plugin is its own item under a **Plugins** heading of the Actions catalog, with an explicit
   **Enable** check box (nothing is enabled by default), a generated settings form, and an
