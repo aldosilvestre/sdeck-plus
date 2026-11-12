@@ -15,7 +15,8 @@ All notable changes to this project are documented here. The format follows
   **Update plugins** icon in the binding toolbar that rereads the plugin folder. A supervised
   host starts the plugin once per press with a cleared environment, bounded output and a fixed
   5 s deadline, in its own process group that is killed afterwards, on a dedicated worker, and
-  never retries. Process separation is **not** a sandbox: plugins run with your privileges.
+  never retries. Process separation is **not** a sandbox: plugins run with your privileges (the
+  notices now say plainly that no administrator rights are involved).
 - Optional manifest `requirements` (commands, services, files): shown in the plugin's sidebar
   item; only commands are looked up on `PATH` and the app never installs or runs anything.
 - `plugin_validate` example (`cargo run --offline --example plugin_validate -- <dir>`) checks a

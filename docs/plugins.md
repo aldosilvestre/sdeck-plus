@@ -12,7 +12,7 @@
 
 Plugins are separate programs that add actions without recompiling the app. This page is the
 contract for the host in `src/plugins.rs`. **Process separation is not sandboxing**: a plugin runs
-with your user's privileges, so enable only plugins you trust.
+with your user's privileges (the app never asks for or gives administrator rights), so enable only plugins you trust.
 
 ## Layout
 

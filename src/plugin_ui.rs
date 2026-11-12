@@ -23,8 +23,9 @@ use std::{
 pub(crate) const PLUGIN_PICKER: u32 = 8;
 
 pub(crate) const UNTRUSTED_WARNING: &str =
-    "Plugins are separate programs that run with your user's privileges. \
-Process separation is not sandboxing, so enable only plugins you trust.";
+    "Plugins are separate programs that run with your user's privileges: no administrator \
+(root) rights are requested or given, but a plugin can do what you can do. Process \
+separation is not sandboxing, so enable only plugins you trust.";
 
 /// The plugin control an event of `kind` on `control` maps to.
 pub(crate) fn plugin_control(control: ControlKind, event: EventKind) -> PluginControl {

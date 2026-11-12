@@ -24,7 +24,7 @@ pub(crate) type Notify = Rc<dyn Fn(&str, bool)>;
 const POLL: Duration = Duration::from_millis(40);
 const MAX_LISTED_PROBLEMS: usize = 8;
 const INTRO: &str = "Add a plugin from a folder on this computer or from an HTTPS repository address. Nothing runs until you enable it.";
-const RUN_WARNING: &str = "Once enabled, this plugin runs with your user's privileges. Read its code before you enable it.";
+const RUN_WARNING: &str = "Once enabled, this plugin runs with your user's privileges. It gets no administrator (root) rights, but it can read your files and use your network. Read its code before you enable it.";
 
 /// Where the dialog stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1225,7 +1225,7 @@ fn pinned_notices(installed: Option<&Option<String>>) -> Vec<GtkBox> {
     }
     notices.push(callout(
         "dialog-warning-symbolic",
-        "Runs with your privileges once enabled",
+        "Runs as your user, not as administrator",
         RUN_WARNING,
         "warning",
     ));

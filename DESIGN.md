@@ -100,7 +100,7 @@ found" or "Not checked" (services and files are not looked up).
 
 The pinned callouts sit between the scrolling area and the footer and never scroll away: the
 privileges warning (amber `desk_warning` edge and icon; ink text) always states that the plugin
-runs with the user's privileges once enabled and that its code should be read first, and, when
+runs with the user's privileges once enabled (never with administrator rights) and that its code should be read first, and, when
 the id is installed, a replace notice (`desk_cyan` edge) gives the installed version and says
 that replacing disables the plugin until it is enabled again. The footer has Close and Install
 (or Replace); while Install cannot be pressed, a helper line there says "Check a plugin to
