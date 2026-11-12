@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Discord demo extension for sdeck-plus (plugin protocol v1, standard library only).
+
+Reads one JSON request line on stdin and writes exactly one JSON response line on stdout.
+Diagnostics go to stderr and never contain the bot token or the message text.
+"""
+
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+PROTOCOL_VERSION = 1
+MAX_TEXT = 512
+TIMEOUT_SECONDS = 5
+MAX_REQUEST_BYTES = 64 * 1024
+MAX_TOKEN_BYTES = 512
+API_BASE = "https://discord.com/api/v10"
+USER_AGENT = "sdeck-plus-discord/1"
+
+DEFAULT_MODS = "CTRL SHIFT"
+DEFAULT_WINDOW = "class:^(discord|vesktop|legcord)$"
+DEFAULT_KEYS = {"toggle-mute": "M", "toggle-deafen": "D"}
+
+MODS = {"CTRL", "SHIFT", "ALT", "SUPER"}
+NAMED_KEYS = {"SPACE", "RETURN", "ESCAPE", "TAB"}
+FUNCTION_KEY = re.compile(r"F([1-9]|1[0-9]|2[0-4])")
+PLAIN_KEY = re.compile(r"[A-Za-z0-9]")
+WINDOW = re.compile(r"(class|title|initialclass|initialtitle|pid):[^,\x00-\x1f\x7f]{1,200}")
+CHANNEL_ID = re.compile(r"[0-9]{15,25}")
+INSTANCE = re.compile(r"[A-Za-z0-9_]{1,128}")
+REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+class PluginFailure(Exception):
+    """A failure whose short text is safe to show to the user."""
+
+
+def clip(text):
+    return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 3] + "..."
+
+
+def text_setting(settings, name, default=None):
+    value = settings.get(name, default)
+    if not isinstance(value, str):
+        raise PluginFailure(f"setting `{name}` must be text")
+    return value
+
+
+def reject_unknown(settings, allowed):
+    unknown = sorted(set(settings) - set(allowed))
+    if unknown:
+        raise PluginFailure(f"unknown setting `{unknown[0][:48]}`")
+
+
+def validate_shortcut(settings, default_key):
+    """Returns the comma-joined `MODS,KEY,WINDOW` argument or raises PluginFailure."""
+    reject_unknown(settings, ("mods", "key", "window"))
+    mods = text_setting(settings, "mods", DEFAULT_MODS)
+    parts = mods.split(" ")
+    if not mods or any(part not in MODS for part in parts):
+        raise PluginFailure("mods must be CTRL, SHIFT, ALT or SUPER separated by single spaces")
+    key = text_setting(settings, "key", default_key)
+    if not (
+        PLAIN_KEY.fullmatch(key) or FUNCTION_KEY.fullmatch(key) or key in NAMED_KEYS
+    ):
+        raise PluginFailure("key must be one letter or digit, F1-F24, SPACE, RETURN, ESCAPE or TAB")
+    window = text_setting(settings, "window", DEFAULT_WINDOW)
+    if not WINDOW.fullmatch(window):
+        raise PluginFailure(
+            "window must look like class:REGEX (class, title, initialclass, initialtitle or pid), "
+            "1-200 characters without commas or line breaks"
+        )
+    return f"{mods},{key},{window}"
+
+
+def find_instance(environ):
+    """Returns the Hyprland instance signature for the child environment.
+
+    The host does not forward HYPRLAND_INSTANCE_SIGNATURE, so a valid inherited value is kept and
+    otherwise the instance is derived from `$XDG_RUNTIME_DIR/hypr/`. Only real directories with
+    plain names count; with several, the most recently modified one wins.
+    """
+    current = environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    if INSTANCE.fullmatch(current):
+        return current
+    runtime = environ.get("XDG_RUNTIME_DIR", "")
+    if runtime and os.path.isabs(runtime):
+        try:
+            with os.scandir(os.path.join(runtime, "hypr")) as entries:
+                found = [
+                    (entry.stat(follow_symlinks=False).st_mtime_ns, entry.name)
+                    for entry in entries
+                    if INSTANCE.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False)
+                ]
+        except OSError:
+            found = []
+        if found:
+            return max(found)[1]
+    raise PluginFailure("no running Hyprland instance found")
+
+
+def send_shortcut(action, settings, run=subprocess.run, environ=None):
+    argument = validate_shortcut(settings, DEFAULT_KEYS[action])
+    child_env = dict(os.environ if environ is None else environ)
+    child_env["HYPRLAND_INSTANCE_SIGNATURE"] = find_instance(child_env)
+    argv = ["hyprctl", "dispatch", "sendshortcut", argument]
+    try:
+        result = run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+            env=child_env,
+        )
+    except FileNotFoundError:
+        raise PluginFailure("hyprctl was not found; this action needs Hyprland") from None
+    except subprocess.TimeoutExpired:
+        raise PluginFailure(f"hyprctl timed out after {TIMEOUT_SECONDS} s") from None
+    except OSError:
+        raise PluginFailure("hyprctl could not be started") from None
+    if result.returncode != 0:
+        raise PluginFailure(f"hyprctl exited with status {result.returncode}")
+    output = (result.stdout or "").strip()
+    if output and output.lower() != "ok":
+        raise PluginFailure("hyprctl reported: " + clip(output)[:200])
+    return "Shortcut sent to the Discord window (delivery and the resulting state are not confirmed)"
+
+
+def validate_message(settings):
+    reject_unknown(settings, ("channel_id", "message"))
+    if "channel_id" not in settings or "message" not in settings:
+        raise PluginFailure("channel_id and message are required")
+    channel = text_setting(settings, "channel_id")
+    if not (CHANNEL_ID.fullmatch(channel) and channel.isascii()):
+        raise PluginFailure("channel_id must be 15-25 digits")
+    message = text_setting(settings, "message").strip()
+    if not 1 <= len(message) <= 1024 or any(ord(c) < 32 or ord(c) == 127 for c in message):
+        raise PluginFailure("message must be 1-1024 printable characters")
+    return channel, message
+
+
+def config_dir(environ):
+    base = environ.get("XDG_CONFIG_HOME", "")
+    if base and os.path.isabs(base):
+        return base
+    home = environ.get("HOME", "")
+    if home and os.path.isabs(home):
+        return os.path.join(home, ".config")
+    raise PluginFailure("neither XDG_CONFIG_HOME nor HOME is usable")
+
+
+def token_path(environ):
+    return os.path.join(config_dir(environ), "sdeck-plus", "plugins", "discord", "token")
+
+
+def read_token(environ):
+    """Reads the bot token after checking the file rules. Error texts never include its contents."""
+    path = token_path(environ)
+    rule = (
+        "must be a regular file (not a symlink) owned by you, mode 0600, at most "
+        f"{MAX_TOKEN_BYTES} bytes"
+    )
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        raise PluginFailure(f"bot token file not found at {path}; create it ({rule})") from None
+    except OSError:
+        raise PluginFailure(f"bot token file {path} cannot be opened; it {rule}") from None
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o077
+            or info.st_size > MAX_TOKEN_BYTES
+        ):
+            raise PluginFailure(f"bot token file {path} is not acceptable; it {rule}")
+        data = os.read(fd, MAX_TOKEN_BYTES + 1)
+    except OSError:
+        raise PluginFailure(f"bot token file {path} could not be read; it {rule}") from None
+    finally:
+        os.close(fd)
+    if len(data) > MAX_TOKEN_BYTES:
+        raise PluginFailure(f"bot token file {path} is too large; it {rule}")
+    token = data.decode("ascii", errors="replace").strip()
+    if not token or any(not 33 <= ord(c) <= 126 for c in token):
+        raise PluginFailure(f"bot token file {path} must contain one token with no spaces")
+    return token
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect so the Authorization header never leaves discord.com."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def build_opener():
+    return urllib.request.build_opener(NoRedirect)
+
+
+HTTP_MESSAGES = {
+    401: "Discord rejected the bot token (HTTP 401)",
+    403: "the bot is not allowed to post in that channel (HTTP 403)",
+    404: "channel not found (HTTP 404)",
+    429: "Discord rate limit reached (HTTP 429); try again later",
+}
+
+
+def http_failure(code):
+    if code in HTTP_MESSAGES:
+        return HTTP_MESSAGES[code]
+    if 300 <= code < 400:
+        return f"Discord answered with a redirect (HTTP {code}); refused"
+    return f"Discord returned HTTP {code}"
+
+
+def send_message(settings, environ, opener=None):
+    channel, message = validate_message(settings)
+    token = read_token(environ)
+    request = urllib.request.Request(
+        f"{API_BASE}/channels/{channel}/messages",
+        data=json.dumps({"content": message}).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bot {token}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        response = (opener or build_opener()).open(request, timeout=TIMEOUT_SECONDS)
+    except urllib.error.HTTPError as error:
+        code = error.code
+        error.close()
+        raise PluginFailure(http_failure(code)) from None
+    except (urllib.error.URLError, OSError):
+        raise PluginFailure("could not reach Discord") from None
+    try:
+        status = response.getcode()
+    finally:
+        response.close()
+    if not 200 <= status < 300:
+        raise PluginFailure(http_failure(status))
+    return "Message sent to Discord"
+
+
+def handle(request, environ, run, opener):
+    action = request.get("action")
+    settings = request.get("settings", {})
+    if not isinstance(settings, dict):
+        raise PluginFailure("settings must be an object")
+    if not isinstance(action, str):
+        raise PluginFailure("unknown action")
+    if action in DEFAULT_KEYS:
+        return send_shortcut(action, settings, run=run, environ=environ)
+    if action == "send-message":
+        return send_message(settings, environ, opener=opener)
+    raise PluginFailure("unknown action")
+
+
+def reply(stdout, request_id, ok, text):
+    body = {"protocol_version": PROTOCOL_VERSION, "request_id": request_id, "ok": ok}
+    if text:
+        body["error" if not ok else "message"] = clip(text)
+    stdout.write(json.dumps(body) + "\n")
+    stdout.flush()
+
+
+def main(argv=None, stdin=None, stdout=None, environ=None, run=None, opener=None, stderr=None):
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    stderr = sys.stderr if stderr is None else stderr
+    environ = os.environ if environ is None else environ
+    run = subprocess.run if run is None else run
+    request_id = "unknown"
+    try:
+        line = stdin.readline(MAX_REQUEST_BYTES + 1)
+        try:
+            request = json.loads(line)
+        except ValueError:
+            raise PluginFailure("request is not valid JSON") from None
+        if not isinstance(request, dict):
+            raise PluginFailure("request must be a JSON object")
+        candidate = request.get("request_id")
+        if isinstance(candidate, str) and REQUEST_ID.fullmatch(candidate):
+            request_id = candidate
+        version = request.get("protocol_version")
+        if type(version) is not int or version != PROTOCOL_VERSION:
+            raise PluginFailure("unsupported protocol_version")
+        if request.get("type") != "invoke":
+            raise PluginFailure("unsupported request type")
+        reply(stdout, request_id, True, handle(request, environ, run, opener))
+    except PluginFailure as failure:
+        reply(stdout, request_id, False, str(failure))
+    except Exception as error:  # last resort: never a traceback, never the error text
+        stderr.write(f"discord extension internal error: {type(error).__name__}\n")
+        reply(stdout, request_id, False, "internal error in the Discord extension")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

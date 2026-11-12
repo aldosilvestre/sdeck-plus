@@ -123,6 +123,12 @@ returned truncated (4096 bytes). Exit status must be 0.
 - Windows with several device models each keep their own view of the folder; enabling in one
   becomes visible in another after "Rescan plugins", although runs always use the file on disk.
 
+## Bundled demo
+
+`extensions/discord/` is a demonstration plugin (Hyprland shortcut actions and a bot message). Copy it
+into `<data dir>/sdeck-plus/plugins/discord/` and enable it explicitly; see its `README.md` for the
+token file rules and limits.
+
 ## Tests
 
 `cargo test --offline --test plugin_host` and `--test plugin_bindings` run generated `/bin/sh`

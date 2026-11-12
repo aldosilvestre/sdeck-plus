@@ -1,0 +1,41 @@
+{
+  "id": "discord",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "name": "Discord",
+  "executable": "run",
+  "actions": [
+    {
+      "id": "toggle-mute",
+      "name": "Toggle mute (shortcut)",
+      "description": "Sends the mute shortcut to the Discord window on Hyprland. Delivery and the resulting state are not confirmed.",
+      "controls": ["key", "dial_press"],
+      "settings": [
+        {"type": "text", "id": "mods", "label": "Modifiers", "max_length": 64, "default": "CTRL SHIFT"},
+        {"type": "text", "id": "key", "label": "Key", "max_length": 16, "default": "M"},
+        {"type": "text", "id": "window", "label": "Window selector", "max_length": 256, "default": "class:^(discord|vesktop|legcord)$"}
+      ]
+    },
+    {
+      "id": "toggle-deafen",
+      "name": "Toggle deafen (shortcut)",
+      "description": "Sends the deafen shortcut to the Discord window on Hyprland. Delivery and the resulting state are not confirmed.",
+      "controls": ["key", "dial_press"],
+      "settings": [
+        {"type": "text", "id": "mods", "label": "Modifiers", "max_length": 64, "default": "CTRL SHIFT"},
+        {"type": "text", "id": "key", "label": "Key", "max_length": 16, "default": "D"},
+        {"type": "text", "id": "window", "label": "Window selector", "max_length": 256, "default": "class:^(discord|vesktop|legcord)$"}
+      ]
+    },
+    {
+      "id": "send-message",
+      "name": "Send bot message",
+      "description": "Posts a message to a channel as your Discord bot. The bot token is read from a file, never from the binding.",
+      "controls": ["key"],
+      "settings": [
+        {"type": "text", "id": "channel_id", "label": "Channel ID", "required": true, "max_length": 25},
+        {"type": "text", "id": "message", "label": "Message", "required": true, "max_length": 1024}
+      ]
+    }
+  ]
+}
