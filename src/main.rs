@@ -1285,6 +1285,12 @@ fn build_body(
     binding_buttons.append(&save_binding);
     binding_buttons.append(&test_action);
     binding_buttons.append(&remove_binding);
+    // Rescanning plugins is not a binding action: it sits apart at the right end of the row.
+    let toolbar_gap = GtkBox::new(Orientation::Horizontal, 0);
+    toolbar_gap.set_hexpand(true);
+    binding_buttons.append(&toolbar_gap);
+    binding_buttons.append(&gtk::Separator::new(Orientation::Vertical));
+    binding_buttons.append(&plugin_ui::rescan_button(&binding_ui.plugins));
     // The status line sits right under Save/Test/Remove so results stay visible.
     // The toolbar tops the right-hand panel, above its tabs.
     let binding_feedback = GtkBox::new(Orientation::Vertical, 8);

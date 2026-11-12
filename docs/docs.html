@@ -724,9 +724,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             <article class="card wide">
               <h4>External plugins</h4>
               <p>A plugin is a separate program that adds actions. Each installed plugin appears as its own collapsible item in the <strong>Actions</strong> catalog, below the
-                 built-in categories, with its status. Plugins live in <code>$XDG_DATA_HOME/sdeck-plus/plugins/&lt;id&gt;/</code> (or
+                 built-in categories, under a <strong>Plugins</strong> heading, with its status. Plugins live in <code>$XDG_DATA_HOME/sdeck-plus/plugins/&lt;id&gt;/</code> (or
                  <code>$HOME/.local/share/sdeck-plus/plugins/&lt;id&gt;/</code>), shared by every device model. The app only reads each <code>manifest.json</code> while browsing and
-                 never installs or enables anything by itself; <strong>Rescan plugins</strong> reads the folder again. Folders with a bad manifest are listed with the reason and
+                 never installs or enables anything by itself; the refresh button at the right end of the binding toolbar (<strong>Update plugins</strong>) reads the folder again. Folders with a bad manifest are listed with the reason and
                  do not affect the others or the built-in actions.</p>
               <p><strong>Plugins run with your user's privileges. Process separation is not sandboxing</strong>, so tick <strong>Enable</strong> only for plugins you trust.
                  Actions of a disabled plugin are listed but cannot be assigned or run. Assign an action like any other, complete its generated form (text, bounded number or

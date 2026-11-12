@@ -176,15 +176,129 @@ fn every_plugin_is_its_own_sidebar_item_with_status_and_visible_problems() {
             assert!(!headers(widgets)
                 .iter()
                 .any(|name| name.starts_with("Extra")));
-            let rescan = all::<Button>(widgets)
-                .into_iter()
-                .find(|b| button_caption(b).as_deref() == Some("Rescan plugins"))
-                .expect("rescan control");
-            rescan.emit_clicked();
+            update_plugins(widgets).emit_clicked();
             assert!(headers(widgets)
                 .iter()
                 .any(|name| name.starts_with("Extra")));
             assert!(!root.ran());
+        })
+    });
+}
+
+/// The one rescan control, found by its tooltip.
+fn update_plugins(widgets: &MonitorWidgets) -> Button {
+    let found: Vec<Button> = all::<Button>(widgets)
+        .into_iter()
+        .filter(|b| b.tooltip_text().as_deref() == Some("Update plugins"))
+        .collect();
+    assert_eq!(found.len(), 1, "exactly one rescan control");
+    found.into_iter().next().unwrap()
+}
+
+fn tool(widgets: &MonitorWidgets, name: &str) -> Button {
+    all::<Button>(widgets)
+        .into_iter()
+        .find(|b| {
+            b.tooltip_text()
+                .is_some_and(|tip| tip.lines().next() == Some(name))
+        })
+        .unwrap_or_else(|| panic!("no {name} button"))
+}
+
+fn plugin_headings(widgets: &MonitorWidgets) -> Vec<Label> {
+    all::<Label>(widgets)
+        .into_iter()
+        .filter(|label| label.has_css_class("plugin-heading"))
+        .collect()
+}
+
+#[test]
+fn the_rescan_control_is_an_icon_at_the_right_end_of_the_binding_toolbar() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-rescan-toolbar", |widgets, _layers, _requests| {
+            let rescan = update_plugins(widgets);
+            assert!(rescan.label().is_none(), "icon only");
+            let image = rescan.child().and_downcast::<gtk::Image>().expect("icon");
+            assert_eq!(image.icon_name().as_deref(), Some("view-refresh-symbolic"));
+            assert_eq!(rescan.tooltip_text().as_deref(), Some("Update plugins"));
+            assert!(rescan.is_focusable() && rescan.is_sensitive());
+            assert!(
+                all::<Button>(widgets)
+                    .iter()
+                    .all(|b| button_caption(b).as_deref() != Some("Rescan plugins")),
+                "the old text button is gone"
+            );
+            let row = rescan.parent().expect("toolbar row");
+            let save = tool(widgets, "Save binding");
+            assert_eq!(save.parent().as_ref(), Some(&row));
+            assert_eq!(tool(widgets, "Test action").parent().as_ref(), Some(&row));
+            let remove = tool(widgets, "Remove binding");
+            assert_eq!(remove.parent().as_ref(), Some(&row));
+            assert_eq!(row.last_child().as_ref(), Some(rescan.upcast_ref()));
+            assert_eq!(rescan.halign(), gtk::Align::End);
+            let bounds = |b: &Button| b.compute_bounds(&widgets.root);
+            let (rescan_box, remove_box) = (bounds(&rescan).unwrap(), bounds(&remove).unwrap());
+            assert!(
+                rescan_box.x() > remove_box.x() + remove_box.width() + 8.0,
+                "separated from the three: {rescan_box:?} vs {remove_box:?}"
+            );
+            for name in ["Save binding", "Test action", "Remove binding"] {
+                let other = tool(widgets, name);
+                assert_eq!(other.height(), rescan.height(), "{name} height");
+                assert!(rescan.height() > 0);
+            }
+            let rescan_box_end = rescan_box.x() + rescan_box.width();
+            let row_box = row.compute_bounds(&widgets.root).unwrap();
+            assert!(
+                (row_box.x() + row_box.width() - rescan_box_end).abs() < 1.5,
+                "flush with the right end"
+            );
+        })
+    });
+}
+
+#[test]
+fn the_plugin_heading_marks_where_plugins_begin_and_is_absent_without_plugins() {
+    run_gtk_test(|| {
+        catalog_fixture("plugin-heading", |widgets, _layers, _requests| {
+            assert!(plugin_headings(widgets).is_empty(), "no plugin folder");
+            let built_in = headers(widgets);
+            let root = PluginRoot::new("heading");
+            widgets.binding_ui.plugins.load(root.0.clone());
+            let found = plugin_headings(widgets);
+            assert_eq!(found.len(), 1);
+            let heading = &found[0];
+            assert_eq!(heading.text(), "Plugins");
+            assert_eq!(heading.accessible_role(), gtk::AccessibleRole::Heading);
+            let mut buttons = Vec::new();
+            collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
+            // The heading's block and the first plugin item are siblings, the heading first.
+            let region = heading
+                .parent()
+                .and_then(|bar| bar.parent())
+                .expect("region");
+            let position = |inner: &gtk::Widget| {
+                let mut index = 0;
+                let mut child = region.first_child();
+                while let Some(current) = child {
+                    if inner == &current || inner.is_ancestor(&current) {
+                        return index;
+                    }
+                    index += 1;
+                    child = current.next_sibling();
+                }
+                panic!("not in the plugin region");
+            };
+            let demo = buttons
+                .iter()
+                .find(|b| {
+                    b.tooltip_text().as_deref() == Some("Show or hide Demo (disabled) actions")
+                })
+                .expect("demo item");
+            assert_eq!(position(heading.upcast_ref()), 0);
+            assert!(position(demo.upcast_ref()) > 0, "plugin items follow it");
+            let after = headers(widgets);
+            assert!(after.starts_with(&built_in), "built-in order unchanged");
         })
     });
 }

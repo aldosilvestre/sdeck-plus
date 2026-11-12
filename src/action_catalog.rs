@@ -564,14 +564,16 @@ impl Section {
     }
 }
 
-/// Rebuilds the plugin sidebar items: a shared toolbar, then one collapsible item per plugin.
+/// Rebuilds the plugin sidebar items: a "Plugins" heading, then one collapsible item per plugin.
 fn populate_plugins(region: &GtkBox, built: &RefCell<Vec<Section>>, wiring: &Wiring) {
     while let Some(child) = region.first_child() {
         region.remove(&child);
     }
     built.borrow_mut().clear();
     let hub = &wiring.ui.plugins;
-    region.append(&plugin_ui::toolbar(hub));
+    if let Some(heading) = plugin_ui::heading(hub) {
+        region.append(&heading);
+    }
     let fail: Rc<dyn Fn(&str)> = {
         let ui = wiring.ui.clone();
         Rc::new(move |message| ui.error(message))

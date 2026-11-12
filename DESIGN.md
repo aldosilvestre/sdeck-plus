@@ -42,9 +42,13 @@ item per installed plugin below the built-in categories, never a shared "Plugins
 category: the header shows the plugin name (with "(disabled)" while it is off) and
 the body leads with the untrusted-code warning (process separation is not
 sandboxing) and an explicit "Enable <name>" check box, then the plugin's actions
-with the controls they support as the row subtitle. A strip above the items holds
-**Rescan plugins**, malformed-plugin and invalid enabled-state messages (labels with
-the alert role, error colour) or the empty-state hint naming the plugin folder.
+with the controls they support as the row subtitle. A thin divider and a small muted
+**Plugins** heading (heading role, not clickable) mark where the plugin entries begin;
+it is shown only while a plugin folder, a plugin or a plugin problem exists, so the
+built-in categories stand alone otherwise. Under it come malformed-plugin and invalid
+enabled-state messages (labels with the alert role, error colour) or the empty-state
+hint naming the plugin folder. Rescanning is not in the sidebar: see the binding
+toolbar below.
 Actions of a disabled plugin, or that do not fit the selected control (key, dial
 turn, dial press, touch strip), are dimmed with an explanatory tooltip. Assigning one
 always opens the generic **Plugin action** form (plugin and action drop-downs, then
@@ -513,6 +517,12 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   and test caption. The status line and Undo remove sit directly under it. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
+  The same row ends with **Update plugins**, an icon-only refresh button of the
+  same size, pushed to the right by an expanding gap and a thin vertical divider so
+  it reads as separate from the three binding tools. Its tooltip is exactly
+  "Update plugins" (also its accessible name); it rereads the plugin folder and
+  never runs a plugin. The toolbar is always visible, for keys, dials and the
+  touch strip alike, so the control is always reachable.
   Test action remains neutral and explicitly
   labeled, with guidance that testing executes and saving only persists.
 - **Button text and image:** right-clicking a key selects it and opens a small

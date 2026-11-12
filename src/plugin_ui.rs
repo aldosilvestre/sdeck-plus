@@ -1,7 +1,7 @@
 //! Native GTK pieces for external plugins: the shared registry view, the generic settings form
 //! and the per-plugin sidebar controls. Browsing and saving only read manifests and the
 //! enabled state; a plugin runs solely through the plugin worker (`plugin_runtime`).
-use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation};
+use gtk::{prelude::*, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use sdeck_plus::binding_editor::{ControlKind, EventKind};
 use sdeck_plus::plugins::{
     PluginAction, PluginBinding, PluginControl, PluginManifest, PluginRegistry, SettingField,
@@ -225,17 +225,36 @@ impl PluginHub {
     }
 }
 
-/// The sidebar strip that heads every plugin: rescan, problems and where plugins live.
-pub(crate) fn toolbar(hub: &PluginHub) -> GtkBox {
+/// The icon-only rescan control at the right end of the binding toolbar. It only reads the
+/// plugin folder again; nothing is run.
+pub(crate) fn rescan_button(hub: &PluginHub) -> Button {
+    let rescan = crate::ui::icon_button("view-refresh-symbolic", "Update plugins");
+    rescan.set_halign(gtk::Align::End);
+    let hub = hub.clone();
+    rescan.connect_clicked(move |_| hub.rescan());
+    rescan
+}
+
+/// Where the plugin entries of the sidebar begin: a divider, a "Plugins" heading, then plugin
+/// problems or the empty-state hint. `None` while there is no plugin folder, no plugin and no
+/// problem, so the built-in categories stand alone.
+pub(crate) fn heading(hub: &PluginHub) -> Option<GtkBox> {
+    let problems = hub.problems();
+    let root = hub.root();
+    if root.is_none() && problems.is_empty() && hub.plugins().is_empty() {
+        return None;
+    }
     let bar = GtkBox::new(Orientation::Vertical, 6);
     bar.add_css_class("plugin-toolbar");
-    let rescan = crate::ui::button("view-refresh-symbolic", "Rescan plugins");
-    rescan.set_tooltip_text(Some("Read the plugin folder again. Nothing is run."));
-    rescan.set_halign(gtk::Align::Start);
-    let weak = hub.clone();
-    rescan.connect_clicked(move |_| weak.rescan());
-    bar.append(&rescan);
-    for problem in hub.problems() {
+    bar.append(&gtk::Separator::new(Orientation::Horizontal));
+    let title = Label::builder()
+        .label("Plugins")
+        .xalign(0.0)
+        .accessible_role(gtk::AccessibleRole::Heading)
+        .build();
+    title.add_css_class("plugin-heading");
+    bar.append(&title);
+    for problem in problems {
         let label = Label::builder()
             .label(&problem)
             .wrap(true)
@@ -247,15 +266,15 @@ pub(crate) fn toolbar(hub: &PluginHub) -> GtkBox {
         bar.append(&label);
     }
     if hub.plugins().is_empty() {
-        let place = hub.root().map_or_else(
+        let place = root.map_or_else(
             || "the plugin folder".into(),
             |root| root.display().to_string(),
         );
         bar.append(&crate::ui::helper(&format!(
-            "No plugins found. Put a plugin folder in {place} and rescan."
+            "No plugins found. Put a plugin folder in {place} and use Update plugins."
         )));
     }
-    bar
+    Some(bar)
 }
 
 /// The warning and the explicit enable switch at the top of one plugin's sidebar item.
