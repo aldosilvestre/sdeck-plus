@@ -422,11 +422,17 @@ primary, Delete profile destructive). Escape or the footer button (Close in Edit
 New; both show the real Esc hint) hides the dialog without saving; Cancel and Esc discard a
 New draft.
 The profile tabs form a vertical rail at the left of the content, identical at every window
-width: the connection badge, then the Organize and OBS tools (at the top so their popovers stay
-reachable in short windows; the artboard's foot placement is not used because the shell scrolls
-as one page, 814px tall in a 700px window, which would put a foot-of-rail tool below the fold;
-`rail_tests` guards that the tools stay visible without scrolling), then the profile names (about 12 characters, ellipsized). Organize and OBS are frameless (hover shows the surface) so they stay secondary
-to the tabs. The Organize menu only opens the profile creation, application
+width, full height and never scrolling (artboard 03-profile-rail): the connection badge, a
+"PROFILES" sub-heading (11px, bold, muted), the profile names (about 12 characters, ellipsized),
+a flat "New profile" button that opens the same dialog as the Organize menu's New profile row,
+then at the foot a "TOOLS" sub-heading with Organize, OBS and Menu. Because the rail is outside
+the scrolling region the tools are always visible and their popovers open fully, in a 1080x700
+window and at the smallest window. The tools are frameless (hover shows the surface) so they stay
+secondary to the tabs. Menu is the window's one configuration menu button seated in the shown
+model's rail (moved, not copied, when the shown model changes); the header keeps the title,
+detail line, Current selector and update indicator. Only the content column (page bar, preview,
+editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
+inside the window. The Organize menu only opens the profile creation, application
 association and profile deletion dialogs. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
 breadcrumb with a 12px gap, and page-owned folders and New page trail it,
@@ -642,8 +648,8 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   (neutral) and a red X in a circle. Each tooltip has two lines, its name then
   what it does, and doubles as the accessible name and test caption. The status
   line and Undo remove stay at the top of the right-hand panel, in its toolbar
-  row with the plugin buttons. The row is inside the editor card, so it scrolls
-  with a form taller than the card's scroll region. The
+  row with the plugin buttons. The heading row is the editor card's fixed top:
+  only the form below it scrolls, so Save, Test and Remove stay visible. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
   The same row ends with **Add plugin…** and **Update plugins**, two icon-only buttons of the

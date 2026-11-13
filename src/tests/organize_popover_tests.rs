@@ -3,7 +3,7 @@ use super::ui_refresh_tests::fixture;
 use super::*;
 
 /// The visible dialog of a fixture, found by title through the public window list.
-fn dialog_titled(window: &ApplicationWindow, title: &str) -> gtk::Window {
+pub(super) fn dialog_titled(window: &ApplicationWindow, title: &str) -> gtk::Window {
     gtk::Window::toplevels()
         .snapshot()
         .into_iter()

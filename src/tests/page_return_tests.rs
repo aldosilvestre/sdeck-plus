@@ -120,7 +120,7 @@ fn assert_page_return_option_is_saved_reloaded_and_tested_with_any_action() {
         std::fs::create_dir_all(&directory).unwrap();
         for (name, on) in [("off", false), ("on", true)] {
             ui.return_toggle.set_active(on);
-            let adjustment = widgets.root.vadjustment();
+            let adjustment = widgets.scroller.vadjustment();
             adjustment.set_value((adjustment.upper() - adjustment.page_size()).max(0.0));
             rendered_texture(&window, &widgets.root)
                 .save_to_png(directory.join(format!("return-{name}.png")))

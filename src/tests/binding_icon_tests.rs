@@ -189,7 +189,7 @@ fn assert_dial_icons() {
     assert!(!icons[3].is_visible(), "None shows no icon");
     assert_eq!(icons[1].widget_name(), "volume-up");
     assert_eq!(icons[2].widget_name(), "shortcut");
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     for index in [1, 2] {
         let icon = &icons[index];
         assert!(icon.is_visible() && icon.has_css_class("binding-icon"));
@@ -666,7 +666,7 @@ fn assert_gesture_badges() {
     );
     // The badges share the strip header line and stay above the sections.
     assert_eq!(row.parent(), widgets.touch_status.parent());
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     let header = row.compute_bounds(&content).unwrap();
     for zone in &widgets.zone_widgets {
         let zone = zone.compute_bounds(&content).unwrap();
@@ -724,7 +724,7 @@ fn assert_more_action_icons() {
     assert_eq!(category.selected(), 2);
     // The inspector now follows the preview, so scroll its selectors into view.
     let bounds = category.compute_bounds(&fixture.widgets.root).unwrap();
-    let adjustment = fixture.widgets.root.vadjustment();
+    let adjustment = fixture.widgets.scroller.vadjustment();
     adjustment.set_value(adjustment.value() + f64::from(bounds.y()) - 40.0);
     wait_for_frame(&fixture.window);
     assert_eq!(

@@ -429,6 +429,7 @@ fn build_ui_in(
     let stack = gtk::Stack::builder()
         .hhomogeneous(false)
         .vhomogeneous(false)
+        .vexpand(true)
         .css_classes(["session-stack"])
         .build();
     let shell = shell_box();
@@ -439,22 +440,18 @@ fn build_ui_in(
         let window = window.clone();
         let lifecycle = Rc::downgrade(&lifecycle);
         let toast = toast.clone();
-        let viewport = viewport.downgrade();
         let shell = shell.downgrade();
         let labels = (header.status.clone(), header.connection_detail.clone());
         move |model, opened, send_initial| {
-            let (lifecycle, viewport, shell) = lifecycle
+            let (lifecycle, shell) = lifecycle
                 .upgrade()
-                .zip(viewport.upgrade())
                 .zip(shell.upgrade())
-                .map(|((lifecycle, viewport), shell)| (lifecycle, viewport, shell))
                 .ok_or("the window is closing")?;
             build_session(
                 &SessionHost {
                     window: &window,
                     lifecycle: &lifecycle,
                     toast: &toast,
-                    viewport: &viewport,
                     shell: &shell,
                     labels: (&labels.0, &labels.1),
                 },
@@ -532,7 +529,6 @@ struct SessionHost<'a> {
     window: &'a ApplicationWindow,
     lifecycle: &'a Rc<RefCell<DeviceLifecycle>>,
     toast: &'a ui::Toast,
-    viewport: &'a gtk::ScrolledWindow,
     /// What a key swap in progress makes insensitive.
     shell: &'a GtkBox,
     /// The window's connection status and detail labels.
@@ -609,7 +605,7 @@ fn build_session(
         send_initial,
     );
     // Editing is switched off on the body alone: the header stays usable.
-    body.attach(host.viewport, body.root.upcast_ref());
+    body.attach(body.root.upcast_ref());
     match body.feature_runtime.start_plugins(&events) {
         Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
         Ok(None) => {}
@@ -693,7 +689,9 @@ impl ModelSelector {
 // action workers, disk reads or presentation.
 #[cfg(test)]
 struct MonitorWidgets {
-    root: gtk::ScrolledWindow,
+    root: clamp::Clamp,
+    /// The content column's scroller; the header and the profile rail never scroll.
+    scroller: gtk::ScrolledWindow,
     toast: ui::Toast,
     binding_status: Label,
     status: Label,
@@ -779,8 +777,9 @@ fn build_header(window: &ApplicationWindow) -> Header {
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
     header.append(&update_panel.indicator);
+    // The Menu button lives in the profile rail's tools; the header only keeps a handle.
+    #[cfg(test)]
     let help_menu = configuration_menu.button().clone();
-    header.append(&help_menu);
 
     let connection_detail = Label::new(None);
     show_connection_state(
@@ -820,14 +819,10 @@ fn shell_box() -> GtkBox {
     root
 }
 
-/// A two-axis viewport is the fallback for unusually small allocations or fonts.
-/// Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
-fn shell_viewport(shell: &GtkBox) -> gtk::ScrolledWindow {
-    gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&clamp::Clamp::new(shell, SHELL_MAX_WIDTH))
-        .build()
+/// The window's fixed frame: header and profile rail never scroll, only the content column
+/// of each body does (see `build_body`). It fills the window up to SHELL_MAX_WIDTH.
+fn shell_viewport(shell: &GtkBox) -> clamp::Clamp {
+    clamp::Clamp::new(shell, SHELL_MAX_WIDTH)
 }
 
 /// One model's complete editor: everything below the header.
@@ -839,6 +834,10 @@ struct Body {
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
     settings_scroll: gtk::ScrolledWindow,
+    /// The content column's scroller: the only scrolling region of the window.
+    content_scroll: gtk::ScrolledWindow,
+    /// The rail slot the window's Menu button is seated in while this body is shown.
+    menu_slot: GtkBox,
     // Keep the weakly referenced editor callbacks alive with the body.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     #[cfg(test)]
@@ -856,14 +855,14 @@ struct Body {
 }
 
 impl Body {
-    /// Tie the body to the viewport that scrolls it: the form keeps within
-    /// about one window of height, and `configuration_root` is what editing
+    /// Tie the body to its content column, the only part that scrolls: the form keeps
+    /// within about one window of height, and `configuration_root` is what editing
     /// being switched off makes insensitive.
-    fn attach(&self, viewport: &gtk::ScrolledWindow, configuration_root: &gtk::Widget) {
+    fn attach(&self, configuration_root: &gtk::Widget) {
         self.feature_runtime
             .attach_configuration_root(configuration_root);
         let scroll = self.settings_scroll.downgrade();
-        viewport
+        self.content_scroll
             .vadjustment()
             .connect_page_size_notify(move |adjustment| {
                 if let Some(scroll) = scroll.upgrade() {
@@ -899,8 +898,10 @@ fn build_widgets(
     shell.append(&header.root);
     shell.append(&body.root);
     let viewport = shell_viewport(&shell);
-    body.attach(&viewport, viewport.upcast_ref());
+    body.attach(viewport.upcast_ref());
+    header.configuration_menu.place_in(&body.menu_slot);
     let Body {
+        content_scroll,
         binding_status,
         preview,
         touch_status,
@@ -923,6 +924,7 @@ fn build_widgets(
     } = body;
     MonitorWidgets {
         root: viewport,
+        scroller: content_scroll,
         toast,
         binding_status,
         status: header.status,
@@ -1269,22 +1271,48 @@ fn build_body(
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
-    // The rail's head holds the connection badge (a mirror of the header's label) and the
-    // profile tools, so both stay reachable however short the window is; profiles follow.
+    // The rail never scrolls. Its head holds the connection badge (a mirror of the header's
+    // label) and the PROFILES heading; the profile tabs fill the middle; its foot holds the
+    // flat New profile button, the TOOLS heading and the tools, so they are always visible.
     let rail_status = ui::mirror_badge(connection_badge);
-    // Both tools start at the left edge, like the profile names below them.
+    // Tools start at the left edge, like the profile names above them.
     for menu in [&management_menu, &obs_menu] {
         if let Some(content) = menu.child() {
             content.set_halign(gtk::Align::Start);
         }
     }
-    layer_row.set_margin_bottom(8);
+    // The window's Menu button is seated here (see `ConfigurationMenu::place_in`).
+    let menu_slot = GtkBox::new(Orientation::Vertical, 0);
+    layer_row.append(&menu_slot);
     let rail_head = GtkBox::new(Orientation::Vertical, 2);
     rail_head.append(&rail_status);
-    rail_head.append(&layer_row);
+    rail_head.append(&ui::rail_heading("PROFILES"));
     feature_runtime
         .profile_tabs()
         .set_action_widget(&rail_head, gtk::PackType::Start);
+    let new_profile = ui::button("list-add-symbolic", "New profile");
+    new_profile.set_has_frame(false);
+    new_profile.add_css_class("rail-new-profile");
+    new_profile.add_css_class("flat");
+    if let Some(content) = new_profile.child() {
+        content.set_halign(gtk::Align::Start);
+    }
+    {
+        // The same dialog the Organize menu's New profile row opens.
+        let dialog = new_dialog.downgrade();
+        new_profile.connect_clicked(move |_| {
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.present();
+            }
+        });
+    }
+    let rail_foot = GtkBox::new(Orientation::Vertical, 2);
+    rail_foot.append(&new_profile);
+    rail_foot.append(&ui::rail_heading("TOOLS"));
+    rail_foot.append(&layer_row);
+    feature_runtime
+        .profile_tabs()
+        .set_action_widget(&rail_foot, gtk::PackType::End);
     // Navigation (linked arrows + breadcrumb) leads; page management trails.
     let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
@@ -1313,8 +1341,12 @@ fn build_body(
     let heading_row = GtkBox::new(Orientation::Horizontal, 8);
     heading_row.add_css_class("editor-heading-row");
     heading_row.append(&settings_heading);
+    // The heading row is the card's fixed top: only the form below it scrolls (S11), so
+    // Save, Test and Remove stay visible however tall the form is.
     settings_card.append(&heading_row);
-    settings_card.append(feature_runtime.touchscreen_controls());
+    let form = GtkBox::new(Orientation::Vertical, 6);
+    form.set_hexpand(true);
+    form.append(feature_runtime.touchscreen_controls());
     // Keep a usable form width without padding short actions to the chassis height.
     settings_card.set_size_request(300, -1);
     settings_card.set_spacing(6);
@@ -1326,10 +1358,10 @@ fn build_body(
     // A key has one event and takes its action from the catalog, so only
     // dials and the touch strip show these selectors.
     selector_row.set_visible(false);
-    settings_card.append(&selector_row);
-    settings_card.append(&binding_ui.hold_toggle);
-    settings_card.append(&binding_ui.action_guidance);
-    settings_card.append(&binding_ui.layer_target_row);
+    form.append(&selector_row);
+    form.append(&binding_ui.hold_toggle);
+    form.append(&binding_ui.action_guidance);
+    form.append(&binding_ui.layer_target_row);
     let action_fields = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .focusable(false)
@@ -1374,18 +1406,18 @@ fn build_body(
                 fields.set_visible(matches!(picker.selected(), 1..=4));
             }
         });
-    settings_card.append(&action_fields);
-    settings_card.append(&binding_ui.feature_editor.root);
-    settings_card.append(&*binding_ui.plugin_editor);
+    form.append(&action_fields);
+    form.append(&binding_ui.feature_editor.root);
+    form.append(&*binding_ui.plugin_editor);
     let options_heading = inspector_heading("Options");
     binding_ui
         .return_toggle
         .bind_property("visible", &options_heading, "visible")
         .sync_create()
         .build();
-    settings_card.append(&options_heading);
-    settings_card.append(&binding_ui.return_toggle);
-    settings_card.append(&binding_ui.return_row);
+    form.append(&options_heading);
+    form.append(&binding_ui.return_toggle);
+    form.append(&binding_ui.return_row);
     let binding_buttons = GtkBox::new(Orientation::Horizontal, 8);
     let test_action = binding_tool(
         "media-playback-start-symbolic",
@@ -1461,7 +1493,7 @@ fn build_body(
     let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
     artwork_section.set_child(Some(&artwork_content));
     appearance.append(&artwork_section);
-    settings_card.append(&appearance);
+    form.append(&appearance);
     let layer_hint = Label::new(Some(
         "Touchscreen pages belong to the profile, independently of keypad pages and folders.",
     ));
@@ -1803,10 +1835,11 @@ fn build_body(
         .max_content_height(480)
         .hexpand(true)
         .valign(gtk::Align::Start)
-        .child(&settings_card)
+        .child(&form)
         .build();
     settings_scroll.add_css_class("settings-scroll");
-    workspace.append(&settings_scroll);
+    settings_card.append(&settings_scroll);
+    workspace.append(&settings_card);
     body.insert(&workspace, -1);
     // The right-hand panel: draggable actions, dial presets and per-binding options.
     let side_panel = card();
@@ -1865,7 +1898,21 @@ fn build_body(
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
     profile_content.append(&body);
-    feature_runtime.attach_profile_content(&profile_content);
+    // Only this column scrolls: the header and the profile rail stay put.
+    let content_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .hexpand(true)
+        .vexpand(true)
+        .child(&profile_content)
+        .build();
+    content_scroll.add_css_class("content-scroll");
+    let content_column = GtkBox::new(Orientation::Vertical, 0);
+    content_column.set_hexpand(true);
+    content_column.set_vexpand(true);
+    content_column.append(&content_scroll);
+    feature_runtime.attach_profile_content(&content_column);
+    root.set_vexpand(true);
     root.append(feature_runtime.profile_tabs());
 
     // All thirteen pictures are registered independently of the shared editor.
@@ -1879,6 +1926,8 @@ fn build_body(
         feature_runtime,
         organization_writes: vec![create_layer],
         settings_scroll,
+        content_scroll,
+        menu_slot,
         _text_editor: text_editor,
         #[cfg(test)]
         layer_picker,
@@ -6799,17 +6848,7 @@ mod tests {
         };
         let (sender, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), sender);
-        let shell = widgets
-            .root
-            .child()
-            .unwrap()
-            .downcast::<gtk::Viewport>()
-            .unwrap()
-            .child()
-            .unwrap()
-            // The width clamp wraps the shell.
-            .first_child()
-            .unwrap();
+        let shell = widgets.root.first_child().unwrap();
         let motion = shell.settings();
         let animations = motion.is_gtk_enable_animations();
         motion.set_gtk_enable_animations(false);
@@ -6882,17 +6921,7 @@ mod tests {
             (DEFAULT_WIDTH, DEFAULT_HEIGHT)
         );
         eprintln!("GTK actual test client allocation 1000x700 executed");
-        let content = widgets
-            .root
-            .child()
-            .unwrap()
-            .downcast::<gtk::Viewport>()
-            .unwrap()
-            .child()
-            .unwrap()
-            // The width clamp wraps the shell.
-            .first_child()
-            .unwrap();
+        let content = widgets.root.first_child().unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
             let _ = rendered_pixels(&window, &widgets.root);
@@ -6996,8 +7025,8 @@ mod tests {
             assert_eq!(artwork.pictures.borrow().len(), 13);
             assert_artwork_geometry(&artwork, &content, true);
             assert_sidebar_geometry(&widgets, &content);
-            let horizontal = widgets.root.hadjustment();
-            let vertical = widgets.root.vadjustment();
+            let horizontal = widgets.scroller.hadjustment();
+            let vertical = widgets.scroller.vadjustment();
             eprintln!("GTK production allocation {width}x{height}: content {}x{}, horizontal upper/page={}/{}, vertical upper/page={}/{}",
                 content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
             assert!(
@@ -7064,7 +7093,7 @@ mod tests {
                 if width >= 960 {
                     assert!(horizontal.upper() <= horizontal.page_size());
                 }
-                assert_reachable(&ui.action_picker, &widgets.root);
+                assert_reachable(&ui.action_picker, &widgets.scroller);
                 for row in [
                     &ui.layer_target_row,
                     &ui.text_row,
@@ -7073,17 +7102,17 @@ mod tests {
                     &ui.modifier_row,
                 ] {
                     if row.is_visible() {
-                        assert_reachable(row, &widgets.root);
+                        assert_reachable(row, &widgets.scroller);
                     }
                 }
                 let mut buttons = Vec::new();
                 collect_layout_buttons(&content, &mut buttons);
                 for button in buttons {
-                    assert_reachable(&button, &widgets.root);
+                    assert_reachable(&button, &widgets.scroller);
                 }
                 eprintln!("GTK production image-backed action {action} editor/button reachability assertions executed at {width}x{height}");
             }
-            assert_reachable(&widgets.layer_picker, &widgets.root);
+            assert_reachable(&widgets.layer_picker, &widgets.scroller);
             let mut buttons = Vec::new();
             collect_layout_buttons(&content, &mut buttons);
             assert_eq!(
@@ -7094,7 +7123,7 @@ mod tests {
                 1
             );
             for button in buttons {
-                assert_reachable(&button, &widgets.root);
+                assert_reachable(&button, &widgets.scroller);
             }
             vertical.set_value(0.0);
             eprintln!("GTK production layer/editor/artwork reachability assertions executed at {width}x{height}");
@@ -7241,16 +7270,17 @@ mod tests {
         for (width, height) in [(640, 480), (1000, 700), (1280, 800), (1840, 980)] {
             widgets.root.set_size_request(width, height);
             let capture = |name: &str| {
-                widgets.root.vadjustment().set_value(0.0);
+                widgets.scroller.vadjustment().set_value(0.0);
                 let texture = rendered_texture(window, &widgets.root);
                 assert_eq!((texture.width(), texture.height()), (width, height));
                 assert!(
-                    widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size()
+                    widgets.scroller.hadjustment().upper()
+                        <= widgets.scroller.hadjustment().page_size()
                 );
                 texture
                     .save_to_png(directory.join(format!("{width}x{height}-{name}-top.png")))
                     .unwrap();
-                let adjustment = widgets.root.vadjustment();
+                let adjustment = widgets.scroller.vadjustment();
                 if adjustment.upper() > adjustment.page_size() {
                     adjustment.set_value(adjustment.upper() - adjustment.page_size());
                     rendered_texture(window, &widgets.root)
@@ -7294,7 +7324,7 @@ mod tests {
                 ),
             ] {
                 button.emit_clicked();
-                let heading = sidebar_settings(widgets)
+                let heading = settings_region(widgets)
                     .first_child()
                     .unwrap()
                     .first_child()
@@ -7336,7 +7366,7 @@ mod tests {
         widgets.binding_ui.update_action_visibility();
         for (width, height) in [(640, 480), (1000, 700), (1280, 800), (1840, 980)] {
             widgets.root.set_size_request(width, height);
-            widgets.root.vadjustment().set_value(0.0);
+            widgets.scroller.vadjustment().set_value(0.0);
             wait_for_frame(&widgets.root);
             for (name, menu) in [
                 ("help", &widgets.help_menu),
@@ -8046,7 +8076,7 @@ mod tests {
                     assert_eq!(widgets.binding_ui.control_picker.selected(), 2);
                     assert_eq!(widgets.binding_ui.control_number(), Some(*zone));
                     assert_eq!(widgets.binding_ui.event_model.n_items(), 7);
-                    let heading = sidebar_settings(widgets)
+                    let heading = settings_region(widgets)
                         .first_child()
                         .unwrap()
                         .first_child()
@@ -8093,8 +8123,8 @@ mod tests {
                 .root
                 .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
             let minimum = content.measure(Orientation::Vertical, DEFAULT_WIDTH - 48).0;
-            let horizontal = widgets.root.hadjustment();
-            let vertical = widgets.root.vadjustment();
+            let horizontal = widgets.scroller.hadjustment();
+            let vertical = widgets.scroller.vadjustment();
             // Editing below the fold may have scrolled to the focused field.
             // Reset the viewport for the geometry matrix, not application state.
             vertical.set_value(0.0);
@@ -8203,9 +8233,10 @@ mod tests {
                 bounds.y() <= 16.0,
                 "scrolling may move the shell above its top margin"
             );
+            let scrolling = widgets.scroller.vadjustment();
             assert!(
-                bounds.height() > 668.0,
-                "inspector is reachable through vertical scrolling"
+                scrolling.upper() > scrolling.page_size(),
+                "inspector is reachable through the content column's vertical scrolling"
             );
             let window_width = DEFAULT_WIDTH as f32;
             assert_eq!(
@@ -8240,7 +8271,7 @@ mod tests {
         widgets.artwork_section.set_expanded(true);
     }
 
-    fn assert_visible_bounds(widget: &gtk::Widget, root: &gtk::ScrolledWindow) {
+    fn assert_visible_bounds(widget: &gtk::Widget, root: &impl IsA<gtk::Widget>) {
         // Overlay scrollbars belong to their scroller, not to the content measure.
         if !widget.is_visible() || widget.is::<gtk::Scrollbar>() {
             return;
@@ -8412,16 +8443,13 @@ mod tests {
             let offset = (y * widget.width() as usize + x) * 4;
             pixels[offset..offset + 4].to_vec()
         };
-        let expected = background(widgets.root.upcast_ref(), 5, 5);
+        let expected = background(window.upcast_ref(), 5, 5);
         assert_eq!(expected[3], 255);
-        assert_eq!(background(window.upcast_ref(), 5, 5), expected);
-        let viewport = widgets.root.child().unwrap();
-        assert_eq!(background(&viewport, 5, 5), expected);
         assert_eq!(
             background(content, 2, content.height() as usize - 2),
             expected
         );
-        let settings = sidebar_settings(widgets);
+        let settings = settings_region(widgets);
         let device = device_canvas(widgets);
         let elevated = background(&settings, 3, settings.height() as usize / 2);
         assert_eq!(elevated[3], 255);
@@ -8555,9 +8583,11 @@ mod tests {
     /// The configuration region: the form's own scroller, which stays put while
     /// the form scrolls inside it.
     fn settings_region(widgets: &MonitorWidgets) -> gtk::Widget {
+        // The editor card: its fixed heading row above the scrolling form region.
         sidebar_settings(widgets)
             .ancestor(gtk::ScrolledWindow::static_type())
-            .expect("configuration region scroller")
+            .and_then(|scroller| scroller.parent())
+            .expect("configuration region card")
     }
 
     fn sidebar_settings(widgets: &MonitorWidgets) -> gtk::Widget {
@@ -8613,9 +8643,14 @@ mod tests {
                 "the profile rail stays narrow"
             );
             assert!(pagebar.x() >= tab_header.x() + tab_header.width() - 1.0);
+            // The content column scrolls horizontally when its minimum width exceeds the
+            // space beside the rail; the page bar then overhangs by exactly that much.
+            let overhang = (widgets.scroller.hadjustment().upper()
+                - widgets.scroller.hadjustment().page_size())
+            .max(0.0) as f32;
             assert!(
-                (pagebar.x() + pagebar.width() - shell.width()).abs() <= 1.0,
-                "the page bar reaches the right edge of the shell measure"
+                (pagebar.x() + pagebar.width() - shell.width() - overhang).abs() <= 1.0,
+                "the page bar reaches the right edge of the shell measure at {width}x{height}"
             );
             if width == 1840 {
                 assert_eq!(
@@ -8649,7 +8684,10 @@ mod tests {
                 "below-preview editor needs a bounded reading measure: {editor:?}"
             );
             assert!((editor.y() - device.y() - device.height() - 12.0).abs() <= 1.0);
-            assert!(widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size());
+            assert!(
+                widgets.scroller.hadjustment().upper()
+                    <= widgets.scroller.hadjustment().page_size()
+            );
         }
         let previous = widgets.binding_ui.action_picker.selected();
         widgets.binding_ui.action_picker.set_selected(7);
@@ -8684,14 +8722,17 @@ mod tests {
     fn assert_sidebar_hierarchy(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         assert!(settings.next_sibling().is_none(), "no event card");
-        // The card sits in its own vertical scroller inside the workspace column.
-        let sidebar = settings
-            .ancestor(gtk::ScrolledWindow::static_type())
-            .unwrap()
-            .parent()
-            .unwrap()
-            .downcast::<GtkBox>()
-            .unwrap();
+        // The form sits in its own vertical scroller under the editor card's fixed heading
+        // row, and the card sits in the workspace column.
+        let editor_card = settings_region(widgets);
+        assert_eq!(
+            settings
+                .ancestor(gtk::ScrolledWindow::static_type())
+                .unwrap()
+                .parent(),
+            Some(editor_card.clone())
+        );
+        let sidebar = editor_card.parent().unwrap().downcast::<GtkBox>().unwrap();
         assert_eq!(sidebar.orientation(), Orientation::Vertical);
         assert_eq!(sidebar.spacing(), 12);
         let body = sidebar
@@ -8724,7 +8765,7 @@ mod tests {
             ),
             (16, 16, 16, 16)
         );
-        for panel in [device_canvas(widgets), settings] {
+        for panel in [device_canvas(widgets), editor_card] {
             let panel = panel.downcast::<GtkBox>().unwrap();
             assert!(panel.has_css_class("card"));
             assert_eq!(
@@ -8745,20 +8786,23 @@ mod tests {
                 (0, 0, 0, 0)
             );
         }
-        assert_eq!(widgets.root.hscrollbar_policy(), gtk::PolicyType::Automatic);
-        assert_eq!(widgets.root.vscrollbar_policy(), gtk::PolicyType::Automatic);
+        assert_eq!(
+            widgets.scroller.hscrollbar_policy(),
+            gtk::PolicyType::Automatic
+        );
+        assert_eq!(
+            widgets.scroller.vscrollbar_policy(),
+            gtk::PolicyType::Automatic
+        );
         eprintln!("GTK sidebar hierarchy and spacing assertions executed");
     }
 
     fn assert_sidebar_geometry(widgets: &MonitorWidgets, content: &gtk::Widget) {
-        let settings = sidebar_settings(widgets);
+        // The editor card: fixed heading row, then the scrolling form.
+        let settings = settings_region(widgets);
         let device = device_canvas(widgets);
-        // Viewport and scroller of the configuration region, then the workspace column.
+        // Workspace column, flow child and flow box, then the profile content.
         let profile_content = settings
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
             .parent()
             .unwrap()
             .parent()
@@ -8820,12 +8864,8 @@ mod tests {
             );
         }
         let cell = device.parent().unwrap().compute_bounds(content).unwrap();
-        // The region (its scroller) stays put while the form scrolls inside it.
-        let settings = settings
-            .ancestor(gtk::ScrolledWindow::static_type())
-            .unwrap()
-            .compute_bounds(content)
-            .unwrap();
+        // The card stays put while the form scrolls inside it.
+        let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
         if (settings.y() - device.y()).abs() <= 0.5 {
             // A height-limited preview is centered in its column.

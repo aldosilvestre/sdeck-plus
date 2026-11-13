@@ -295,7 +295,7 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .profile-tabs, .profile-tabs > stack { background-color: transparent; }
 .profile-tabs > stack { margin-left: 8px; }
 /* Profiles sit in a vertical rail at the left; tools gather at its foot. */
-.profile-tabs > header.left { padding: 6px 4px; }
+.profile-tabs > header.left { padding: 6px 3px; }
 /* The connection badge heads the rail as a small labelled pill, at every window width. */
 .rail-badge { margin: 2px 4px 8px 4px; padding: 3px 8px; font-size: 11px; }
 .profile-tabs > header.left tab { padding: 8px 10px; margin: 1px 0; }
@@ -619,3 +619,11 @@ popover.dial-event-choice > contents { padding: 6px; }
 .banner label.feedback-error,
 .banner label.feedback-warning,
 .banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }
+
+/* Rail sub-headings (PROFILES, TOOLS) and the flat New profile button above the tools. */
+.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: @desk_muted; }
+.profile-tabs > header.left button.rail-new-profile { padding: 6px 10px; margin-top: 4px; }
+/* The scrolling form shares the editor card's surface (the heading row above it is fixed). */
+scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
+button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
+button.rail-new-profile.flat:hover { background-color: @desk_hover; }

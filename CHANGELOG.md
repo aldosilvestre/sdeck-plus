@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Fixed profile rail:** the rail now spans the window height and never scrolls, with a PROFILES heading, the profile names, a flat **New profile** button (the same dialog as Organize > New profile), then a TOOLS heading with Organize, OBS and **Menu** at its foot, always visible. Menu moved from the header into the rail; its items and name are unchanged. Only the content column scrolls.
+- **Editor toolbar:** Save, Test and Remove stay visible while a tall editor form scrolls (the heading row is fixed above the form).
 - **Editor toolbar:** Save binding, Test action and Remove binding now sit in the editor card's heading row, level with "Configuring: …", as in the approved design; their icons, tooltips, accessible names and behaviour are unchanged. The status line, Undo remove and the plugin buttons stay at the top of the right-hand panel.
 - **Deletion confirmations:** deleting a profile, page, folder or touchscreen page asks `Delete “name”?` with what goes with it (a profile lists its page and binding counts) and ends "This cannot be undone."; the buttons are **Cancel** (Esc) and a red **Delete**. The import confirmation uses the same layout.
 - **Menu popover:** the header Menu is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.

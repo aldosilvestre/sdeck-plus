@@ -361,7 +361,7 @@ fn capture_documentation_screenshots() {
         .downcast::<Button>()
         .unwrap()
         .emit_clicked();
-    assert_reachable(&widgets.binding_ui.action_picker, &widgets.root);
+    assert_reachable(&widgets.binding_ui.action_picker, &widgets.scroller);
     dropdown(
         &directory,
         &widgets.binding_ui.action_picker,
@@ -371,7 +371,7 @@ fn capture_documentation_screenshots() {
     wait_for_frame(&widgets.root);
     let category =
         descendants::<gtk::DropDown>(widgets.binding_ui.feature_editor.root.upcast_ref()).remove(0);
-    assert_reachable(&category, &widgets.root);
+    assert_reachable(&category, &widgets.scroller);
     dropdown(&directory, &category, "more-actions-categories");
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
@@ -380,7 +380,7 @@ fn capture_documentation_screenshots() {
         .populate_action(&Action::Feature(FeatureAction::Obs(ObsAction::Scene(
             "Studio camera".into(),
         ))));
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("more-actions-obs");
     widgets
         .binding_ui
@@ -396,7 +396,7 @@ fn capture_documentation_screenshots() {
         .downcast::<Button>()
         .unwrap()
         .emit_clicked();
-    assert_reachable(&widgets.binding_ui.event_picker, &widgets.root);
+    assert_reachable(&widgets.binding_ui.event_picker, &widgets.scroller);
     dropdown(
         &directory,
         &widgets.binding_ui.event_picker,
@@ -417,14 +417,14 @@ fn capture_documentation_screenshots() {
         .unwrap()
         .emit_clicked();
     widgets.binding_ui.event_picker.set_selected(3);
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("touch-strip");
 
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let editor = &widgets._text_editor;
     wait_for_frame(&widgets.root);
-    assert_reachable(&widgets.key_widgets[0], &widgets.root);
+    assert_reachable(&widgets.key_widgets[0], &widgets.scroller);
     wait_for_frame(&widgets.root);
     // Show an edited draft: Save enabled, the unsaved hint and a grid choice.
     editor.panel.set_autohide(false);
@@ -441,10 +441,10 @@ fn capture_documentation_screenshots() {
         .emit_clicked();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&widgets.root);
-    assert_reachable(&widgets.target_picker, &widgets.root);
+    assert_reachable(&widgets.target_picker, &widgets.scroller);
     dropdown(&directory, &widgets.target_picker, "artwork-touch-zones");
     widgets.artwork_section.set_expanded(false);
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     wait_for_frame(&widgets.root);
 
     // Right-click menu of a key, and the event choice after dropping an action on a dial.
@@ -579,7 +579,7 @@ fn capture_documentation_screenshots() {
     );
 
     key_button(&widgets.key_labels[0]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     set_pressed(&widgets.key_widgets[0], true);
     set_pressed(&widgets.encoder_widgets[1], true);
     // Refresh momentary feedback on the frame update signal, not a timer race.
@@ -730,7 +730,7 @@ fn capture_documentation_screenshots() {
     artwork.refresh(true);
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[7]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("missing-file");
     artwork
         .layers
@@ -761,7 +761,7 @@ fn capture_documentation_screenshots() {
     artwork.refresh(true);
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[7]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     widgets.binding_ui.hold_toggle.set_active(true);
     wait_for_frame(&widgets.root);
     capture("key-hold-action");

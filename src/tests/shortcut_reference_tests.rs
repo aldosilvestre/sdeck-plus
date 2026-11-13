@@ -58,7 +58,7 @@ pub(super) fn assert_reference_dialog() {
                         .unwrap();
                 }
             };
-            let adjustment = widgets.root.vadjustment();
+            let adjustment = widgets.scroller.vadjustment();
             adjustment.set_value(0.0);
             save("shortcut-top", widgets.root.upcast_ref());
             adjustment.set_value((adjustment.upper() - adjustment.page_size()).max(0.0));

@@ -147,8 +147,27 @@ impl ConfigurationMenu {
         });
     }
 
+    #[cfg(test)]
     pub(crate) fn button(&self) -> &gtk::MenuButton {
         &self.0.button
+    }
+
+    /// Seats the Menu button in `slot`, a rail tool slot, leaving any previous slot. The one
+    /// button follows the model shown, so it is moved rather than copied.
+    pub(crate) fn place_in(&self, slot: &gtk::Box) {
+        let button = &self.0.button;
+        if button.parent().as_ref() == Some(slot.upcast_ref()) {
+            return;
+        }
+        if let Some(previous) = button.parent().and_downcast::<gtk::Box>() {
+            previous.remove(button);
+        }
+        // Frameless and left-aligned like the other rail tools.
+        button.set_has_frame(false);
+        if let Some(content) = button.child() {
+            content.set_halign(gtk::Align::Start);
+        }
+        slot.append(button);
     }
 
     pub(crate) fn bind(&self, runtime: FeatureRuntime) {

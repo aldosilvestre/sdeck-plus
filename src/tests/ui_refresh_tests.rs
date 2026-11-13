@@ -83,7 +83,7 @@ fn assert_page_toolbar_hierarchy() {
         return;
     };
     let widgets = &fixture.widgets;
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     let bounds = |widget: &gtk::Widget| widget.compute_bounds(&content).unwrap();
 
     // Navigation: previous/next/parent form one linked group before the breadcrumb.
@@ -302,7 +302,7 @@ fn assert_dial_legends_and_touch_placeholder() {
     };
     assert_eq!(legends[1].text(), volume_text);
     assert_eq!(legends[2].text(), "Shortcut CTRL+M");
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     for (index, knob) in widgets.encoder_widgets.iter().enumerate() {
         let legend = &legends[index];
         assert!(legend.has_css_class("dial-legend"));
@@ -359,7 +359,7 @@ fn assert_inspector_grouping() {
     widgets
         .root
         .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     let bounds = |widget: &gtk::Widget| widget.compute_bounds(&content).unwrap();
 
     // Modifiers: one aligned, linked row of named toggles in Ctrl, Alt, Shift, Super order.

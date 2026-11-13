@@ -491,12 +491,12 @@ fn the_preview_contract_holds_at_the_default_window_for_both_models() {
             );
             // The preview sits beside the catalog, entirely inside the window.
             let window_bounds = bin
-                .compute_bounds(&f.widgets.root.child().unwrap())
+                .compute_bounds(&f.widgets.scroller.child().unwrap())
                 .unwrap();
             assert!(window_bounds.x() + window_bounds.width() <= DEFAULT_WIDTH as f32);
             let sidebar = class_of(&root, "settings-sidebar");
             let side = sidebar
-                .compute_bounds(&f.widgets.root.child().unwrap())
+                .compute_bounds(&f.widgets.scroller.child().unwrap())
                 .unwrap();
             assert!(
                 side.x() >= window_bounds.x() + card_bounds.width(),

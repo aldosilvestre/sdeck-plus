@@ -51,9 +51,12 @@ fn assert_binding_toolbar() {
         heading_row.has_css_class("editor-heading-row"),
         "the heading sits in its own row"
     );
+    // The row is the editor card's fixed top; the scrolling form below it is in the same card.
+    let card = heading_row.parent().expect("editor card");
+    assert!(card.has_css_class("editor-card"));
     assert!(
-        heading_row.is_ancestor(&sidebar_settings(widgets)),
-        "the heading row is inside the editor card"
+        sidebar_settings(widgets).is_ancestor(&card),
+        "the heading row and the form share the editor card"
     );
     let heading_bounds = heading.compute_bounds(&widgets.root).unwrap();
     let mut previous_x = heading_bounds.x() + heading_bounds.width();
