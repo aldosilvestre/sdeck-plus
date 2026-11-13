@@ -480,7 +480,7 @@ fn touch_taps_choose_their_section_before_the_whole_strip() {
 }
 
 #[test]
-fn unknown_information_rows_are_removed_as_conflicts() {
+fn unknown_information_rows_are_kept_as_conflicts() {
     let fixture = Fixture::new();
     fs::create_dir_all(&fixture.0).unwrap();
     fs::write(
@@ -497,6 +497,7 @@ fn unknown_information_rows_are_removed_as_conflicts() {
     let store = LayerStore::open_at(&fixture.0).unwrap();
 
     assert_eq!(store.conflicts().len(), 1);
+    assert!(store.conflicts()[0].kept);
     assert_eq!(store.info_source("Base", &Trigger::KeyPress(1)), None);
     assert_eq!(store.layers()["Base"].bindings.len(), 1);
 }
