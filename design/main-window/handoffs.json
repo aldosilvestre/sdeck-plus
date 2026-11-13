@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-profile-rail.html",
+  "handoffs": {
+    "03-profile-rail.html": {
+      "status": "sent",
+      "queued": false,
+      "sentAt": "2026-11-13T13:26:22.457Z",
+      "startedAt": null,
+      "implementedAt": null,
+      "feature": "odd/tasks/audio-input-controls.md"
+    }
+  }
+}

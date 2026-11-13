@@ -20,7 +20,7 @@
     {
       "file": "03-profile-rail.html",
       "title": "Profile rail",
-      "tradeoff": "Profiles move to a vertical rail, categories become filter chips and audio is grouped Media / Output / Input. Scales to many profiles; needs 1200px+ and a stacked layout below that.",
+      "tradeoff": "Profiles move to a vertical rail, categories become filter chips and audio is grouped Media / Output / Input; the hardware preview keeps its current look (chassis, coloured keys, touch strip, dials). Needs 1200px+ and a stacked layout below that.",
       "width": 1240,
       "height": 900
     }
