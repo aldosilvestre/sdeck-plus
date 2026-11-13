@@ -10,6 +10,8 @@ use sdeck_plus::{
     obs::ObsConfig,
     organization::{NavigationAction, Organization},
 };
+
+pub(crate) const RETURN_OPTION_LABEL: &str = "Return to the previous profile when focus leaves";
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
@@ -301,6 +303,8 @@ pub(crate) struct FeatureRuntime {
     profile_application: Entry,
     profile_application_apply: Button,
     profile_application_status: Label,
+    profile_returns: gtk::CheckButton,
+    focus_memory: Rc<RefCell<sdeck_plus::focus_profile::FocusMemory>>,
     focused_application: Rc<RefCell<Option<sdeck_plus::app_focus::FocusedApplication>>>,
     focus_received: Rc<Cell<bool>>,
     manual_profile: Rc<Cell<bool>>,
@@ -370,6 +374,16 @@ impl FeatureRuntime {
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
+        let profile_returns = gtk::CheckButton::new();
+        let profile_returns_text = Label::new(Some(RETURN_OPTION_LABEL));
+        profile_returns_text.set_wrap(true);
+        profile_returns_text.set_max_width_chars(30);
+        profile_returns_text.set_xalign(0.0);
+        profile_returns.set_child(Some(&profile_returns_text));
+        profile_returns.set_sensitive(false);
+        profile_returns.set_tooltip_text(Some(
+            "Needs an application above. While that application has focus this profile is shown; when focus moves to something that matches no profile, the profile that was shown before comes back instead of Base.",
+        ));
         let profile_delete = crate::ui::button("user-trash-symbolic", "Delete profile");
         profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
@@ -452,6 +466,8 @@ impl FeatureRuntime {
             profile_application,
             profile_application_apply,
             profile_application_status,
+            profile_returns,
+            focus_memory: Rc::default(),
             focused_application: Rc::new(RefCell::new(None)),
             focus_received: Rc::new(Cell::new(false)),
             manual_profile: Rc::new(Cell::new(false)),
@@ -479,6 +495,7 @@ impl FeatureRuntime {
                     .map(|(name, _)| name.clone());
                 if let Some(profile) = profile {
                     callback.manual_profile.set(true);
+                    callback.focus_memory.borrow_mut().user_chose_a_profile();
                     callback.select_profile(&profile);
                 }
             });
@@ -493,6 +510,13 @@ impl FeatureRuntime {
         crate::ui::field_help(&application_row, "Automatic switching help",
             "Enter a window class or executable, such as kitty or firefox. This profile is selected when that application has focus; it does not launch the application. Leave empty for manual selection. All profile tabs stay visible. Base is always available and cannot have an application rule.");
         runtime.organization_management.append(&application_row);
+        runtime
+            .organization_management
+            .append(&runtime.profile_returns);
+        let callback = runtime.clone();
+        runtime
+            .profile_returns
+            .connect_toggled(move |_| callback.refresh_save_state());
         runtime
             .organization_management
             .append(&runtime.profile_application_status);
@@ -709,12 +733,23 @@ impl FeatureRuntime {
             .as_deref()
             .and_then(|profile| organization.as_ref()?.profile_application(profile));
         self.profile_application.set_text(application.unwrap_or(""));
+        self.profile_returns
+            .set_active(profile.as_deref().zip(organization.as_ref()).is_some_and(
+                |(profile, organization)| organization.profile_returns_to_previous(profile),
+            ));
         self.refresh_save_state();
         crate::ui::clear_feedback(&self.profile_application_status);
         self.profile_application_status
             .set_text(match (profile.as_deref(), application) {
                 (Some(sdeck_plus::layers::DEFAULT_LAYER), _) => {
                     "Base: always available, cannot be deleted."
+                }
+                (Some(profile), Some(_))
+                    if organization.as_ref().is_some_and(|organization| {
+                        organization.profile_returns_to_previous(profile)
+                    }) =>
+                {
+                    "Automatic switching enabled; the previous profile returns when focus leaves."
                 }
                 (_, Some(_)) => "Automatic switching enabled.",
                 (_, None) => "Manual selection — no application rule.",
@@ -728,12 +763,20 @@ impl FeatureRuntime {
             .and_then(|item| item.downcast::<gtk::StringObject>().ok())
             .map(|item| item.string().to_string());
         let organization = self.organization.borrow();
+        let text = self.profile_application.text();
+        let has_application = !text.trim().is_empty();
+        // The option only exists next to an application rule.
+        let returns = has_application && self.profile_returns.is_active();
         let dirty = match (profile.as_deref(), organization.as_ref()) {
             (Some(profile), Some(organization)) if profile != sdeck_plus::layers::DEFAULT_LAYER => {
-                self.profile_application.text().trim()
-                    != organization.profile_application(profile).unwrap_or("")
+                self.profile_returns.set_sensitive(has_application);
+                text.trim() != organization.profile_application(profile).unwrap_or("")
+                    || returns != organization.profile_returns_to_previous(profile)
             }
-            _ => false,
+            _ => {
+                self.profile_returns.set_sensitive(false);
+                false
+            }
         };
         self.profile_application_apply.set_sensitive(dirty);
     }
@@ -752,7 +795,15 @@ impl FeatureRuntime {
             let Some(organization) = organization.as_mut() else {
                 return;
             };
-            organization.set_profile_application(&profile, &self.profile_application.text())
+            let text = self.profile_application.text();
+            organization
+                .set_profile_application(&profile, &text)
+                .and_then(|()| {
+                    organization.set_profile_returns_to_previous(
+                        &profile,
+                        !text.trim().is_empty() && self.profile_returns.is_active(),
+                    )
+                })
         };
         match result {
             Ok(()) => {
@@ -800,23 +851,16 @@ impl FeatureRuntime {
             }
             let focus = self.focused_application.borrow();
             let current = organization.profile_for_key(self.layers.borrow().active());
-            if organization.profile_matches(&current, focus.as_ref()) {
-                self.manual_profile.set(false);
-                current
-            } else {
-                match organization
-                    .profiles()
-                    .into_iter()
-                    .find(|profile| organization.profile_matches(profile, focus.as_ref()))
-                {
-                    Some(profile) => {
-                        self.manual_profile.set(false);
-                        profile
-                    }
-                    None if self.manual_profile.get() => current,
-                    None => sdeck_plus::layers::DEFAULT_LAYER.to_owned(),
-                }
-            }
+            let mut manual = self.manual_profile.get();
+            let target = sdeck_plus::focus_profile::profile_for_focus(
+                organization,
+                &current,
+                focus.as_ref(),
+                &mut manual,
+                &mut self.focus_memory.borrow_mut(),
+            );
+            self.manual_profile.set(manual);
+            target
         };
         let current = self
             .organization
