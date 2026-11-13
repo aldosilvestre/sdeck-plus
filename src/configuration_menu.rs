@@ -44,6 +44,11 @@ impl ConfigurationMenu {
         let import = ui::button("document-open-symbolic", "Import configuration...");
         let export = ui::button("document-save-symbolic", "Export configuration...");
         for item in [&help, &updates, &import, &export] {
+            // Menu rows: compact, left-aligned, borderless until hovered.
+            item.add_css_class("menu-row");
+            if let Some(content) = item.child() {
+                content.set_halign(gtk::Align::Start);
+            }
             body.append(item);
         }
         let panel = ui::popover("Menu", &body);

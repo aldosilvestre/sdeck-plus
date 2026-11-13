@@ -848,7 +848,7 @@ pub(crate) fn row_button(
 }
 
 /// Offer the dial's three events next to it and report the one chosen.
-fn choose_event(anchor: &gtk::Widget, pick: impl Fn(EventKind) + Clone + 'static) {
+pub(crate) fn choose_event(anchor: &gtk::Widget, pick: impl Fn(EventKind) + Clone + 'static) {
     let popover = gtk::Popover::new();
     popover.set_parent(anchor);
     popover.add_css_class("dial-event-choice");
@@ -860,6 +860,11 @@ fn choose_event(anchor: &gtk::Widget, pick: impl Fn(EventKind) + Clone + 'static
     ] {
         let button = Button::with_label(label);
         button.add_css_class("flat");
+        // Menu rows read from the left, like a list.
+        if let Some(caption) = button.child().and_downcast::<Label>() {
+            caption.set_xalign(0.0);
+            caption.set_hexpand(true);
+        }
         let weak = popover.downgrade();
         let pick = pick.clone();
         button.connect_clicked(move |_| {

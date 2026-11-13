@@ -1146,3 +1146,59 @@ fn every_feedback_message_reads_as_a_banner_except_inside_a_toast() {
         window.close();
     });
 }
+
+#[test]
+fn the_configuration_menu_lists_left_aligned_borderless_rows() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder().default_width(400).build();
+        install_style(&window);
+        let menu = crate::configuration_menu::ConfigurationMenu::new(
+            &window,
+            &gtk::Box::new(gtk::Orientation::Vertical, 0),
+        );
+        window.set_child(Some(menu.button()));
+        window.present();
+        wait_for_frame(&window);
+        let popover = menu.button().popover().expect("menu popover");
+        let mut rows = Vec::new();
+        let mut stack = vec![popover.upcast::<gtk::Widget>()];
+        while let Some(widget) = stack.pop() {
+            if widget.has_css_class("menu-row") {
+                rows.push(widget.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                stack.push(current.clone());
+                child = current.next_sibling();
+            }
+        }
+        let mut captions: Vec<String> = rows
+            .iter()
+            .filter_map(|row| row.downcast_ref::<Button>())
+            .filter_map(button_caption)
+            .map(|caption| caption.to_string())
+            .collect();
+        captions.sort();
+        assert_eq!(
+            captions,
+            [
+                "Export configuration...",
+                "Help",
+                "Import configuration...",
+                "Updates"
+            ]
+        );
+        for row in &rows {
+            let content = row.first_child().expect("row content");
+            assert_eq!(
+                content.halign(),
+                gtk::Align::Start,
+                "rows start at the left"
+            );
+        }
+        window.destroy();
+    });
+}

@@ -600,3 +600,13 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
 /* An action beside a toast message, as in "Binding removed.  Undo". */
 .toast .toast-action { color: @desk_violet; font-weight: 600; border-radius: 999px; padding: 0 10px; min-height: 28px; }
 .toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }
+
+/* The dial event menu: compact rows that fill on hover and keep the keyboard focus ring. */
+popover.dial-event-choice > contents { padding: 6px; }
+.dial-event-choice button.flat { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
+.dial-event-choice button.flat:hover { background-color: @desk_hover; }
+.dial-event-choice button.flat:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+
+/* Rows of a menu popover (Menu: Help, Updates, Import, Export). */
+button.menu-row { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
+button.menu-row:hover { background-color: @desk_hover; }

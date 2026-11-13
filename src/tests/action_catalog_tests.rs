@@ -358,3 +358,51 @@ fn multimedia_is_grouped_into_media_output_input_and_files_and_search_hides_the_
         });
     });
 }
+
+#[test]
+fn the_dial_event_menu_lists_compact_left_aligned_rows() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder()
+            .default_width(400)
+            .default_height(300)
+            .build();
+        install_style(&window);
+        let anchor = Button::with_label("Dial 1");
+        window.set_child(Some(&anchor));
+        window.present();
+        wait_for_frame(&window);
+        crate::action_catalog::choose_event(anchor.upcast_ref(), |_| {});
+        let mut popovers = Vec::new();
+        let mut child = anchor.first_child();
+        while let Some(widget) = child {
+            if widget.has_css_class("dial-event-choice") {
+                popovers.push(widget.clone());
+            }
+            child = widget.next_sibling();
+        }
+        assert_eq!(popovers.len(), 1);
+        let mut rows = Vec::new();
+        collect_catalog_buttons(&popovers[0], &mut rows);
+        let captions: Vec<_> = rows.iter().filter_map(button_caption).collect();
+        assert_eq!(
+            captions,
+            ["Turn clockwise", "Turn counterclockwise", "Press"]
+        );
+        for row in &rows {
+            let label = row
+                .child()
+                .and_downcast::<gtk::Label>()
+                .expect("row caption");
+            assert_eq!(label.xalign(), 0.0, "{} starts at the left", label.text());
+            assert!(
+                row.measure(gtk::Orientation::Vertical, -1).0 >= 36,
+                "{} is a comfortable target",
+                label.text()
+            );
+        }
+        window.destroy();
+    });
+}
