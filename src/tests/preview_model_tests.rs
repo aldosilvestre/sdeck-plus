@@ -379,7 +379,9 @@ fn plus_preview_is_identical_to_the_shipped_one() {
             "Tab keeps visiting keys, the strip, its sections, then the dials"
         );
         let rendered = render_preview(&f.window, &preview_of(&root), None);
-        assert_eq!((rendered.width, rendered.height), (520, 428));
+        // The workspace keeps its natural width (the catalog takes the spare room), so the
+        // bin is the card itself; it was 520px wide when spare width was centred around it.
+        assert_eq!((rendered.width, rendered.height), (440, 428));
         assert_eq!(
             rendered.hash(),
             PLUS_GOLDEN_HASH,
@@ -501,6 +503,11 @@ fn the_preview_contract_holds_at_the_default_window_for_both_models() {
             assert!(
                 side.x() >= window_bounds.x() + card_bounds.width(),
                 "{}: the catalog stays in its own column",
+                model.id
+            );
+            assert!(
+                (side.y() - window_bounds.y()).abs() <= 1.0,
+                "{}: the catalog shares the preview's top row",
                 model.id
             );
             // Every control is a usable target and is not clipped.

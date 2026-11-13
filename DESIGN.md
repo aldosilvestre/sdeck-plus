@@ -180,7 +180,7 @@ References consulted:
 - `design/apple.md`: restrained configurator chrome and readable utility text;
   no Apple branding, proprietary fonts or marketing imagery.
 - [StyleGallery sidebar](https://github.com/changeroa/StyleGallery/blob/main/patterns/split-sidebar/sidebar.md):
-  two task regions that stack when available width is insufficient.
+  two task regions (here they stay side by side and scroll instead of stacking).
 - [beui popover source](https://beui.dev/r/popover/raw): anchored disclosure,
   Escape dismissal and focus restoration. GTK supplies the implementation;
   no web component or motion library is copied.
@@ -379,8 +379,11 @@ The preview is never scaled for a model: the card is the chassis plus 14px
 every control at least 24px on both sides (the smallest is the + XL key at
 40px). At the default 1120x700 window the + XL card still sits beside the
 352px action catalog (570 + 16 + 352 = 938 of the usable width left of the rail), so
-the settings column stays usable; a narrower window wraps the catalog below
-the workspace exactly as it does for the +, and the page scrolls vertically.
+the settings column stays usable. A narrower window never wraps the catalog
+below the workspace, for either model: the catalog shrinks toward its 250px
+minimum and then the content column scrolls horizontally (the rail and header
+stay put), so an action can always be dragged from the catalog onto a key or
+dial that is on screen beside it.
 The + XL chassis is 42px taller than the + (456px against 414px); its card
 (570x470) ends inside the 700px viewport of the default window, so the page
 needs no vertical scroll to reach the dials (a test pins this for both
@@ -390,18 +393,24 @@ on the +) so neighbours never touch.
 The complete configuration shell (header, profile rail, page navigation and
 body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
-share the shell's leading/trailing edges. The native FlowBox decides wrapping
-from natural widths, so the preview's natural width stays unscaled; spare
-width reaches the preview/editor workspace and the action catalog through
-horizontal expansion. The preview does not consume spare vertical space so
+share the shell's leading/trailing edges. The body is a plain two-column
+horizontal box (class `configuration-grid`, 16px gap) that never wraps: the
+workspace keeps its natural width, so the preview stays unscaled, and spare
+width goes to the action catalog through horizontal expansion. The preview does not consume spare vertical space so
 its inspector follows immediately underneath. The inspector sits in its own
 vertical scroller (`settings-scroll`) capped at about one window of height
 (window height minus 240px, at least 320px): a tall form scrolls inside that
 region instead of stretching the page, and the outer viewport only scrolls when
 the window is shorter than the preview itself. The action catalog has its own
-bounded scrolling list.
-At narrow widths the shell shrinks to the available width and the same native
-container stacks the regions; only vertical scrolling is needed at 640px.
+bounded scrolling list. Its real minimum is the 250px size request: the Actions /
+Dials / Binding tabs shrink (the theme's button minimum width is cleared and the
+captions may ellipsize) and the live-information check caption wraps.
+At narrow widths the shell shrinks to the available width; the two columns
+stay side by side down to their combined minimum (workspace + 16px + the 250px
+catalog; measured content minimum 706px for the + and 836px for the + XL, which
+with the 166px the rail takes (rail plus its gap) is a window of 872px and 1002px),
+and below that the content column scrolls horizontally, as it
+does at 640px, instead of stacking.
 These two size-only containers are the only custom layout; there is no resize
 polling.
 
@@ -422,10 +431,13 @@ primary, Delete profile destructive). Escape or the footer button (Close in Edit
 New; both show the real Esc hint) hides the dialog without saving; Cancel and Esc discard a
 New draft.
 The profile tabs form a vertical rail at the left of the content, identical at every window
-width, full height and never scrolling (artboard 03-profile-rail): the connection badge, a
-"PROFILES" sub-heading (11px, bold, muted), the profile names (about 12 characters, ellipsized),
-a flat "New profile" button that opens the same dialog as the Organize menu's New profile row,
-then at the foot a "TOOLS" sub-heading with Organize, OBS and Menu. Because the rail is outside
+width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
+badge, a "TOOLS" sub-heading (11px, bold, muted) with Organize, OBS and Menu, then a "PROFILES"
+sub-heading with a compact "+" New profile action beside it (the same dialog as the Organize
+menu's New profile row), then the profile names (about 12 characters, ellipsized). Nothing is
+packed at the rail foot. Each tool and New profile has a tooltip that says what it does
+("Organize: ...", "OBS: ...", "Menu: ...", "New profile: ...") and the same text as its accessible
+description. The badge, tools and PROFILES row are the Notebook's start action widget. Because the rail is outside
 the scrolling region the tools are always visible and their popovers open fully, in a 1120x700
 window and at the smallest window. The tools are frameless (hover shows the surface) so they stay
 secondary to the tabs. Menu is the window's one configuration menu button seated in the shown
@@ -466,10 +478,12 @@ Delete still confirms and is unavailable while artwork writes are disabled.
 A page without folders shows a dim folder icon and "No folders on this page
 yet". Rows use only `@desk_*` tokens, so light and dark themes match, and
 keyboard focus draws the cyan focus ring. The physical preview and a minimum-300px
-inspector form one vertical workspace, beside the minimum-250px action catalog
-when roomy. The catalog wraps below that workspace at narrow desktop widths.
-The outer `ScrolledWindow` owns primary vertical overflow. A text editor may scroll its own text; native
-popovers contain secondary content. No primary field forces horizontal scroll.
+inspector form one vertical workspace, always beside the minimum-250px action
+catalog (never wrapped below it). The outer `ScrolledWindow` owns primary
+vertical overflow, and scrolls horizontally only when the window is narrower
+than the two columns' combined minimum. A text editor may scroll its own text; native
+popovers contain secondary content. No field forces horizontal scroll while the
+two columns fit.
 
 ## 5. Components and states
 
@@ -876,8 +890,9 @@ chooses and saves an action; a user locates profile and OBS settings without
 backend knowledge. Each retains a clear next step and a way back.
 
 The desktop-first physical preview keeps fixed hardware coordinates. Test
-640x480, 1000x700 and 1280x800 allocations, empty/loaded forms, long labels,
-every action family and all changed popovers in light/dark GTK variants.
+640x480, 1000x700 and 1280x800 allocations (the catalog beside the preview at
+every width; horizontal scrolling only below the side-by-side minimum),
+empty/loaded forms, long labels, every action family and all changed popovers in light/dark GTK variants.
 The GTK owner test is the state/geometry harness; fresh native captures and
 independent reviews establish visual quality. Web-only Lighthouse/React
 tooling does not apply. Manual hardware input is reported only if observed.

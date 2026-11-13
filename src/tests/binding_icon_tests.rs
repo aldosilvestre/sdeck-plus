@@ -471,7 +471,11 @@ fn assert_icon_action_consistency() {
     }
     let organize = descendants::<gtk::MenuButton>(root)
         .into_iter()
-        .find(|button| button.tooltip_text().as_deref() == Some("Organize"))
+        .find(|button| {
+            button
+                .tooltip_text()
+                .is_some_and(|tip| tip.starts_with("Organize: "))
+        })
         .expect("Organize menu");
     assert_eq!(
         image_names(organize.upcast_ref())

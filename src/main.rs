@@ -1271,31 +1271,40 @@ fn build_body(
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
-    // The rail never scrolls. Its head holds the connection badge (a mirror of the header's
-    // label) and the PROFILES heading; the profile tabs fill the middle; its foot holds the
-    // flat New profile button, the TOOLS heading and the tools, so they are always visible.
+    // The rail never scrolls. Its head, top-down: the connection badge (a mirror of the header's
+    // label), the TOOLS heading with Organize, OBS and Menu, then the PROFILES heading with a
+    // compact New profile action beside it. The profile tabs follow; nothing sits at the foot.
     let rail_status = ui::mirror_badge(connection_badge);
-    // Tools start at the left edge, like the profile names above them.
-    for menu in [&management_menu, &obs_menu] {
+    // Tools start at the left edge, like the profile names below them.
+    for (menu, what) in [
+        (
+            &management_menu,
+            "Organize: edit the shown profile, create a new one or delete it.",
+        ),
+        (
+            &obs_menu,
+            "OBS: set the address and password used to connect to OBS Studio for OBS actions.",
+        ),
+    ] {
         if let Some(content) = menu.child() {
             content.set_halign(gtk::Align::Start);
         }
+        menu.set_tooltip_text(Some(what));
+        menu.update_property(&[gtk::accessible::Property::Description(what)]);
     }
     // The window's Menu button is seated here (see `ConfigurationMenu::place_in`).
     let menu_slot = GtkBox::new(Orientation::Vertical, 0);
     layer_row.append(&menu_slot);
-    let rail_head = GtkBox::new(Orientation::Vertical, 2);
-    rail_head.append(&rail_status);
-    rail_head.append(&ui::rail_heading("PROFILES"));
-    feature_runtime
-        .profile_tabs()
-        .set_action_widget(&rail_head, gtk::PackType::Start);
-    let new_profile = ui::button("list-add-symbolic", "New profile");
+    let new_profile = ui::icon_button("list-add-symbolic", "New profile");
     new_profile.set_has_frame(false);
     new_profile.add_css_class("rail-new-profile");
     new_profile.add_css_class("flat");
-    if let Some(content) = new_profile.child() {
-        content.set_halign(gtk::Align::Start);
+    new_profile.set_halign(gtk::Align::End);
+    new_profile.set_valign(gtk::Align::Center);
+    {
+        let what = "New profile: add a profile with its own keys, dials, pages and touch strip.";
+        new_profile.set_tooltip_text(Some(what));
+        new_profile.update_property(&[gtk::accessible::Property::Description(what)]);
     }
     {
         // The same dialog the Organize menu's New profile row opens.
@@ -1306,13 +1315,21 @@ fn build_body(
             }
         });
     }
-    let rail_foot = GtkBox::new(Orientation::Vertical, 2);
-    rail_foot.append(&new_profile);
-    rail_foot.append(&ui::rail_heading("TOOLS"));
-    rail_foot.append(&layer_row);
+    let profiles_heading = ui::rail_heading("PROFILES");
+    profiles_heading.set_hexpand(true);
+    profiles_heading.set_valign(gtk::Align::Center);
+    let profiles_row = GtkBox::new(Orientation::Horizontal, 0);
+    profiles_row.add_css_class("rail-profiles-row");
+    profiles_row.append(&profiles_heading);
+    profiles_row.append(&new_profile);
+    let rail_head = GtkBox::new(Orientation::Vertical, 2);
+    rail_head.append(&rail_status);
+    rail_head.append(&ui::rail_heading("TOOLS"));
+    rail_head.append(&layer_row);
+    rail_head.append(&profiles_row);
     feature_runtime
         .profile_tabs()
-        .set_action_widget(&rail_foot, gtk::PackType::End);
+        .set_action_widget(&rail_head, gtk::PackType::Start);
     // Navigation (linked arrows + breadcrumb) leads; page management trails.
     let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
@@ -1799,15 +1816,11 @@ fn build_body(
         });
     }
 
-    let body = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .min_children_per_line(1)
-        .max_children_per_line(2)
-        .column_spacing(16)
-        .row_spacing(16)
-        .build();
-    // The preview and its inspector stay together; the action catalog wraps
-    // beneath them on narrow desktops.
+    // Two columns that never wrap: the preview and its inspector keep their
+    // natural width and the action catalog takes the rest, shrinking down to
+    // its minimum. Narrower than that the content column scrolls sideways, so
+    // the catalog stays beside the keys it is dragged onto.
+    let body = GtkBox::new(Orientation::Horizontal, 16);
     body.set_vexpand(true);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
@@ -1825,7 +1838,7 @@ fn build_body(
     );
     feature_runtime.attach_preview(&preview);
     let workspace = GtkBox::new(Orientation::Vertical, 12);
-    workspace.set_hexpand(true);
+    workspace.set_hexpand(false);
     workspace.append(preview.widget());
     // A tall form scrolls here, within its own region, instead of stretching the page.
     let settings_scroll = gtk::ScrolledWindow::builder()
@@ -1840,7 +1853,7 @@ fn build_body(
     settings_scroll.add_css_class("settings-scroll");
     settings_card.append(&settings_scroll);
     workspace.append(&settings_card);
-    body.insert(&workspace, -1);
+    body.append(&workspace);
     // The right-hand panel: draggable actions, dial presets and per-binding options.
     let side_panel = card();
     side_panel.add_css_class("action-catalog");
@@ -1890,11 +1903,19 @@ fn build_body(
     tabs.add_titled(&binding_page, Some("binding"), "Binding");
     let switcher = gtk::StackSwitcher::builder().stack(&tabs).build();
     switcher.add_css_class("sidebar-tabs");
+    // The tab captions may ellipsize, so the catalog can shrink to its 250px minimum.
+    let mut tab = switcher.first_child();
+    while let Some(button) = tab {
+        if let Some(label) = descendant_label(&button) {
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        }
+        tab = button.next_sibling();
+    }
     side_panel.append(&binding_feedback);
     side_panel.append(&switcher);
     side_panel.append(&tabs);
     sidebar.append(&side_panel);
-    body.insert(&sidebar, -1);
+    body.append(&sidebar);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
     profile_content.append(&body);
@@ -2348,6 +2369,11 @@ impl BindingUi {
         let row = return_row.clone();
         return_toggle.connect_toggled(move |toggle| row.set_visible(toggle.is_active()));
         let info_toggle = CheckButton::with_label("Show live information on the key");
+        // The caption wraps so the narrow catalog column is not pinned by its width.
+        if let Some(label) = descendant_label(info_toggle.upcast_ref()) {
+            label.set_wrap(true);
+            label.set_xalign(0.0);
+        }
         info_toggle.set_tooltip_text(Some(
             "Replaces the image with a live picture, such as the volume or the time. Dials, and a tap or hold on a touch section, draw it on that section.",
         ));
@@ -5162,6 +5188,21 @@ fn card() -> GtkBox {
     panel
 }
 
+/// The caption label inside a stack-switcher button.
+fn descendant_label(widget: &gtk::Widget) -> Option<Label> {
+    if let Ok(label) = widget.clone().downcast::<Label>() {
+        return Some(label);
+    }
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        if let Some(found) = descendant_label(&next) {
+            return Some(found);
+        }
+        child = next.next_sibling();
+    }
+    None
+}
+
 fn install_style(window: &ApplicationWindow) {
     let provider = gtk::CssProvider::new();
     provider.connect_parsing_error(|_, section, error| {
@@ -5224,6 +5265,7 @@ mod tests {
     mod binding_toolbar_tests;
     mod button_swap_tests;
     mod button_text_popup_tests;
+    mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
     mod configuration_transfer_tests;
     mod confirm_menu_tests;
@@ -7029,10 +7071,8 @@ mod tests {
             let vertical = widgets.scroller.vadjustment();
             eprintln!("GTK production allocation {width}x{height}: content {}x{}, horizontal upper/page={}/{}, vertical upper/page={}/{}",
                 content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
-            assert!(
-                horizontal.upper() <= horizontal.page_size(),
-                "responsive configuration must not require horizontal scrolling"
-            );
+            assert_horizontal_overflow_is_layout_minimum(&widgets, width);
+            assert_catalog_beside_preview(&widgets, &content, width);
             assert!(ui.action_picker.compute_bounds(&content).is_some());
             assert!(widgets
                 .feature_runtime
@@ -7090,9 +7130,8 @@ mod tests {
                 );
                 eprintln!("GTK production image-backed action {action} at {width}x{height}: content {}x{}, minimum {action_minimum}, horizontal upper/page={}/{}, vertical upper/page={}/{}",
                     content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
-                if width >= 960 {
-                    assert!(horizontal.upper() <= horizontal.page_size());
-                }
+                assert_horizontal_overflow_is_layout_minimum(&widgets, width);
+                assert_catalog_beside_preview(&widgets, &content, width);
                 assert_reachable(&ui.action_picker, &widgets.scroller);
                 for row in [
                     &ui.layer_target_row,
@@ -7273,10 +7312,7 @@ mod tests {
                 widgets.scroller.vadjustment().set_value(0.0);
                 let texture = rendered_texture(window, &widgets.root);
                 assert_eq!((texture.width(), texture.height()), (width, height));
-                assert!(
-                    widgets.scroller.hadjustment().upper()
-                        <= widgets.scroller.hadjustment().page_size()
-                );
+                assert_horizontal_overflow_is_layout_minimum(widgets, width);
                 texture
                     .save_to_png(directory.join(format!("{width}x{height}-{name}-top.png")))
                     .unwrap();
@@ -8602,6 +8638,56 @@ mod tests {
             .unwrap()
     }
 
+    /// The content column scrolls sideways only when the two-column layout
+    /// cannot fit; it never wraps the catalog under the preview instead.
+    fn assert_horizontal_overflow_is_layout_minimum(widgets: &MonitorWidgets, width: i32) {
+        let content = widgets.scroller.child().unwrap();
+        let minimum = f64::from(content.measure(Orientation::Horizontal, -1).0);
+        let horizontal = widgets.scroller.hadjustment();
+        if minimum <= horizontal.page_size() {
+            assert!(
+                horizontal.upper() <= horizontal.page_size(),
+                "no horizontal scrolling while the side-by-side layout fits at {width}"
+            );
+        } else {
+            assert!(
+                horizontal.upper() >= minimum - 1.0,
+                "below the side-by-side minimum the column scrolls horizontally at {width}"
+            );
+        }
+    }
+
+    /// The catalog sits right of the preview card, on the same top row.
+    fn assert_catalog_beside_preview(widgets: &MonitorWidgets, content: &gtk::Widget, width: i32) {
+        let card = device_canvas(widgets).compute_bounds(content).unwrap();
+        let side = descendant_with_class(widgets.root.upcast_ref(), "settings-sidebar")
+            .expect("the catalog sidebar")
+            .compute_bounds(content)
+            .unwrap();
+        assert!(
+            side.x() >= card.x() + card.width(),
+            "the catalog never wraps under the preview at {width}: {side:?} vs {card:?}"
+        );
+        assert!(
+            (side.y() - card.y()).abs() <= 8.0,
+            "the catalog stays on the preview's top row at {width}: {side:?} vs {card:?}"
+        );
+    }
+
+    fn descendant_with_class(root: &gtk::Widget, class: &str) -> Option<gtk::Widget> {
+        if root.has_css_class(class) {
+            return Some(root.clone());
+        }
+        let mut child = root.first_child();
+        while let Some(next) = child {
+            if let Some(found) = descendant_with_class(&next, class) {
+                return Some(found);
+            }
+            child = next.next_sibling();
+        }
+        None
+    }
+
     fn assert_compact_responsive_regions(widgets: &MonitorWidgets, content: &gtk::Widget) {
         for (width, height) in [(1840, 980), (1000, 700), (640, 480)] {
             widgets.root.allocate(width, height, -1, None);
@@ -8684,10 +8770,8 @@ mod tests {
                 "below-preview editor needs a bounded reading measure: {editor:?}"
             );
             assert!((editor.y() - device.y() - device.height() - 12.0).abs() <= 1.0);
-            assert!(
-                widgets.scroller.hadjustment().upper()
-                    <= widgets.scroller.hadjustment().page_size()
-            );
+            assert_horizontal_overflow_is_layout_minimum(widgets, width);
+            assert_catalog_beside_preview(widgets, content, width);
         }
         let previous = widgets.binding_ui.action_picker.selected();
         widgets.binding_ui.action_picker.set_selected(7);
@@ -8735,25 +8819,14 @@ mod tests {
         let sidebar = editor_card.parent().unwrap().downcast::<GtkBox>().unwrap();
         assert_eq!(sidebar.orientation(), Orientation::Vertical);
         assert_eq!(sidebar.spacing(), 12);
-        let body = sidebar
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .downcast::<gtk::FlowBox>()
-            .unwrap();
-        assert_eq!(body.min_children_per_line(), 1);
-        assert_eq!(body.max_children_per_line(), 2);
-        assert_eq!(body.column_spacing(), 16);
-        assert_eq!(body.row_spacing(), 16);
-        assert_eq!(
-            body.first_child()
-                .unwrap()
-                .downcast::<gtk::FlowBoxChild>()
-                .unwrap()
-                .child(),
-            Some(sidebar.upcast())
-        );
+        // Two columns in a plain horizontal box: nothing wraps, the catalog is
+        // the second column.
+        let body = sidebar.parent().unwrap().downcast::<GtkBox>().unwrap();
+        assert_eq!(body.orientation(), Orientation::Horizontal);
+        assert_eq!(body.spacing(), 16);
+        assert!(body.has_css_class("configuration-grid"));
+        assert_eq!(body.first_child(), Some(sidebar.upcast()));
+        assert!(body.last_child().unwrap().has_css_class("settings-sidebar"));
         let shell = content.clone().downcast::<GtkBox>().unwrap();
         assert_eq!(shell.spacing(), 16);
         assert_eq!(
@@ -8801,17 +8874,9 @@ mod tests {
         // The editor card: fixed heading row, then the scrolling form.
         let settings = settings_region(widgets);
         let device = device_canvas(widgets);
-        // Workspace column, flow child and flow box, then the profile content.
-        let profile_content = settings
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap();
-        let navigation = profile_content.first_child().unwrap();
+        // The page navigation card heads the profile content above the two columns.
+        let navigation = descendant_with_class(widgets.root.upcast_ref(), "navigation-card")
+            .expect("page navigation card");
         let navigation_bounds = navigation.compute_bounds(content).unwrap();
         let header = widgets
             .feature_runtime
@@ -8819,8 +8884,11 @@ mod tests {
             .first_child()
             .unwrap();
         let header_bounds = header.compute_bounds(content).unwrap();
+        // A narrow window may be scrolled sideways (a focused field scrolls into view);
+        // the rail does not move with the column, so add the scroll offset back.
+        let scrolled = widgets.scroller.hadjustment().value() as f32;
         assert!(
-            navigation_bounds.x() - header_bounds.x() - header_bounds.width() >= 7.0,
+            navigation_bounds.x() + scrolled - header_bounds.x() - header_bounds.width() >= 7.0,
             "the profile rail and page navigation need a visible gap"
         );
         let region = device.parent().unwrap().parent().unwrap();
@@ -8867,19 +8935,11 @@ mod tests {
         // The card stays put while the form scrolls inside it.
         let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
-        if (settings.y() - device.y()).abs() <= 0.5 {
-            // A height-limited preview is centered in its column.
-            let slack = (cell.width() - device.width()) / 2.0;
-            assert!(
-                (settings.x() - device.x() - device.width() - slack - 16.0).abs() <= 1.0,
-                "column gap: {settings:?}, {device:?}, {cell:?}"
-            );
-        } else {
-            assert!(
-                (settings.y() - device.y() - device.height() - 12.0).abs() <= 1.0,
-                "preview and inspector keep a 12px gap: {settings:?}, {device:?}"
-            );
-        }
+        // The editor card always sits under the preview, whatever the width.
+        assert!(
+            (settings.y() - device.y() - device.height() - 12.0).abs() <= 1.0,
+            "preview and inspector keep a 12px gap: {settings:?}, {device:?}, {cell:?}"
+        );
         eprintln!("GTK sidebar geometry assertions executed");
     }
 

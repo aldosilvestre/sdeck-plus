@@ -50,6 +50,9 @@ impl ConfigurationMenu {
             export.clone(),
         ]);
         let button = ui::menu_button("open-menu-symbolic", "Menu", &panel);
+        let what = "Menu: help, updates, and importing or exporting the configuration.";
+        button.set_tooltip_text(Some(what));
+        button.update_property(&[gtk::accessible::Property::Description(what)]);
         let help_dialog = gtk::Dialog::builder()
             .title("Setup help")
             .transient_for(window)

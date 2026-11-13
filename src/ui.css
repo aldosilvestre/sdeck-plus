@@ -39,7 +39,6 @@ window, scrolledwindow, viewport, .app-shell {
 .field-label { font-size: 14px; }
 .shortcut-guidance link, .shortcut-guidance link:visited { color: @desk_cyan; }
 .shortcut-guidance link:focus { outline: 2px solid @desk_cyan; outline-offset: 2px; }
-.configuration-grid > flowboxchild { padding: 0; }
 
 .card {
     background-color: @desk_surface;
@@ -535,6 +534,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .dial-event-choice button, .key-context-menu button { padding: 6px 10px; }
 .sidebar-tabs, .popover-tabs { margin-bottom: 6px; }
 .sidebar-tabs > button, .popover-tabs > button { padding: 5px 4px; }
+.sidebar-tabs > button { min-width: 0; }
 .sidebar-tabs > button:checked, .popover-tabs > button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 700; }
 .catalog-grip { color: @desk_muted; opacity: 0.45; }
 .catalog-action:hover .catalog-grip { opacity: 1; }
@@ -620,9 +620,9 @@ popover.dial-event-choice > contents { padding: 6px; }
 .banner label.feedback-warning,
 .banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }
 
-/* Rail sub-headings (PROFILES, TOOLS) and the flat New profile button above the tools. */
+/* Rail sub-headings (TOOLS, PROFILES) and the compact New profile action beside PROFILES. */
 .rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: @desk_muted; }
-.profile-tabs > header.left button.rail-new-profile { padding: 6px 10px; margin-top: 4px; }
+.profile-tabs > header.left button.rail-new-profile { min-height: 20px; padding: 4px 6px; margin: 8px 4px 0 0; }
 /* The scrolling form shares the editor card's surface (the heading row above it is fixed). */
 scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
 button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
