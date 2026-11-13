@@ -478,14 +478,16 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   primitive; completion feedback follows the actual disk result.
 - **Profile manager:** Organize separates Edit profile and New profile in a
   native StackSwitcher. Only the selected task occupies vertical space.
-  Editing groups the profile selector, optional auto-switch application and
+  Editing groups the profile selector, optional auto-switch application, the
+  "Return to the previous profile when focus leaves" check (wrapped text, enabled
+  only while the application field has text and never for Base) and
   Save changes/Delete profile actions with 12px gaps. New profile has a name
   and Create profile action. Extended explanations use named question-mark
   controls with hover tooltips and click/keyboard help popovers, not paragraphs
   in the form. Existing 16px panel padding and 4px field-label gaps apply.
   Create profile is disabled for empty or duplicate names and says why under the
-  field; Save changes is enabled only when the application rule differs from the
-  saved one, and never for Base.
+  field; Save changes is enabled only when the application rule or the return
+  check differs from the saved state, and never for Base.
 - **Popover:** organization, setup help and OBS settings stay anchored to the
   trigger, with a visible close action and native Escape/outside dismissal.
   Never open one automatically at startup.

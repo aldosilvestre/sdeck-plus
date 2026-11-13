@@ -624,8 +624,10 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Profiles and application switching</h4>
               <p>Profiles are tabs, with <strong>Base</strong> always available and undeletable. <strong>Organize &gt; New profile</strong> creates one
                  (<strong>Create profile</strong> stays disabled until the name is new). <strong>Organize &gt; Edit profile</strong> sets an optional window class or executable
-                 name such as <code>kitty</code>, <code>firefox</code> or <code>obs</code>; <strong>Save changes</strong> is enabled only when the rule changed. Base cannot require an application.</p>
-              <p>Detection uses Hyprland IPC focus events, not process polling. A matching application selects its profile; unmatched or unavailable focus returns to Base;
+                 name such as <code>kitty</code>, <code>firefox</code> or <code>obs</code>; <strong>Save changes</strong> is enabled only when the rule changed. Base cannot require an application.
+                 The <strong>Return to the previous profile when focus leaves</strong> check below it (off by default, enabled only while the application field has text) makes that profile
+                 give the screen back to the profile it replaced instead of Base.</p>
+              <p>Detection uses Hyprland IPC focus events, not process polling. A matching application selects its profile; unmatched or unavailable focus returns to Base (or, with the return check on, to the profile that was shown before it, if that profile still exists and does not need another application);
                  focusing the configuration window keeps the last external context. A manual tab choice lasts until the next external focus change. Selecting a profile never
                  launches its application. Every start opens on Base's first page.</p>
             </article>
