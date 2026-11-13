@@ -33,7 +33,7 @@ pub enum FeatureAction {
 impl FeatureAction {
     /// Serialized variant names, so a stored action of another variant can be
     /// told apart from a malformed one (see `layers::unknown_action_kind`).
-    pub(crate) const VARIANTS: [&'static str; 7] = [
+    pub(crate) const VARIANTS: [&'static str; 8] = [
         "Desktop",
         "Navigation",
         "Touchscreen",
@@ -41,6 +41,7 @@ impl FeatureAction {
         "Obs",
         "Timer",
         "CancelTimer",
+        "Plugin",
     ];
 
     pub fn validate(&self) -> io::Result<()> {
@@ -128,7 +129,25 @@ mod tests {
             FeatureAction::Obs(crate::obs::ObsAction::ToggleRecording),
             FeatureAction::Timer { seconds: 1 },
             FeatureAction::CancelTimer,
+            FeatureAction::Plugin(crate::plugins::PluginBinding::new(
+                "demo",
+                "run",
+                crate::plugins::Settings::new(),
+            )),
         ];
+        // Adding a variant must break this match, so the list above and VARIANTS get it too.
+        for action in &samples {
+            match action {
+                FeatureAction::Desktop(_)
+                | FeatureAction::Navigation(_)
+                | FeatureAction::Touchscreen(_)
+                | FeatureAction::Device(_)
+                | FeatureAction::Obs(_)
+                | FeatureAction::Timer { .. }
+                | FeatureAction::CancelTimer
+                | FeatureAction::Plugin(_) => {}
+            }
+        }
         let names: Vec<String> = samples
             .iter()
             .map(|action| match serde_json::to_value(action).unwrap() {
