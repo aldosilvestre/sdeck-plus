@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Deletion confirmations:** deleting a profile, page, folder or touchscreen page asks `Delete “name”?` with what goes with it (a profile lists its page and binding counts) and ends "This cannot be undone."; the buttons are **Cancel** (Esc) and a red **Delete**. The import confirmation uses the same layout.
+- **Menu popover:** the header Menu is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.
+- **Organize menu:** a red **Delete profile** row after a divider opens the same confirmation for the shown profile; it is disabled for Base.
 - **Organize menu:** the Organize tool is now a compact menu with **Edit profile** and **New profile** rows. Each opens its form in a dedicated modal dialog (Esc closes it); profile creation, editing, validation and deletion work as before.
 
 - **Feedback:** toasts start with a tone glyph and keep the message in ink; a success toast has no

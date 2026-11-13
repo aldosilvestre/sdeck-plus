@@ -179,20 +179,11 @@ impl FeatureRuntime {
                 .map_or(1, |index| index + 1);
             (owner, number)
         };
-        let dialog = gtk::MessageDialog::builder()
-            .transient_for(&parent)
-            .modal(true)
-            .destroy_with_parent(true)
-            .message_type(gtk::MessageType::Question)
-            .text(format!("Delete touchscreen page {number}?"))
-            .secondary_text("Its bindings and artwork are deleted. This cannot be undone.")
-            .build();
-        super::pages::style_confirm_dialog(&dialog);
-        crate::ui::add_key_hint(&dialog.add_button("Keep", gtk::ResponseType::Cancel), "Esc");
-        dialog
-            .add_button("Delete page", gtk::ResponseType::Accept)
-            .add_css_class("destructive-action");
-        dialog.set_default_response(gtk::ResponseType::Cancel);
+        let dialog = crate::ui::delete_confirmation(
+            &parent,
+            &format!("Touchscreen page {number}"),
+            "Its bindings and artwork go with it. This cannot be undone.",
+        );
         let callback = self.clone();
         dialog.connect_response(move |dialog, response| {
             if response == gtk::ResponseType::Accept {

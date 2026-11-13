@@ -411,8 +411,10 @@ with the topic as its title; no click is needed, the popover ignores the pointer
 blocks the form, and there is no second native tooltip. A form that opens with the button
 focused does not pop the help open by itself.
 The Organize menu is the compact command menu of the approved overlay design: a small
-popover of frameless rows (Edit profile, New profile) with no header, tabs or form fields,
-and no shortcut hints, because none are bound. Choosing a row closes the menu and opens that
+popover of frameless rows (Edit profile, New profile), a divider, then a red **Delete
+profile** row, with no header, tabs or form fields, and no shortcut hints, because none are
+bound. Delete profile asks for confirmation (below) and is disabled while the shown profile is
+Base, which cannot be deleted. Choosing a row closes the menu and opens that
 form in its own modal dialog (below). Each dialog is transient for the main window, titled
 "Edit profile" or "New profile", with a one-line subtitle; the Base note is a callout with a
 cyan accent edge; the Edit footer has a divider and two equal-width buttons (Save changes
@@ -687,8 +689,15 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   This editing popover is non-modal: opening the native font dialog must not
   dismiss it or discard its draft. Close, the trigger, Save/Remove and a
   key/profile change provide explicit exits.
-- **Profile removal confirmation:** name the exact profile and loss of
-  bindings/artwork, provide Keep/Remove choices, and never default to Remove.
+- **Deletion confirmation:** the title names the item in curly quotes (`Delete “Studio”?`);
+  the body says what goes with it and ends "This cannot be undone." (a profile counts its
+  pages and bindings: "2 pages and 14 bindings go with it."). Buttons are **Cancel**, with an
+  `Esc` key hint and the default, and a red destructive **Delete**; Escape or Cancel changes
+  nothing. Page, folder, touchscreen-page and profile deletion share this dialog; the import
+  confirmation uses the same layout with an **Import** button.
+- **Menu popover:** the header Menu is a headerless command menu (about 6px padding, no title
+  row and no Close button) of Help, Updates, Import configuration... and Export
+  configuration...; Escape or a click outside dismisses it.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
 - **OBS:** visible endpoint/password labels, masked password, Save settings

@@ -1215,7 +1215,13 @@ fn build_body(
             new_dialog.clone(),
         ),
     ];
-    let management_popover = ui::command_menu(&command_rows.each_ref().map(|(row, _)| row.clone()));
+    // Delete sits apart, after a divider; it is off while the shown profile is Base.
+    let delete_row = ui::command_row("user-trash-symbolic", "Delete profile");
+    delete_row.add_css_class("destructive");
+    let management_popover = ui::command_menu_sections(&[
+        &command_rows.each_ref().map(|(row, _)| row.clone()),
+        std::slice::from_ref(&delete_row),
+    ]);
     for (row, dialog) in &command_rows {
         let popover = management_popover.downgrade();
         let dialog = dialog.downgrade();
@@ -1226,6 +1232,27 @@ fn build_body(
             if let Some(dialog) = dialog.upgrade() {
                 dialog.present();
             }
+        });
+    }
+    {
+        let runtime = feature_runtime.clone();
+        let row = delete_row.clone();
+        let refresh = move || {
+            row.set_sensitive(
+                runtime
+                    .current_profile()
+                    .is_some_and(|profile| profile != sdeck_plus::layers::DEFAULT_LAYER),
+            );
+        };
+        refresh();
+        management_popover.connect_show(move |_| refresh());
+        let runtime = feature_runtime.clone();
+        let popover = management_popover.downgrade();
+        delete_row.connect_clicked(move |_| {
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+            runtime.confirm_current_profile_removal();
         });
     }
     let management_menu = ui::menu_button(
@@ -5143,6 +5170,7 @@ mod tests {
     mod button_text_popup_tests;
     mod catalog_overwrite_tests;
     mod configuration_transfer_tests;
+    mod confirm_menu_tests;
     mod control_feedback_tests;
     mod control_remove_tests;
     mod device_roots_tests;

@@ -259,11 +259,42 @@ pub(crate) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
         if let Some(label) = widget.downcast_ref::<Label>() {
             label.set_justify(gtk::Justification::Left);
             label.set_xalign(0.0);
+            label.set_halign(gtk::Align::Fill);
+            label.set_hexpand(true);
         }
         child = widget.next_sibling();
     }
     dialog.set_resizable(false);
     dialog.set_default_size(360, -1);
+}
+
+/// The destructive confirmation of the compact-command design: `Delete “name”?`, a body that
+/// says what goes with it, **Cancel** (with its `Esc` hint, the default) and a red **Delete**.
+/// The caller connects the response; only `ResponseType::Accept` means delete.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn delete_confirmation(
+    parent: &impl IsA<gtk::Window>,
+    name: &str,
+    detail: &str,
+) -> gtk::MessageDialog {
+    let dialog = gtk::MessageDialog::builder()
+        .transient_for(parent)
+        .modal(true)
+        .destroy_with_parent(true)
+        .message_type(gtk::MessageType::Question)
+        .text(format!("Delete \u{201c}{name}\u{201d}?"))
+        .secondary_text(detail)
+        .build();
+    style_confirm_dialog(&dialog);
+    add_key_hint(
+        &dialog.add_button("Cancel", gtk::ResponseType::Cancel),
+        "Esc",
+    );
+    dialog
+        .add_button("Delete", gtk::ResponseType::Accept)
+        .add_css_class("destructive-action");
+    dialog.set_default_response(gtk::ResponseType::Cancel);
+    dialog
 }
 
 /// Shows a keyboard hint (for example `Esc`) after a button's caption. The caption stays the
@@ -339,6 +370,12 @@ pub(crate) fn command_row(icon: &str, caption: &str) -> Button {
 /// The compact Organize-style command menu: just rows, no header or forms.
 #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
 pub(crate) fn command_menu(rows: &[Button]) -> Popover {
+    command_menu_sections(&[rows])
+}
+
+/// A command menu whose sections are divided by a hairline, as in the artboard.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn command_menu_sections(sections: &[&[Button]]) -> Popover {
     let panel = Popover::new();
     panel.set_halign(gtk::Align::End);
     panel.add_css_class("organize-popover");
@@ -349,8 +386,13 @@ pub(crate) fn command_menu(rows: &[Button]) -> Popover {
     list.set_margin_bottom(6);
     list.set_margin_start(6);
     list.set_margin_end(6);
-    for row in rows {
-        list.append(row);
+    for (index, section) in sections.iter().enumerate() {
+        if index > 0 {
+            list.append(&gtk::Separator::new(Orientation::Horizontal));
+        }
+        for row in *section {
+            list.append(row);
+        }
     }
     panel.set_child(Some(&list));
     panel

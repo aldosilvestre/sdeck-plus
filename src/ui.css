@@ -517,6 +517,9 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
 .organize-subtitle { color: @desk_muted; margin-top: -8px; }
 popover.command-menu button.command-row { padding: 8px 12px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
 popover.command-menu button.command-row:hover { background-color: @desk_hover; }
+popover.command-menu separator { margin: 4px 6px; background-color: @desk_edge; min-height: 1px; }
+popover.command-menu button.command-row.destructive { color: @desk_error; }
+popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
 .profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
@@ -600,9 +603,6 @@ popover.dial-event-choice > contents { padding: 6px; }
 .dial-event-choice button.flat:hover { background-color: @desk_hover; }
 .dial-event-choice button.flat:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
 
-/* Rows of a menu popover (Menu: Help, Updates, Import, Export). */
-button.menu-row { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
-button.menu-row:hover { background-color: @desk_hover; }
 
 /* The rail's tools line up with the profile names: same inner gap, frameless until hovered. */
 .profile-tabs > header.left menubutton.icon-action > button { padding: 6px 10px; }

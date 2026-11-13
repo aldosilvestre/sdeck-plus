@@ -1221,7 +1221,7 @@ fn the_configuration_menu_lists_left_aligned_borderless_rows() {
         let mut rows = Vec::new();
         let mut stack = vec![popover.upcast::<gtk::Widget>()];
         while let Some(widget) = stack.pop() {
-            if widget.has_css_class("menu-row") {
+            if widget.has_css_class("command-row") {
                 rows.push(widget.clone());
             }
             let mut child = widget.first_child();

@@ -174,6 +174,51 @@ impl FeatureRuntime {
         self.confirm_removal(Removal::Profile(profile));
     }
 
+    /// The profile the rail currently shows, when organization is available.
+    pub(crate) fn current_profile(&self) -> Option<String> {
+        self.organization
+            .borrow()
+            .as_ref()
+            .map(|organization| organization.current(&self.layers.borrow()).profile)
+    }
+
+    /// Ask before deleting the profile shown now (Base is never offered).
+    pub(crate) fn confirm_current_profile_removal(&self) {
+        if let Some(profile) = self.current_profile() {
+            if profile != sdeck_plus::layers::DEFAULT_LAYER {
+                self.confirm_removal(Removal::Profile(profile));
+            }
+        }
+    }
+
+    /// What goes with a profile, counted from the pages and bindings it owns.
+    fn profile_removal_detail(&self, profile: &str) -> String {
+        let layers = self.layers.borrow();
+        let organization = self.organization.borrow();
+        let (pages, bindings) = layers
+            .layers()
+            .iter()
+            .filter(|(key, _)| {
+                organization
+                    .as_ref()
+                    .is_some_and(|organization| organization.profile_for_key(key) == profile)
+            })
+            .fold((0, 0), |(pages, bindings), (_, layer)| {
+                (pages + 1, bindings + layer.bindings.len())
+            });
+        if pages == 0 {
+            return "Everything in it goes with it. This cannot be undone.".to_owned();
+        }
+        let plural = |count: usize, noun: &str| {
+            format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+        };
+        format!(
+            "{} and {} go with it. This cannot be undone.",
+            plural(pages, "page"),
+            plural(bindings, "binding")
+        )
+    }
+
     pub(super) fn confirm_removal(&self, target: Removal) {
         let Some(parent) = self
             .profile_tabs
@@ -182,7 +227,7 @@ impl FeatureRuntime {
         else {
             return;
         };
-        let (name, action, detail) = match &target {
+        let (name, detail) = match &target {
             Removal::Page(_) => {
                 let Some(name) = self
                     .organization
@@ -194,35 +239,18 @@ impl FeatureRuntime {
                 };
                 (
                     name,
-                    "Delete page",
-                    "Its folders, bindings and artwork are deleted. This cannot be undone.",
+                    "Its folders, bindings and artwork go with it. This cannot be undone."
+                        .to_owned(),
                 )
             }
             Removal::Folder { name, .. } => (
                 name.clone(),
-                "Delete folder",
-                "Its contents are deleted. Other pages' folders are kept.",
+                "Its contents go with it. Other pages' folders are kept. This cannot be undone."
+                    .to_owned(),
             ),
-            Removal::Profile(name) => (
-                name.clone(),
-                "Delete profile",
-                "Everything in it is deleted. This cannot be undone.",
-            ),
+            Removal::Profile(name) => (name.clone(), self.profile_removal_detail(name)),
         };
-        let dialog = gtk::MessageDialog::builder()
-            .transient_for(&parent)
-            .modal(true)
-            .destroy_with_parent(true)
-            .message_type(gtk::MessageType::Question)
-            .text(format!("Delete \"{name}\"?"))
-            .secondary_text(detail)
-            .build();
-        style_confirm_dialog(&dialog);
-        crate::ui::add_key_hint(&dialog.add_button("Keep", ResponseType::Cancel), "Esc");
-        dialog
-            .add_button(action, ResponseType::Accept)
-            .add_css_class("destructive-action");
-        dialog.set_default_response(ResponseType::Cancel);
+        let dialog = crate::ui::delete_confirmation(&parent, &name, &detail);
         let callback = self.clone();
         dialog.connect_response(move |dialog, response| {
             if response == ResponseType::Accept {
@@ -256,10 +284,4 @@ impl FeatureRuntime {
         });
         dialog.present();
     }
-}
-
-/// Gives a destructive confirmation the app's compact, centred native style.
-/// Pair with a `destructive-action` button; colours come from the theme tokens.
-pub(super) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
-    crate::ui::style_confirm_dialog(dialog);
 }

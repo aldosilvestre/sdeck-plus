@@ -72,7 +72,7 @@ fn organize_menu_lists_only_the_profile_commands() {
         assert!(panel.has_css_class("command-menu"));
         let rows = all::<Button>(panel.upcast_ref());
         let names: Vec<_> = rows.iter().map(caption).collect();
-        assert_eq!(names, ["Edit profile", "New profile"]);
+        assert_eq!(names, ["Edit profile", "New profile", "Delete profile"]);
         // Compact: no form fields, tabs or help inside the menu, and no invented shortcut hints.
         assert!(all::<Entry>(panel.upcast_ref()).is_empty());
         assert!(all::<gtk::Stack>(panel.upcast_ref()).is_empty());

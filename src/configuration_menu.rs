@@ -38,20 +38,17 @@ impl Drop for MenuState {
 
 impl ConfigurationMenu {
     pub(crate) fn new(window: &gtk::ApplicationWindow, help_body: &gtk::Box) -> Self {
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        let help = ui::button("help-browser-symbolic", "Help");
-        let updates = ui::button("software-update-available-symbolic", "Updates");
-        let import = ui::button("document-open-symbolic", "Import configuration...");
-        let export = ui::button("document-save-symbolic", "Export configuration...");
-        for item in [&help, &updates, &import, &export] {
-            // Menu rows: compact, left-aligned, borderless until hovered.
-            item.add_css_class("menu-row");
-            if let Some(content) = item.child() {
-                content.set_halign(gtk::Align::Start);
-            }
-            body.append(item);
-        }
-        let panel = ui::popover("Menu", &body);
+        let help = ui::command_row("help-browser-symbolic", "Help");
+        let updates = ui::command_row("software-update-available-symbolic", "Updates");
+        let import = ui::command_row("document-open-symbolic", "Import configuration...");
+        let export = ui::command_row("document-save-symbolic", "Export configuration...");
+        // Headerless, like the artboard's menus: rows only, dismissed by Escape or a click outside.
+        let panel = ui::command_menu(&[
+            help.clone(),
+            updates.clone(),
+            import.clone(),
+            export.clone(),
+        ]);
         let button = ui::menu_button("open-menu-symbolic", "Menu", &panel);
         let help_dialog = gtk::Dialog::builder()
             .title("Setup help")
@@ -234,41 +231,39 @@ impl ConfigurationMenu {
         if let Some(dialog) = self.0.confirmation.borrow_mut().take() {
             dialog.destroy();
         }
-        let dialog = gtk::Dialog::builder()
-            .title("Import configuration?")
+        let dialog = gtk::MessageDialog::builder()
             .transient_for(&window)
             .modal(true)
             .destroy_with_parent(true)
-            .resizable(false)
-            .default_width(440)
+            .message_type(gtk::MessageType::Question)
+            .text("Import configuration?")
+            .secondary_text(
+                "Importing replaces profiles, actions, artwork assignments and settings. \
+                 Reference-only imports keep local files; missing files must be selected locally. \
+                 Your previous configuration will be retained as a backup.",
+            )
             .build();
+        ui::style_confirm_dialog(&dialog);
+        dialog.set_default_size(440, -1);
         ui::add_key_hint(&dialog.add_button("Cancel", ResponseType::Cancel), "Esc");
         dialog
             .add_button("Import", ResponseType::Accept)
             .add_css_class("destructive-action");
         dialog.set_default_response(ResponseType::Cancel);
-        let content = dialog.content_area();
-        content.set_spacing(12);
-        content.set_margin_start(16);
-        content.set_margin_end(16);
-        content.set_margin_top(16);
-        content.set_margin_bottom(16);
-        content.append(&ui::helper(
-            "Importing replaces profiles, actions, artwork assignments and settings. \
-             Reference-only imports keep local files; missing files must be selected locally. \
-             Your previous configuration will be retained as a backup.",
-        ));
         let file = gtk::Label::new(Some(&path.to_string_lossy()));
         file.set_xalign(0.0);
         file.set_wrap(true);
         file.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         file.set_max_width_chars(48);
         file.set_selectable(true);
-        content.append(&file);
+        if let Some(area) = dialog.message_area().downcast_ref::<gtk::Box>() {
+            area.append(&file);
+        }
         let weak = Rc::downgrade(&self.0);
         dialog.connect_response(move |dialog, response| {
             if let Some(state) = weak.upgrade() {
-                let current = state.confirmation.borrow().as_ref() == Some(dialog);
+                let current = state.confirmation.borrow().as_ref()
+                    == Some(dialog.upcast_ref::<gtk::Dialog>());
                 if current {
                     state.confirmation.borrow_mut().take();
                     if response == ResponseType::Accept {
@@ -283,13 +278,14 @@ impl ConfigurationMenu {
         let weak = Rc::downgrade(&self.0);
         dialog.connect_close_request(move |dialog| {
             if let Some(state) = weak.upgrade() {
-                if state.confirmation.borrow().as_ref() == Some(dialog) {
+                if state.confirmation.borrow().as_ref() == Some(dialog.upcast_ref::<gtk::Dialog>())
+                {
                     state.confirmation.borrow_mut().take();
                 }
             }
             glib::Propagation::Proceed
         });
-        self.0.confirmation.replace(Some(dialog.clone()));
+        self.0.confirmation.replace(Some(dialog.clone().upcast()));
         dialog.present();
     }
 
