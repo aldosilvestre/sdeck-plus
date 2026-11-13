@@ -51,6 +51,78 @@ impl FeatureEditor {
         );
     }
 
+    /// Input device picker: same rules as the output picker, with its own device list.
+    pub(crate) fn assert_audio_input_choices(&self) {
+        use sdeck_plus::desktop_actions::audio_output::AudioOutput;
+        let selected = FeatureAction::Desktop(DesktopAction::SetAudioInput {
+            name: "usb_mic".into(),
+        });
+        self.populate(&selected);
+        assert!(self.audio_input.root().is_visible());
+        assert!(!self.audio_output.root().is_visible());
+        self.audio_input.set_outputs(vec![
+            AudioOutput {
+                name: "builtin_mic".into(),
+                description: "Built-in microphone".into(),
+            },
+            AudioOutput {
+                name: "usb_mic".into(),
+                description: "USB microphone".into(),
+            },
+        ]);
+        assert_eq!(self.parse().unwrap(), selected);
+        // A disconnected saved device stays selected.
+        self.audio_input.set_outputs(Vec::new());
+        assert_eq!(self.parse().unwrap(), selected);
+        self.audio_input.select_rotation();
+        let rotation = FeatureAction::Desktop(DesktopAction::CycleAudioInput);
+        assert_eq!(self.parse().unwrap(), rotation);
+        self.audio_input.select(Some("builtin_mic"));
+        assert_eq!(
+            self.parse().unwrap(),
+            FeatureAction::Desktop(DesktopAction::SetAudioInput {
+                name: "builtin_mic".into(),
+            })
+        );
+        // The output picker is unaffected by input choices.
+        self.populate(&FeatureAction::Desktop(DesktopAction::CycleAudioOutput));
+        assert!(self.audio_output.root().is_visible());
+        assert!(!self.audio_input.root().is_visible());
+    }
+
+    /// Input volume step: shown for both input volume actions, defaults to 5 and is
+    /// always stored explicitly (there is no legacy shape for it).
+    pub(crate) fn assert_input_volume_step_field(&self) {
+        for choice in [Choice::InputVolumeUp, Choice::InputVolumeDown] {
+            self.reset();
+            self.category.set_selected(choice.category());
+            self.refresh_choices();
+            let index = self.choices().position(|value| value == choice).unwrap();
+            self.action.set_selected(index as u32);
+            assert!(self.number_row.is_visible(), "{choice:?}");
+            assert_eq!(self.number_label.text(), "Step (percent, 1–100)");
+            assert_eq!(self.number.text(), "5");
+        }
+        let step = |direction, percent| {
+            FeatureAction::Desktop(DesktopAction::InputVolumeStep { direction, percent })
+        };
+        self.populate(&step(VolumeDirection::Up, 5));
+        assert_eq!(self.parse().unwrap(), step(VolumeDirection::Up, 5));
+        self.number.set_text("12");
+        assert_eq!(self.parse().unwrap(), step(VolumeDirection::Up, 12));
+        self.populate(&step(VolumeDirection::Down, 33));
+        assert_eq!(self.number.text(), "33");
+        assert_eq!(self.parse().unwrap(), step(VolumeDirection::Down, 33));
+        for text in ["0", "101", "abc", ""] {
+            self.number.set_text(text);
+            assert!(self.parse().is_err(), "{text:?}");
+        }
+        self.populate(&FeatureAction::Desktop(DesktopAction::ToggleInputMute));
+        assert!(!self.number_row.is_visible());
+        self.reset();
+        assert!(!self.number_row.is_visible());
+    }
+
     pub(crate) fn select_category(&self, category: u32) {
         self.reset();
         self.category.set_selected(category);
@@ -89,6 +161,7 @@ impl FeatureEditor {
                     vec![true, false, false, false, false, false]
                 }
                 FeatureAction::Desktop(DesktopAction::VolumeStep { .. })
+                | FeatureAction::Desktop(DesktopAction::InputVolumeStep { .. })
                 | FeatureAction::Desktop(DesktopAction::Media(
                     MediaCommand::VolumeUp | MediaCommand::VolumeDown,
                 ))
@@ -117,6 +190,15 @@ impl FeatureEditor {
                     action,
                     FeatureAction::Desktop(
                         DesktopAction::SetAudioOutput { .. } | DesktopAction::CycleAudioOutput
+                    )
+                ),
+            );
+            assert_eq!(
+                self.audio_input.root().is_visible(),
+                matches!(
+                    action,
+                    FeatureAction::Desktop(
+                        DesktopAction::SetAudioInput { .. } | DesktopAction::CycleAudioInput
                     )
                 ),
             );
@@ -339,6 +421,19 @@ pub(crate) fn examples() -> Vec<FeatureAction> {
         FeatureAction::Desktop(DesktopAction::CycleAudioOutput),
         FeatureAction::Desktop(DesktopAction::SetAudioOutput {
             name: "alsa_output.pci-0000_06_00.6.analog-stereo".into(),
+        }),
+        FeatureAction::Desktop(DesktopAction::CycleAudioInput),
+        FeatureAction::Desktop(DesktopAction::SetAudioInput {
+            name: "alsa_input.usb-Mic.mono-fallback".into(),
+        }),
+        FeatureAction::Desktop(DesktopAction::ToggleInputMute),
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Up,
+            percent: 5,
+        }),
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Down,
+            percent: 10,
         }),
         FeatureAction::Navigation(NavigationAction::NextPage),
         FeatureAction::Navigation(NavigationAction::PreviousPage),

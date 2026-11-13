@@ -1,15 +1,39 @@
 use gtk::{gio, glib, prelude::*, Box as GtkBox, Button, Label, Orientation};
-use sdeck_plus::desktop_actions::audio_output::{list_outputs, AudioOutput};
+use sdeck_plus::desktop_actions::audio_output::{list_inputs, list_outputs, AudioOutput};
 use sdeck_plus::desktop_actions::DesktopAction;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 
+/// Which kind of audio device a picker chooses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Kind {
+    Output,
+    Input,
+}
+
+impl Kind {
+    fn field(self) -> &'static str {
+        match self {
+            Self::Output => "Output device",
+            Self::Input => "Input device",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Output => "output",
+            Self::Input => "input",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct OutputPicker(Rc<Widgets>);
 
 struct Widgets {
+    kind: Kind,
     root: GtkBox,
     picker: gtk::DropDown,
     model: gtk::StringList,
@@ -23,7 +47,7 @@ struct Widgets {
 }
 
 impl OutputPicker {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(kind: Kind) -> Self {
         let model = gtk::StringList::new(&[]);
         let picker = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
         crate::bound_layer_picker(&picker);
@@ -32,12 +56,13 @@ impl OutputPicker {
         let controls = GtkBox::new(Orientation::Horizontal, 8);
         controls.append(&picker);
         controls.append(&refresh);
-        let (root, label) = super::field("Output device", &controls);
+        let (root, label) = super::field(kind.field(), &controls);
         label.set_mnemonic_widget(Some(&picker));
         picker.update_relation(&[gtk::accessible::Relation::LabelledBy(&[label.upcast_ref()])]);
         let status = crate::ui::helper("");
         root.append(&status);
         let this = Self(Rc::new(Widgets {
+            kind,
             root,
             picker,
             model,
@@ -79,9 +104,12 @@ impl OutputPicker {
     }
 
     pub(super) fn action(&self) -> DesktopAction {
-        match self.0.selected.borrow().clone() {
-            Some(name) => DesktopAction::SetAudioOutput { name },
-            None => DesktopAction::CycleAudioOutput,
+        let selected = self.0.selected.borrow().clone();
+        match (self.0.kind, selected) {
+            (Kind::Output, Some(name)) => DesktopAction::SetAudioOutput { name },
+            (Kind::Output, None) => DesktopAction::CycleAudioOutput,
+            (Kind::Input, Some(name)) => DesktopAction::SetAudioInput { name },
+            (Kind::Input, None) => DesktopAction::CycleAudioInput,
         }
     }
 
@@ -122,10 +150,11 @@ impl OutputPicker {
         let empty = outputs.is_empty();
         *self.0.outputs.borrow_mut() = outputs;
         self.rebuild();
-        self.0.status.set_text(if empty {
-            "No outputs connected. Connect a device and refresh."
+        let noun = self.0.kind.noun();
+        self.0.status.set_text(&if empty {
+            format!("No {noun}s connected. Connect a device and refresh.")
         } else {
-            "Rotate selects the next connected output on each press and returns to the first after the last."
+            format!("Rotate selects the next connected {noun} on each press and returns to the first after the last.")
         });
     }
 
@@ -134,10 +163,17 @@ impl OutputPicker {
             return;
         }
         self.0.refresh.set_sensitive(false);
-        self.0.status.set_text("Loading audio outputs...");
+        let kind = self.0.kind;
+        self.0
+            .status
+            .set_text(&format!("Loading audio {}s...", kind.noun()));
         let weak = Rc::downgrade(&self.0);
         glib::MainContext::default().spawn_local(async move {
-            let result = gio::spawn_blocking(list_outputs).await;
+            let result = gio::spawn_blocking(move || match kind {
+                Kind::Output => list_outputs(),
+                Kind::Input => list_inputs(),
+            })
+            .await;
             let Some(widgets) = weak.upgrade() else {
                 return;
             };
@@ -148,11 +184,11 @@ impl OutputPicker {
                 Ok(Err(error)) => this
                     .0
                     .status
-                    .set_text(&format!("Could not list audio outputs: {error}")),
-                Err(_) => this
-                    .0
-                    .status
-                    .set_text("Could not list audio outputs: worker failed."),
+                    .set_text(&format!("Could not list audio {}s: {error}", kind.noun())),
+                Err(_) => this.0.status.set_text(&format!(
+                    "Could not list audio {}s: worker failed.",
+                    kind.noun()
+                )),
             }
         });
     }

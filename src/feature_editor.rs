@@ -62,6 +62,7 @@ pub(crate) struct EditorWidgets {
     direct_sound: Cell<bool>,
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
+    audio_input: audio_output::OutputPicker,
 }
 
 impl Deref for FeatureEditor {
@@ -147,7 +148,8 @@ impl FeatureEditor {
         let (number_row, number_label) = field("", &number);
         let (direction_row, _) = field("Direction", &direction);
         let (flag_row, _) = field("Options", &flag);
-        let audio_output = audio_output::OutputPicker::new();
+        let audio_output = audio_output::OutputPicker::new(audio_output::Kind::Output);
+        let audio_input = audio_output::OutputPicker::new(audio_output::Kind::Input);
         for row in [
             &first_row,
             &second_row,
@@ -159,6 +161,7 @@ impl FeatureEditor {
             root.append(row);
         }
         root.append(audio_output.root());
+        root.append(audio_input.root());
         let editor = Self(Rc::new(EditorWidgets {
             root,
             selectors: pickers,
@@ -191,6 +194,7 @@ impl FeatureEditor {
             direct_sound: Cell::new(false),
             picker: RefCell::new(None),
             audio_output,
+            audio_input,
         }));
         let weak = Rc::downgrade(&editor.0);
         crate::binding_icon::icon_dropdown(&editor.action, move |position| {
@@ -355,6 +359,9 @@ impl FeatureEditor {
         self.audio_output
             .root()
             .set_visible(choice == Choice::SetAudioOutput);
+        self.audio_input
+            .root()
+            .set_visible(choice == Choice::SetAudioInput);
         self.description.set_text(choice.description());
         crate::binding_icon::set_binding_icon(&self.action_icon, choice.binding_icon());
         self.first.set_placeholder_text(Some(match choice {
@@ -380,7 +387,10 @@ impl FeatureEditor {
             Choice::Timer => "90",
             Choice::Brightness => "50",
             Choice::AdjustBrightness => "-5",
-            Choice::VolumeUp | Choice::VolumeDown => "5",
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => "5",
             _ => "",
         }));
         self.browse_file
@@ -425,10 +435,16 @@ impl FeatureEditor {
             Choice::Timer => Some("Duration in seconds (1–86400)"),
             Choice::Brightness => Some("Brightness percent (0–100)"),
             Choice::AdjustBrightness => Some("Adjustment percent (signed)"),
-            Choice::VolumeUp | Choice::VolumeDown => Some("Step (percent, 1–100)"),
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => Some("Step (percent, 1–100)"),
             _ => None,
         };
-        let volume = matches!(choice, Choice::VolumeUp | Choice::VolumeDown);
+        let volume = matches!(
+            choice,
+            Choice::VolumeUp | Choice::VolumeDown | Choice::InputVolumeUp | Choice::InputVolumeDown
+        );
         if volume != self.volume_mode.replace(volume) {
             // The entry is shared by every numeric action; start from the new action's default.
             self.number
@@ -499,6 +515,7 @@ impl FeatureEditor {
     pub(crate) fn reset(&self) {
         self.invalidate_picker();
         self.audio_output.select(None);
+        self.audio_input.select(None);
         self.first.set_text("");
         self.second.set_text("");
         self.text.buffer().set_text("");
@@ -590,6 +607,16 @@ impl FeatureEditor {
                 numeric.parse().map_err(|error| invalid_number(&error))?,
             )),
             Choice::Mute => FeatureAction::Desktop(DesktopAction::Media(MediaCommand::Mute)),
+            Choice::InputVolumeUp => FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+                direction: VolumeDirection::Up,
+                percent: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::InputVolumeDown => FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+                direction: VolumeDirection::Down,
+                percent: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::InputMute => FeatureAction::Desktop(DesktopAction::ToggleInputMute),
+            Choice::SetAudioInput => FeatureAction::Desktop(self.audio_input.action()),
             Choice::SetAudioOutput => FeatureAction::Desktop(self.audio_output.action()),
             Choice::NextPage => FeatureAction::Navigation(NavigationAction::NextPage),
             Choice::PreviousPage => FeatureAction::Navigation(NavigationAction::PreviousPage),
@@ -673,6 +700,22 @@ impl FeatureEditor {
                 DesktopAction::CycleAudioOutput => {
                     self.audio_output.select(None);
                     Choice::SetAudioOutput
+                }
+                DesktopAction::SetAudioInput { name } => {
+                    self.audio_input.select(Some(name));
+                    Choice::SetAudioInput
+                }
+                DesktopAction::CycleAudioInput => {
+                    self.audio_input.select(None);
+                    Choice::SetAudioInput
+                }
+                DesktopAction::ToggleInputMute => Choice::InputMute,
+                DesktopAction::InputVolumeStep { direction, percent } => {
+                    volume_step = Some(*percent);
+                    match direction {
+                        VolumeDirection::Up => Choice::InputVolumeUp,
+                        VolumeDirection::Down => Choice::InputVolumeDown,
+                    }
                 }
                 DesktopAction::Media(command) => match command {
                     MediaCommand::PlayPause => Choice::PlayPause,

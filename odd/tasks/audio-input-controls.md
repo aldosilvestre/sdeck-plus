@@ -12,7 +12,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - S6: Docs, help text and CHANGELOG describe all of the above; outputs behave exactly as before.
 
 ## Tasks
-- T1 (S1,S2,S3) core actions: DesktopAction variants, wpctl/pw-dump, serde, validate, summary. inline. commit: pending
+- T1 (S1,S2,S3) core actions: DesktopAction variants, wpctl/pw-dump, serde, validate, summary. inline. commit: c656412 (bin did not compile alone; fixed by T2 commit)
 - T2 (S1,S2,S3) editor choices, icons, catalog. inline. commit: pending
 - T3 (S4) live information sources. inline. commit: pending
 - T4 (S5) dial preset. inline. commit: pending
