@@ -28,6 +28,7 @@ mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
+pub(crate) mod plugin_values;
 mod timer_sound;
 mod touchscreen;
 
@@ -928,6 +929,32 @@ impl FeatureRuntime {
         };
         let (sender, worker) = crate::plugin_runtime::spawn_for_root(root, events.clone())?;
         *self.plugins.borrow_mut() = Some(sender);
+        Ok(Some(worker))
+    }
+
+    /// Starts the worker that asks plugins for the values their displays show, and keeps the
+    /// artwork's list of display actions in step with the installed plugins.
+    pub(crate) fn start_plugin_values(
+        &self,
+        events: &mpsc::Sender<MonitorEvent>,
+    ) -> std::io::Result<Option<crate::plugin_runtime::PluginWorker>> {
+        let Some(root) = self.ui.plugins.root() else {
+            return Ok(None);
+        };
+        let (sender, worker) = crate::plugin_runtime::spawn_queries_for_root(root, events.clone())?;
+        self.artwork.set_plugin_queries(sender);
+        if self
+            .artwork
+            .set_plugin_displays(self.ui.plugins.display_actions())
+        {
+            self.artwork.refresh(true);
+        }
+        let artwork = self.artwork.clone();
+        self.ui.plugins.on_displays(move |displays| {
+            artwork.set_plugin_displays(displays);
+            artwork.refresh(true);
+            true
+        });
         Ok(Some(worker))
     }
 

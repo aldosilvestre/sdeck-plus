@@ -11,6 +11,7 @@ use sdeck_plus::plugins::{
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeSet,
     path::PathBuf,
     rc::{Rc, Weak},
     sync::{
@@ -302,6 +303,37 @@ impl PluginHub {
         if self.0.control.replace(control) != control {
             notify(&self.0.control_changed);
         }
+    }
+
+    /// The enabled plugin actions that declare a display, as `(plugin id, action id)`. Reads
+    /// the cached manifests only.
+    pub(crate) fn display_actions(&self) -> BTreeSet<(String, String)> {
+        self.plugins()
+            .into_iter()
+            .filter(|(_, enabled)| *enabled)
+            .flat_map(|(manifest, _)| {
+                manifest
+                    .actions
+                    .iter()
+                    .filter(|action| action.display.is_some())
+                    .map(|action| (manifest.id.clone(), action.id.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Calls `listener` with the display actions after the plugin list changes, until the hub
+    /// is gone. It holds the hub weakly, so it never keeps the session alive.
+    pub(crate) fn on_displays(
+        &self,
+        listener: impl Fn(BTreeSet<(String, String)>) -> bool + 'static,
+    ) {
+        let state = Rc::downgrade(&self.0);
+        self.on_change(move || {
+            state
+                .upgrade()
+                .is_some_and(|state| listener(PluginHub(state).display_actions()))
+        });
     }
 
     /// Calls `listener` after the plugin list changes, until it returns false.

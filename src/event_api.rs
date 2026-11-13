@@ -167,6 +167,18 @@ pub enum MonitorEvent {
     },
     /// An action finished running, so live readings it changes are stale.
     ActionDispatched,
+    /// A plugin's answer to a display `query` for one control, or why there is none. In
+    /// memory only: it is never stored in any configuration.
+    PluginValue {
+        layer: String,
+        target: ArtworkTarget,
+        binding: crate::plugins::PluginBinding,
+        result: Result<crate::plugins::QueryOutcome, String>,
+    },
+    /// A plugin action finished (either way), so what that plugin displays may have changed.
+    PluginFinished {
+        plugin_id: String,
+    },
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
 }

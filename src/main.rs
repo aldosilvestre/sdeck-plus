@@ -10,6 +10,7 @@ use sdeck_plus::{
     protocol,
 };
 
+use feature_runtime::plugin_values::Shown;
 use gtk::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry,
     FileChooserAction, FileChooserNative, Label, Orientation, Picture, ResponseType, TextView,
@@ -610,6 +611,11 @@ fn build_session(
         Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
         Ok(None) => {}
         Err(error) => eprintln!("Could not start the plugin worker: {error}"),
+    }
+    match body.feature_runtime.start_plugin_values(&events) {
+        Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
+        Ok(None) => {}
+        Err(error) => eprintln!("Could not start the plugin value worker: {error}"),
     }
     body.feature_runtime
         .configure(organization, obs, device_sender, events);
@@ -1978,6 +1984,13 @@ impl EventSurface {
             },
             MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
             MonitorEvent::Info { source, value } => artwork.update_info(source, value),
+            MonitorEvent::PluginValue {
+                layer,
+                target,
+                binding,
+                result,
+            } => artwork.update_plugin_value(layer, target, binding, result),
+            MonitorEvent::PluginFinished { plugin_id } => artwork.plugin_finished(&plugin_id),
             MonitorEvent::BindingSaveResult(result) => {
                 let (message, failed) = match result {
                     Ok(()) => ("Binding saved successfully.".to_owned(), false),
@@ -3472,6 +3485,7 @@ struct InfoState {
     values: std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
     marquee: PreviewMarquee,
     countdown: Option<timer_artwork::CountdownArtwork>,
+    plugin: feature_runtime::plugin_values::PluginValues,
 }
 
 impl std::ops::Deref for InfoState {
@@ -3562,12 +3576,13 @@ impl ArtworkUi {
 
     fn touchscreen_zone_command(&self, layer: &str, zone: u8) -> ArtworkCommand {
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
-        let source = self.layers.borrow().zone_info_source(layer, zone);
+        let shown = self.zone_shown(layer, zone);
         ArtworkCommand::ComposeTouchscreenZone {
             zone,
             path: self.info_background(layer, ArtworkTarget::EncoderZone(zone)),
             strip_path: self.info_background(layer, ArtworkTarget::TouchStripBackground),
-            value: source.map(|source| self.info_value(source)),
+            value: shown
+                .map(|shown| self.shown_value(layer, ArtworkTarget::EncoderZone(zone), &shown)),
             previous,
             next,
         }
@@ -3579,12 +3594,16 @@ impl ArtworkUi {
         target: ArtworkTarget,
         source: sdeck_plus::info::InfoSource,
     ) -> ArtworkCommand {
+        self.shown_command(layer, target, &Shown::Info(source))
+    }
+
+    fn shown_command(&self, layer: &str, target: ArtworkTarget, shown: &Shown) -> ArtworkCommand {
         if let ArtworkTarget::EncoderZone(zone) = target {
             if self.indicated_zone(layer, zone) {
                 return self.touchscreen_zone_command(layer, zone);
             }
         }
-        self.info_value_command(layer, target, self.info_value(source))
+        self.info_value_command(layer, target, self.shown_value(layer, target, shown))
     }
 
     fn info_value_command(
@@ -3608,13 +3627,13 @@ impl ArtworkUi {
     /// Redraw keys and touch sections that show information over their own
     /// artwork; the sections go last so they draw over the strip background.
     fn with_info(&self, layer: &str, commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
-        let targets = self.info_targets(layer);
+        let targets = self.shown_targets(layer);
         let shown = |target: &ArtworkTarget| targets.iter().any(|(shown, _)| shown == target);
         let info = |wanted: fn(&ArtworkTarget) -> bool| -> Vec<ArtworkCommand> {
             targets
                 .iter()
                 .filter(|(target, _)| wanted(target))
-                .map(|(target, source)| self.info_command(layer, *target, *source))
+                .map(|(target, shown)| self.shown_command(layer, *target, shown))
                 .collect()
         };
         let mut other = Vec::new();
@@ -3822,7 +3841,7 @@ impl ArtworkUi {
     /// stops once no title scrolls or their window is gone.
     fn tick_preview_marquee(&self, now: std::time::Instant) -> glib::ControlFlow {
         let layer = self.layers.borrow().active().to_owned();
-        let shown = self.info_targets(&layer);
+        let shown = self.shown_targets(&layer);
         let running: Vec<_> = self
             .info
             .borrow()
@@ -3840,7 +3859,7 @@ impl ArtworkUi {
             let source = shown
                 .iter()
                 .find(|(shown, _)| *shown == target)
-                .map(|(_, source)| *source);
+                .map(|(_, source)| source);
             match source.filter(|_| alive && !self.countdown_shows(&layer, target)) {
                 Some(source) => {
                     let elapsed = now.saturating_duration_since(started);
@@ -3854,7 +3873,11 @@ impl ArtworkUi {
                         .iter()
                         .any(|(shown, picture)| *shown == target && picture.is_mapped());
                     if visible && moved != offset {
-                        self.paint_info_preview_at(target, &self.info_value(source), now);
+                        self.paint_info_preview_at(
+                            target,
+                            &self.shown_value(&layer, target, source),
+                            now,
+                        );
                     }
                 }
                 None => {
@@ -3918,18 +3941,16 @@ impl ArtworkUi {
     fn paint_navigation_previews(&self, layer: &str) {
         for zone in self.indicator_zones() {
             // Information previews already paint their indicators with their value.
-            if self.indicated_zone(layer, zone)
-                && self.layers.borrow().zone_info_source(layer, zone).is_none()
-            {
+            if self.indicated_zone(layer, zone) && self.zone_shown(layer, zone).is_none() {
                 self.paint_touchscreen_zone(layer, zone, None, Duration::ZERO);
             }
         }
     }
 
     fn paint_info_previews(&self, layer: &str) {
-        for (target, source) in self.info_targets(layer) {
+        for (target, shown) in self.shown_targets(layer) {
             if !self.countdown_shows(layer, target) {
-                self.paint_info_preview(target, &self.info_value(source));
+                self.paint_info_preview(target, &self.shown_value(layer, target, &shown));
             }
         }
         self.paint_countdown_preview(layer);
@@ -4055,6 +4076,7 @@ impl ArtworkUi {
             let _ = self.output.send(ArtworkCommand::Replace(commands));
         }
         *self.last_layer.borrow_mut() = Some(cache_key);
+        self.request_plugin_values(&layer, None);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
             editor.load_context(false);
             editor.refresh_preview();
@@ -4130,19 +4152,19 @@ impl ArtworkUi {
 
     /// Whether `target` shows live information on `layer`.
     fn shows_info(&self, layer: &str, target: ArtworkTarget) -> bool {
-        self.info_targets(layer)
+        self.shown_targets(layer)
             .iter()
             .any(|(shown, _)| *shown == target)
     }
 
     fn restore_button_preview(&self, target: &ArtworkTarget) {
         let layer = self.layers.borrow().active().to_owned();
-        if let Some((_, source)) = self
-            .info_targets(&layer)
+        if let Some((_, shown)) = self
+            .shown_targets(&layer)
             .into_iter()
             .find(|(shown, _)| shown == target)
         {
-            self.paint_info_preview(*target, &self.info_value(source));
+            self.paint_info_preview(*target, &self.shown_value(&layer, *target, &shown));
             return;
         }
         let (path, text) = {
@@ -5066,6 +5088,7 @@ mod tests {
     mod page_ui_tests;
     mod plugin_add_ui_tests;
     mod plugin_ui_tests;
+    mod plugin_value_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
