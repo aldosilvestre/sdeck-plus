@@ -702,11 +702,8 @@ fn selector_adds_no_pixels(model: &'static DeviceModel, connected: bool, dark: b
         "{} connected {connected} dark {dark}: the hidden selector changes pixels",
         model.id
     );
-    // Put it back for the registry's own bookkeeping.
-    header.insert_child_after(
-        &selector,
-        header.first_child().and_then(|c| c.next_sibling()).as_ref(),
-    );
+    // Put it back, after the connection detail, for the registry's own bookkeeping.
+    header.insert_child_after(&selector, header.first_child().as_ref());
 }
 
 /// Host-independent: the + window's header has no 'Current' or 'Preview' text
@@ -744,7 +741,11 @@ fn the_plus_window_has_no_selector_text_and_no_selector_in_the_tab_order() {
             "no selector widget is reachable with Tab"
         );
         let mut found = Vec::new();
-        let header = selector.root.parent().expect("the header");
+        let header = selector
+            .root
+            .parent()
+            .and_then(|detail_row| detail_row.parent())
+            .expect("the header");
         texts(&header, &mut found);
         // The caption exists but is not shown; no visible header text says it.
         fn visible_texts(widget: &gtk::Widget, found: &mut Vec<String>) {

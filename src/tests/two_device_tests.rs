@@ -719,6 +719,59 @@ fn the_menu_and_updates_follow_the_shown_session_and_open_one_dialog() {
     });
 }
 
+/// Every Menu button (by its tooltip) in the window, hidden sessions included.
+fn menu_buttons(widget: &gtk::Widget, found: &mut Vec<gtk::MenuButton>) {
+    if let Some(button) = widget.downcast_ref::<gtk::MenuButton>() {
+        if button
+            .tooltip_text()
+            .is_some_and(|tip| tip.starts_with("Menu: "))
+        {
+            found.push(button.clone());
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        menu_buttons(&current, found);
+        child = current.next_sibling();
+    }
+}
+
+#[test]
+fn switching_models_keeps_the_one_menu_button_in_the_header() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("pair-menu-header") else {
+            return;
+        };
+        let _devices = pair.plug_both();
+        let mut first = None;
+        for model in [&PLUS_XL, &PLUS, &PLUS_XL] {
+            pair.registry.show(model, SwitchReason::Device);
+            let mut found = Vec::new();
+            menu_buttons(pair.window.upcast_ref(), &mut found);
+            assert_eq!(
+                found.len(),
+                1,
+                "one Menu button after showing {}",
+                model.name
+            );
+            let menu = &found[0];
+            assert!(
+                menu.ancestor(gtk::Notebook::static_type()).is_none(),
+                "Menu is outside every model's rail"
+            );
+            assert_eq!(
+                menu.ancestor(gtk::Stack::static_type()),
+                None,
+                "Menu is outside every model's session"
+            );
+            assert!(
+                first.get_or_insert_with(|| menu.clone()) == menu,
+                "the very same button follows the shown model"
+            );
+        }
+    });
+}
+
 #[test]
 fn a_pending_import_stays_with_the_session_it_was_started_in() {
     run_gtk_test(|| {

@@ -745,22 +745,27 @@ struct Header {
 }
 
 fn build_header(window: &ApplicationWindow) -> Header {
-    let header = GtkBox::new(Orientation::Horizontal, 12);
-    let heading = GtkBox::new(Orientation::Vertical, 4);
+    // Two rows. The title row: the title, the update indicator and the Menu button, which sits
+    // at the far right and is centred on the title line. The detail row under it: the
+    // connection detail and, with two devices connected, the 'Current' selector at its right.
+    let header = GtkBox::new(Orientation::Vertical, 4);
+    let title_row = GtkBox::new(Orientation::Horizontal, 12);
+    let detail_row = GtkBox::new(Orientation::Horizontal, 12);
+    header.append(&title_row);
+    header.append(&detail_row);
     let title = Label::new(Some("SDECK-PLUS"));
     title.add_css_class("title");
     title.set_xalign(0.0);
-    heading.append(&title);
-    header.append(&heading);
-    heading.set_hexpand(true);
+    title.set_hexpand(true);
+    title.set_valign(gtk::Align::Center);
+    title_row.append(&title);
     // The badge itself lives in the profile rail (see `build_body`); this label stays the
     // source of truth the connection code writes to, so it is kept but not shown.
     let status = Label::new(None);
     status.add_css_class("status");
     status.set_visible(false);
-    header.append(&status);
+    title_row.append(&status);
     let selector = ModelSelector::new();
-    header.append(&selector.root);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
@@ -776,10 +781,13 @@ fn build_header(window: &ApplicationWindow) -> Header {
     let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
-    header.append(&update_panel.indicator);
-    // The Menu button lives in the profile rail's tools; the header only keeps a handle.
-    #[cfg(test)]
+    update_panel.indicator.set_valign(gtk::Align::Center);
+    title_row.append(&update_panel.indicator);
+    // The one Menu button stays here for every model shown: far right, level with the title.
     let help_menu = configuration_menu.button().clone();
+    help_menu.set_halign(gtk::Align::End);
+    help_menu.set_valign(gtk::Align::Center);
+    title_row.append(&help_menu);
 
     let connection_detail = Label::new(None);
     show_connection_state(
@@ -792,7 +800,9 @@ fn build_header(window: &ApplicationWindow) -> Header {
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
     connection_detail.set_max_width_chars(70);
-    heading.append(&connection_detail);
+    connection_detail.set_hexpand(true);
+    detail_row.append(&connection_detail);
+    detail_row.append(&selector.root);
     Header {
         root: header,
         status,
@@ -836,8 +846,6 @@ struct Body {
     settings_scroll: gtk::ScrolledWindow,
     /// The content column's scroller: the only scrolling region of the window.
     content_scroll: gtk::ScrolledWindow,
-    /// The rail slot the window's Menu button is seated in while this body is shown.
-    menu_slot: GtkBox,
     // Keep the weakly referenced editor callbacks alive with the body.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     #[cfg(test)]
@@ -899,7 +907,6 @@ fn build_widgets(
     shell.append(&body.root);
     let viewport = shell_viewport(&shell);
     body.attach(viewport.upcast_ref());
-    header.configuration_menu.place_in(&body.menu_slot);
     let Body {
         content_scroll,
         binding_status,
@@ -1272,7 +1279,7 @@ fn build_body(
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
     // The rail never scrolls. Its head, top-down: the connection badge (a mirror of the header's
-    // label), the TOOLS heading with Organize, OBS and Menu, then the PROFILES heading with a
+    // label), the TOOLS heading with Organize and OBS, then the PROFILES heading with a
     // compact New profile action beside it. The profile tabs follow; nothing sits at the foot.
     let rail_status = ui::mirror_badge(connection_badge);
     // Tools start at the left edge, like the profile names below them.
@@ -1292,9 +1299,6 @@ fn build_body(
         menu.set_tooltip_text(Some(what));
         menu.update_property(&[gtk::accessible::Property::Description(what)]);
     }
-    // The window's Menu button is seated here (see `ConfigurationMenu::place_in`).
-    let menu_slot = GtkBox::new(Orientation::Vertical, 0);
-    layer_row.append(&menu_slot);
     let new_profile = ui::icon_button("list-add-symbolic", "New profile");
     new_profile.set_has_frame(false);
     new_profile.add_css_class("rail-new-profile");
@@ -1948,7 +1952,6 @@ fn build_body(
         organization_writes: vec![create_layer],
         settings_scroll,
         content_scroll,
-        menu_slot,
         _text_editor: text_editor,
         #[cfg(test)]
         layer_picker,

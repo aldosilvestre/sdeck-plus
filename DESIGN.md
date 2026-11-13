@@ -432,17 +432,21 @@ New; both show the real Esc hint) hides the dialog without saving; Cancel and Es
 New draft.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
-badge, a "TOOLS" sub-heading (11px, bold, muted) with Organize, OBS and Menu, then a "PROFILES"
+badge, a "TOOLS" sub-heading (11px, bold, muted) with Organize and OBS, then a "PROFILES"
 sub-heading with a compact "+" New profile action beside it (the same dialog as the Organize
 menu's New profile row), then the profile names (about 12 characters, ellipsized). Nothing is
 packed at the rail foot. Each tool and New profile has a tooltip that says what it does
-("Organize: ...", "OBS: ...", "Menu: ...", "New profile: ...") and the same text as its accessible
+("Organize: ...", "OBS: ...", "New profile: ...") and the same text as its accessible
 description. The badge, tools and PROFILES row are the Notebook's start action widget. Because the rail is outside
 the scrolling region the tools are always visible and their popovers open fully, in a 1120x700
 window and at the smallest window. The tools are frameless (hover shows the surface) so they stay
-secondary to the tabs. Menu is the window's one configuration menu button seated in the shown
-model's rail (moved, not copied, when the shown model changes); the header keeps the title,
-detail line, Current selector and update indicator. Only the content column (page bar, preview,
+secondary to the tabs. Menu is the window's one configuration menu button and lives in the
+header, not the rail: on the title row, completely at the right edge and vertically centred on the
+"SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
+("Menu: ..."), accessible name and description and headerless popover, and the same button serves
+every model shown. The header has two rows: the title row (title, update indicator when shown,
+Menu) and, under it, the connection detail with the Current selector at its right when two models
+are connected, so the selector never overlaps the Menu. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
 inside the window. The Organize menu only opens the profile creation, application
 association and profile deletion dialogs. The page bar separates navigation from
@@ -720,7 +724,7 @@ two columns fit.
   `Esc` key hint and the default, and a red destructive **Delete**; Escape or Cancel changes
   nothing. Page, folder, touchscreen-page and profile deletion share this dialog; the import
   confirmation uses the same layout with an **Import** button.
-- **Menu popover:** the rail's Menu is a headerless command menu (about 6px padding, no title
+- **Menu popover:** the header's Menu is a headerless command menu (about 6px padding, no title
   row and no Close button) of Help, Updates, Import configuration... and Export
   configuration...; Escape or a click outside dismisses it.
 - **Feedback:** countdown, completion, connection and errors use inline text

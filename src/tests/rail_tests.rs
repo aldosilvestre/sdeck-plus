@@ -1,5 +1,6 @@
-//! The fixed profile rail: badge, TOOLS, then PROFILES with New profile beside its heading and
-//! the profile tabs, while only the content column scrolls.
+//! The fixed profile rail: badge, TOOLS (Organize, OBS), then PROFILES with New profile beside its
+//! heading and the profile tabs, while only the content column scrolls. The Menu button is in the
+//! header, on the title row.
 use super::organize_popover_tests::dialog_titled;
 use super::ui_refresh_tests::fixture;
 use super::*;
@@ -68,13 +69,12 @@ fn the_rail_lists_badge_tools_then_profiles_with_new_profile_beside_its_heading(
             top(&rail_label(widgets, "TOOLS"), widgets),
             top(&widgets.management_menu, widgets),
             top(&widgets.obs_menu, widgets),
-            top(&widgets.help_menu, widgets),
             top(&profiles_heading, widgets),
             top(&base_tab, widgets),
         ];
         assert!(
             ordered.windows(2).all(|pair| pair[0] < pair[1]),
-            "badge, TOOLS, Organize, OBS, Menu, PROFILES, profiles: {ordered:?}"
+            "badge, TOOLS, Organize, OBS, PROFILES, profiles: {ordered:?}"
         );
         // New profile sits on the PROFILES heading's row, to its right, before the tabs.
         let heading = profiles_heading.compute_bounds(&widgets.root).unwrap();
@@ -99,24 +99,72 @@ fn the_rail_lists_badge_tools_then_profiles_with_new_profile_beside_its_heading(
         for tool in [
             top(&widgets.management_menu, widgets),
             top(&widgets.obs_menu, widgets),
-            top(&widgets.help_menu, widgets),
             top(&new_profile, widgets),
         ] {
             assert!(tool < last_tab, "no tool or action below the last tab");
         }
-        assert!(widgets.help_menu.is_ancestor(tabs), "Menu is a rail tool");
+        assert!(!widgets.help_menu.is_ancestor(tabs), "Menu left the rail");
         let content = widgets.scroller.compute_bounds(&widgets.root).unwrap();
-        for tool in [
-            &widgets.management_menu,
-            &widgets.obs_menu,
-            &widgets.help_menu,
-        ] {
+        for tool in [&widgets.management_menu, &widgets.obs_menu] {
             let bounds = tool.compute_bounds(&widgets.root).unwrap();
             assert!(
                 bounds.x() + bounds.width() <= content.x() + 0.5,
                 "tools sit left of the content column: {bounds:?} vs {content:?}"
             );
         }
+    });
+}
+
+/// The window's header: the first child of the shell column, above the body.
+pub(super) fn header_of(widgets: &MonitorWidgets) -> gtk::Widget {
+    widgets
+        .root
+        .first_child()
+        .and_then(|shell| shell.first_child())
+        .expect("the header")
+}
+
+#[test]
+fn the_menu_sits_in_the_header_on_the_title_row_at_the_far_right() {
+    run_gtk_test(|| {
+        let Some(fixture) = fixture("header-menu", |_| {}) else {
+            return;
+        };
+        let widgets = &fixture.widgets;
+        wait_for_frame(&fixture.window);
+        let header = header_of(widgets);
+        let mut labels: Vec<Label> = Vec::new();
+        collect(&header, &mut labels);
+        let title = labels
+            .into_iter()
+            .find(|label| label.text() == "SDECK-PLUS")
+            .expect("the title in the header");
+        let menu = &widgets.help_menu;
+        assert!(menu.is_ancestor(&header), "Menu is a header child");
+        assert!(
+            !menu.is_ancestor(widgets.feature_runtime.profile_tabs()),
+            "Menu is not in the rail"
+        );
+        let header_box = header.compute_bounds(&widgets.root).unwrap();
+        let button = menu.compute_bounds(&widgets.root).unwrap();
+        let title_box = title.compute_bounds(&widgets.root).unwrap();
+        let right = |bounds: &gtk::graphene::Rect| bounds.x() + bounds.width();
+        assert!(
+            right(&button) <= right(&header_box) + 0.5
+                && right(&button) >= right(&header_box) - 2.0,
+            "Menu ends at the header's right edge: {button:?} in {header_box:?}"
+        );
+        assert!(
+            button.x() > title_box.x() + title_box.width() * 0.5,
+            "Menu is right of the title text: {button:?} vs {title_box:?}"
+        );
+        let centre = button.y() + button.height() / 2.0;
+        assert!(
+            centre >= title_box.y() && centre <= title_box.y() + title_box.height(),
+            "Menu is level with the title: {button:?} vs {title_box:?}"
+        );
+        let caption = menu.tooltip_text().expect("Menu tooltip");
+        assert!(caption.starts_with("Menu: "), "{caption}");
     });
 }
 
@@ -215,7 +263,6 @@ fn the_rail_does_not_move_when_the_content_scrolls() {
         let tracked = |widgets: &MonitorWidgets| {
             [
                 top(&widgets.management_menu, widgets),
-                top(&widgets.help_menu, widgets),
                 top(&rail_label(widgets, "PROFILES"), widgets),
                 top(&rail_label(widgets, "Base"), widgets),
             ]

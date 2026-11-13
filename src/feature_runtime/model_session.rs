@@ -170,11 +170,6 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    /// The shown rail's slot for the window's Menu button.
-    pub(crate) fn menu_slot(&self) -> &GtkBox {
-        &self._body.menu_slot
-    }
-
     pub(crate) fn new(
         model: &'static DeviceModel,
         body: crate::Body,
@@ -298,7 +293,6 @@ impl ModelSession {
         stack.add_named(&first.root, Some(shown.id));
         stack.set_visible_child(&first.root);
         header.menu.bind(first.runtime.clone());
-        header.menu.place_in(first.menu_slot());
         let registry = Rc::new(Self {
             roots,
             header,
@@ -664,7 +658,6 @@ impl ModelSession {
         self.stack.set_visible_child(&session.root);
         self.shown.set(model);
         self.header.menu.bind(session.runtime.clone());
-        self.header.menu.place_in(session.menu_slot());
         self.apply_read_only();
         // Remembered only once the session really opened.
         if let Err(error) = device_preference::save_to(&self.roots.preference, model) {
