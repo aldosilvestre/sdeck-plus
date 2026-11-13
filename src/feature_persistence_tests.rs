@@ -536,6 +536,52 @@ fn explicit_obs_controls_survive_layer_storage_and_reload() {
 }
 
 #[test]
+fn audio_input_and_obs_input_volume_actions_survive_layer_storage_and_reload() {
+    use crate::desktop_actions::{DesktopAction, VolumeDirection};
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    let actions = [
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Up,
+            percent: 5,
+        }),
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Down,
+            percent: 12,
+        }),
+        FeatureAction::Desktop(DesktopAction::ToggleInputMute),
+        FeatureAction::Desktop(DesktopAction::CycleAudioInput),
+        FeatureAction::Desktop(DesktopAction::SetAudioInput {
+            name: "alsa_input.usb-Mic".into(),
+        }),
+        FeatureAction::Obs(ObsAction::InputVolume {
+            input: "Mic/Aux".into(),
+            direction: VolumeDirection::Down,
+            db: 3,
+        }),
+    ];
+    for (index, action) in actions.iter().enumerate() {
+        store
+            .bind(
+                "Base",
+                Trigger::KeyPress(u8::try_from(index + 1).unwrap()),
+                Action::Feature(action.clone()),
+            )
+            .unwrap();
+    }
+    store.persist().unwrap();
+    let reloaded = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(reloaded.diagnostics().is_empty());
+    for (index, action) in actions.into_iter().enumerate() {
+        assert_eq!(
+            reloaded.layers()["Base"].bindings
+                [&Trigger::KeyPress(u8::try_from(index + 1).unwrap())],
+            Action::Feature(action)
+        );
+    }
+}
+
+#[test]
 fn previous_brightness_and_scroll_records_load_as_typed_actions() {
     let fixture = Fixture::new();
     fs::create_dir_all(&fixture.0).unwrap();

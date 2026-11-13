@@ -7,7 +7,7 @@ use sdeck_plus::{
     },
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
-    obs::ObsAction,
+    obs::{ObsAction, DEFAULT_INPUT_VOLUME_STEP_DB},
     organization::NavigationAction,
 };
 use std::{
@@ -38,7 +38,7 @@ pub(crate) struct EditorWidgets {
     text: TextView,
     number: Entry,
     /// Whether `number` currently holds a volume step rather than another numeric field.
-    volume_mode: Cell<bool>,
+    volume_mode: Cell<Option<u8>>,
     direction: gtk::DropDown,
     flag: CheckButton,
     first_row: GtkBox,
@@ -172,7 +172,7 @@ impl FeatureEditor {
             second,
             text,
             number,
-            volume_mode: Cell::new(false),
+            volume_mode: Cell::new(None),
             direction,
             flag,
             first_row,
@@ -372,7 +372,7 @@ impl FeatureEditor {
             Choice::PlayAudio => "/home/user/Music/track.ogg",
             Choice::OpenFolder => "Studio",
             Choice::Scene | Choice::Visibility => "Main scene",
-            Choice::ObsMute => "Microphone",
+            Choice::ObsMute | Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => "Microphone",
             _ => "",
         }));
         self.second
@@ -391,6 +391,7 @@ impl FeatureEditor {
             | Choice::VolumeDown
             | Choice::InputVolumeUp
             | Choice::InputVolumeDown => "5",
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => "2",
             _ => "",
         }));
         self.browse_file
@@ -404,7 +405,9 @@ impl FeatureEditor {
             Choice::PlayAudio => Some("Audio file path"),
             Choice::OpenFolder => Some("Folder name"),
             Choice::Scene | Choice::Visibility => Some("Scene name"),
-            Choice::ObsMute => Some("Input name"),
+            Choice::ObsMute | Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => {
+                Some("Input name")
+            }
             _ => None,
         };
         if let Some(label) = first {
@@ -439,16 +442,22 @@ impl FeatureEditor {
             | Choice::VolumeDown
             | Choice::InputVolumeUp
             | Choice::InputVolumeDown => Some("Step (percent, 1–100)"),
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => Some("Step (dB, 1–20)"),
             _ => None,
         };
-        let volume = matches!(
-            choice,
-            Choice::VolumeUp | Choice::VolumeDown | Choice::InputVolumeUp | Choice::InputVolumeDown
-        );
-        if volume != self.volume_mode.replace(volume) {
+        let step_default = match choice {
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => Some(DEFAULT_VOLUME_STEP),
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => {
+                Some(DEFAULT_INPUT_VOLUME_STEP_DB)
+            }
+            _ => None,
+        };
+        if step_default != self.volume_mode.replace(step_default) {
             // The entry is shared by every numeric action; start from the new action's default.
-            self.number
-                .set_text(&if volume { DEFAULT_VOLUME_STEP } else { 1 }.to_string());
+            self.number.set_text(&step_default.unwrap_or(1).to_string());
         }
         if let Some(label) = numeric {
             self.number_label.set_text(label);
@@ -520,7 +529,7 @@ impl FeatureEditor {
         self.second.set_text("");
         self.text.buffer().set_text("");
         self.number.set_text("1");
-        self.volume_mode.set(false);
+        self.volume_mode.set(None);
         self.direction.set_selected(0);
         self.flag.set_active(false);
         self.category.set_selected(0);
@@ -651,6 +660,16 @@ impl FeatureEditor {
             Choice::StartStreaming => FeatureAction::Obs(ObsAction::StartStreaming),
             Choice::StopStreaming => FeatureAction::Obs(ObsAction::StopStreaming),
             Choice::ObsMute => FeatureAction::Obs(ObsAction::ToggleMute(first)),
+            Choice::ObsInputVolumeUp => FeatureAction::Obs(ObsAction::InputVolume {
+                input: first,
+                direction: VolumeDirection::Up,
+                db: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::ObsInputVolumeDown => FeatureAction::Obs(ObsAction::InputVolume {
+                input: first,
+                direction: VolumeDirection::Down,
+                db: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
             Choice::Visibility => FeatureAction::Obs(ObsAction::SourceVisibility {
                 scene: first,
                 source: second,
@@ -789,6 +808,18 @@ impl FeatureEditor {
                 ObsAction::ToggleMute(input) => {
                     self.first.set_text(input);
                     Choice::ObsMute
+                }
+                ObsAction::InputVolume {
+                    input,
+                    direction,
+                    db,
+                } => {
+                    self.first.set_text(input);
+                    volume_step = Some(*db);
+                    match direction {
+                        VolumeDirection::Up => Choice::ObsInputVolumeUp,
+                        VolumeDirection::Down => Choice::ObsInputVolumeDown,
+                    }
                 }
                 ObsAction::SourceVisibility {
                     scene,

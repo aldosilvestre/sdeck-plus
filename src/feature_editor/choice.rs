@@ -39,6 +39,8 @@ pub(crate) enum Choice {
     Recording,
     Streaming,
     ObsMute,
+    ObsInputVolumeUp,
+    ObsInputVolumeDown,
     Visibility,
     StartRecording,
     StopRecording,
@@ -137,6 +139,16 @@ impl Choice {
             Self::Recording => FeatureAction::Obs(O::ToggleRecording),
             Self::Streaming => FeatureAction::Obs(O::ToggleStreaming),
             Self::ObsMute => FeatureAction::Obs(O::ToggleMute(text())),
+            Self::ObsInputVolumeUp => FeatureAction::Obs(O::InputVolume {
+                input: text(),
+                direction: VolumeDirection::Up,
+                db: 2,
+            }),
+            Self::ObsInputVolumeDown => FeatureAction::Obs(O::InputVolume {
+                input: text(),
+                direction: VolumeDirection::Down,
+                db: 2,
+            }),
             Self::Visibility => FeatureAction::Obs(O::SourceVisibility {
                 scene: text(),
                 source: text(),
@@ -190,6 +202,8 @@ impl Choice {
             Self::Recording => "Start or stop OBS recording when this control is activated.",
             Self::Streaming => "Start or stop OBS streaming when this control is activated.",
             Self::ObsMute => "Toggle mute for an OBS input. Match the input name exactly.",
+            Self::ObsInputVolumeUp => "Raise the volume of an OBS audio input by a step in dB (default 2). Match the input name exactly; OBS tops out at +26 dB.",
+            Self::ObsInputVolumeDown => "Lower the volume of an OBS audio input by a step in dB (default 2). Match the input name exactly; OBS bottoms out at -100 dB.",
             Self::Visibility => "Set a source's visibility in an OBS scene. Match both names exactly; clear Visible to hide it.",
             Self::StartRecording => "Start OBS recording. OBS must have a recording output configured.",
             Self::StopRecording => "Stop OBS recording and save the recording file.",
@@ -200,7 +214,7 @@ impl Choice {
         }
     }
 
-    pub(crate) const ALL: [Self; 44] = [
+    pub(crate) const ALL: [Self; 46] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
@@ -238,6 +252,8 @@ impl Choice {
         Self::Recording,
         Self::Streaming,
         Self::ObsMute,
+        Self::ObsInputVolumeUp,
+        Self::ObsInputVolumeDown,
         Self::Visibility,
         Self::StartRecording,
         Self::StopRecording,
@@ -286,6 +302,8 @@ impl Choice {
             | Self::Recording
             | Self::Streaming
             | Self::ObsMute
+            | Self::ObsInputVolumeUp
+            | Self::ObsInputVolumeDown
             | Self::Visibility
             | Self::StartRecording
             | Self::StopRecording
@@ -335,6 +353,8 @@ impl Choice {
             Self::Recording => "Toggle recording",
             Self::Streaming => "Toggle streaming",
             Self::ObsMute => "Toggle input mute",
+            Self::ObsInputVolumeUp => "OBS input volume up",
+            Self::ObsInputVolumeDown => "OBS input volume down",
             Self::Visibility => "Set source visibility",
             Self::StartRecording => "Start recording",
             Self::StopRecording => "Stop recording",

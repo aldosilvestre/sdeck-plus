@@ -263,6 +263,10 @@ impl BindingIcon {
                 ObsAction::ToggleStreaming | ObsAction::StartStreaming => Self::Stream,
                 ObsAction::ToggleMute(_) => Self::MicrophoneMute,
                 ObsAction::SourceVisibility { .. } => Self::Visibility,
+                ObsAction::InputVolume { direction, .. } => match direction {
+                    VolumeDirection::Up => Self::VolumeUp,
+                    VolumeDirection::Down => Self::VolumeDown,
+                },
             },
             FeatureAction::Plugin(_) => Self::More,
             FeatureAction::Timer { .. } => Self::Timer,

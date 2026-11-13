@@ -14,6 +14,7 @@ fn volume_step_field_follows_the_selected_action_and_validates_input() {
 
         editor.assert_volume_step_field();
         editor.assert_input_volume_step_field();
+        editor.assert_obs_input_volume_step_field();
         editor.assert_audio_input_choices();
         editor.assert_roundtrips();
     });

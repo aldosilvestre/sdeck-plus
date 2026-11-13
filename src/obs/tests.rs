@@ -9,6 +9,8 @@ use tungstenite::{Message, WebSocket};
 mod config;
 #[path = "tests_errors.rs"]
 mod errors;
+#[path = "tests_volume.rs"]
+mod volume;
 
 fn raw_server(
     handler: impl FnOnce(WebSocket<TcpStream>) + Send + 'static,

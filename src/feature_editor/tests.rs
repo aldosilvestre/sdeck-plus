@@ -123,6 +123,41 @@ impl FeatureEditor {
         assert!(!self.number_row.is_visible());
     }
 
+    /// OBS input volume: input name plus a dB step (default 2), validated by the action.
+    pub(crate) fn assert_obs_input_volume_step_field(&self) {
+        for choice in [Choice::ObsInputVolumeUp, Choice::ObsInputVolumeDown] {
+            self.reset();
+            self.category.set_selected(choice.category());
+            self.refresh_choices();
+            let index = self.choices().position(|value| value == choice).unwrap();
+            self.action.set_selected(index as u32);
+            assert!(self.first_row.is_visible() && self.number_row.is_visible());
+            assert_eq!(self.number_label.text(), "Step (dB, 1–20)");
+            assert_eq!(self.number.text(), "2", "{choice:?}");
+            self.first.set_text("Mic");
+            assert!(matches!(
+                self.parse().unwrap(),
+                FeatureAction::Obs(ObsAction::InputVolume { db: 2, .. })
+            ));
+        }
+        self.number.set_text("20");
+        assert!(self.parse().is_ok());
+        for text in ["0", "21", "abc", ""] {
+            self.number.set_text(text);
+            assert!(self.parse().is_err(), "{text:?}");
+        }
+        self.first.set_text("");
+        self.number.set_text("2");
+        assert!(self.parse().is_err(), "an input name is required");
+        // Leaving a stepped action restores the shared entry's neutral default.
+        self.populate(&FeatureAction::Obs(ObsAction::ToggleMute("Mic".into())));
+        assert!(!self.number_row.is_visible());
+        self.populate(&FeatureAction::Timer { seconds: 90 });
+        assert_eq!(self.number.text(), "90");
+        self.reset();
+        assert!(!self.number_row.is_visible());
+    }
+
     pub(crate) fn select_category(&self, category: u32) {
         self.reset();
         self.category.set_selected(category);
@@ -159,6 +194,9 @@ impl FeatureEditor {
                 | FeatureAction::Navigation(NavigationAction::OpenFolder(_))
                 | FeatureAction::Obs(ObsAction::Scene(_) | ObsAction::ToggleMute(_)) => {
                     vec![true, false, false, false, false, false]
+                }
+                FeatureAction::Obs(ObsAction::InputVolume { .. }) => {
+                    vec![true, false, false, true, false, false]
                 }
                 FeatureAction::Desktop(DesktopAction::VolumeStep { .. })
                 | FeatureAction::Desktop(DesktopAction::InputVolumeStep { .. })
@@ -458,6 +496,16 @@ pub(crate) fn examples() -> Vec<FeatureAction> {
         FeatureAction::Obs(ObsAction::StartStreaming),
         FeatureAction::Obs(ObsAction::StopStreaming),
         FeatureAction::Obs(ObsAction::ToggleMute("Microphone".into())),
+        FeatureAction::Obs(ObsAction::InputVolume {
+            input: "Microphone".into(),
+            direction: VolumeDirection::Up,
+            db: 2,
+        }),
+        FeatureAction::Obs(ObsAction::InputVolume {
+            input: "Desktop Audio".into(),
+            direction: VolumeDirection::Down,
+            db: 20,
+        }),
         FeatureAction::Obs(ObsAction::SourceVisibility {
             scene: "Main scene".into(),
             source: "Camera".into(),

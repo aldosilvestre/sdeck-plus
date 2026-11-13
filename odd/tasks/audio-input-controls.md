@@ -17,7 +17,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - T2 (S1,S2,S3) editor choices, icons, catalog. inline. commit: pending
 - T3 (S4) live information sources. inline. commit: pending
 - T4 (S5) dial preset. inline. commit: pending
-- T6 (S7) OBS input volume up/down actions (obs-websocket). inline. commit: pending
+- T6 (S7) OBS input volume up/down actions (obs-websocket). inline (workers unavailable: provider auth). commit: see git log
 - T7 (S8) main-window redesign: implement design/main-window/03-profile-rail.html in GTK keeping the current hardware preview look. rail done (default window 1080x700, compact rail <1200px). Remaining from the artboard: category chips and Media/Output/Input grouping in the catalog; title/status inside the rail (kept in the top header). commit: see git log
 - T5 (S6) docs: README, index, docs.html, CHANGELOG. inline. commit: pending
 
@@ -33,3 +33,4 @@ L8: decisions: rail collapses to icons at 1000px (expands at >=1200px); redesign
 L9: Recuerda tambien rediseñar los modales, popover, hover, alertas, toast, etc. (overlay/feedback components of the redesign; to be designed as artboards first)
 L10: T7 state (uncommitted): vertical profile rail implemented (Notebook tab_pos Left, tools at its foot, one-letter/icon-only below 1200px) in src/feature_runtime.rs, src/main.rs, src/ui.rs, src/ui.css. At 1000px the Stream Deck + XL preview (570px) no longer fits beside the catalog (preview_model_tests::the_preview_contract_holds_at_the_default_window_for_both_models fails) and the Plus preview renders 482px wide instead of 520 (plus_preview_is_identical_to_the_shipped_one asserts 520x428; it already failed on base by hash). Decision needed: default window width vs accept the XL wrap. Popup-heavy GTK tests (binding_icon_tests, binding_editor_hides...) are flaky under the full run.
 L11: width decision: default window raised to 1080x700 (XL fits beside the catalog again). GTK suite back to the 3 baseline failures.
+L12: T6 implemented inline (workers kept failing with auth; the gentle sync rewrites model profiles back to claude-bridge). OBS input volume: step 1-20 dB (default 2), clamp -100..+26 dB.
