@@ -1059,3 +1059,45 @@ fn confirm_dialogs_read_left_aligned_and_their_cancel_button_shows_an_escape_hin
         );
     });
 }
+
+#[test]
+fn a_toast_can_carry_one_action_that_runs_once_and_closes_it() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let toast = ui::Toast::new();
+        assert!(!toast.action.is_visible(), "a plain toast has no action");
+        let runs = Rc::new(Cell::new(0));
+        let counter = runs.clone();
+        toast.show_with_action(
+            "Binding removed.",
+            "Undo",
+            Rc::new(move || counter.set(counter.get() + 1)),
+        );
+        assert!(toast.action.is_visible());
+        assert_eq!(toast.action.label().as_deref(), Some("Undo"));
+        assert_eq!(toast.label.text(), "Binding removed.");
+        assert!(toast.root.reveals_child());
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 1);
+        assert!(
+            !toast.root.reveals_child(),
+            "using the action closes the toast"
+        );
+        // A second click or a later plain message never runs the old action again.
+        toast.show("Saved.", false);
+        assert!(!toast.action.is_visible());
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 1);
+        // A new action replaces the previous one.
+        let counter = runs.clone();
+        toast.show_with_action(
+            "Page removed.",
+            "Undo",
+            Rc::new(move || counter.set(counter.get() + 10)),
+        );
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 11);
+    });
+}

@@ -90,6 +90,8 @@ All notable changes to this project are documented here. The format follows
   the menu.
 - **Confirm dialogs:** the title and explanation read left-aligned and the cancel button shows its
   keyboard hint (`Esc`) after its caption, in the discard, delete and import confirmations.
+- **Undo in the toast:** removing a binding now shows "Control configuration removed." with an
+  **Undo** action in the toast (the same undo as the toolbar's **Undo remove**, which stays).
 - **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
   radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
   edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and

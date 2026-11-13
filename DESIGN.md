@@ -264,6 +264,9 @@ whose text stays as its accessible name and tooltip. The header keeps the title 
 Confirm dialogs (discard, delete, import) read left-aligned: a 16px bold title, a muted
 explanation, then the buttons; the cancel button carries an `Esc` key hint (monospace 11px chip).
 
+A toast may carry one action (violet, 600 weight) beside its message, as "Undo" after removing a
+binding; using it runs it once and closes the toast, and any later message drops it.
+
 ## 4. Spacing and layout
 
 Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px

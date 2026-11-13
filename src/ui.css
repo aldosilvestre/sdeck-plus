@@ -592,3 +592,7 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
     padding: 0 6px;
 }
 .confirm-dialog button.destructive-action .key-hint { color: inherit; }
+
+/* An action beside a toast message, as in "Binding removed.  Undo". */
+.toast .toast-action { color: @desk_violet; font-weight: 600; border-radius: 999px; padding: 0 10px; min-height: 28px; }
+.toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }

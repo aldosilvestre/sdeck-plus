@@ -1628,6 +1628,7 @@ fn build_body(
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
+        let toast = toast.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_control(&layers) {
             Ok((layer, control, number)) => {
                 // The whole control goes, whichever of its events is selected.
@@ -1648,6 +1649,13 @@ fn build_body(
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
+                        // The same undo, offered where the eye already is.
+                        let undo = ui.undo_remove.clone();
+                        toast.show_with_action(
+                            "Control configuration removed.",
+                            "Undo",
+                            Rc::new(move || undo.emit_clicked()),
+                        );
                     }
                     Ok(_) => ui.status.set_text("No binding exists for that control."),
                     Err(error) => ui.error(&format!("Could not remove binding: {error}")),

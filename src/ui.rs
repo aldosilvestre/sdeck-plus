@@ -2,10 +2,16 @@
 use gtk::{glib, prelude::*, Box as GtkBox, Button, Image, Label, Orientation, Popover};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
+/// What a toast's action button runs; taken out when used, so it runs once.
+type ToastHandler = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 #[derive(Clone)]
 pub(crate) struct Toast {
     pub(crate) root: gtk::Revealer,
     pub(crate) label: Label,
+    /// An optional action beside the message, such as Undo; hidden unless a caller asks for it.
+    pub(crate) action: Button,
+    handler: ToastHandler,
     timeout: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
@@ -28,6 +34,12 @@ impl Toast {
         label.set_max_width_chars(40);
         label.set_xalign(0.0);
         content.append(&label);
+        let action = Button::new();
+        action.add_css_class("toast-action");
+        action.set_has_frame(false);
+        action.set_visible(false);
+        content.append(&action);
+        let handler: ToastHandler = Rc::default();
         let dismiss = button("window-close-symbolic", "Dismiss");
         dismiss.update_property(&[gtk::accessible::Property::Label("Dismiss notification")]);
         dismiss.set_has_frame(false);
@@ -44,6 +56,22 @@ impl Toast {
                 root.set_reveal_child(false);
             }
         });
+        {
+            let (handler, pending, weak) = (handler.clone(), timeout.clone(), root.downgrade());
+            action.connect_clicked(move |_| {
+                // The action runs once: it is taken out before it is called.
+                let run = handler.borrow_mut().take();
+                if let Some(source) = pending.borrow_mut().take() {
+                    source.remove();
+                }
+                if let Some(root) = weak.upgrade() {
+                    root.set_reveal_child(false);
+                }
+                if let Some(run) = run {
+                    run();
+                }
+            });
+        }
         let pending = timeout.clone();
         root.connect_unrealize(move |_| {
             if let Some(source) = pending.borrow_mut().take() {
@@ -53,6 +81,8 @@ impl Toast {
         Self {
             root,
             label,
+            action,
+            handler,
             timeout,
         }
     }
@@ -64,10 +94,25 @@ impl Toast {
         overlay
     }
 
+    /// A message with one action beside it (for example Undo). It stays a little longer than a
+    /// plain message, since reading it and deciding takes longer.
+    #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+    pub(crate) fn show_with_action(&self, message: &str, caption: &str, run: Rc<dyn Fn()>) {
+        self.show(message, false);
+        self.action.set_label(caption);
+        self.action
+            .update_property(&[gtk::accessible::Property::Label(caption)]);
+        self.action.set_visible(true);
+        *self.handler.borrow_mut() = Some(run);
+    }
+
     pub(crate) fn show(&self, message: &str, failed: bool) {
         if let Some(source) = self.timeout.borrow_mut().take() {
             source.remove();
         }
+        // Any earlier action no longer belongs to this message.
+        self.action.set_visible(false);
+        *self.handler.borrow_mut() = None;
         self.label.set_text(message);
         feedback(&self.label, failed);
         self.root.set_reveal_child(true);
