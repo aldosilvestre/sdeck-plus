@@ -229,6 +229,7 @@ pub struct Layer {
 #[derive(Clone, Debug)]
 pub struct LayerStore {
     conflicts: Vec<ConfigConflict>,
+    kept: Vec<KeptRow>,
     root: PathBuf,
     layers: BTreeMap<String, Layer>,
     active: String,
@@ -266,6 +267,7 @@ impl LayerStore {
             active: DEFAULT_LAYER.into(),
             diagnostics: Vec::new(),
             conflicts: Vec::new(),
+            kept: Vec::new(),
             touchscreens: touchscreen::Touchscreens::default(),
             model,
         };
@@ -349,6 +351,7 @@ impl LayerStore {
             return Ok(false);
         }
         self.layers.remove(name).expect("checked");
+        self.kept.retain(|row| row.layer != name);
         self.touchscreens.remove_references(name);
         for layer in self.layers.values_mut() {
             layer.bindings.retain(
@@ -367,7 +370,10 @@ impl LayerStore {
             .ok_or_else(|| invalid("unknown layer"))?
             .name
             .clone();
-        self.bind_configuration(&owner, trigger, action)
+        self.bind_configuration(&owner, trigger.clone(), action)?;
+        self.forget_kept_binding(layer, &trigger);
+        self.forget_kept_binding(&owner, &trigger);
+        Ok(())
     }
 
     /// Address an exact stored owner, without redirecting legacy touch rows.
@@ -404,7 +410,9 @@ impl LayerStore {
         let data = self.binding_layer_mut(layer, trigger).expect("checked");
         data.returns.remove(trigger);
         data.displays.remove(trigger);
-        Ok(data.bindings.remove(trigger).is_some())
+        let removed = data.bindings.remove(trigger).is_some();
+        self.forget_kept_control(layer, trigger);
+        Ok(removed)
     }
     /// Remove every trigger of one control, with its page returns and live
     /// information, and return what was removed so it can be restored.
@@ -430,6 +438,7 @@ impl LayerStore {
         // Everything is validated: the removal below cannot fail halfway.
         let mut removed = Vec::new();
         for trigger in triggers {
+            self.forget_kept_control(layer, &trigger);
             let Some(data) = self.binding_layer_mut(layer, &trigger) else {
                 continue;
             };
@@ -529,6 +538,7 @@ impl LayerStore {
         let data = self
             .binding_layer_mut(layer, trigger)
             .ok_or_else(|| invalid("unknown layer"))?;
+        let owner = data.name.clone();
         match value {
             Some(source) => {
                 if !shows_information(trigger) {
@@ -545,6 +555,13 @@ impl LayerStore {
                 data.displays.remove(trigger);
             }
         }
+        // The user chose this control's information: a stored choice this build
+        // could not read no longer applies.
+        self.kept.retain(|row| {
+            !(row.kind == KeptKind::Info
+                && row.trigger == *trigger
+                && (row.layer == layer || row.layer == owner))
+        });
         Ok(())
     }
     pub fn info_source(&self, layer: &str, trigger: &Trigger) -> Option<crate::info::InfoSource> {
@@ -643,22 +660,38 @@ impl LayerStore {
     pub fn apply_switch(&mut self, target: &str) -> bool {
         self.select(target)
     }
-    /// Log the removed settings and rewrite the file without them, so the
-    /// application keeps starting. Failures here must never block startup.
+    /// Log the removed and kept settings. Removed ones are rewritten away so the
+    /// application keeps starting; kept ones are written back unchanged on every
+    /// save. Failures here must never block startup.
     fn record_conflicts(&mut self, conflicts: Vec<ConfigConflict>) {
         if let Err(error) = log_conflicts(&self.root, &conflicts) {
             eprintln!("Could not write {CONFLICT_LOG}: {error}");
         }
         for conflict in &conflicts {
+            let action = if conflict.kept { "Kept" } else { "Removed" };
             eprintln!(
-                "Removed button setting {} in {:?}: {}",
+                "{action} button setting {} in {:?}: {}",
                 conflict.control, conflict.layer, conflict.reason
             );
         }
+        let removed = conflicts.iter().any(|conflict| !conflict.kept);
         self.conflicts = conflicts;
-        if let Err(error) = self.persist() {
-            eprintln!("Could not save the cleaned layer configuration: {error}");
+        if removed {
+            if let Err(error) = self.persist() {
+                eprintln!("Could not save the cleaned layer configuration: {error}");
+            }
         }
+    }
+    fn forget_kept_binding(&mut self, layer: &str, trigger: &Trigger) {
+        self.kept.retain(|row| {
+            !(row.layer == layer
+                && row.trigger == *trigger
+                && matches!(row.kind, KeptKind::Binding | KeptKind::PageReturn))
+        });
+    }
+    fn forget_kept_control(&mut self, layer: &str, trigger: &Trigger) {
+        self.kept
+            .retain(|row| !(row.layer == layer && row.trigger == *trigger));
     }
     fn load(&mut self) -> io::Result<()> {
         let path = self.root.join("layers.conf");
@@ -669,8 +702,9 @@ impl LayerStore {
         };
         let parsed = parse(self.model, &text);
         match parsed {
-            Ok((layers, active, conflicts)) => {
+            Ok((layers, active, conflicts, kept)) => {
                 self.layers = layers;
+                self.kept = kept;
                 self.active = if self.layers.contains_key(&active) {
                     active
                 } else {
@@ -714,6 +748,10 @@ impl LayerStore {
                     encode_trigger(trigger),
                     source.id()
                 ));
+            }
+            for row in self.kept.iter().filter(|row| row.layer == layer.name) {
+                text.push_str(&row.row);
+                text.push('\n');
             }
         }
         self.touchscreens
@@ -1061,22 +1099,85 @@ fn decode_action(s: &str) -> Result<Action, String> {
     validate_action(&action).map_err(|e| e.to_string())?;
     Ok(action)
 }
-/// A button setting that could not be loaded and was removed.
+/// A button setting that could not be loaded. A malformed one of a kind this
+/// build knows is removed; one of a kind it does not know (written by a newer
+/// build) is `kept` and written back unchanged on every save.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigConflict {
     pub layer: String,
     pub control: String,
     pub reason: String,
     pub row: String,
+    pub kept: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeptKind {
+    Binding,
+    PageReturn,
+    Info,
+}
+
+/// A `layers.conf` row this build cannot interpret, stored as read.
+#[derive(Clone, Debug)]
+struct KeptRow {
+    layer: String,
+    trigger: Trigger,
+    kind: KeptKind,
+    row: String,
+}
+
+/// Action prefixes `decode_action` understands.
+const KNOWN_ACTION_PREFIXES: [&str; 10] = [
+    "feature-v1",
+    "brightness-v1",
+    "scroll-v1",
+    "switch",
+    "emit",
+    "launchv2",
+    "launch",
+    "command",
+    "key",
+    "shortcut",
+];
+
+/// Why `action` is a kind this build does not know, or `None` when it is
+/// known (even if malformed). Unknown kinds are an action prefix outside
+/// [`KNOWN_ACTION_PREFIXES`] or a `feature-v1` payload that is a JSON object
+/// with exactly one key naming a variant [`crate::features::FeatureAction`] lacks.
+pub(crate) fn unknown_action_kind(action: &str) -> Option<String> {
+    let (prefix, rest) = action.split_once(':')?;
+    if prefix == "feature-v1" {
+        let value: serde_json::Value = serde_json::from_str(&unhex(rest).ok()?).ok()?;
+        let object = value.as_object()?;
+        let mut keys = object.keys();
+        let key = keys.next()?;
+        return (keys.next().is_none()
+            && !crate::features::FeatureAction::VARIANTS.contains(&key.as_str()))
+        .then(|| format!("unknown feature variant '{}'", key.escape_debug()));
+    }
+    let named = prefix.len() <= 32
+        && prefix.starts_with(|c: char| c.is_ascii_lowercase())
+        && prefix
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    (named && !KNOWN_ACTION_PREFIXES.contains(&prefix))
+        .then(|| format!("unknown action kind '{prefix}'"))
 }
 
 /// Written in the configuration folder, one line per removed button setting.
 pub const CONFLICT_LOG: &str = "button-errors.log";
 
-type Parsed = (BTreeMap<String, Layer>, String, Vec<ConfigConflict>);
+type Parsed = (
+    BTreeMap<String, Layer>,
+    String,
+    Vec<ConfigConflict>,
+    Vec<KeptRow>,
+);
 
 /// Only an unsupported header rejects the file; any other broken row removes
-/// just the setting it describes and is reported as a conflict.
+/// just the setting it describes and is reported as a conflict. A row of a kind
+/// this build does not know is kept instead, and reported as such.
 fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
     let mut lines = text.lines();
     if lines.next() != Some(VERSION) {
@@ -1094,9 +1195,16 @@ fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
     );
     let mut active = DEFAULT_LAYER.to_string();
     let mut conflicts = Vec::new();
+    let mut kept = Vec::new();
     for row in lines {
-        if let Err(reason) = apply_row(model, &mut layers, &mut active, row) {
-            conflicts.push(conflict_for(row, reason));
+        match apply_row(model, &mut layers, &mut active, &mut kept, row) {
+            Ok(None) => {}
+            Ok(Some(reason)) => {
+                let mut conflict = conflict_for(row, reason);
+                conflict.kept = true;
+                conflicts.push(conflict);
+            }
+            Err(reason) => conflicts.push(conflict_for(row, reason)),
         }
     }
     let names: Vec<String> = layers.keys().cloned().collect();
@@ -1117,6 +1225,7 @@ fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
                 control: encode_trigger(&trigger),
                 reason: "binding references a missing target layer".into(),
                 row: String::new(),
+                kept: false,
             });
         }
         let stale: Vec<Trigger> = layer
@@ -1132,21 +1241,23 @@ fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
                 control: encode_trigger(&trigger),
                 reason: "page return references a missing page".into(),
                 row: String::new(),
+                kept: false,
             });
         }
     }
     if !layers.contains_key(&active) {
         active = DEFAULT_LAYER.into();
     }
-    Ok((layers, active, conflicts))
+    Ok((layers, active, conflicts, kept))
 }
 
 fn apply_row(
     model: &DeviceModel,
     layers: &mut BTreeMap<String, Layer>,
     active: &mut String,
+    kept: &mut Vec<KeptRow>,
     row: &str,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let cells: Vec<_> = row.split('\t').collect();
     match cells.as_slice() {
         ["active", value] => *active = canonical_layer_name(&unhex(value)?),
@@ -1170,6 +1281,22 @@ fn apply_row(
         ["binding", layer, trigger, action] => {
             let layer = canonical_layer_name(&unhex(layer)?);
             let trigger = decode_trigger(model, trigger)?;
+            if let Some(reason) = unknown_action_kind(action) {
+                let data = layers
+                    .get_mut(&layer)
+                    .ok_or("binding references missing layer")?;
+                if data.bindings.contains_key(&trigger) || has_kept_binding(kept, &layer, &trigger)
+                {
+                    return Err("duplicate binding".into());
+                }
+                kept.push(KeptRow {
+                    layer,
+                    trigger,
+                    kind: KeptKind::Binding,
+                    row: row.into(),
+                });
+                return Ok(Some(reason));
+            }
             let mut action = decode_action(action)?;
             validate_binding_action(&trigger, &action).map_err(|error| error.to_string())?;
             if let Action::SwitchLayer(target) = &mut action {
@@ -1178,7 +1305,7 @@ fn apply_row(
             let data = layers
                 .get_mut(&layer)
                 .ok_or("binding references missing layer")?;
-            if data.bindings.contains_key(&trigger) {
+            if data.bindings.contains_key(&trigger) || has_kept_binding(kept, &layer, &trigger) {
                 return Err("duplicate binding".into());
             }
             data.bindings.insert(trigger, action);
@@ -1196,6 +1323,17 @@ fn apply_row(
             let data = layers
                 .get_mut(&layer)
                 .ok_or("return references missing layer")?;
+            if has_kept_binding(kept, &layer, &trigger) {
+                kept.push(KeptRow {
+                    layer,
+                    trigger,
+                    kind: KeptKind::PageReturn,
+                    row: row.into(),
+                });
+                return Ok(Some(
+                    "page return of a binding this build cannot read".into(),
+                ));
+            }
             if !data.bindings.contains_key(&trigger) || data.returns.contains_key(&trigger) {
                 return Err("invalid or duplicate page return".into());
             }
@@ -1204,11 +1342,29 @@ fn apply_row(
         ["info", layer, trigger, source] => {
             let layer = canonical_layer_name(&unhex(layer)?);
             let trigger = decode_trigger(model, trigger)?;
-            let source =
-                crate::info::InfoSource::from_id(source).ok_or("unknown information source")?;
             let data = layers
                 .get_mut(&layer)
                 .ok_or("information references missing layer")?;
+            let source = match crate::info::InfoSource::from_id(source) {
+                Some(source) => source,
+                None if shows_information(&trigger)
+                    && (data.bindings.contains_key(&trigger)
+                        || has_kept_binding(kept, &layer, &trigger))
+                    && !data.displays.contains_key(&trigger)
+                    && !kept.iter().any(|row| {
+                        row.kind == KeptKind::Info && row.layer == layer && row.trigger == trigger
+                    }) =>
+                {
+                    kept.push(KeptRow {
+                        layer,
+                        trigger,
+                        kind: KeptKind::Info,
+                        row: row.into(),
+                    });
+                    return Ok(Some("unknown information source".into()));
+                }
+                None => return Err("unknown information source".into()),
+            };
             if !shows_information(&trigger)
                 || !data.bindings.contains_key(&trigger)
                 || data.displays.contains_key(&trigger)
@@ -1219,7 +1375,12 @@ fn apply_row(
         }
         _ => return Err("malformed layer configuration".into()),
     }
-    Ok(())
+    Ok(None)
+}
+
+fn has_kept_binding(kept: &[KeptRow], layer: &str, trigger: &Trigger) -> bool {
+    kept.iter()
+        .any(|row| row.kind == KeptKind::Binding && row.layer == layer && row.trigger == *trigger)
 }
 
 fn conflict_for(row: &str, reason: String) -> ConfigConflict {
@@ -1238,6 +1399,7 @@ fn conflict_for(row: &str, reason: String) -> ConfigConflict {
         control: control.chars().take(40).collect(),
         reason,
         row: row.chars().take(300).collect(),
+        kept: false,
     }
 }
 
@@ -1267,16 +1429,23 @@ fn utc_timestamp() -> String {
 fn log_conflicts(root: &Path, conflicts: &[ConfigConflict]) -> io::Result<()> {
     use std::io::Write;
     let stamp = utc_timestamp();
+    let path = root.join(CONFLICT_LOG);
+    // A kept row is reported again on every start; log it once.
+    let earlier = fs::read_to_string(&path).unwrap_or_default();
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(root.join(CONFLICT_LOG))?;
+        .open(path)?;
     for conflict in conflicts {
-        writeln!(
-            file,
-            "{stamp}\tERROR\tprofile={:?}\tcontrol={}\treason={}\tremoved={}",
+        let outcome = if conflict.kept { "kept" } else { "removed" };
+        let line = format!(
+            "profile={:?}\tcontrol={}\treason={}\t{outcome}={}",
             conflict.layer, conflict.control, conflict.reason, conflict.row
-        )?;
+        );
+        if conflict.kept && earlier.lines().any(|old| old.ends_with(&line)) {
+            continue;
+        }
+        writeln!(file, "{stamp}\tERROR\t{line}")?;
     }
     Ok(())
 }
@@ -1437,6 +1606,10 @@ mod launch_tests;
 #[cfg(test)]
 #[path = "layers_tests.rs"]
 mod layers_tests;
+
+#[cfg(test)]
+#[path = "layers/unknown_kind_tests.rs"]
+mod unknown_kind_tests;
 
 #[cfg(test)]
 mod tests {

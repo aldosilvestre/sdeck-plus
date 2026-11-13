@@ -235,7 +235,9 @@ fn validate(stage: &Path, model: &'static DeviceModel) -> io::Result<LayerStore>
         return Err(invalid("bundle requires layers.conf"));
     }
     let mut layers = LayerStore::open_at_model(stage, model)?;
-    if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
+    // Rows of an unknown kind are kept and written back unchanged by the store.
+    if !layers.diagnostics().is_empty() || layers.conflicts().iter().any(|conflict| !conflict.kept)
+    {
         return Err(invalid("invalid or recovered layer configuration"));
     }
     let organization = Organization::open_at(stage, &layers)?;

@@ -84,6 +84,19 @@ All notable changes to this project are documented here. The format follows
   `mergbw_extension`) are gone from this repository; their coverage moved to the plugin projects'
   own tests and the validator.
 
+### Fixed
+
+- **Bindings this build cannot read are no longer deleted.** A `layers.conf` row of a kind
+  this build does not know (a `feature-v1` action of an unknown variant, an unknown action
+  prefix, or live information of an unknown source) used to be logged as `removed=` and
+  dropped on the next save. It is now kept unchanged, not executed and not shown, written
+  back byte-identical on every save, and logged once as `kept=` in `button-errors.log`. It is
+  dropped only when that control is bound again (or its information changed) or its layer is
+  deleted. Malformed rows of a known kind are still removed and logged. A `touchscreen.json`
+  with such an action is treated as unreadable: it is left untouched and saving stays
+  disabled, with a message saying why. Configuration bundles carry kept rows through export
+  and import unchanged.
+
 ## [0.2.0] - 2026-11-10
 
 Support for the Stream Deck + XL and for several Stream Decks at once (package version `0.2.0`).

@@ -962,14 +962,24 @@ fn build_body(
     send_initial: bool,
 ) -> Body {
     let updating_layers = Rc::new(Cell::new(false));
-    let conflicts = layers.borrow().conflicts().len();
-    if conflicts > 0 {
+    let conflicts = layers.borrow().conflicts().to_vec();
+    let kept = conflicts.iter().filter(|conflict| conflict.kept).count();
+    let removed = conflicts.len() - kept;
+    if removed > 0 {
         toast.show(
             &format!(
-                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
+                "Configuration conflicts: {removed} button setting(s) were removed. Details are in {} in the configuration folder.",
                 sdeck_plus::layers::CONFLICT_LOG
             ),
             true,
+        );
+    } else if kept > 0 {
+        toast.show(
+            &format!(
+                "{kept} button setting(s) were written by a newer version and are kept unchanged. Details are in {} in the configuration folder.",
+                sdeck_plus::layers::CONFLICT_LOG
+            ),
+            false,
         );
     }
     let root = GtkBox::new(Orientation::Vertical, 16);

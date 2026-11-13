@@ -103,6 +103,15 @@ impl Touchscreens {
                 for binding in page.bindings {
                     let trigger =
                         decode_trigger(model, &binding.trigger).map_err(|error| invalid(&error))?;
+                    if let Some(reason) = unknown_action_kind(&binding.action) {
+                        // Not rewritten without it, not read without it: leave
+                        // the file as it is and disable writes.
+                        return Err(invalid(&format!(
+                            "binding {} uses an action this build cannot read ({reason}); \
+                             the file is left untouched and saving is disabled",
+                            binding.trigger
+                        )));
+                    }
                     let action = decode_action(&binding.action).map_err(|error| invalid(&error))?;
                     validate_binding_action(&trigger, &action)?;
                     if !(trigger.is_touchscreen()
