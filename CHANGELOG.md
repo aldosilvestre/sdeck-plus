@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Plugin display values (host side):** a plugin manifest may declare `values` (id and label, at
+  most 16) and an action may name the one it shows with `display`. A new `query` request asks the
+  plugin for it and returns a headline (1-32 characters), an optional detail (at most 64) and an
+  optional 0-100 level, under the same limits as an invocation (`PluginRegistry::query`,
+  `QueryOutcome`, `PluginError::NoDisplay`). The Add plugin preview data and `plugin_validate`
+  list the values, and `plugin_validate --query <action>` runs one query. Saved bindings and
+  stores are unchanged; showing the value on keys and the touch strip comes separately.
 - **Agent skill file:** `docs/SKILL.md` lets an AI agent write, test, validate and hand off an
   sdeck-plus plugin (it never enables the plugin); `tests/plugin_sdk.rs` checks it against the code.
 - **External plugins:** separate programs add actions without recompiling the app. Each valid

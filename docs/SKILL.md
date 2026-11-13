@@ -155,6 +155,7 @@ The plugin writes exactly ONE line on stdout and exits with status 0:
 | `RequestIdMismatch` | a different `request_id` |
 | `OutputTooLarge` | stdout over 16 KiB; the process is killed |
 | `Timeout` | the 5 s deadline passed |
+| `NoDisplay` | a query on an action that declares no `display` (nothing runs) |
 
 Complete minimal plugin, standard library only (identical to `examples/plugin-template/run`). It is
 importable (`main(argv, stdin, stdout, environ)`), always returns 0, validates before acting and never
@@ -267,6 +268,22 @@ def my_action(settings, runner=subprocess.run, clock=time.monotonic):
         raise PluginFailure("tool failed")  # never echo result.stderr blindly
     return "done"
 ```
+
+### Showing a value (optional)
+
+An action can show a value the plugin remembers (a brightness, a scene). Declare `"values": [{"id": "brightness", "label": "Brightness"}]` (at most 16 values, unique ids, label 1-64 printable characters) and give the action `"display": "brightness"` (it must name a declared value). The app then asks with a `query` request (a value id, no `action`):
+
+```json
+{"protocol_version":1,"type":"query","request_id":"sdeck-8","value":"brightness","settings":{}}
+```
+
+Answer with one line and exit 0:
+
+```json
+{"protocol_version":1,"request_id":"sdeck-8","ok":true,"value":{"headline":"70%","detail":"Brightness","level":70}}
+```
+
+`headline` is required (1-32 printable characters), `detail` optional (at most 64 printable characters), `level` an optional integer 0-100; unknown fields are rejected. Failure is `ok:false` with `error`, as for an invocation. Same limits as an invocation (5 s, 16 KiB). Answer from your own remembered state, quickly, and never block or contact the device. A query on an action without `display` fails with `NoDisplay` before anything runs. Check it with `plugin_validate <dir> --query <action>` (it RUNS the plugin).
 
 ## Step 4 - runtime constraints to design for
 

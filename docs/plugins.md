@@ -61,6 +61,25 @@ with your user's privileges (the app never asks for or gives administrator right
   out-of-bound values are rejected, defaults are filled in, and the payload must stay within
   4096 bytes (the stored-action bound).
 
+### Display values (optional)
+
+A plugin may declare values it can report, and an action may name the one it displays:
+
+```json
+"values": [{"id": "brightness", "label": "Brightness"}],
+"actions": [{"id": "show-brightness", "name": "Brightness", "controls": ["key", "touch"],
+             "display": "brightness"}]
+```
+
+- `values`: at most 16 values (default none); `id` follows the id rule above, `label` is 1-64
+  printable characters, ids are unique.
+- `display` (per action, optional) must name a declared value, otherwise the manifest is rejected.
+  An action without `display` has nothing to query. Both keys are omitted when unused, so a manifest
+  without them behaves exactly as before; an app build that predates them rejects a manifest that
+  has them (unknown fields are rejected).
+- `PluginRegistry::query` asks for the value (see "Query protocol" below); the saved
+  `PluginBinding` is unchanged, it is still just plugin, action and settings.
+
 ### Requirements (optional)
 
 A plugin may declare what it needs with a top-level `requirements` array (default: none; a
@@ -128,11 +147,43 @@ returned truncated (4096 bytes). Exit status must be 0.
 | Condition | `PluginError` |
 |---|---|
 | `ok:false` | `Reported(error)` |
+| query on an action without `display` (nothing runs) | `NoDisplay { plugin, action }` |
 | non-zero exit | `NonZeroExit { code, diagnostics }` |
 | bad/extra stdout, unknown or missing fields, wrong version, text over 512 characters | `MalformedResponse` |
 | different `request_id` | `RequestIdMismatch` |
 | stdout over 16 KiB (the process is killed) | `OutputTooLarge` |
 | total time exceeded | `Timeout` |
+
+## Query protocol (display values)
+
+`PluginRegistry::query(&binding, &InvokeOptions) -> Result<QueryOutcome, PluginError>` asks the
+plugin for the value the binding's action displays (its `display` value id). Same rules as
+`invoke`: installed, enabled, validated and defaulted settings, one cleared-environment child in its
+own process group, 5 s default deadline (at most 60 s), stdout at most 16 KiB, never retried, call it
+from a worker thread. Stdin receives one line, with a `value` and no `action`:
+
+```json
+{"protocol_version":1,"type":"query","request_id":"req-2","value":"brightness","settings":{"zone":2}}
+```
+
+Stdout is one line, with a `value` object on success (or the `ok:false` form above):
+
+```json
+{"protocol_version":1,"request_id":"req-2","ok":true,"value":{"headline":"70%","detail":"Brightness","level":70}}
+```
+
+- `headline`: required, 1-32 printable characters (no control characters).
+- `detail`: optional, at most 64 printable characters.
+- `level`: optional integer 0-100 (out of range, negative, fractional or non-numeric is rejected).
+- Unknown fields in the response or in `value` are rejected; `ok:true` without `value` is
+  `MalformedResponse`. A malformed body, a bad envelope, a non-zero exit, a timeout or too much
+  output use the same `PluginError` values as an invocation. An action without `display` is refused
+  before anything runs with `NoDisplay { plugin, action }`.
+- The plugin should answer from its own remembered state, quickly, and never block (the light
+  cannot always be read): the host waits at most the deadline.
+
+`QueryOutcome { headline: String, detail: Option<String>, level: Option<u8> }` is exported from
+`sdeck_plus::plugins`. `examples/plugin_validate` has a `--query <action>` mode (it RUNS the plugin).
 
 ## Supervision
 
@@ -215,7 +266,10 @@ With `--invoke` it also installs the staged copy into a fresh private temp plugi
 enables it there only, and performs ONE real invocation through `PluginRegistry::invoke`, after a
 warning that this **runs the plugin with your privileges**; it prints `PLUGIN_INVOKE_OK:` or
 `PLUGIN_INVOKE_ERROR:`. Without the flag nothing is run, and your own plugins folder is never
-touched. The staging and temp folders are always removed.
+touched. The staging and temp folders are always removed. `--query <action>` (exclusive with
+`--invoke`, same options and the same warning) does the same with ONE real `PluginRegistry::query`
+and prints `PLUGIN_QUERY_OK:` (headline, detail, level) or `PLUGIN_QUERY_ERROR:`; the summary also
+lists the declared `value:` lines and each action's `display:`.
 
 ## Adding a plugin from the app (library)
 

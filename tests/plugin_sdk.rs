@@ -4,8 +4,8 @@
 //! the network.
 
 use sdeck_plus::plugins::{
-    PluginManifest, MAX_MANIFEST_BYTES, MAX_MESSAGE_CHARS, MAX_SETTINGS_BYTES, MAX_STDERR_BYTES,
-    MAX_STDOUT_BYTES, MAX_TIMEOUT, PROTOCOL_VERSION,
+    PluginManifest, MAX_DETAIL_CHARS, MAX_HEADLINE_CHARS, MAX_MANIFEST_BYTES, MAX_MESSAGE_CHARS,
+    MAX_SETTINGS_BYTES, MAX_STDERR_BYTES, MAX_STDOUT_BYTES, MAX_TIMEOUT, PROTOCOL_VERSION,
 };
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
@@ -266,8 +266,45 @@ fn the_sdk_page_names_every_invocation_outcome() {
         "RequestIdMismatch",
         "OutputTooLarge",
         "Timeout",
+        "NoDisplay",
     ] {
         assert!(page.contains(outcome), "the SDK page lacks `{outcome}`");
+    }
+}
+
+/// The values limit is private to the library; the declaration is re-read so a change fails here.
+fn value_numbers() -> Vec<String> {
+    let manifest = read("src/plugins/manifest.rs");
+    assert!(
+        manifest.contains("const MAX_VALUES: usize = 16;"),
+        "the documented value count (16) no longer matches MAX_VALUES"
+    );
+    vec![
+        "16 values".to_owned(),
+        format!("{MAX_HEADLINE_CHARS} printable characters"),
+        format!("{MAX_DETAIL_CHARS} printable characters"),
+        "0-100".to_owned(),
+        r#""type":"query""#.to_owned(),
+    ]
+}
+
+#[test]
+fn the_sdk_page_the_contract_and_the_skill_state_the_value_limits() {
+    for document in [
+        format!("docs/{SDK_PAGE}"),
+        "docs/plugins.md".to_owned(),
+        SKILL.to_owned(),
+    ] {
+        let text = read(&document);
+        for needle in value_numbers() {
+            assert!(
+                text.contains(&needle),
+                "{document} lacks the value rule `{needle}`"
+            );
+        }
+        for word in ["display", "NoDisplay"] {
+            assert!(text.contains(word), "{document} lacks `{word}`");
+        }
     }
 }
 
