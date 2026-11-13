@@ -52,6 +52,7 @@ pub enum BindingIcon {
     VolumeDown,
     Mute,
     AudioOutput,
+    AudioInput,
     Scroll,
     Text,
     OpenFile,
@@ -96,7 +97,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 55] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -117,6 +118,7 @@ impl BindingIcon {
         Self::VolumeDown,
         Self::Mute,
         Self::AudioOutput,
+        Self::AudioInput,
         Self::Scroll,
         Self::Text,
         Self::OpenFile,
@@ -224,7 +226,8 @@ impl BindingIcon {
                     MediaCommand::VolumeDown => Self::VolumeDown,
                     MediaCommand::Mute => Self::Mute,
                 },
-                DesktopAction::VolumeStep { direction, .. } => match direction {
+                DesktopAction::VolumeStep { direction, .. }
+                | DesktopAction::InputVolumeStep { direction, .. } => match direction {
                     VolumeDirection::Up => Self::VolumeUp,
                     VolumeDirection::Down => Self::VolumeDown,
                 },
@@ -232,6 +235,10 @@ impl BindingIcon {
                 DesktopAction::StopAudio => Self::Stop,
                 DesktopAction::SetAudioOutput { .. } | DesktopAction::CycleAudioOutput => {
                     Self::AudioOutput
+                }
+                DesktopAction::ToggleInputMute => Self::Mute,
+                DesktopAction::SetAudioInput { .. } | DesktopAction::CycleAudioInput => {
+                    Self::AudioInput
                 }
                 DesktopAction::MouseScroll { .. } => Self::Scroll,
             },
@@ -310,6 +317,7 @@ impl BindingIcon {
             Self::VolumeDown => "volume-down",
             Self::Mute => "mute",
             Self::AudioOutput => "audio-output",
+            Self::AudioInput => "audio-input",
             Self::Scroll => "scroll",
             Self::Text => "text",
             Self::OpenFile => "open-file",
@@ -422,9 +430,12 @@ impl BindingIcon {
             | Self::PreviousTrack
             | Self::Play
             | Self::MediaIdle => C::Media,
-            Self::VolumeUp | Self::VolumeDown | Self::Mute | Self::AudioOutput | Self::Volume => {
-                C::Audio
-            }
+            Self::VolumeUp
+            | Self::VolumeDown
+            | Self::Mute
+            | Self::AudioOutput
+            | Self::AudioInput
+            | Self::Volume => C::Audio,
             Self::ObsScene
             | Self::Record
             | Self::Stream
@@ -1384,6 +1395,14 @@ fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Erro
             rounded(cairo, -11.0, 0.5, 6.0, 10.0, 2.5);
             rounded(cairo, 5.0, 0.5, 6.0, 10.0, 2.5);
             pen.duo(cairo)
+        }
+        BindingIcon::AudioInput => {
+            rounded(cairo, -4.0, -11.0, 8.0, 14.0, 4.0);
+            pen.duo(cairo)?;
+            cairo.arc(0.0, 0.5, 8.0, 0.0, PI);
+            polyline(cairo, &[(0.0, 8.5), (0.0, 11.5)]);
+            polyline(cairo, &[(-4.5, 11.5), (4.5, 11.5)]);
+            pen.line(cairo)
         }
         BindingIcon::Scroll => {
             rounded(cairo, -6.5, -10.5, 13.0, 21.0, 6.5);

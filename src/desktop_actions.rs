@@ -61,6 +61,17 @@ pub enum DesktopAction {
         name: String,
     },
     CycleAudioOutput,
+    /// Microphone (default source) volume change; always stored in this form.
+    InputVolumeStep {
+        direction: VolumeDirection,
+        percent: u8,
+    },
+    /// Toggle the mute state of the default audio input.
+    ToggleInputMute,
+    SetAudioInput {
+        name: String,
+    },
+    CycleAudioInput,
     MouseScroll {
         direction: ScrollDirection,
         ticks: u16,
@@ -204,7 +215,7 @@ impl DesktopAction {
                     Ok(())
                 }
             }
-            Self::SetAudioOutput { name } => printable_target(name),
+            Self::SetAudioOutput { name } | Self::SetAudioInput { name } => printable_target(name),
             Self::MouseScroll { ticks, .. } => {
                 if *ticks == 0 {
                     Err(invalid("scroll requires at least one tick"))
@@ -212,7 +223,7 @@ impl DesktopAction {
                     Ok(())
                 }
             }
-            Self::VolumeStep { percent, .. } => {
+            Self::VolumeStep { percent, .. } | Self::InputVolumeStep { percent, .. } => {
                 if (1..=MAX_VOLUME_STEP).contains(percent) {
                     Ok(())
                 } else {
@@ -221,7 +232,11 @@ impl DesktopAction {
                     )))
                 }
             }
-            Self::Media(_) | Self::StopAudio | Self::CycleAudioOutput => Ok(()),
+            Self::Media(_)
+            | Self::StopAudio
+            | Self::CycleAudioOutput
+            | Self::ToggleInputMute
+            | Self::CycleAudioInput => Ok(()),
         }
     }
 
@@ -243,6 +258,16 @@ impl DesktopAction {
                     VolumeDirection::Down => "down",
                 }
             ),
+            Self::InputVolumeStep { direction, percent } => format!(
+                "Input volume {} {percent}%",
+                match direction {
+                    VolumeDirection::Up => "up",
+                    VolumeDirection::Down => "down",
+                }
+            ),
+            Self::ToggleInputMute => "Toggle input mute".into(),
+            Self::SetAudioInput { name } => format!("Set audio input {name}"),
+            Self::CycleAudioInput => "Rotate audio input".into(),
             Self::PlayAudio { path } => format!("Play audio {}", path.display()),
             Self::StopAudio => "Stop owned audio".into(),
             Self::SetAudioOutput { name } => format!("Set audio output {name}"),
@@ -254,11 +279,15 @@ impl DesktopAction {
 
 /// wpctl argv for a volume step; raising keeps the 100% limit.
 fn volume_argv(direction: VolumeDirection, percent: u8) -> Vec<String> {
+    volume_argv_for("@DEFAULT_AUDIO_SINK@", direction, percent)
+}
+
+fn volume_argv_for(target: &str, direction: VolumeDirection, percent: u8) -> Vec<String> {
     let mut argv = vec!["wpctl".to_string(), "set-volume".into()];
     if direction == VolumeDirection::Up {
         argv.extend(["--limit".to_string(), "1.0".into()]);
     }
-    argv.push("@DEFAULT_AUDIO_SINK@".into());
+    argv.push(target.into());
     argv.push(match direction {
         VolumeDirection::Up => format!("{percent}%+"),
         VolumeDirection::Down => format!("{percent}%-"),
@@ -295,6 +324,8 @@ trait Backend: Send {
     fn stop_audio(&mut self) -> io::Result<()>;
     fn set_audio_output(&mut self, name: &str) -> io::Result<()>;
     fn cycle_audio_output(&mut self) -> io::Result<()>;
+    fn set_audio_input(&mut self, name: &str) -> io::Result<()>;
+    fn cycle_audio_input(&mut self) -> io::Result<()>;
     fn scroll(&mut self, direction: ScrollDirection, ticks: u16) -> io::Result<()>;
     fn poll_errors(&mut self) -> Vec<String> {
         Vec::new()
@@ -406,6 +437,17 @@ impl DesktopRuntime {
             DesktopAction::StopAudio => self.backend.stop_audio(),
             DesktopAction::SetAudioOutput { name } => self.backend.set_audio_output(name),
             DesktopAction::CycleAudioOutput => self.backend.cycle_audio_output(),
+            DesktopAction::InputVolumeStep { direction, percent } => self.backend.run(
+                &volume_argv_for("@DEFAULT_AUDIO_SOURCE@", *direction, *percent),
+            ),
+            DesktopAction::ToggleInputMute => self.backend.run(&[
+                "wpctl".into(),
+                "set-mute".into(),
+                "@DEFAULT_AUDIO_SOURCE@".into(),
+                "toggle".into(),
+            ]),
+            DesktopAction::SetAudioInput { name } => self.backend.set_audio_input(name),
+            DesktopAction::CycleAudioInput => self.backend.cycle_audio_input(),
             DesktopAction::MouseScroll { direction, ticks } => {
                 self.backend.scroll(*direction, *ticks)
             }
@@ -435,6 +477,8 @@ mod tests {
         Stop,
         SetAudioOutput(String),
         CycleAudioOutput,
+        SetAudioInput(String),
+        CycleAudioInput,
         Scroll(ScrollDirection, u16),
         Key(Chord),
     }
@@ -485,6 +529,12 @@ mod tests {
         }
         fn cycle_audio_output(&mut self) -> io::Result<()> {
             self.call(Call::CycleAudioOutput)
+        }
+        fn set_audio_input(&mut self, name: &str) -> io::Result<()> {
+            self.call(Call::SetAudioInput(name.into()))
+        }
+        fn cycle_audio_input(&mut self) -> io::Result<()> {
+            self.call(Call::CycleAudioInput)
         }
         fn scroll(&mut self, direction: ScrollDirection, ticks: u16) -> io::Result<()> {
             self.call(Call::Scroll(direction, ticks))
@@ -1132,6 +1182,149 @@ mod tests {
             // Then all fields survive exactly.
             assert_eq!(decoded, action);
             decoded.validate().unwrap();
+        }
+    }
+
+    fn input_argv(direction: VolumeDirection, percent: u8) -> Vec<String> {
+        let mut argv = vec!["wpctl".to_string(), "set-volume".into()];
+        if direction == VolumeDirection::Up {
+            argv.extend(["--limit".to_string(), "1.0".into()]);
+        }
+        argv.push("@DEFAULT_AUDIO_SOURCE@".into());
+        argv.push(format!(
+            "{percent}%{}",
+            if direction == VolumeDirection::Up {
+                "+"
+            } else {
+                "-"
+            }
+        ));
+        argv
+    }
+
+    #[test]
+    fn input_volume_steps_target_the_default_source_and_cap_raising() {
+        for (direction, percent) in [
+            (VolumeDirection::Up, 5),
+            (VolumeDirection::Up, 10),
+            (VolumeDirection::Down, 1),
+            (VolumeDirection::Down, 100),
+        ] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            runtime
+                .execute(
+                    &DesktopAction::InputVolumeStep { direction, percent },
+                    &mut keyboard,
+                )
+                .unwrap();
+            assert_eq!(
+                state.lock().unwrap().calls,
+                [Call::Run(input_argv(direction, percent))]
+            );
+            assert_eq!(keyboard.sends, 0);
+        }
+    }
+
+    #[test]
+    fn input_volume_step_outside_one_to_one_hundred_never_reaches_backend() {
+        for percent in [0, 101, 255] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            let error = runtime
+                .execute(
+                    &DesktopAction::InputVolumeStep {
+                        direction: VolumeDirection::Up,
+                        percent,
+                    },
+                    &mut keyboard,
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(state.lock().unwrap().calls.is_empty());
+        }
+    }
+
+    #[test]
+    fn input_mute_toggles_the_default_source_only() {
+        let (mut runtime, mut keyboard, state) = fixture();
+        runtime
+            .execute(&DesktopAction::ToggleInputMute, &mut keyboard)
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [Call::Run(
+                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]
+                    .map(String::from)
+                    .to_vec()
+            )]
+        );
+    }
+
+    #[test]
+    fn audio_input_routes_name_and_rotation_without_keyboard_input() {
+        let (mut runtime, mut keyboard, state) = fixture();
+        runtime
+            .execute(
+                &DesktopAction::SetAudioInput {
+                    name: "alsa_input.usb".into(),
+                },
+                &mut keyboard,
+            )
+            .unwrap();
+        runtime
+            .execute(&DesktopAction::CycleAudioInput, &mut keyboard)
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [
+                Call::SetAudioInput("alsa_input.usb".into()),
+                Call::CycleAudioInput
+            ]
+        );
+        assert_eq!(keyboard.sends, 0);
+        for name in ["", "  ", "mic\nname", "mic\0"] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            let error = runtime
+                .execute(
+                    &DesktopAction::SetAudioInput { name: name.into() },
+                    &mut keyboard,
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(state.lock().unwrap().calls.is_empty());
+        }
+    }
+
+    #[test]
+    fn audio_input_actions_have_distinct_stable_shapes_and_summaries() {
+        let cases = [
+            (
+                DesktopAction::InputVolumeStep {
+                    direction: VolumeDirection::Down,
+                    percent: 7,
+                },
+                r#"{"InputVolumeStep":{"direction":"Down","percent":7}}"#,
+                "Input volume down 7%",
+            ),
+            (
+                DesktopAction::ToggleInputMute,
+                r#""ToggleInputMute""#,
+                "Toggle input mute",
+            ),
+            (
+                DesktopAction::SetAudioInput { name: "mic".into() },
+                r#"{"SetAudioInput":{"name":"mic"}}"#,
+                "Set audio input mic",
+            ),
+            (
+                DesktopAction::CycleAudioInput,
+                r#""CycleAudioInput""#,
+                "Rotate audio input",
+            ),
+        ];
+        for (action, json, summary) in cases {
+            assert_eq!(serde_json::to_string(&action).unwrap(), json);
+            assert_eq!(serde_json::from_str::<DesktopAction>(json).unwrap(), action);
+            assert_eq!(action.summary(), summary);
         }
     }
 }

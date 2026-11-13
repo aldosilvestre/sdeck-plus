@@ -7,7 +7,7 @@ use std::{
     process::{Command, Output},
 };
 
-/// An available sink, identified by its persistent PipeWire `node.name`.
+/// An available sink or source, identified by its persistent PipeWire `node.name`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AudioOutput {
     /// Stable `node.name` to persist in `DesktopAction::SetAudioOutput`.
@@ -27,6 +27,19 @@ pub fn list_outputs() -> io::Result<Vec<AudioOutput>> {
     Ok(parse_outputs(&dump()?)?
         .into_iter()
         .map(|(_, output)| output)
+        .collect())
+}
+
+/// Lists the current PipeWire audio sources (microphones and other inputs)
+/// with the same rules as [`list_outputs`], for `media.class = Audio/Source`.
+/// `AudioOutput::name` is then the name persisted in `DesktopAction::SetAudioInput`.
+///
+/// # Errors
+/// Returns command failures and `InvalidData` for malformed dump data.
+pub fn list_inputs() -> io::Result<Vec<AudioOutput>> {
+    Ok(parse_inputs(&dump()?)?
+        .into_iter()
+        .map(|(_, input)| input)
         .collect())
 }
 
@@ -69,6 +82,14 @@ struct Props {
 }
 
 fn parse_outputs(bytes: &[u8]) -> io::Result<Vec<(u32, AudioOutput)>> {
+    parse_nodes(bytes, "Audio/Sink")
+}
+
+fn parse_inputs(bytes: &[u8]) -> io::Result<Vec<(u32, AudioOutput)>> {
+    parse_nodes(bytes, "Audio/Source")
+}
+
+fn parse_nodes(bytes: &[u8], class: &str) -> io::Result<Vec<(u32, AudioOutput)>> {
     let objects: Vec<Object> = serde_json::from_slice(bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut outputs = Vec::new();
@@ -79,11 +100,11 @@ fn parse_outputs(bytes: &[u8]) -> io::Result<Vec<(u32, AudioOutput)>> {
         let Some(props) = object.info.and_then(|info| info.props) else {
             continue;
         };
-        if props.media_class.as_deref() != Some("Audio/Sink") {
+        if props.media_class.as_deref() != Some(class) {
             continue;
         }
         let name = props.name.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "audio sink has no node.name")
+            io::Error::new(io::ErrorKind::InvalidData, "audio node has no node.name")
         })?;
         super::printable_target(&name)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -98,14 +119,32 @@ pub(super) fn set_output(
     process: &mut impl ProcessRunner,
     read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
 ) -> io::Result<()> {
-    let outputs = parse_outputs(&read_dump()?)?;
-    let (id, _) = outputs
+    set_node(name, "output", "Audio/Sink", process, read_dump)
+}
+
+pub(super) fn set_input(
+    name: &str,
+    process: &mut impl ProcessRunner,
+    read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
+) -> io::Result<()> {
+    set_node(name, "input", "Audio/Source", process, read_dump)
+}
+
+fn set_node(
+    name: &str,
+    noun: &str,
+    class: &str,
+    process: &mut impl ProcessRunner,
+    read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
+) -> io::Result<()> {
+    let nodes = parse_nodes(&read_dump()?, class)?;
+    let (id, _) = nodes
         .iter()
-        .find(|(_, output)| output.name == name)
+        .find(|(_, node)| node.name == name)
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("audio output is disconnected: {name}"),
+                format!("audio {noun} is disconnected: {name}"),
             )
         })?;
     process.run(&["wpctl".into(), "set-default".into(), id.to_string()])
@@ -119,7 +158,20 @@ pub(super) fn default_sink() -> io::Result<u32> {
     )
 }
 
+pub(super) fn default_source() -> io::Result<u32> {
+    inspect_default_node(
+        Command::new("wpctl")
+            .args(["inspect", "@DEFAULT_AUDIO_SOURCE@"])
+            .output()?,
+        "source",
+    )
+}
+
 fn inspect_default_output(output: Output) -> io::Result<u32> {
+    inspect_default_node(output, "sink")
+}
+
+fn inspect_default_node(output: Output, noun: &str) -> io::Result<u32> {
     if !output.status.success() {
         return Err(io::Error::other(format!(
             "wpctl inspect exited with {}: {}",
@@ -138,7 +190,7 @@ fn inspect_default_output(output: Output) -> io::Result<u32> {
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "invalid default sink inspect header",
+                format!("invalid default {noun} inspect header"),
             )
         })?;
     id.parse()
@@ -150,10 +202,31 @@ pub(super) fn cycle_output(
     read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
     read_default: impl FnOnce() -> io::Result<u32>,
 ) -> io::Result<()> {
-    let outputs = parse_outputs(&read_dump()?)?;
-    let first = outputs
-        .first()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no audio outputs available"))?;
+    cycle_node("outputs", "Audio/Sink", process, read_dump, read_default)
+}
+
+pub(super) fn cycle_input(
+    process: &mut impl ProcessRunner,
+    read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
+    read_default: impl FnOnce() -> io::Result<u32>,
+) -> io::Result<()> {
+    cycle_node("inputs", "Audio/Source", process, read_dump, read_default)
+}
+
+fn cycle_node(
+    plural: &str,
+    class: &str,
+    process: &mut impl ProcessRunner,
+    read_dump: impl FnOnce() -> io::Result<Vec<u8>>,
+    read_default: impl FnOnce() -> io::Result<u32>,
+) -> io::Result<()> {
+    let outputs = parse_nodes(&read_dump()?, class)?;
+    let first = outputs.first().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no audio {plural} available"),
+        )
+    })?;
     let current = read_default()?;
     let next = outputs
         .iter()
@@ -166,6 +239,10 @@ pub(super) fn cycle_output(
 #[cfg(test)]
 #[path = "audio_output_cycle_tests.rs"]
 mod cycle_tests;
+
+#[cfg(test)]
+#[path = "audio_input_tests.rs"]
+mod input_tests;
 
 #[cfg(test)]
 mod tests {
