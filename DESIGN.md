@@ -37,8 +37,108 @@ Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
 assigned, with the same save-or-draft rule as keys, and clicking an action with a
 dial selected uses the event chosen in the inspector. The touch strip retains
-its existing action selector. Secondary
+its existing action selector. **Plugins** (see `docs/plugins.md`) add one collapsible
+item per installed plugin below the built-in categories, never a shared "Plugins"
+category: the header shows the plugin name (with "(disabled)" while it is off) and
+the body leads with the untrusted-code warning (process separation is not
+sandboxing) and an explicit "Enable <name>" check box, then the plugin's actions
+with the controls they support as the row subtitle. A plugin that declares
+`requirements` also shows a compact **Requires** list under the check box (kind, name,
+version, "(optional)", description as tooltip) with an alert-role error line such as
+"Missing: hyprctl" for each required command not found on `PATH`; it is rechecked on
+every rescan, never blocks enabling or assigning, and runs nothing. A thin divider and a small muted
+**Plugins** heading row (heading role label, not clickable) mark where the plugin entries
+begin. The row is always shown, so adding a plugin is discoverable before any plugin
+exists, and shows only the label: the add button lives in the binding toolbar (see below).
+Under the row come malformed-plugin and invalid enabled-state messages (labels with the alert role,
+error colour) or the empty-state hint ("No plugins yet. Use the Add plugin button in the toolbar, or copy a plugin
+folder into <folder> and use Update plugins."; "No plugins yet. Use the Add plugin button in the toolbar to add one." when no folder is known). Adding and rescanning are not in the sidebar: see the
+binding toolbar below.
+Actions of a disabled plugin, or that do not fit the selected control (key, dial
+turn, dial press, touch strip), are dimmed with an explanatory tooltip. Assigning one
+always opens the generic **Plugin action** form (plugin and action drop-downs, then
+a text entry, a bounded spin button or a check box per manifest field, labelled for
+assistive technology) and stays a draft until Save binding; plugins cannot add their
+own widgets. A saved binding whose plugin is missing or changed shows a notice and is
+kept verbatim until another action is chosen. Secondary
 organization and artwork tools use progressive disclosure.
+
+**Add plugin dialog.** A modal window transient for the main window, one instance at a
+time (pressing the button again presents it), 660 x 760 by default and resizable (it still
+fits at 520 px wide). It opens with the entry focused, Enter in the entry runs the check and
+Escape closes it. Top to bottom: an in-content header row (the window's title bar: an "Add
+plugin" heading and a Close icon button), a short explanation ("Add a plugin from a folder on
+this computer or from an HTTPS repository address. Nothing runs until you enable it.", shown
+until a preview exists), the **Plugin source** block, a status row, a scrolling area, the
+pinned callouts and the footer.
+
+The source block has a **Folder | Repository** selector (linked toggle buttons, Folder by
+default, operable with Tab and Space), one entry, **Browse…** and **Check plugin**. The selector
+only changes the entry's placeholder and the helper line under it, and hides Browse for
+Repository; it never changes what is checked (the text decides). Typing or pasting an
+`https://` address selects Repository, and typing an absolute or `~` path selects Folder, so
+the selector never contradicts the text. Check plugin has the primary look while the entry has
+text and there is no preview; once a preview exists Install or Replace is the primary action.
+While a check or install runs the status row shows a spinner, the text and Cancel.
+
+The scrolling area holds the error callout, the "No plugin checked yet" empty state (idle
+only) and the preview card. The error callout (tinted `desk_error` fill, `desk_error` left
+edge, ink text, an icon on every row) is a list of alert-role sentences: a headline, up to 8
+problems and "And N more problems.". The preview card has a monogram tile (the first letter of
+the name on a `desk_selection` tile with a `desk_violet` edge), the name as a title, chips for
+`v<version>`, `id <id>` and the source (Folder or Repository, with an icon), the source line
+(folder path or repository address, wrapping, full text as tooltip), a four-cell stats row
+(Files, Size, Commit, Actions; the commit is the first 10 characters of the downloaded commit,
+and a folder shows a muted "n/a") and two native expanders. **Actions** (open by default, except when a required command is
+missing, so the Requirements rows fit) lists each action with chips for its controls (Key, Dial turn, Dial press, Touch strip) and a
+muted settings line. **Requirements** shows "X of Y found" (counting commands, the only kind
+that is looked up) and is collapsed when every required command is found and opened
+automatically when one is missing, and the card is then scrolled (on the frame clock, after layout)
+so the first Missing row is fully visible; each row has a status chip: Found, "Missing: <command>"
+(a required command not on `PATH`, an alert that never blocks installing), "Optional, not
+found" or "Not checked" (services and files are not looked up).
+
+The pinned callouts sit between the scrolling area and the footer and never scroll away: the
+privileges warning (amber `desk_warning` edge and icon; ink text) always states that the plugin
+runs with the user's privileges once enabled (never with administrator rights) and that its code should be read first, and, when
+the id is installed, a replace notice (`desk_cyan` edge) gives the installed version and says
+that replacing disables the plugin until it is enabled again. The footer has Close and Install
+(or Replace); while Install cannot be pressed, a helper line there says "Check a plugin to
+enable Install." Focus is the 2px `desk_cyan` outline on every control; colours come from the
+`desk_*` tokens only, so the dark and light palettes both apply.
+
+States: **idle** (Install disabled), **checking** (entry, selector, Browse and Check disabled; spinner,
+Cancel), **valid preview** (Install enabled for exactly the text in the entry; editing the
+entry or Browse drops the preview and the staged copy and returns to idle; switching the
+selector does not), **invalid** (one or
+more readable sentences, Install disabled; nothing is installed or left staged), **replace**
+(valid preview of an id that is already installed; the button reads Replace) and
+**installing** (everything disabled; spinner). An AlreadyInstalled answer from a race moves the
+dialog to replace with an explanation instead of failing silently. On success the dialog closes,
+the sidebar is rescanned so the plugin appears as its own disabled item, and the status line
+says "Installed <name> <version>. It is disabled: enable it in the Plugins section." (a
+replacement also says it was disabled and must be enabled again).
+
+Safety rules: only `https://` repository addresses are accepted and are fetched with the
+system git (hardened by the library; a missing git is explained and a folder suggested);
+checking and installing run on a worker thread, never the GTK thread; a candidate is validated
+with the registry rules before anything is installed; installed plugins are never enabled;
+Replace is used only after an explicit press on a valid preview and disables the plugin;
+installs are serialised through one hub-wide slot (a second request is refused); closing the
+dialog never blocks: it cancels a running check and returns, and the main-loop poll joins the
+finished worker later (a cancelled check leaves no staging directory; an install already
+started completes, then the sidebar is rescanned and the status line reports it). Errors are sentences, never debug output.
+Everything shown from a plugin or from git (names, labels, requirement text, git's message) is
+displayed literally (no markup) with control, zero-width and bidirectional-format characters
+removed; a long plugin name, version or id chip is ellipsized with the full text as its tooltip. Releasing a
+staged copy (closing, Escape, editing, a failed replace, the main window closing) never blocks
+the GTK thread: the directory is deleted on a short-lived thread, and an install that finishes
+or fails after the dialog closed is reported on the status line.
+
+Known limits: a collapsed section's rows are not in the widget tree until it opens; with many requirements at 520 px wide the last optional rows can sit under the pinned callouts until scrolled; the repository error offers no "choose a folder instead" shortcut (the message says to); Replace overwrites whatever version is installed at that moment, which may differ
+from the one the preview showed if another install ran in between; the staged copy is validated and copied at check time, so
+later edits to the source folder are not installed (the previewed bytes are).
+
 
 Touchscreen configuration is profile-owned and has its own page selection,
 independent of keypad pages and folders. Only the touch inspector shows the
@@ -499,6 +599,14 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   and test caption. The status line and Undo remove sit directly under it. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
+  The same row ends with **Add plugin…** and **Update plugins**, two icon-only buttons of the
+  same size and normal toolbar spacing, add (`list-add-symbolic`) immediately before
+  refresh so refresh stays right-most, pushed to the right by an expanding gap and a thin
+  vertical divider so they read as separate from the three binding tools. Add plugin's
+  tooltip is "Add plugin…" (accessible name "Add plugin"); it opens the add dialog below.
+  Update plugins' tooltip is exactly "Update plugins" (also its accessible name); it rereads
+  the plugin folder and never runs a plugin. The toolbar is always visible, for keys, dials
+  and the touch strip alike, so both controls are always reachable.
   Test action remains neutral and explicitly
   labeled, with guidance that testing executes and saving only persists.
 - **Button text and image:** right-clicking a key selects it and opens a small

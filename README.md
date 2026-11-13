@@ -53,6 +53,11 @@ permissions on its own.
   control (configurable volume step, default 5%), audio-output switching, sounds, brightness, timers and page returns.
 - **OBS Studio:** switch scenes, toggle recording and streaming, mute inputs and
   show or hide sources over the local WebSocket server.
+- **External plugins:** extra actions from separate programs you enable explicitly; add one from the
+  app by folder path or public HTTPS repository address, checked before anything is installed (see
+  [docs/plugins.md](docs/plugins.md)); to write one, follow the
+  [plugin SDK guide](docs/plugin-sdk.html) and the starter in `examples/plugin-template` (an AI agent
+  can follow [docs/SKILL.md](docs/SKILL.md)).
 - **System tray** with optional start at login.
 - **Light and dark GTK themes** following the desktop.
 - **Configuration backup and restore** through a single readable metadata-only export file (no base64);

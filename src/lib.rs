@@ -21,6 +21,7 @@ pub mod layers;
 pub mod local_artwork;
 pub mod obs;
 pub mod organization;
+pub mod plugins;
 pub mod preview_layout;
 pub mod protocol;
 

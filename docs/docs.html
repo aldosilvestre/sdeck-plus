@@ -121,6 +121,7 @@
         <li><a href="./#actions">Actions</a></li>
         <li><a href="#install">Install</a></li>
         <li><a href="docs.html" aria-current="page">Documentation</a></li>
+        <li><a href="plugin-sdk.html">Plugin SDK</a></li>
         <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
       </ul>
     </nav>
@@ -183,6 +184,7 @@
             <li><a href="#profiles-pages-folders">Profiles, pages and folders</a></li>
             <li><a href="#appearance">Appearance</a></li>
             <li><a href="#obs-studio">OBS Studio</a></li>
+            <li><a href="#plugins">Plugins</a></li>
             <li><a href="#data-tray-lifecycle">Data, tray and lifecycle</a></li>
           </ol>
         </li>
@@ -193,6 +195,7 @@
             <li><a href="#dev-simulated">Simulated devices</a></li>
             <li><a href="#dev-device-checks">Real-device checks</a></li>
             <li><a href="#dev-event-api">In-process event API</a></li>
+            <li><a href="#dev-plugins">Writing a plugin</a></li>
             <li><a href="#dev-code">Code organization</a></li>
           </ol>
         </li>
@@ -717,6 +720,28 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
           </div>
         </div>
 
+        <div class="doc-group" id="plugins" style="--c: var(--fam-obs)">
+          <h3>Plugins</h3>
+          <div class="cards">
+            <article class="card wide">
+              <h4>External plugins</h4>
+              <p>A plugin is a separate program that adds actions. Each installed plugin appears as its own collapsible item in the <strong>Actions</strong> catalog, below the
+                 built-in categories, under a <strong>Plugins</strong> heading, with its status. Plugins live in <code>$XDG_DATA_HOME/sdeck-plus/plugins/&lt;id&gt;/</code> (or
+                 <code>$HOME/.local/share/sdeck-plus/plugins/&lt;id&gt;/</code>), shared by every device model. The app only reads each <code>manifest.json</code> while browsing and
+                 never enables anything by itself; the refresh button at the right end of the binding toolbar (<strong>Update plugins</strong>) reads the folder again. Folders with a bad manifest are listed with the reason and
+                 do not affect the others or the built-in actions.</p>
+              <p><strong>Adding a plugin.</strong> Press the <strong>Add plugin</strong> button (<strong>+</strong>) at the right end of the binding toolbar, immediately left of <strong>Update plugins</strong>, and enter an absolute folder path (or <code>~/...</code>, or use <strong>Browse&hellip;</strong>) or the <code>https://</code> address of a public repository whose root holds the plugin. <strong>Check plugin</strong> first validates it with the same rules as the validator and shows a preview (id, version, source and downloaded commit, files, actions, requirements) without installing or running anything; <strong>Install</strong> then adds it as a disabled item, and installing a plugin whose id already exists needs an explicit <strong>Replace</strong>, which disables it until you tick <strong>Enable</strong> again. Repositories are fetched with the system <code>git</code> (HTTPS only, shallow, no submodules or hooks, 60 s and 32 MiB limits); SSH, private repositories, choosing a branch or tag and removing a plugin from the app are not supported yet. Copying a plugin folder into the plugins folder by hand still works. Details for authors are in the <a href="plugin-sdk.html#installing">plugin SDK guide</a>.</p>
+              <p><strong>Plugins run with your user's privileges, never with administrator (root) rights. Process separation is not sandboxing</strong>, so tick <strong>Enable</strong> only for plugins you trust.
+                 Actions of a disabled plugin are listed but cannot be assigned or run. Assign an action like any other, complete its generated form (text, bounded number or
+                 check box fields) and <strong>Save binding</strong>; saving never runs the plugin, only <strong>Test action</strong> or the control does. Each press runs the plugin
+                 once on its own worker with a 5 second deadline, so a slow plugin cannot delay built-in actions, and errors appear in the status line.</p>
+              <p>Bindings keep the plugin and action ids and the field values. If the plugin is missing or no longer offers the action, the binding is kept as saved and the editor
+                 says why. Exported bundles contain the bindings only, never plugin programs or the enabled list. See <code>docs/plugins.md</code> for the host contract.</p>
+              <p><strong>Writing a plugin?</strong> The <a href="plugin-sdk.html">plugin SDK guide</a> covers the project layout, the manifest, the protocol, the limits, security and testing, and <code>examples/plugin-template</code> is a starter project you can copy.</p>
+            </article>
+          </div>
+        </div>
+
         <div class="doc-group" id="data-tray-lifecycle" style="--c: var(--fam-load)">
           <h3>Data, tray and lifecycle</h3>
           <div class="cards">
@@ -861,11 +886,12 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
 cargo run --offline --example verify_streamdeck -- --input
 cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
 cargo run --offline --example verify_desktop
-dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav</code></pre>
+dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav
+cargo run --offline --example plugin_validate -- /path/to/plugin-project</code></pre>
               </div>
               <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
                  through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
-                 silent audio file and the <code>mpv-mpris</code> plugin.</p>
+                 silent audio file and the <code>mpv-mpris</code> plugin. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
             </article>
             <article class="card wide" id="dev-event-api">
               <h4>In-process event API</h4>
@@ -875,6 +901,10 @@ dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/
                  image writes on one thread. Only the newest pending artwork snapshot is applied, and GTK polls results with a short GLib timer.
                  Internal events use the <code>MonitorEvent::AppEvent</code> channel. There is no TCP, HTTP or WebSocket listener.</p>
               <p>The protocol decoder validates the report ID and declared little-endian payload length before decoding input.</p>
+            </article>
+            <article class="card wide" id="dev-plugins">
+              <h4>Writing a plugin</h4>
+              <p>Plugins are separate projects, one repository each, so adding one never touches this repository. The <a href="plugin-sdk.html">plugin SDK guide</a> is the author-facing documentation; <code>docs/plugins.md</code> is the host contract. Start from <code>examples/plugin-template</code> (a copyable Python 3 project with its own unit tests), check it with <code>cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt;</code> and keep the guide honest with <code>cargo test --offline --test plugin_sdk</code>, which runs the template through the validator and compares the guide's limits with the code.</p>
             </article>
             <article class="card wide" id="dev-code">
               <h4>Code organization</h4>
@@ -927,6 +957,7 @@ dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/
         <ul>
           <li><a href="#configuration">Configuration</a></li>
           <li><a href="#development">Development</a></li>
+          <li><a href="plugin-sdk.html">Plugin SDK</a></li>
           <li><a href="https://github.com/aldosilvestre/sdeck-plus">GitHub</a></li>
           <li><a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/CHANGELOG.md">Changelog</a></li>
         </ul>

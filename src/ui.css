@@ -401,6 +401,87 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .catalog-icon { padding: 5px; border-radius: 8px; background-color: @desk_field; border: 1px solid @desk_edge; }
 .catalog-action:hover .catalog-icon { border-color: @desk_cyan; }
 .binding-toolbar { padding-bottom: 8px; border-bottom: 1px solid alpha(@desk_edge, 0.8); margin-bottom: 4px; }
+.plugin-heading { color: @desk_muted; font-size: 11px; font-weight: 700; padding: 2px 8px 0 8px; }
+.plugin-heading-row { padding-right: 4px; }
+/* Add plugin dialog: in-content header, source selector, preview card, pinned callouts. */
+.plugin-add-header { padding: 8px 10px 8px 16px; border-bottom: 1px solid @desk_edge; background-color: @desk_bg; }
+.plugin-add-title { font-size: 14px; font-weight: 600; }
+.plugin-add-dialog button.plugin-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; }
+.plugin-add-dialog button.plugin-close:hover { background-color: @desk_hover; }
+.plugin-add-footer { padding: 12px 16px; border-top: 1px solid @desk_edge; }
+.plugin-source-kind > button { min-height: 20px; padding: 5px 12px; color: @desk_muted; }
+.plugin-source-kind > button:hover { color: @desk_ink; }
+.plugin-source-kind > button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
+.plugin-source-kind > button:disabled, .plugin-source-kind > button:disabled label,
+.plugin-source-kind > button:disabled image { color: @desk_muted; background-color: transparent; }
+.plugin-source-kind > button:disabled:checked { background-color: @desk_selection; }
+.plugin-empty { padding: 28px 20px; }
+.plugin-empty image { color: @desk_muted; }
+.plugin-add-dialog .plugin-preview { padding: 16px; }
+.plugin-monogram {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 14px;
+    background-color: @desk_selection;
+    color: @desk_violet;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+    font-size: 20px;
+    font-weight: 700;
+}
+.plugin-chip {
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background-color: @desk_field;
+    border: 1px solid @desk_edge;
+    color: @desk_ink;
+}
+.plugin-rows .plugin-chip { background-color: @desk_surface; }
+.plugin-chip.plugin-mono, .plugin-mono { font-family: monospace; }
+.plugin-chip.plugin-pill { border-radius: 999px; padding: 2px 9px; }
+.plugin-chip.ok, .plugin-chip.ok label, .plugin-chip.ok image { color: @desk_success; }
+.plugin-chip.bad, .plugin-chip.bad label, .plugin-chip.bad image { color: @desk_error; }
+.plugin-chip.dim, .plugin-chip.dim label, .plugin-chip.dim image, label.dim { color: @desk_muted; }
+.plugin-stats { background-color: @desk_field; border: 1px solid @desk_edge; border-radius: 10px; }
+.plugin-stat { padding: 8px 12px; }
+.plugin-stat:not(:first-child) { border-left: 1px solid @desk_edge; }
+.plugin-stat-name { font-size: 11px; font-weight: 700; color: @desk_muted; }
+.plugin-stat-value { font-weight: 600; }
+.plugin-stat-value.plugin-mono { font-weight: 400; font-size: 12px; padding-top: 2px; }
+.plugin-section { border-top: 1px solid @desk_edge; padding-top: 8px; }
+.plugin-section > title { padding: 4px; border-radius: 8px; min-height: 26px; }
+.plugin-section > title:hover { background-color: @desk_hover; }
+.plugin-section:focus-visible > title, .plugin-section > title:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.plugin-section-title { font-size: 13px; font-weight: 600; }
+.plugin-count { color: @desk_muted; font-size: 11px; padding: 1px 7px; border-radius: 999px; background-color: @desk_field; }
+.plugin-rows { background-color: @desk_field; border: 1px solid @desk_edge; border-radius: 10px; }
+.plugin-row { padding: 8px 12px; min-height: 24px; }
+.plugin-row:not(:first-child) { border-top: 1px solid @desk_edge; }
+.plugin-row-name { font-weight: 600; }
+.plugin-callout {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background-color: @desk_field;
+    border: 1px solid @desk_edge;
+    border-left: 3px solid @desk_warning;
+}
+.plugin-callout.info { border-left-color: @desk_cyan; }
+.plugin-callout-icon { color: @desk_warning; }
+.plugin-callout.info .plugin-callout-icon { color: @desk_cyan; }
+.plugin-callout-title { font-size: 14px; font-weight: 600; }
+.plugin-callout.error {
+    padding: 10px 12px;
+    background-color: alpha(@desk_error, 0.16);
+    border-color: alpha(@desk_error, 0.55);
+    border-left-color: @desk_error;
+}
+.plugin-error-icon { color: @desk_error; margin-top: 1px; }
+.plugin-error-row:first-child label { font-weight: 600; }
 .binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
 popover.organize-popover > contents { border-radius: 14px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 14px 34px alpha(black, 0.28); }

@@ -1,0 +1,9 @@
+{
+  "title": "Add plugin dialog",
+  "brief": "\"el popup de agregado de plugins esta bastante feo, utiliza sino herramientas de diseño para que quede mas estetico.\" Make the Add plugin dialog (modal GTK window, folder or HTTPS repository, check, preview, install disabled) more attractive and clearer, using only the app's design tokens and widgets GTK can build natively.",
+  "artboards": [
+    { "file": "01-source-and-review.html", "title": "Source and review", "tradeoff": "Clear two-step flow and a compact review; the Folder | Repository choice adds one control the current single entry does not have, and the review stays text-led (less glanceable than a card).", "width": 760, "height": 900 },
+    { "file": "02-plugin-card.html", "title": "Plugin card", "tradeoff": "Most polished and glanceable: monogram, version, source pill, stats row and a prominent privileges callout; costs the most vertical space, so sections collapse and the callout pins above the footer.", "width": 760, "height": 900 },
+    { "file": "03-checklist.html", "title": "Checklist", "tradeoff": "Turns the check into visible, trustworthy verification rows with errors inside the failing row; the longest column and the quietest preview, so identity and actions are secondary.", "width": 760, "height": 900 }
+  ]
+}

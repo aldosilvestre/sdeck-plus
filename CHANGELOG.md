@@ -5,6 +5,62 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Agent skill file:** `docs/SKILL.md` lets an AI agent write, test, validate and hand off an
+  sdeck-plus plugin (it never enables the plugin); `tests/plugin_sdk.rs` checks it against the code.
+- **External plugins:** separate programs add actions without recompiling the app. Each valid
+  plugin is its own item under a **Plugins** heading of the Actions catalog, with an explicit
+  **Enable** check box (nothing is enabled by default), a generated settings form, and an
+  **Update plugins** icon in the binding toolbar that rereads the plugin folder. A supervised
+  host starts the plugin once per press with a cleared environment, bounded output and a fixed
+  5 s deadline, in its own process group that is killed afterwards, on a dedicated worker, and
+  never retries. Process separation is **not** a sandbox: plugins run with your privileges (the
+  notices now say plainly that no administrator rights are involved).
+- Optional manifest `requirements` (commands, services, files): shown in the plugin's sidebar
+  item; only commands are looked up on `PATH` and the app never installs or runs anything.
+- `plugin_validate` example (`cargo run --offline --example plugin_validate -- <dir>`) checks a
+  plugin project without running it; its explicit `--invoke` mode runs the plugin once.
+- **Plugin SDK:** a guide for plugin authors (`docs/plugin-sdk.html`, linked from the
+  documentation and the site map), the host contract in `docs/plugins.md`, and a copyable starter
+  project in `examples/plugin-template`. A test keeps the guide's limits equal to the code's.
+  Limits: the Discord plugin has never been verified against a live Discord or Hyprland session,
+  and on the MeRGBW light only power-off was observed to work (TG609).
+- **Add plugin dialog:** an **Add plugin** button (+) in the binding toolbar, next to
+  **Update plugins**, adds a plugin from an absolute folder path or the `https://` address of a repository.
+  Before anything is installed the candidate is checked with the validator's rules (manifest,
+  executable confinement, limits, no symlinks; missing commands only warn) and previewed with its
+  id, version, source, downloaded commit, files, actions and requirements. Install never enables
+  the plugin; replacing an installed id needs an explicit **Replace** and disables it until it is
+  enabled again. Installs run one at a time and closing the dialog cancels.
+- **Shared install library** (`sdeck_plus::plugins::{parse_source, stage, install}`): repositories
+  are fetched only over HTTPS with the system `git` (shallow clone of the default branch, no
+  submodules, hooks, LFS or user git configuration, 60 s deadline, 32 MiB ceiling, `.git`
+  removed); `plugin_validate` now uses the same staging, so both report the same problems.
+  Limits: only public HTTPS repositories with the plugin at the repository root; no SSH, branch
+  or tag selection, removal from the app or automatic updates. A real HTTPS clone is not exercised
+  by the automated tests (a fake git and a local repository only), and keyboard and screen-reader
+  behaviour of the dialog was not verified with real input.
+
+### Changed
+
+- The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
+  about the toolbar's Add plugin button and the plugins folder.
+- The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |
+  Repository** selector that adapts the hints and Browse, and a plugin card (monogram, version, id
+  and source chips, files, size and commit, collapsible actions and requirements) with the
+  run-with-your-privileges warning and the replace notice pinned above the footer. Errors appear
+  in a callout. Behaviour is unchanged.
+- The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
+  `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
+  Their manifests need a build that knows `requirements`; older builds reject unknown fields.
+
+### Removed
+
+- The `extensions/` folder and the two demo-plugin integration tests (`discord_extension`,
+  `mergbw_extension`) are gone from this repository; their coverage moved to the plugin projects'
+  own tests and the validator.
+
 ## [0.2.0] - 2026-11-10
 
 Support for the Stream Deck + XL and for several Stream Decks at once (package version `0.2.0`).

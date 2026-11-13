@@ -1,0 +1,22 @@
+{
+  "id": "hello",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "name": "Hello",
+  "executable": "run",
+  "requirements": [
+    {"kind": "command", "name": "python3", "version": ">= 3.8", "description": "Runs the plugin; standard library only, no pip packages"}
+  ],
+  "actions": [
+    {
+      "id": "say-hello",
+      "name": "Say hello",
+      "description": "Returns a greeting. It has no side effects.",
+      "controls": ["key", "dial_press"],
+      "settings": [
+        {"type": "text", "id": "name", "label": "Name", "max_length": 32, "default": "world"},
+        {"type": "boolean", "id": "shout", "label": "Shout", "default": false}
+      ]
+    }
+  ]
+}

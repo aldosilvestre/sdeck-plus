@@ -1,0 +1,672 @@
+//! Guards the plugin SDK: the starter template in `examples/plugin-template` works with the real
+//! validator and its own unit tests, and the SDK page and `docs/plugins.md` state the numbers the
+//! host really enforces. Only the harmless template is ever executed; nothing needs a display or
+//! the network.
+
+use sdeck_plus::plugins::{
+    PluginManifest, MAX_MANIFEST_BYTES, MAX_MESSAGE_CHARS, MAX_SETTINGS_BYTES, MAX_STDERR_BYTES,
+    MAX_STDOUT_BYTES, MAX_TIMEOUT, PROTOCOL_VERSION,
+};
+use std::collections::BTreeSet;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+const SDK_PAGE: &str = "plugin-sdk.html";
+const FORWARDED_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "LANG",
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "WAYLAND_DISPLAY",
+    "DBUS_SESSION_BUS_ADDRESS",
+];
+
+fn root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn read(relative: &str) -> String {
+    let path = root().join(relative);
+    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+fn template() -> PathBuf {
+    root().join("examples/plugin-template")
+}
+
+fn python3_exists() -> bool {
+    Command::new("python3")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// `cargo test` only type-checks examples, so the first call builds this one (offline, same
+/// profile) when it is not linked yet. `None` means it cannot be located or built.
+fn example() -> Option<PathBuf> {
+    static BUILD: std::sync::Once = std::sync::Once::new();
+    let exe = std::env::current_exe().ok()?;
+    let profile_dir = exe.parent()?.parent()?;
+    let path = profile_dir.join("examples/plugin_validate");
+    BUILD.call_once(|| {
+        let profile = profile_dir.file_name().and_then(|name| name.to_str());
+        let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        build.args(["build", "--offline", "--example", "plugin_validate"]);
+        match profile {
+            Some("debug") => {}
+            Some("release") => {
+                build.arg("--release");
+            }
+            _ => return,
+        }
+        if !path.is_file() {
+            let _ = build.status();
+        }
+    });
+    path.is_file().then_some(path)
+}
+
+fn validate(binary: &Path, args: &[&str]) -> (Output, String) {
+    let output = Command::new(binary)
+        .arg(template())
+        .args(args)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    (output, text)
+}
+
+// ---- the template -------------------------------------------------------------------------
+
+#[test]
+fn the_template_validates_without_running_it() {
+    let Some(binary) = example() else {
+        eprintln!("SKIPPED: examples/plugin_validate is not built next to this test");
+        return;
+    };
+    let (output, text) = validate(&binary, &[]);
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.starts_with("PLUGIN_VALIDATE_OK:"), "{text}");
+    assert!(text.contains("hello"), "{text}");
+    assert!(text.contains("say-hello"), "{text}");
+}
+
+#[test]
+fn the_template_answers_a_real_invocation() {
+    let Some(binary) = example() else {
+        eprintln!("SKIPPED: examples/plugin_validate is not built next to this test");
+        return;
+    };
+    if !python3_exists() {
+        eprintln!("SKIPPED: python3 is not installed");
+        return;
+    }
+    let (output, text) = validate(
+        &binary,
+        &["--invoke", "say-hello", "--settings", r#"{"name":"Ada"}"#],
+    );
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("PLUGIN_INVOKE_OK:"), "{text}");
+    assert!(text.contains("Ada"), "the greeting names the user: {text}");
+}
+
+#[test]
+fn the_template_rejects_settings_the_manifest_does_not_allow() {
+    let Some(binary) = example() else {
+        eprintln!("SKIPPED: examples/plugin_validate is not built next to this test");
+        return;
+    };
+    if !python3_exists() {
+        eprintln!("SKIPPED: python3 is not installed");
+        return;
+    }
+    let (output, text) = validate(
+        &binary,
+        &["--invoke", "say-hello", "--settings", r#"{"nme":"Ada"}"#],
+    );
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(text.contains("PLUGIN_INVOKE_ERROR:"), "{text}");
+    assert!(text.contains("unknown setting"), "{text}");
+}
+
+#[test]
+fn the_template_python_tests_pass() {
+    if !python3_exists() {
+        eprintln!("SKIPPED: python3 is not installed");
+        return;
+    }
+    let mut child = Command::new("python3")
+        .args(["-B", "-I", "-m", "unittest", "discover", "-s", "tests"])
+        .current_dir(template())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the template's unit tests did not finish within 60 s");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let output = child.wait_with_output().unwrap();
+    let report = String::from_utf8_lossy(&output.stderr);
+    assert!(status.success(), "unittest failed:\n{report}");
+    assert!(
+        report.contains("OK"),
+        "unexpected unittest report:\n{report}"
+    );
+}
+
+#[test]
+fn the_template_is_a_complete_small_project() {
+    let dir = template();
+    let run = std::fs::metadata(dir.join("run")).expect("examples/plugin-template/run exists");
+    assert_eq!(run.permissions().mode() & 0o777, 0o755, "run must be 0755");
+    let lines = read("examples/plugin-template/run").lines().count();
+    assert!(
+        lines < 120,
+        "run has {lines} lines; keep the template small"
+    );
+    for file in ["manifest.json", "README.md", "LICENSE", "tests/test_run.py"] {
+        assert!(dir.join(file).is_file(), "template is missing {file}");
+    }
+    assert!(read("examples/plugin-template/README.md").contains("## Dependencies"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("examples/plugin-template/manifest.json")).unwrap();
+    assert_eq!(manifest["id"], "hello");
+    let requirements = manifest["requirements"].as_array().expect("requirements");
+    assert!(
+        requirements
+            .iter()
+            .any(|r| r["kind"] == "command" && r["name"] == "python3"),
+        "the manifest must declare python3"
+    );
+}
+
+// ---- the documentation matches the code -----------------------------------------------------
+
+fn expected_numbers() -> Vec<(String, &'static str)> {
+    vec![
+        (
+            format!("{} KiB", MAX_STDOUT_BYTES / 1024),
+            "the stdout limit (MAX_STDOUT_BYTES)",
+        ),
+        (
+            format!("{} KiB", MAX_MANIFEST_BYTES / 1024),
+            "the manifest size limit (MAX_MANIFEST_BYTES)",
+        ),
+        (
+            format!("{MAX_SETTINGS_BYTES} bytes"),
+            "the settings payload limit (MAX_SETTINGS_BYTES)",
+        ),
+        (
+            format!("{MAX_STDERR_BYTES} bytes"),
+            "the stderr bytes kept (MAX_STDERR_BYTES)",
+        ),
+        (
+            format!("{MAX_MESSAGE_CHARS} characters"),
+            "the message/error length (MAX_MESSAGE_CHARS)",
+        ),
+        (
+            format!("{} s", MAX_TIMEOUT.as_secs()),
+            "the longest request timeout (MAX_TIMEOUT)",
+        ),
+        (
+            format!(r#""protocol_version":{PROTOCOL_VERSION}"#),
+            "the protocol version on the wire (PROTOCOL_VERSION)",
+        ),
+    ]
+}
+
+#[test]
+fn the_sdk_page_and_the_contract_state_the_real_limits() {
+    for document in [format!("docs/{SDK_PAGE}"), "docs/plugins.md".to_owned()] {
+        let text = read(&document);
+        for (needle, what) in expected_numbers() {
+            assert!(
+                text.contains(&needle),
+                "{document} does not state {what}: expected the text `{needle}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn both_documents_list_every_forwarded_environment_variable() {
+    for document in [format!("docs/{SDK_PAGE}"), "docs/plugins.md".to_owned()] {
+        let text = read(&document);
+        for name in FORWARDED_ENV {
+            assert!(
+                text.contains(name),
+                "{document} does not list the forwarded variable {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_sdk_page_names_every_invocation_outcome() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    for outcome in [
+        "Reported",
+        "NonZeroExit",
+        "MalformedResponse",
+        "RequestIdMismatch",
+        "OutputTooLarge",
+        "Timeout",
+    ] {
+        assert!(page.contains(outcome), "the SDK page lacks `{outcome}`");
+    }
+}
+
+#[test]
+fn the_contract_points_to_the_sdk_page() {
+    assert!(
+        read("docs/plugins.md").contains(SDK_PAGE),
+        "docs/plugins.md must point to {SDK_PAGE}"
+    );
+}
+
+#[test]
+fn the_site_links_to_the_sdk_page() {
+    let sitemap = read("docs/sitemap.xml");
+    assert!(
+        sitemap.contains(&format!(
+            "<loc>https://aldosilvestre.github.io/sdeck-plus/{SDK_PAGE}</loc>"
+        )),
+        "docs/sitemap.xml lacks {SDK_PAGE}"
+    );
+    for page in ["docs/docs.html", "docs/index.html"] {
+        assert!(
+            read(page).contains(&format!("href=\"{SDK_PAGE}")),
+            "{page} does not link to {SDK_PAGE}"
+        );
+    }
+}
+
+// ---- structure of the SDK page --------------------------------------------------------------
+
+/// Values of `name="..."` attributes, in document order. The page is hand-written, so a plain
+/// scan is enough; it never has the pattern inside text because angle brackets are escaped.
+fn attribute_values(html: &str, name: &str) -> Vec<String> {
+    let pattern = format!(" {name}=\"");
+    let mut values = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find(&pattern) {
+        rest = &rest[start + pattern.len()..];
+        let end = rest.find('"').expect("unterminated attribute");
+        values.push(rest[..end].to_owned());
+        rest = &rest[end..];
+    }
+    values
+}
+
+#[test]
+fn the_sdk_page_has_one_h1_and_unique_ids() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    assert_eq!(
+        page.matches("<h1").count(),
+        1,
+        "exactly one <h1> is expected"
+    );
+    let ids = attribute_values(&page, "id");
+    let unique: BTreeSet<&String> = ids.iter().collect();
+    assert_eq!(unique.len(), ids.len(), "duplicate ids on the SDK page");
+}
+
+#[test]
+fn every_link_on_the_sdk_page_resolves() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    let ids: BTreeSet<String> = attribute_values(&page, "id").into_iter().collect();
+    for href in attribute_values(&page, "href") {
+        if href.starts_with("https://") || href.starts_with("mailto:") {
+            continue;
+        }
+        if let Some(fragment) = href.strip_prefix('#') {
+            assert!(ids.contains(fragment), "href=\"#{fragment}\" has no target");
+            continue;
+        }
+        let (file, fragment) = match href.split_once('#') {
+            Some((file, fragment)) => (file, Some(fragment)),
+            None => (href.as_str(), None),
+        };
+        let target = root().join("docs").join(file);
+        assert!(target.exists(), "href=\"{href}\" points to a missing file");
+        if let (Some(fragment), true) = (fragment, file.ends_with(".html")) {
+            let linked = std::fs::read_to_string(&target).unwrap();
+            assert!(
+                attribute_values(&linked, "id")
+                    .iter()
+                    .any(|id| id == fragment),
+                "href=\"{href}\": {file} has no id `{fragment}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_sdk_page_covers_the_sections_in_order() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    let mut last = 0;
+    for id in [
+        "overview",
+        "quick-start",
+        "layout",
+        "manifest",
+        "settings",
+        "protocol",
+        "limits",
+        "security",
+        "dependencies",
+        "testing",
+        "installing",
+        "compatibility",
+        "troubleshooting",
+        "reference-plugins",
+        "checklist",
+    ] {
+        let at = page
+            .find(&format!("id=\"{id}\""))
+            .unwrap_or_else(|| panic!("the SDK page lacks the section id `{id}`"));
+        assert!(at > last, "section `{id}` is out of order");
+        last = at;
+    }
+}
+
+// ---- adding a plugin from the app ------------------------------------------------------------
+
+/// The install limits are private to the library (`pub(super)`/private constants), so they cannot
+/// be imported like the host limits above. Each entry names the source line that declares it and
+/// `the_install_numbers_match_their_declarations` re-reads that file, so a changed value fails
+/// here instead of silently drifting from the documentation. GAP: make them public to drop this.
+const INSTALL_DECLARATIONS: [(&str, &str, &str); 7] = [
+    // (file, exact declaration, text both documents must contain)
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_FILES: usize = 256;",
+        "256 files",
+    ),
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;",
+        "8 MiB per file",
+    ),
+    (
+        "src/plugins/install/copy.rs",
+        "pub(super) const MAX_DEPTH: usize = 8;",
+        "8 directory levels",
+    ),
+    (
+        "src/plugins/install/source.rs",
+        "const MAX_ADDRESS_CHARS: usize = 512;",
+        "512 characters",
+    ),
+    (
+        "src/plugins/install.rs",
+        "const DEFAULT_DEADLINE: Duration = Duration::from_secs(60);",
+        "60 s deadline",
+    ),
+    (
+        "src/plugins/install.rs",
+        "const DEFAULT_MAX_CLONE_BYTES: u64 = 32 * 1024 * 1024;",
+        "32 MiB ceiling",
+    ),
+    (
+        "src/plugin_add_ui.rs",
+        "const MAX_LISTED_PROBLEMS: usize = 8;",
+        "first 8 problems",
+    ),
+];
+
+/// Messages of the Add plugin dialog (`src/plugin_add_ui.rs`) that the SDK page quotes.
+const DIALOG_MESSAGES: [&str; 6] = [
+    "This does not follow the plugin format. Nothing was installed.",
+    "Repository addresses need git, and git could not be started.",
+    "The enabled-plugins file cannot be read",
+    "use an absolute path for a folder",
+    "only https:// repository addresses or absolute folder paths are accepted",
+    "is already installed.",
+];
+
+#[test]
+fn the_install_numbers_match_their_declarations() {
+    for (file, declaration, _) in INSTALL_DECLARATIONS {
+        assert!(
+            read(file).contains(declaration),
+            "{file} no longer declares `{declaration}`: update the documents and this table"
+        );
+    }
+}
+
+#[test]
+fn the_sdk_page_states_the_install_limits() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    for (_, declaration, needle) in INSTALL_DECLARATIONS {
+        assert!(
+            page.contains(needle),
+            "the SDK page does not state `{needle}` ({declaration})"
+        );
+    }
+}
+
+#[test]
+fn the_contract_states_the_clone_and_address_limits() {
+    let text = read("docs/plugins.md");
+    for needle in ["512 characters", "60 s", "32 MiB", "256 files"] {
+        assert!(text.contains(needle), "docs/plugins.md lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_sdk_page_documents_the_add_plugin_dialog() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    let ui = read("src/plugin_add_ui.rs");
+    let sidebar = read("src/plugin_ui.rs");
+    assert!(
+        sidebar.contains("\"Add plugin\""),
+        "the button's accessible name moved: update the guard"
+    );
+    assert!(
+        page.contains("<strong>Add plugin</strong>"),
+        "no Add plugin button"
+    );
+    for button in ["Check plugin", "Install", "Replace"] {
+        assert!(
+            page.contains(button),
+            "the SDK page does not name `{button}`"
+        );
+    }
+    // The app capitalises the first letter of library messages, so compare in lowercase.
+    let (ui, source, page) = (
+        ui.to_lowercase(),
+        read("src/plugins/install/source.rs").to_lowercase(),
+        page.to_lowercase(),
+    );
+    for message in DIALOG_MESSAGES {
+        let message = message.to_lowercase();
+        assert!(
+            ui.contains(&message) || source.contains(&message),
+            "`{message}` is not a message of the app any more"
+        );
+        assert!(
+            page.contains(&message),
+            "the SDK page does not quote `{message}`"
+        );
+    }
+}
+
+#[test]
+fn the_sdk_page_states_the_repository_rules_and_the_limits() {
+    let page = read(&format!("docs/{SDK_PAGE}"));
+    for needle in [
+        "repository root",
+        "https://",
+        "--depth 1",
+        "no submodules",
+        "no LFS",
+        "default branch",
+        "Not supported yet",
+    ] {
+        assert!(page.contains(needle), "the SDK page lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_documents_link_to_each_other_and_ids_stay_unique() {
+    for name in ["docs.html", "index.html"] {
+        let page = read(&format!("docs/{name}"));
+        let ids = attribute_values(&page, "id");
+        let unique: BTreeSet<&String> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "duplicate ids in docs/{name}");
+        for href in attribute_values(&page, "href") {
+            if href.starts_with("https://") || href.starts_with("mailto:") {
+                continue;
+            }
+            if let Some(fragment) = href.strip_prefix('#') {
+                assert!(
+                    ids.iter().any(|id| id == fragment),
+                    "{name}: no target for #{fragment}"
+                );
+                continue;
+            }
+            let file = href.split('#').next().unwrap_or_default();
+            if !file.is_empty() && !file.starts_with("assets/") {
+                assert!(
+                    root().join("docs").join(file).exists(),
+                    "{name}: missing {href}"
+                );
+            }
+        }
+    }
+    let docs = read("docs/docs.html");
+    assert!(docs.contains(SDK_PAGE) && docs.contains("Add plugin"));
+    let plugins = read("docs/plugins.md");
+    assert!(plugins.contains("## Add plugin dialog") && plugins.contains(SDK_PAGE));
+}
+
+// ---- the agent skill file ---------------------------------------------------------------------
+
+const SKILL: &str = "docs/SKILL.md";
+
+/// The body of the fenced block that opens with exactly "```<info>" (for example "```python run"),
+/// up to its closing fence.
+fn fenced_block<'a>(text: &'a str, info: &str) -> &'a str {
+    let opening = format!("```{info}\n");
+    let start = text
+        .find(&opening)
+        .unwrap_or_else(|| panic!("{SKILL} has no fenced block opened with ```{info}"))
+        + opening.len();
+    let end = text[start..].find("\n```").expect("unterminated fence");
+    &text[start..start + end]
+}
+
+#[test]
+fn the_skill_has_valid_frontmatter() {
+    let text = read(SKILL);
+    let rest = text
+        .strip_prefix("---\n")
+        .expect("frontmatter must open the file");
+    let (front, body) = rest.split_once("\n---\n").expect("frontmatter must close");
+    assert!(
+        front.contains("\nname: sdeck-plus-plugin-author\n")
+            || front.starts_with("name: sdeck-plus-plugin-author\n")
+    );
+    let description = front
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .expect("a description");
+    assert!(description.starts_with("\"Trigger: "), "{description}");
+    assert!(description.ends_with('"'), "{description}");
+    assert!(front.contains("license: MIT"));
+    assert!(front.contains("author:") && front.contains("version:"));
+    assert!(body.trim_start().starts_with("## Activation contract"));
+}
+
+#[test]
+fn the_skill_states_the_real_numbers_and_rules() {
+    let text = read(SKILL);
+    for (needle, what) in expected_numbers() {
+        assert!(
+            text.contains(&needle),
+            "{SKILL} does not state {what}: `{needle}`"
+        );
+    }
+    for (_, declaration, needle) in INSTALL_DECLARATIONS {
+        assert!(
+            text.contains(needle),
+            "{SKILL} lacks `{needle}` ({declaration})"
+        );
+    }
+    for name in FORWARDED_ENV {
+        assert!(text.contains(name), "{SKILL} does not list {name}");
+    }
+    for needle in [
+        "cargo run --offline --example plugin_validate",
+        "--invoke",
+        "PLUGIN_VALIDATE_OK",
+        "Add plugin",
+        "Update plugins",
+        "NEVER enable",
+        "python3 -B -I -m unittest discover -s tests",
+        "0600",
+        "4.5 s",
+        "queue of eight",
+    ] {
+        assert!(text.contains(needle), "{SKILL} lacks `{needle}`");
+    }
+}
+
+#[test]
+fn the_skill_example_is_the_template_and_its_manifest_parses() {
+    let text = read(SKILL);
+    assert_eq!(
+        fenced_block(&text, "python run").trim(),
+        read("examples/plugin-template/run").trim(),
+        "the `python run` block must stay identical to examples/plugin-template/run"
+    );
+    let manifest = fenced_block(&text, "json manifest.json");
+    assert_eq!(
+        manifest.trim(),
+        read("examples/plugin-template/manifest.json").trim()
+    );
+    let parsed = PluginManifest::parse(manifest.as_bytes()).expect("the manifest example parses");
+    assert_eq!(parsed.id, "hello");
+}
+
+#[test]
+fn the_skill_is_linked_and_has_no_secrets_or_home_paths() {
+    for document in ["docs/plugins.md", "docs/plugin-sdk.html", "README.md"] {
+        assert!(
+            read(document).contains("SKILL.md"),
+            "{document} must link to {SKILL}"
+        );
+    }
+    let text = read(SKILL);
+    assert!(!text.contains("/home/"), "no absolute home paths");
+    for token in [
+        "ghp_",
+        "github_pat_",
+        "xoxb-",
+        "sk_live",
+        "sk-ant",
+        "AKIA",
+        "-----BEGIN",
+    ] {
+        assert!(
+            !text.contains(token),
+            "{SKILL} contains a secret-like `{token}`"
+        );
+    }
+}

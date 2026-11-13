@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "02-plugin-card.html",
+  "handoffs": {
+    "02-plugin-card.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-12T21:00:38.308Z",
+      "startedAt": "2026-11-12T21:00:41.330Z",
+      "implementedAt": "2026-11-12T21:22:53.630Z",
+      "note": "Implemented in GTK on branch feat/plugin-add-polish (commit 69253b6): plugin card with the Folder | Repository selector, native expanders, pinned callouts. No loopback preview URL: it is a native GTK window; compare with the renders captured by the tests (dark and light, all states)."
+    }
+  }
+}
