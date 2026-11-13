@@ -252,7 +252,7 @@ Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
 ## 4. Spacing and layout
 
-Default window: 1000x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
+Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
@@ -356,8 +356,8 @@ hardware behavior.
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the + XL key at
-40px). At the default 1000x700 window the + XL card still sits beside the
-352px action catalog (570 + 16 + 352 = 938 of the 968px of usable width), so
+40px). At the default 1080x700 window the + XL card still sits beside the
+352px action catalog (570 + 16 + 352 = 938 of the usable width left of the compact rail), so
 the settings column stays usable; a narrower window wraps the catalog below
 the workspace exactly as it does for the +, and the page scrolls vertically.
 The + XL chassis is 42px taller than the + (456px against 414px); its card
@@ -393,7 +393,10 @@ The Organize popover has a header with the menu's icon, the title "Profiles", a 
 subtitle and a frameless icon-only Close; its Edit/New tabs use the segmented style of the
 sidebar tabs; the Base note is a callout with a cyan accent edge; the footer has a divider
 and two equal-width buttons (Save changes primary, Delete profile destructive).
-The profile tabs, profile organization menu and OBS menu form a compact toolbar;
+The profile tabs form a vertical rail at the left of the content, with the profile
+organization menu and the OBS menu at its foot. Below a 1200px window the rail is
+compact: each tab shows the profile's first letter (the full name stays in its tooltip)
+and the two tools show only their icons; from 1200px it shows names and captions.
 Organize and OBS are frameless (hover shows the surface) so they stay secondary
 to the tabs. The organization popover contains only profile creation, application
 association and profile deletion. The page bar separates navigation from

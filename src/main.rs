@@ -59,7 +59,9 @@ mod scaled_bin;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
-const DEFAULT_WIDTH: i32 = 1000;
+const DEFAULT_WIDTH: i32 = 1080;
+/// Window width from which the profile rail shows names and tool captions.
+const RAIL_EXPANDED_WIDTH: i32 = 1200;
 const DEFAULT_HEIGHT: i32 = 700;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
@@ -987,7 +989,8 @@ fn build_body(
     let layer_card = card();
     layer_card.add_css_class("navigation-card");
     layer_card.set_spacing(8);
-    let layer_row = GtkBox::new(Orientation::Horizontal, 8);
+    let layer_row = GtkBox::new(Orientation::Vertical, 4);
+    layer_row.set_valign(gtk::Align::End);
     let layer_model = gtk::StringList::new(&[]);
     for name in layers.borrow().names() {
         layer_model.append(&name);
@@ -1198,6 +1201,25 @@ fn build_body(
     feature_runtime
         .profile_tabs()
         .set_action_widget(&layer_row, gtk::PackType::End);
+    // The rail shows initials and icon-only tools below this window width.
+    let rail_runtime = feature_runtime.clone();
+    let rail_menus = [management_menu.clone(), obs_menu.clone()];
+    let apply_rail: Rc<dyn Fn(i32)> = Rc::new(move |width| {
+        let compact = width < RAIL_EXPANDED_WIDTH;
+        rail_runtime.set_rail_compact(compact);
+        for menu in &rail_menus {
+            ui::set_caption_visible(menu, !compact);
+        }
+    });
+    apply_rail(window.default_width());
+    let apply = apply_rail.clone();
+    window.connect_default_width_notify(move |window| apply(window.default_width()));
+    window.connect_realize(move |window| {
+        if let Some(surface) = window.surface() {
+            let apply = apply_rail.clone();
+            surface.connect_layout(move |_, width, _| apply(width));
+        }
+    });
     // Navigation (linked arrows + breadcrumb) leads; page management trails.
     let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
@@ -8087,8 +8109,13 @@ mod tests {
                 bounds.height() > 668.0,
                 "inspector is reachable through vertical scrolling"
             );
-            assert_eq!(bounds.width(), 968.0, "shell uses the full window width");
-            assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
+            let window_width = DEFAULT_WIDTH as f32;
+            assert_eq!(
+                bounds.width(),
+                window_width - 32.0,
+                "shell uses the full window width"
+            );
+            assert!((bounds.x() + bounds.width() / 2.0 - window_width / 2.0).abs() <= 1.0);
             let mut buttons = Vec::new();
             collect_layout_buttons(content, &mut buttons);
             for caption in ["Image…", "Clear"] {
@@ -8476,13 +8503,22 @@ mod tests {
                 .unwrap()
                 .compute_bounds(content)
                 .unwrap();
-            for bar in [header, tab_header, pagebar] {
-                assert!((bar.x()).abs() <= 1.0);
-                assert!(
-                    (bar.width() - shell.width()).abs() <= 1.0,
-                    "configuration chrome must share the shell measure"
-                );
-            }
+            assert!((header.x()).abs() <= 1.0);
+            assert!(
+                (header.width() - shell.width()).abs() <= 1.0,
+                "configuration chrome must share the shell measure"
+            );
+            // The profile rail hugs the left edge; the page bar fills the rest of the measure.
+            assert!((tab_header.x()).abs() <= 1.0);
+            assert!(
+                tab_header.width() < shell.width() / 4.0,
+                "the profile rail stays narrow"
+            );
+            assert!(pagebar.x() >= tab_header.x() + tab_header.width() - 1.0);
+            assert!(
+                (pagebar.x() + pagebar.width() - shell.width()).abs() <= 1.0,
+                "the page bar reaches the right edge of the shell measure"
+            );
             if width == 1840 {
                 assert_eq!(
                     shell.width(),
@@ -8642,8 +8678,8 @@ mod tests {
             .unwrap();
         let header_bounds = header.compute_bounds(content).unwrap();
         assert!(
-            navigation_bounds.y() - header_bounds.y() - header_bounds.height() >= 11.0,
-            "profile tabs and page navigation need a visible gap"
+            navigation_bounds.x() - header_bounds.x() - header_bounds.width() >= 7.0,
+            "the profile rail and page navigation need a visible gap"
         );
         let region = device.parent().unwrap().parent().unwrap();
         let region_bounds = region.compute_bounds(content).unwrap();

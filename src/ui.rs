@@ -147,6 +147,19 @@ pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
     content
 }
 
+/// Shows or hides the caption of a menu button made by [`menu_button`], leaving its
+/// icon, tooltip and accessible name, so a narrow rail can show icons only.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn set_caption_visible(button: &gtk::MenuButton, visible: bool) {
+    let mut child = button.child().and_then(|content| content.first_child());
+    while let Some(widget) = child {
+        if widget.is::<Label>() {
+            widget.set_visible(visible);
+        }
+        child = widget.next_sibling();
+    }
+}
+
 pub(crate) fn decorate_button(button: &Button, icon: &str, caption: &str) {
     button.set_child(Some(&icon_caption(icon, caption)));
     button.add_css_class("icon-action");
