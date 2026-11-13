@@ -300,6 +300,96 @@ pub(crate) fn menu_button(icon: &str, caption: &str, panel: &Popover) -> gtk::Me
     button
 }
 
+/// A frameless, left-aligned row of the compact command menu.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn command_row(icon: &str, caption: &str) -> Button {
+    let row = button(icon, caption);
+    row.add_css_class("command-row");
+    row.set_has_frame(false);
+    if let Some(content) = row.child() {
+        content.set_halign(gtk::Align::Start);
+    }
+    row
+}
+
+/// The compact Organize-style command menu: just rows, no header or forms.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn command_menu(rows: &[Button]) -> Popover {
+    let panel = Popover::new();
+    panel.set_halign(gtk::Align::End);
+    panel.add_css_class("organize-popover");
+    panel.add_css_class("command-menu");
+    track_motion(&panel);
+    let list = GtkBox::new(Orientation::Vertical, 2);
+    list.set_margin_top(6);
+    list.set_margin_bottom(6);
+    list.set_margin_start(6);
+    list.set_margin_end(6);
+    for row in rows {
+        list.append(row);
+    }
+    panel.set_child(Some(&list));
+    panel
+}
+
+/// A transient modal dialog holding one profile form. Escape and the footer button
+/// close (hide) it; the form widgets are reused, never rebuilt, so state is not duplicated.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn profile_dialog(
+    parent: &impl IsA<gtk::Window>,
+    title: &str,
+    subtitle: &str,
+    body: &impl IsA<gtk::Widget>,
+    dismiss: &str,
+) -> gtk::Window {
+    let dialog = gtk::Window::builder()
+        .title(title)
+        .transient_for(parent)
+        .modal(true)
+        .destroy_with_parent(true)
+        .hide_on_close(true)
+        .resizable(false)
+        .default_width(400)
+        .build();
+    dialog.add_css_class("profile-dialog");
+    let content = GtkBox::new(Orientation::Vertical, 16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    let heading = Label::new(Some(title));
+    heading.add_css_class("section-label");
+    heading.set_xalign(0.0);
+    content.append(&heading);
+    let note = helper(subtitle);
+    note.add_css_class("organize-subtitle");
+    content.append(&note);
+    content.append(body);
+    let close = Button::with_label(dismiss);
+    add_key_hint(close.upcast_ref(), "Esc");
+    close.set_halign(gtk::Align::End);
+    let weak = dialog.downgrade();
+    close.connect_clicked(move |_| {
+        if let Some(dialog) = weak.upgrade() {
+            dialog.close();
+        }
+    });
+    content.append(&close);
+    dialog.set_child(Some(&content));
+    let escape = gtk::ShortcutController::new();
+    escape.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Escape"),
+        Some(gtk::CallbackAction::new(|widget, _| {
+            if let Some(window) = widget.downcast_ref::<gtk::Window>() {
+                window.close();
+            }
+            glib::Propagation::Stop
+        })),
+    ));
+    dialog.add_controller(escape);
+    dialog
+}
+
 pub(crate) fn section_heading(icon: &str, text: &str) -> GtkBox {
     let heading = GtkBox::new(Orientation::Horizontal, 8);
     let image = Image::from_icon_name(icon);
@@ -445,6 +535,8 @@ pub(crate) fn panel_body(body: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
 }
 
 /// Give a titled popover an icon, a one-line subtitle and an icon-only Close.
+/// Organize no longer uses it; the `ui_showcase` example still does.
+#[allow(dead_code)]
 pub(crate) fn refine_popover_header(panel: &Popover, icon: &str, subtitle: &str) {
     let Some(content) = panel.child().and_downcast::<GtkBox>() else {
         return;

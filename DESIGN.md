@@ -407,15 +407,20 @@ help on hover, or on keyboard focus when navigating with the keyboard, in a ligh
 with the topic as its title; no click is needed, the popover ignores the pointer so it never
 blocks the form, and there is no second native tooltip. A form that opens with the button
 focused does not pop the help open by itself.
-The Organize popover has a header with the menu's icon, the title "Profiles", a one-line
-subtitle and a frameless icon-only Close; its Edit/New tabs use the segmented style of the
-sidebar tabs; the Base note is a callout with a cyan accent edge; the footer has a divider
-and two equal-width buttons (Save changes primary, Delete profile destructive).
+The Organize menu is the compact command menu of the approved overlay design: a small
+popover of frameless rows (Edit profile, New profile) with no header, tabs or form fields,
+and no shortcut hints, because none are bound. Choosing a row closes the menu and opens that
+form in its own modal dialog (below). Each dialog is transient for the main window, titled
+"Edit profile" or "New profile", with a one-line subtitle; the Base note is a callout with a
+cyan accent edge; the Edit footer has a divider and two equal-width buttons (Save changes
+primary, Delete profile destructive). Escape or the footer button (Close in Edit, Cancel in
+New; both show the real Esc hint) hides the dialog without saving; Cancel and Esc discard a
+New draft.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width: the connection badge, then the Organize and OBS tools (at the top so their popovers stay
 reachable in short windows), then the profile names (about 12 characters, ellipsized). Organize and OBS are frameless (hover shows the surface) so they stay secondary
-to the tabs. The organization popover contains only profile creation, application
-association and profile deletion. The page bar separates navigation from
+to the tabs. The Organize menu only opens the profile creation, application
+association and profile deletion dialogs. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
 breadcrumb with a 12px gap, and page-owned folders and New page trail it,
 followed by frameless square pencil and red-trash icons (still named, with
@@ -604,15 +609,17 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   unrelated application focus; a matching application can select its profile
   automatically. Save new profile and Save profile use the existing native save
   primitive; completion feedback follows the actual disk result.
-- **Profile manager:** Organize separates Edit profile and New profile in a
-  native StackSwitcher. Only the selected task occupies vertical space.
+- **Profile manager:** Organize lists Edit profile and New profile as command
+  rows; each opens a dedicated modal dialog, and only one task is shown at a time.
   Editing groups the profile selector, optional auto-switch application, the
   "Return to the previous profile when focus leaves" check (wrapped text, enabled
   only while the application field has text and never for Base) and
   Save changes/Delete profile actions with 12px gaps. New profile has a name
-  and Create profile action. Extended explanations use named question-mark
-  controls with hover tooltips and click/keyboard help popovers, not paragraphs
-  in the form. Existing 16px panel padding and 4px field-label gaps apply.
+  and Create profile action; creating a profile closes that dialog and opens
+  Edit profile on it. Deleting still asks for confirmation. Extended
+  explanations use named question-mark controls with hover tooltips and
+  click/keyboard help popovers, not paragraphs in the form. Dialogs use 16px
+  padding and 4px field-label gaps.
   Create profile is disabled for empty or duplicate names and says why under the
   field; Save changes is enabled only when the application rule or the return
   check differs from the saved state, and never for Base.

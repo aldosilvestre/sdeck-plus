@@ -1,6 +1,40 @@
-//! The Organize popover: profile editing and creation panels.
+//! The Organize command menu and the profile dialogs it opens.
 use super::ui_refresh_tests::fixture;
 use super::*;
+
+/// The visible dialog of a fixture, found by title through the public window list.
+fn dialog_titled(window: &ApplicationWindow, title: &str) -> gtk::Window {
+    gtk::Window::toplevels()
+        .snapshot()
+        .into_iter()
+        .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+        .find(|candidate| {
+            candidate.is_visible()
+                && candidate.title().as_deref() == Some(title)
+                && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+        })
+        .unwrap_or_else(|| panic!("{title} dialog is open"))
+}
+
+fn buttons_of(widget: &gtk::Widget, found: &mut Vec<Button>) {
+    if let Some(button) = widget.downcast_ref::<Button>() {
+        found.push(button.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        buttons_of(&current, found);
+        child = current.next_sibling();
+    }
+}
+
+fn row(panel: &gtk::Popover, caption: &str) -> Button {
+    let mut found = Vec::new();
+    buttons_of(panel.upcast_ref(), &mut found);
+    found
+        .into_iter()
+        .find(|button| button_caption(button).as_deref() == Some(caption))
+        .unwrap_or_else(|| panic!("{caption} row"))
+}
 
 #[test]
 fn organize_popover_capture() {
@@ -14,101 +48,45 @@ fn organize_popover_capture() {
         let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") else {
             return;
         };
-        let stack = {
-            let mut found = Vec::new();
-            collect_stacks(panel.upcast_ref(), &mut found);
-            found.remove(0)
-        };
-        for name in ["edit", "new"] {
-            stack.set_visible_child_name(name);
-            let texture = rendered_text_popup(&panel, || widgets.management_menu.popup());
-            texture
-                .save_to_png(std::path::Path::new(&directory).join(format!("organize-{name}.png")))
+        let directory = std::path::Path::new(&directory);
+        let texture = rendered_text_popup(&panel, || widgets.management_menu.popup());
+        texture
+            .save_to_png(directory.join("organize-menu.png"))
+            .unwrap();
+        for (caption, file) in [
+            ("Edit profile", "organize-edit.png"),
+            ("New profile", "organize-new.png"),
+        ] {
+            widgets.management_menu.popup();
+            row(&panel, caption).emit_clicked();
+            let dialog = dialog_titled(&fixture.window, caption);
+            wait_for_frame(&dialog);
+            rendered_texture(&dialog, &dialog.child().unwrap())
+                .save_to_png(directory.join(file))
                 .unwrap();
-            if name == "edit" {
-                // Hover the help icon and capture the help it reveals.
-                let help = {
-                    let mut found = Vec::new();
-                    collect_help(panel.upcast_ref(), &mut found);
-                    found.remove(0)
-                };
-                let tip = help.popover().unwrap();
-                let motion = {
-                    let controllers = help.observe_controllers();
-                    (0..controllers.n_items())
-                        .find_map(|i| {
-                            controllers
-                                .item(i)?
-                                .downcast::<gtk::EventControllerMotion>()
-                                .ok()
-                        })
-                        .unwrap()
-                };
-                let texture = rendered_text_popup(&tip, || {
-                    motion.emit_by_name::<()>("enter", &[&2.0f64, &2.0f64])
-                });
-                texture
-                    .save_to_png(std::path::Path::new(&directory).join("organize-help.png"))
-                    .unwrap();
-                motion.emit_by_name::<()>("leave", &[]);
-            }
-            panel.popdown();
+            dialog.close();
         }
     });
 }
 
-fn collect_help(widget: &gtk::Widget, found: &mut Vec<gtk::MenuButton>) {
-    if let Some(button) = widget.downcast_ref::<gtk::MenuButton>() {
-        if button.has_css_class("field-help") {
-            found.push(button.clone());
-        }
-    }
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        collect_help(&current, found);
-        child = current.next_sibling();
-    }
-}
-
-fn collect_stacks(widget: &gtk::Widget, found: &mut Vec<gtk::Stack>) {
-    if let Some(stack) = widget.downcast_ref::<gtk::Stack>() {
-        found.push(stack.clone());
-    }
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        collect_stacks(&current, found);
-        child = current.next_sibling();
-    }
-}
-
 #[test]
-fn organize_popover_has_a_titled_header_and_a_clear_button_hierarchy() {
+fn profile_dialogs_have_a_titled_header_and_a_clear_button_hierarchy() {
     run_gtk_test(|| {
         let Some(fixture) = fixture("organize-style", |_| {}) else {
             return;
         };
-        let widgets = &fixture.widgets;
-        let panel = widgets.management_menu.popover().unwrap();
+        let panel = fixture.widgets.management_menu.popover().unwrap();
         assert!(panel.has_css_class("organize-popover"));
-        let content = panel.child().unwrap();
-        // Header: icon, title, and an icon-only Close.
-        let header = content.first_child().unwrap();
-        let icon = header
-            .first_child()
-            .unwrap()
-            .downcast::<gtk::Image>()
-            .unwrap();
-        assert_eq!(
-            icon.icon_name().as_deref(),
-            Some("preferences-system-symbolic")
-        );
-        let title = icon.next_sibling().unwrap().downcast::<Label>().unwrap();
-        assert_eq!(title.text(), "Profiles");
-        let close = header.last_child().unwrap().downcast::<Button>().unwrap();
-        assert!(close.child().is_some_and(|child| child.is::<gtk::Image>()));
-        assert_eq!(close.tooltip_text().as_deref(), Some("Close"));
-        // A subtitle explains the panel under the header.
-        let subtitle = header.next_sibling().unwrap().downcast::<Label>().unwrap();
+        panel.set_autohide(false);
+        fixture.widgets.management_menu.popup();
+        row(&panel, "Edit profile").emit_clicked();
+        let dialog = dialog_titled(&fixture.window, "Edit profile");
+        assert!(dialog.has_css_class("profile-dialog"));
+        let content = dialog.child().unwrap();
+        // Title, then a one-line subtitle explaining the dialog.
+        let title = content.first_child().unwrap().downcast::<Label>().unwrap();
+        assert_eq!(title.text(), "Edit profile");
+        let subtitle = title.next_sibling().unwrap().downcast::<Label>().unwrap();
         assert!(
             subtitle.has_css_class("organize-subtitle"),
             "{}",
@@ -116,7 +94,7 @@ fn organize_popover_has_a_titled_header_and_a_clear_button_hierarchy() {
         );
         // Save is the primary action; Delete is destructive; both share the row evenly.
         let mut buttons = Vec::new();
-        collect_layout_buttons(panel.upcast_ref(), &mut buttons);
+        buttons_of(dialog.upcast_ref(), &mut buttons);
         let named = |name: &str| {
             buttons
                 .iter()
@@ -128,11 +106,12 @@ fn organize_popover_has_a_titled_header_and_a_clear_button_hierarchy() {
         let delete = named("Delete profile");
         assert!(save.has_css_class("suggested-action"));
         assert!(delete.has_css_class("destructive-action"));
-        let row = save.parent().unwrap().downcast::<GtkBox>().unwrap();
-        assert!(row.is_homogeneous(), "equal-width footer buttons");
-        assert_eq!(delete.parent().as_ref(), Some(row.upcast_ref()));
+        let actions = save.parent().unwrap().downcast::<GtkBox>().unwrap();
+        assert!(actions.is_homogeneous(), "equal-width footer buttons");
+        assert_eq!(delete.parent().as_ref(), Some(actions.upcast_ref()));
         // The Base note stands out as a callout.
-        let note = row.prev_sibling().unwrap().downcast::<Label>().unwrap();
+        let note = actions.prev_sibling().unwrap().downcast::<Label>().unwrap();
         assert!(note.has_css_class("profile-note"));
+        dialog.close();
     });
 }

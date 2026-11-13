@@ -433,7 +433,13 @@ fn assert_icon_action_consistency() {
     folder_name.set_text("Icons");
     folder_name.emit_activate();
     let mut deletes = Vec::new();
-    for button in descendants::<Button>(root) {
+    // The profile forms live in hidden modal dialogs, not under the root.
+    let scanned = descendants::<Button>(root).into_iter().chain(
+        profile_dialog_bodies(&fixture.window)
+            .into_iter()
+            .flat_map(|body| descendants::<Button>(&body)),
+    );
+    for button in scanned {
         if !button.has_css_class("icon-action") {
             continue;
         }

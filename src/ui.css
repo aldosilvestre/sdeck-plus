@@ -515,6 +515,8 @@ popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; pad
 popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
 .help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
 .organize-subtitle { color: @desk_muted; margin-top: -8px; }
+popover.command-menu button.command-row { padding: 8px 12px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
+popover.command-menu button.command-row:hover { background-color: @desk_hover; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
 .profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }

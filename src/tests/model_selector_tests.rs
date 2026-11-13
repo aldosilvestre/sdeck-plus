@@ -248,6 +248,57 @@ fn in_selector(pair: &Pair, widget: &gtk::Widget) -> bool {
         || widget.is_ancestor(&selector.root)
 }
 
+/// Failure-only description of where focus is and which windows exist.
+fn focus_report(pair: &Pair) -> String {
+    let describe = |widget: &gtk::Widget| {
+        let mut chain = Vec::new();
+        let mut current = Some(widget.clone());
+        while let Some(item) = current {
+            chain.push(format!(
+                "{}[{}]",
+                item.type_().name(),
+                item.css_classes()
+                    .iter()
+                    .map(|class| class.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            ));
+            current = item.parent();
+        }
+        chain.join(" < ")
+    };
+    let selector = pair.registry.selector();
+    let focus = gtk::prelude::GtkWindowExt::focus(&pair.window);
+    let mut report = format!(
+        "focus: {}\nin_selector: {:?}; selector dropdown focused={} visible={} mapped={}\nwindow: {}x{} visible={} active={}\n",
+        focus.as_ref().map(describe).unwrap_or_else(|| "none".into()),
+        focus.as_ref().map(|focus| in_selector(pair, focus)),
+        selector.dropdown.has_focus(),
+        selector.root.is_visible(),
+        selector.root.is_mapped(),
+        pair.window.width(),
+        pair.window.height(),
+        pair.window.is_visible(),
+        pair.window.is_active(),
+    );
+    for window in gtk::Window::toplevels()
+        .snapshot()
+        .into_iter()
+        .filter_map(|window| window.downcast::<gtk::Window>().ok())
+        .filter(|window| window.is_visible())
+    {
+        report.push_str(&format!(
+            "toplevel: {} title={:?} modal={} transient_for_this={} classes={:?}\n",
+            window.type_().name(),
+            window.title(),
+            window.is_modal(),
+            window.transient_for().as_ref() == Some(pair.window.upcast_ref()),
+            window.css_classes(),
+        ));
+    }
+    report
+}
+
 #[test]
 fn the_selector_is_a_tab_stop_only_while_it_is_visible() {
     run_gtk_test(|| {
@@ -276,9 +327,16 @@ fn the_selector_is_a_tab_stop_only_while_it_is_visible() {
             gtk::DirectionType::TabBackward,
         ] {
             assert!(dropdown.grab_focus());
-            assert!(pair.window.child_focus(direction));
-            assert!(gtk::prelude::GtkWindowExt::focus(&pair.window)
-                .is_some_and(|focus| !in_selector(&pair, &focus)));
+            let moved = pair.window.child_focus(direction);
+            let left_selector = gtk::prelude::GtkWindowExt::focus(&pair.window)
+                .is_some_and(|focus| !in_selector(&pair, &focus));
+            if !(moved && left_selector) {
+                // Evidence only on failure, so a passing run is not slowed or reordered.
+                panic!(
+                    "Tab {direction:?} must leave the selector (moved={moved})\n{}",
+                    focus_report(&pair)
+                );
+            }
         }
         pair.bus.unplug(XL_PATH);
         pair.wait_devices(1);

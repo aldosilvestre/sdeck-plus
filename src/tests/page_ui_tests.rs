@@ -93,22 +93,35 @@ pub(super) fn capture_page_workflow(
     save("delete-page", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);
 
-    let profile_panel = widgets.management_menu.popover().unwrap();
     let mut entries = Vec::new();
-    collect_entries(profile_panel.upcast_ref(), &mut entries);
+    for body in profile_dialog_bodies(window) {
+        collect_entries(&body, &mut entries);
+    }
+    let mut dialog_buttons = Vec::new();
+    for body in profile_dialog_bodies(window) {
+        collect_layout_buttons(&body, &mut dialog_buttons);
+    }
     entries
         .iter()
         .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
         .unwrap()
         .set_text(&format!("QA profile {width}"));
-    button("Create profile").emit_clicked();
+    dialog_buttons
+        .iter()
+        .find(|button| button_caption(button).as_deref() == Some("Create profile"))
+        .expect("the New profile dialog's Create profile button")
+        .emit_clicked();
     button("New page").emit_clicked();
     let dialog = current_dialog();
     page_dialog_entry(&dialog).set_text("Profile tools");
     dialog.response(ResponseType::Accept);
     name.set_text("QA child");
     button("New folder").emit_clicked();
-    button("Delete profile").emit_clicked();
+    dialog_buttons
+        .iter()
+        .find(|button| button_caption(button).as_deref() == Some("Delete profile"))
+        .expect("the Edit profile dialog's Delete profile button")
+        .emit_clicked();
     let dialog = current_dialog();
     save("delete-profile", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);

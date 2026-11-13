@@ -478,19 +478,32 @@ fn capture_documentation_screenshots() {
     save(&directory, reference.upcast_ref(), "shortcut-reference");
     reference.response(ResponseType::Close);
     widgets.feature_runtime.edit_profile("Studio");
-    menu(
-        &directory,
-        &widgets.management_menu,
-        "organize-profiles-pages",
-    );
-    let panel = widgets.management_menu.popover().unwrap();
-    let tasks = descendants::<gtk::Stack>(panel.upcast_ref()).remove(0);
-    tasks.set_visible_child_name("new");
-    menu(&directory, &widgets.management_menu, "organize-new-profile");
-    tasks.set_visible_child_name("edit");
+    // The compact command menu, then each command's dedicated modal dialog.
+    menu(&directory, &widgets.management_menu, "organize-menu");
+    let organize = widgets.management_menu.popover().unwrap();
+    organize.set_autohide(false);
+    let open_profile_dialog = |command: &str| {
+        widgets.management_menu.popup();
+        descendants::<Button>(organize.upcast_ref())
+            .into_iter()
+            .find(|row| button_caption(row).as_deref() == Some(command))
+            .unwrap_or_else(|| panic!("{command} command row"))
+            .emit_clicked();
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+            .find(|candidate| {
+                candidate.is_visible()
+                    && candidate.title().as_deref() == Some(command)
+                    && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+            })
+            .unwrap_or_else(|| panic!("{command} dialog opens"))
+    };
+    let edit = open_profile_dialog("Edit profile");
+    save(&directory, edit.upcast_ref(), "organize-profiles-pages");
     // The information icon reveals its help on hover.
-    widgets.management_menu.popup();
-    let help_icon = descendants::<gtk::MenuButton>(panel.upcast_ref())
+    let help_icon = descendants::<gtk::MenuButton>(edit.upcast_ref())
         .into_iter()
         .find(|button| button.has_css_class("field-help"))
         .expect("help icon");
@@ -509,11 +522,16 @@ fn capture_documentation_screenshots() {
     hover.emit_by_name::<()>("enter", &[&2.0f64, &2.0f64]);
     save(&directory, help_tip.upcast_ref(), "field-help");
     hover.emit_by_name::<()>("leave", &[]);
-    widgets.management_menu.popdown();
+    edit.close();
+    let new = open_profile_dialog("New profile");
+    save(&directory, new.upcast_ref(), "organize-new-profile");
+    new.close();
     settings.set_gtk_theme_name(Some("Adwaita"));
     settings.set_gtk_application_prefer_dark_theme(false);
     wait_for_frame(&widgets.root);
-    menu(&directory, &widgets.management_menu, "organize-light-theme");
+    let edit = open_profile_dialog("Edit profile");
+    save(&directory, edit.upcast_ref(), "organize-light-theme");
+    edit.close();
     settings.set_gtk_theme_name(Some("Adwaita-dark"));
     settings.set_gtk_application_prefer_dark_theme(true);
     widgets

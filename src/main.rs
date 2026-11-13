@@ -1031,7 +1031,6 @@ fn build_body(
         .build();
     let create_layer = ui::button("list-add-symbolic", "Create profile");
     create_layer.add_css_class("suggested-action");
-    let management = GtkBox::new(Orientation::Vertical, 16);
     let creation = GtkBox::new(Orientation::Vertical, 12);
     let name_row = labeled("Profile name", &layer_name);
     ui::field_help(&name_row, "New profile help",
@@ -1041,6 +1040,7 @@ fn build_body(
     let creation_error = ui::helper("");
     creation_error.set_visible(false);
     creation.append(&creation_error);
+    let creation_error_view = creation_error.clone();
     let error = creation_error.downgrade();
     let known = layers.clone();
     let create = create_layer.downgrade();
@@ -1181,27 +1181,53 @@ fn build_body(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    let profile_tasks = gtk::Stack::builder()
-        .vhomogeneous(false)
-        .hhomogeneous(true)
-        .build();
-    profile_tasks.add_titled(feature_runtime.management(), Some("edit"), "Edit profile");
-    profile_tasks.add_titled(&creation, Some("new"), "New profile");
-    let task_picker = gtk::StackSwitcher::builder().stack(&profile_tasks).build();
-    task_picker.add_css_class("popover-tabs");
-    task_picker.set_halign(gtk::Align::Fill);
-    management.append(&task_picker);
-    management.append(&profile_tasks);
-    let management_scroll = ui::panel_body(&management);
-    // The header, subtitle and footer divider take room; keep the forms scroll-free.
-    management_scroll.set_max_content_height(344);
-    let management_popover = ui::popover("Profiles", &management_scroll);
-    management_popover.add_css_class("organize-popover");
-    ui::refine_popover_header(
-        &management_popover,
-        "preferences-system-symbolic",
-        "Choose a profile to edit, or create a new one.",
+    // Organize is a compact command menu; each profile form lives in its own modal dialog.
+    let edit_dialog = ui::profile_dialog(
+        &window,
+        "Edit profile",
+        "Choose a profile to edit its automatic switching or delete it.",
+        feature_runtime.management(),
+        "Close",
     );
+    let new_dialog = ui::profile_dialog(
+        &window,
+        "New profile",
+        "Create a separate, empty set of bindings and artwork.",
+        &creation,
+        "Cancel",
+    );
+    {
+        // A closed (cancelled or dismissed) draft never lingers into the next opening.
+        let name = layer_name.clone();
+        let error = creation_error_view.clone();
+        new_dialog.connect_hide(move |_| {
+            name.set_text("");
+            error.set_visible(false);
+        });
+    }
+    let command_rows = [
+        (
+            ui::command_row("document-edit-symbolic", "Edit profile"),
+            edit_dialog.clone(),
+        ),
+        (
+            ui::command_row("list-add-symbolic", "New profile"),
+            new_dialog.clone(),
+        ),
+    ];
+    let management_popover = ui::command_menu(&command_rows.each_ref().map(|(row, _)| row.clone()));
+    for (row, dialog) in &command_rows {
+        let popover = management_popover.downgrade();
+        let dialog = dialog.downgrade();
+        row.connect_clicked(move |_| {
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.present();
+            }
+        });
+    }
     let management_menu = ui::menu_button(
         "preferences-system-symbolic",
         "Organize",
@@ -1457,7 +1483,7 @@ fn build_body(
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
         let updating_layers = updating_layers.clone();
-        let tasks = profile_tasks.downgrade();
+        let dialogs = [new_dialog.downgrade(), edit_dialog.downgrade()];
         create_layer.connect_clicked(move |_| {
             let value = name.text().to_string();
             let trimmed = value.trim().to_owned();
@@ -1494,8 +1520,10 @@ fn build_body(
                 ui.refresh_summaries(&layers);
                 artwork.refresh(false);
                 name.set_text("");
-                if let Some(tasks) = tasks.upgrade() {
-                    tasks.set_visible_child_name("edit");
+                // Creation returns to editing the new profile.
+                if let [Some(new), Some(edit)] = dialogs.each_ref().map(|dialog| dialog.upgrade()) {
+                    new.close();
+                    edit.present();
                 }
             }
         });
@@ -5139,6 +5167,7 @@ mod tests {
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
+    mod profile_organize_dialog_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
@@ -5526,7 +5555,7 @@ mod tests {
 
         assert_physical_shortcut_widgets(&ui);
         shortcut_reference_tests::assert_reference_dialog();
-        profile_manager_tests::assert_compact_profile_manager();
+        profile_organize_dialog_tests::assert_compact_profile_manager();
         control_feedback_tests::assert_control_feedback();
         assert_profile_tabs_and_focus();
         assert_return_to_previous_profile();
@@ -5632,18 +5661,27 @@ mod tests {
         assert_eq!(profile_names(&picker), ["Base", "Music", "Studio"]);
         let mut buttons = Vec::new();
         collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
         let save = buttons
             .iter()
             .find(|button| button_caption(button).as_deref() == Some("Save changes"))
             .unwrap();
         let mut entries = Vec::new();
         collect_entries(widgets.root.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
         let application = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("Window class or executable"))
             .unwrap();
         let mut checks = Vec::new();
         collect_check_buttons(widgets.root.upcast_ref(), &mut checks);
+        for body in profile_dialog_bodies(&window) {
+            collect_check_buttons(&body, &mut checks);
+        }
         let check = checks
             .iter()
             .find(|check| {
@@ -5800,6 +5838,9 @@ mod tests {
         assert_eq!(layers.borrow().active(), "Studio");
         let mut buttons = Vec::new();
         collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
         let button = |caption: &str| {
             buttons
                 .iter()
@@ -5978,6 +6019,9 @@ mod tests {
         assert_eq!(tabs.n_pages(), 2);
         let mut entries = Vec::new();
         collect_entries(widgets.root.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
         let name = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
@@ -6055,6 +6099,9 @@ mod tests {
         ui.text_entry.set_text("toast-test");
         let mut buttons = Vec::new();
         collect_layout_buttons(viewport.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
         let save = buttons
             .iter()
             .find(|button| button_caption(button).as_deref() == Some("Save binding"))
@@ -6069,6 +6116,9 @@ mod tests {
             .unwrap();
         let mut entries = Vec::new();
         collect_entries(viewport.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
         let profile_name = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
@@ -6196,68 +6246,37 @@ mod tests {
                         .unwrap();
                 }
                 if scenario == 3 {
+                    // The profile forms live in modal dialogs: each shows its primary
+                    // button completely, with no scrolling.
                     let panel = management_menu.popover().unwrap();
-                    let autohide = panel.is_autohide();
-                    // The user's desktop focus must not dismiss an owned capture.
                     panel.set_autohide(false);
-                    management_menu.popup();
-                    let panel_content = panel.child().unwrap();
-                    wait_for_frame(&panel);
-                    assert!(panel.is_visible() && panel.is_mapped());
-                    assert!(panel_content.is_drawable());
-                    // Native popup surfaces do not expose a render node reliably.
-                    // Render the same widgets in a fixed component host instead.
-                    let panel_size = (panel_content.width(), panel_content.height());
-                    assert!(panel_size.0 > 0 && panel_size.1 > 0);
-                    panel.set_child(gtk::Widget::NONE);
-                    let capture_stage = gtk::Fixed::new();
-                    panel_content.set_size_request(panel_size.0, panel_size.1);
-                    capture_stage.put(&panel_content, 0.0, 0.0);
-                    let capture_window = ApplicationWindow::builder().child(&capture_stage).build();
-                    capture_window.present();
-                    wait_for_frame(&panel_content);
-                    let scroller = save_profile
-                        .ancestor(gtk::ScrolledWindow::static_type())
-                        .unwrap()
-                        .downcast::<gtk::ScrolledWindow>()
-                        .unwrap();
-                    let scroll_to = |button: &Button| {
-                        let bounds = button.compute_bounds(&scroller).unwrap();
-                        if bounds.y() < 0.0
-                            || bounds.y() + bounds.height() > scroller.height() as f32
-                        {
-                            let adjustment = scroller.vadjustment();
-                            adjustment.set_value(adjustment.value() + f64::from(bounds.y()));
-                            wait_for_frame(&scroller);
+                    for (command, button, file) in [
+                        ("New profile", create_profile, "profile-create-panel"),
+                        ("Edit profile", save_profile, "profile-save-panel"),
+                    ] {
+                        management_menu.popup();
+                        let mut rows = Vec::new();
+                        collect_all_buttons(panel.upcast_ref(), &mut rows);
+                        let row = rows
+                            .iter()
+                            .find(|row| button_caption(row).as_deref() == Some(command));
+                        row.unwrap_or_else(|| panic!("{command} command row"))
+                            .emit_clicked();
+                        assert!(!panel.is_visible(), "a command closes the menu");
+                        let dialog = button.root().and_downcast::<gtk::Window>().unwrap();
+                        assert!(dialog.is_visible() && dialog.is_modal());
+                        wait_for_frame(&dialog);
+                        let content = dialog.child().unwrap();
+                        let bounds = button.compute_bounds(&content).unwrap();
+                        assert!(bounds.y() >= 0.0);
+                        assert!(bounds.y() + bounds.height() <= content.height() as f32 + 1.0);
+                        if let Some(directory) = &directory {
+                            rendered_texture(&dialog, &content)
+                                .save_to_png(directory.join(format!("{file}-{width}x{height}.png")))
+                                .unwrap();
                         }
-                        let bounds = button.compute_bounds(&scroller).unwrap();
-                        assert!(bounds.y() >= -1.0);
-                        assert!(bounds.y() + bounds.height() <= scroller.height() as f32 + 1.0);
-                    };
-                    scroll_to(create_profile);
-                    assert!(panel_content.is_drawable());
-                    if let Some(directory) = &directory {
-                        rendered_texture(&capture_window, &panel_content)
-                            .save_to_png(
-                                directory
-                                    .join(format!("profile-create-panel-{width}x{height}.png")),
-                            )
-                            .unwrap();
+                        dialog.close();
                     }
-                    scroll_to(save_profile);
-                    if let Some(directory) = &directory {
-                        rendered_texture(&capture_window, &panel_content)
-                            .save_to_png(
-                                directory.join(format!("profile-save-panel-{width}x{height}.png")),
-                            )
-                            .unwrap();
-                    }
-                    capture_stage.remove(&panel_content);
-                    panel_content.set_size_request(-1, -1);
-                    panel.set_child(Some(&panel_content));
-                    capture_window.destroy();
-                    management_menu.popdown();
-                    panel.set_autohide(autohide);
                 }
             }
         }
@@ -7282,7 +7301,6 @@ mod tests {
             wait_for_frame(&widgets.root);
             for (name, menu) in [
                 ("help", &widgets.help_menu),
-                ("organization", &widgets.management_menu),
                 ("folders", widgets.feature_runtime.folder_menu()),
                 ("obs", &widgets.obs_menu),
             ] {
@@ -7728,6 +7746,31 @@ mod tests {
             .into_iter()
             .find(|button| button.tooltip_text().as_deref() == Some(caption))
             .unwrap_or_else(|| panic!("folder action {caption:?} is listed"))
+    }
+
+    fn collect_all_buttons(widget: &gtk::Widget, found: &mut Vec<Button>) {
+        if let Some(button) = widget.downcast_ref::<Button>() {
+            found.push(button.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            child = current.next_sibling();
+            collect_all_buttons(&current, found);
+        }
+    }
+
+    /// The forms of the New/Edit profile dialogs of `window`, shown or not.
+    fn profile_dialog_bodies(window: &ApplicationWindow) -> Vec<gtk::Widget> {
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+            .filter(|candidate| {
+                candidate.has_css_class("profile-dialog")
+                    && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+            })
+            .filter_map(|candidate| candidate.child())
+            .collect()
     }
 
     fn collect_entries(widget: &gtk::Widget, entries: &mut Vec<Entry>) {

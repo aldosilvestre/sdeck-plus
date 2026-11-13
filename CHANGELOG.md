@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Organize menu:** the Organize tool is now a compact menu with **Edit profile** and **New profile** rows. Each opens its form in a dedicated modal dialog (Esc closes it); profile creation, editing, validation and deletion work as before.
+
 ### Added
 
 - **Microphone (audio input) controls:** **Input volume up** and **Input volume down** (1-100%
