@@ -84,6 +84,10 @@ All notable changes to this project are documented here. The format follows
   Organization, Device, OBS, and Plugins while one is installed) narrows the catalog to one category,
   opened at once; it combines with the search and is remembered. Multimedia is grouped into Media,
   Output, Input and Files, with the headings hidden while searching.
+- **Connection badge in the rail:** the "Not connected" / connected badge moves from the header to
+  the top of the profile rail (a tone-coloured dot while the rail is compact, with the text as its
+  tooltip). The header keeps the title, the connection detail line, the model selector, updates and
+  the menu.
 - **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
   radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
   edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and

@@ -258,6 +258,9 @@ inset edge. The toast is a pill (`desk_hover` fill, 999px radius). The binding s
 8px radius, tone text on `alpha(tone, 0.16)` for errors, warnings and successes, always with words.
 Source artboard: `design/overlays/03-compact-command.html`.
 
+The connection badge heads the profile rail; when the rail is compact it is a 12px tone-coloured dot
+whose text stays as its accessible name and tooltip. The header keeps the title and the detail line.
+
 ## 4. Spacing and layout
 
 Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px

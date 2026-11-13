@@ -147,6 +147,44 @@ pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
     content
 }
 
+/// A label that follows `source`: its text, tooltip and style classes. Used to show the
+/// connection badge in the profile rail while the header's label stays the one written to.
+pub(crate) fn mirror_badge(source: &Label) -> Label {
+    let badge = Label::new(None);
+    badge.set_halign(gtk::Align::Start);
+    badge.set_valign(gtk::Align::Start);
+    badge.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    badge.set_margin_bottom(6);
+    let copy = {
+        let badge = badge.downgrade();
+        move |source: &Label| {
+            let Some(badge) = badge.upgrade() else { return };
+            badge.set_text(&source.text());
+            badge.set_tooltip_text(source.tooltip_text().as_deref());
+            // Keep the compact marker, which the rail owns, across style updates.
+            let compact = badge.has_css_class("rail-compact");
+            let mut classes: Vec<String> = source
+                .css_classes()
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            classes.push("rail-badge".into());
+            if compact {
+                classes.push("rail-compact".into());
+            }
+            let classes: Vec<&str> = classes.iter().map(String::as_str).collect();
+            badge.set_css_classes(&classes);
+        }
+    };
+    copy(source);
+    let update = copy.clone();
+    source.connect_label_notify(move |source| update(source));
+    let update = copy.clone();
+    source.connect_css_classes_notify(move |source| update(source));
+    source.connect_tooltip_text_notify(move |source| copy(source));
+    badge
+}
+
 /// Shows or hides the caption of a menu button made by [`menu_button`], leaving its
 /// icon, tooltip and accessible name, so a narrow rail can show icons only.
 #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file

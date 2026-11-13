@@ -955,3 +955,36 @@ fn switching_back_and_forth_leaves_every_root_byte_identical_and_asks_nothing() 
         assert_eq!(tree(&xl_root), xl_before);
     });
 }
+
+#[test]
+fn the_rail_badge_mirrors_the_connection_label_and_turns_into_a_dot_when_compact() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let source = Label::new(None);
+        source.add_css_class("status");
+        let badge = ui::mirror_badge(&source);
+        // The mirror starts as the label is and follows every later change.
+        source.set_text("Not connected");
+        source.add_css_class("status-idle");
+        source.set_tooltip_text(Some("Plug a Stream Deck in"));
+        assert_eq!(badge.text(), "Not connected");
+        assert_eq!(
+            badge.tooltip_text().as_deref(),
+            Some("Plug a Stream Deck in")
+        );
+        assert!(badge.has_css_class("status") && badge.has_css_class("status-idle"));
+        assert!(badge.has_css_class("rail-badge"));
+        // A tone change replaces the old one.
+        source.remove_css_class("status-idle");
+        source.add_css_class("status-online");
+        source.set_text("Connected");
+        assert!(badge.has_css_class("status-online") && !badge.has_css_class("status-idle"));
+        // The compact marker belongs to the rail and survives updates.
+        badge.add_css_class("rail-compact");
+        source.set_text("Stream Deck + connected");
+        assert!(badge.has_css_class("rail-compact"));
+        assert_eq!(badge.text(), "Stream Deck + connected");
+    });
+}

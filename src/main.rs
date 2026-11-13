@@ -605,6 +605,7 @@ fn build_session(
         layer_sender,
         host.toast.clone(),
         host.shell,
+        host.labels.0,
         send_initial,
     );
     // Editing is switched off on the body alone: the header stays usable.
@@ -753,10 +754,12 @@ fn build_header(window: &ApplicationWindow) -> Header {
     title.set_xalign(0.0);
     heading.append(&title);
     header.append(&heading);
+    heading.set_hexpand(true);
+    // The badge itself lives in the profile rail (see `build_body`); this label stays the
+    // source of truth the connection code writes to, so it is kept but not shown.
     let status = Label::new(None);
     status.add_css_class("status");
-    status.set_hexpand(true);
-    status.set_halign(gtk::Align::End);
+    status.set_visible(false);
     header.append(&status);
     let selector = ModelSelector::new();
     header.append(&selector.root);
@@ -887,6 +890,7 @@ fn build_widgets(
         layer_sender,
         toast.clone(),
         &shell,
+        &header.status,
         true,
     );
     header.configuration_menu.bind(body.feature_runtime.clone());
@@ -961,6 +965,7 @@ fn build_body(
     layer_sender: mpsc::Sender<LayerCommand>,
     toast: ui::Toast,
     shell: &GtkBox,
+    connection_badge: &Label,
     send_initial: bool,
 ) -> Body {
     let updating_layers = Rc::new(Cell::new(false));
@@ -1201,11 +1206,22 @@ fn build_body(
     feature_runtime
         .profile_tabs()
         .set_action_widget(&layer_row, gtk::PackType::End);
+    // The connection badge heads the rail: a mirror of the header's label, a dot when compact.
+    let rail_status = ui::mirror_badge(connection_badge);
+    feature_runtime
+        .profile_tabs()
+        .set_action_widget(&rail_status, gtk::PackType::Start);
     // The rail shows initials and icon-only tools below this window width.
     let rail_runtime = feature_runtime.clone();
     let rail_menus = [management_menu.clone(), obs_menu.clone()];
+    let rail_badge = rail_status.clone();
     let apply_rail: Rc<dyn Fn(i32)> = Rc::new(move |width| {
         let compact = width < RAIL_EXPANDED_WIDTH;
+        if compact {
+            rail_badge.add_css_class("rail-compact");
+        } else {
+            rail_badge.remove_css_class("rail-compact");
+        }
         rail_runtime.set_rail_compact(compact);
         for menu in &rail_menus {
             ui::set_caption_visible(menu, !compact);

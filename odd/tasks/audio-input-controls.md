@@ -40,3 +40,4 @@ L15: design/overlays/ created with 01-quiet-surfaces, 02-tonal-feedback, 03-comp
 L16: la tercer propuesta es la mejor (overlays: 03-compact-command chosen). Implemented in src/ui.css (popover/tooltip radius+shadow, selected rows, pill toast, banner binding status). A global min-height on popover rows clipped the Organize popover, so row sizing stays unchanged.
 L17: docs screenshots regenerated with the official generator (35 PNGs, window 1000x950 captures; Microphone preset uses a microphone icon); img width/height attributes aligned to the PNG sizes.
 L18: y por que no lo hiciste, debes hacer todo. (finish every pending part of the chosen artboards: catalog chips + grouping, title/status in the rail, confirm dialogs, toast Undo, banners for all feedback, menu rows + hover/focus)
+L19: catalog chips+groups (118448a) and the connection badge in the rail done; title stays in the header (it spans the full width and the rail is 56px when compact).
