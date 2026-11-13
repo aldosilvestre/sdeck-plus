@@ -727,7 +727,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>. These are the Stream Deck + files; the Stream Deck + XL keeps the same set under
                  <code>devices/plus-xl/</code> (see <a href="#device-data">Data per model</a>).</p>
               <p>An unreadable or unsupported <code>layers.conf</code> leaves configuration unavailable with writes disabled; repair it and restart. In a readable file, invalid, conflicting
-                 or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.</p>
+                 or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.
+                 A record of a kind this version does not know (for example an action written by a newer version) is not removed: it is kept unchanged, not run and not shown, written back on every
+                 save and logged once as <code>kept=</code>; it is dropped only when you set that control again or delete its layer. A <code>touchscreen.json</code> holding such an action is left untouched and saving stays disabled until it is readable.</p>
             </article>
             <article class="card">
               <h4>Backup and restore</h4>
