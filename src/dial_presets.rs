@@ -232,12 +232,17 @@ pub(crate) fn connect(
     let list = GtkBox::new(Orientation::Vertical, 2);
     list.add_css_class("catalog-rows");
     for (index, preset) in presets.iter().enumerate() {
-        let icon = preset
-            .events
-            .first()
-            .map_or(BindingIcon::Generic, |(_, action)| {
-                BindingIcon::for_action(action)
-            });
+        // The microphone preset shows a microphone, not the speaker its volume steps share.
+        let icon = if preset.label == "Microphone" {
+            BindingIcon::AudioInput
+        } else {
+            preset
+                .events
+                .first()
+                .map_or(BindingIcon::Generic, |(_, action)| {
+                    BindingIcon::for_action(action)
+                })
+        };
         let row = row_button(
             preset.label,
             Some(preset.summary),
