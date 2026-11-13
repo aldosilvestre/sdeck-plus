@@ -60,8 +60,17 @@ always opens the generic **Plugin action** form (plugin and action drop-downs, t
 a text entry, a bounded spin button or a check box per manifest field, labelled for
 assistive technology) and stays a draft until Save binding; plugins cannot add their
 own widgets. A saved binding whose plugin is missing or changed shows a notice and is
-kept verbatim until another action is chosen. Secondary
-organization and artwork tools use progressive disclosure.
+kept verbatim until another action is chosen. **Plugin values.** An enabled plugin
+action whose manifest declares a `display` shows the value the plugin reports (headline,
+optional detail, optional level bar) on the key, dial zone or touch section it is bound to, in
+the window preview and on the device, drawn like live information; there is no extra control
+in the editor and nothing is stored. Until the first answer the control shows "..."; when the
+plugin fails or times out it shows a greyed "--". An explicit live-information choice on the
+same control wins, and a running timer countdown keeps its key. A disabled or missing plugin,
+or an action without a display, leaves the control as it was (its usual icon). Values are
+asked for when the layer, page or bindings change, when the device connects, when the plugin
+list changes and after any action of the same plugin finishes; they are not polled.
+Secondary organization and artwork tools use progressive disclosure.
 
 **Add plugin dialog.** A modal window transient for the main window, one instance at a
 time (pressing the button again presents it), 660 x 760 by default and resizable (it still

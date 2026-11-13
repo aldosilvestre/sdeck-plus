@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Plugin values on keys and the touch strip:** a plugin action that declares a `display` now
+  shows the value its plugin reports (headline, optional detail, optional level bar) on the key,
+  dial zone or touch section it is bound to, in the window and on the device, through the
+  live-information drawing path. Nothing is stored and no choice is added to the live-information
+  list: an explicit live-information choice and a running countdown win, a disabled plugin leaves
+  the control as it was, `...` shows until the first answer and `--` when the plugin fails.
+  Queries run on their own plugin worker with its own bounded queue (a refresh burst never makes
+  a key press fail as busy), with the 5 s deadline, when the layer or page changes, the device
+  connects, the plugin list changes, or an action of the same plugin finishes.
 - **Plugin display values (host side):** a plugin manifest may declare `values` (id and label, at
   most 16) and an action may name the one it shows with `display`. A new `query` request asks the
   plugin for it and returns a headline (1-32 characters), an optional detail (at most 64) and an
