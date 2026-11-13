@@ -5149,6 +5149,7 @@ mod tests {
     mod dial_action_tests;
     mod dial_preset_tests;
     mod documentation_screenshots;
+    mod feedback_banner_tests;
     mod folder_panel_tests;
     mod hover_help_tests;
     mod key_hold_integration_tests;
@@ -6197,7 +6198,7 @@ mod tests {
                 timeout.remove();
             }
             assert!(arrived.get(), "save result did not reach the toast");
-            assert_eq!(toast.label.has_css_class("feedback-error"), failed);
+            assert_eq!(toast.tone.has_css_class("feedback-error"), failed);
             if failed {
                 assert_eq!(std::fs::read(path.join("sentinel")).unwrap(), b"keep");
                 assert_eq!(std::fs::read(&metadata_path).ok(), metadata_before);
@@ -6286,14 +6287,14 @@ mod tests {
         ui.text_entry.set_text("");
         save.emit_clicked();
         assert!(toast.root.reveals_child());
-        assert!(toast.label.has_css_class("feedback-error"));
+        assert!(toast.tone.has_css_class("feedback-error"));
         assert_eq!(std::fs::read(&path).unwrap(), saved);
         commands.send(LayerCommand::Shutdown).unwrap();
         worker.join().unwrap();
         ui.text_entry.set_text("toast-test");
         save.emit_clicked();
         assert!(toast.root.reveals_child());
-        assert!(toast.label.has_css_class("feedback-error"));
+        assert!(toast.tone.has_css_class("feedback-error"));
         assert_eq!(std::fs::read(&path).unwrap(), saved);
         ui::assert_toast_lifecycle(&toast);
         polling.remove();

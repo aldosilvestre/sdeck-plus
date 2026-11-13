@@ -606,3 +606,16 @@ button.menu-row:hover { background-color: @desk_hover; }
 
 /* The rail's tools line up with the profile names: same inner gap, frameless until hovered. */
 .profile-tabs > header.left menubutton.icon-action > button { padding: 6px 10px; }
+
+/* Toast and banner tone glyphs: the glyph carries the tone, the message stays in ink. */
+.toast-tone.feedback-success, .banner.feedback-success .banner-tone { color: @desk_success; }
+.toast-tone.feedback-error, .banner.feedback-error .banner-tone { color: @desk_error; }
+.banner.feedback-warning .banner-tone { color: @desk_warning; }
+.toast label, .toast label.feedback-error, .toast label.feedback-success { color: @desk_ink; }
+.banner { padding: 6px 10px; border-radius: 8px; }
+.banner.feedback-error { background-color: alpha(@desk_error, 0.16); }
+.banner.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
+.banner.feedback-success { background-color: alpha(@desk_success, 0.16); }
+.banner label.feedback-error,
+.banner label.feedback-warning,
+.banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }

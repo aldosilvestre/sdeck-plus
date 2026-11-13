@@ -9,6 +9,12 @@ All notable changes to this project are documented here. The format follows
 
 - **Organize menu:** the Organize tool is now a compact menu with **Edit profile** and **New profile** rows. Each opens its form in a dedicated modal dialog (Esc closes it); profile creation, editing, validation and deletion work as before.
 
+- **Feedback:** toasts start with a tone glyph and keep the message in ink; a success toast has no
+  Dismiss button (it hides itself), an error keeps one. Inline status messages are banners with a
+  tone glyph and ink text instead of coloured text.
+- **Microphone icons:** Input volume up/down and Mute microphone now show microphone icons
+  (`input-volume-up`, `input-volume-down`, `input-mute`) instead of speaker icons.
+
 ### Added
 
 - **Microphone (audio input) controls:** **Input volume up** and **Input volume down** (1-100%

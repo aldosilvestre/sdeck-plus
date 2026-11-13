@@ -9,6 +9,10 @@ type ToastHandler = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 pub(crate) struct Toast {
     pub(crate) root: gtk::Revealer,
     pub(crate) label: Label,
+    /// The tone glyph before the message: a check for success, an alert for an error.
+    pub(crate) tone: Image,
+    /// Shown only for errors, which stay until dismissed; a success hides itself.
+    pub(crate) dismiss: Button,
     /// An optional action beside the message, such as Undo; hidden unless a caller asks for it.
     pub(crate) action: Button,
     handler: ToastHandler,
@@ -28,6 +32,10 @@ impl Toast {
             .build();
         let content = GtkBox::new(Orientation::Horizontal, 12);
         content.add_css_class("toast");
+        let tone = Image::from_icon_name("emblem-ok-symbolic");
+        tone.add_css_class("toast-tone");
+        tone.set_accessible_role(gtk::AccessibleRole::Presentation);
+        content.append(&tone);
         let label = Label::new(None);
         label.set_wrap(true);
         label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
@@ -81,6 +89,8 @@ impl Toast {
         Self {
             root,
             label,
+            tone,
+            dismiss,
             action,
             handler,
             timeout,
@@ -114,7 +124,21 @@ impl Toast {
         self.action.set_visible(false);
         *self.handler.borrow_mut() = None;
         self.label.set_text(message);
-        feedback(&self.label, failed);
+        // The message stays in ink; only the tone glyph carries the colour.
+        for class in ["feedback-error", "feedback-success"] {
+            self.tone.remove_css_class(class);
+        }
+        self.tone.add_css_class(if failed {
+            "feedback-error"
+        } else {
+            "feedback-success"
+        });
+        self.tone.set_icon_name(Some(if failed {
+            "dialog-error-symbolic"
+        } else {
+            "emblem-ok-symbolic"
+        }));
+        self.dismiss.set_visible(failed);
         self.root.set_reveal_child(true);
         if !failed {
             let weak = self.root.downgrade();
@@ -506,19 +530,75 @@ pub(crate) fn track_motion(widget: &impl IsA<gtk::Widget>) {
     });
 }
 
+const FEEDBACK_CLASSES: [&str; 3] = ["feedback-error", "feedback-success", "feedback-warning"];
+
 pub(crate) fn clear_feedback(label: &Label) {
-    label.remove_css_class("feedback-error");
-    label.remove_css_class("feedback-success");
-    label.remove_css_class("feedback-warning");
+    for class in FEEDBACK_CLASSES {
+        label.remove_css_class(class);
+    }
+    if let Some(banner) = banner_of(label) {
+        for class in FEEDBACK_CLASSES {
+            banner.remove_css_class(class);
+        }
+        if let Some(icon) = banner.first_child().and_downcast::<Image>() {
+            icon.set_visible(false);
+        }
+    }
 }
 
 pub(crate) fn feedback(label: &Label, failed: bool) {
     clear_feedback(label);
-    label.add_css_class(if failed {
+    let class = if failed {
         "feedback-error"
     } else {
         "feedback-success"
-    });
+    };
+    label.add_css_class(class);
+    if let Some(banner) = banner_of(label).or_else(|| wrap_in_banner(label)) {
+        banner.add_css_class(class);
+        if let Some(icon) = banner.first_child().and_downcast::<Image>() {
+            icon.set_icon_name(Some(if failed {
+                "dialog-error-symbolic"
+            } else {
+                "emblem-ok-symbolic"
+            }));
+            icon.set_visible(true);
+        }
+    }
+}
+
+/// The banner row a feedback label already sits in, if any.
+pub(crate) fn banner_of(label: &Label) -> Option<GtkBox> {
+    label
+        .parent()
+        .and_downcast::<GtkBox>()
+        .filter(|parent| parent.has_css_class("banner"))
+}
+
+/// Put a feedback label into a banner row (tone glyph, then the message in ink) in the same
+/// place of its box, the first time it shows feedback. The row follows the label's visibility.
+/// Labels outside a box (none today) keep the tinted-label look.
+fn wrap_in_banner(label: &Label) -> Option<GtkBox> {
+    let parent = label.parent().and_downcast::<GtkBox>()?;
+    let before = label.prev_sibling();
+    let banner = GtkBox::new(Orientation::Horizontal, 8);
+    banner.add_css_class("banner");
+    banner.set_hexpand(label.hexpands());
+    banner.set_halign(label.halign());
+    banner.set_valign(label.valign());
+    let icon = Image::from_icon_name("emblem-ok-symbolic");
+    icon.add_css_class("banner-tone");
+    icon.set_valign(gtk::Align::Start);
+    icon.set_accessible_role(gtk::AccessibleRole::Presentation);
+    banner.append(&icon);
+    parent.remove(label);
+    banner.append(label);
+    parent.insert_child_after(&banner, before.as_ref());
+    label
+        .bind_property("visible", &banner, "visible")
+        .sync_create()
+        .build();
+    Some(banner)
 }
 
 pub(crate) fn panel_body(body: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
