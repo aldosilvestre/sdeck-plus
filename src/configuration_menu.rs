@@ -237,7 +237,7 @@ impl ConfigurationMenu {
             .resizable(false)
             .default_width(440)
             .build();
-        dialog.add_button("Cancel", ResponseType::Cancel);
+        ui::add_key_hint(&dialog.add_button("Cancel", ResponseType::Cancel), "Esc");
         dialog
             .add_button("Import", ResponseType::Accept)
             .add_css_class("destructive-action");

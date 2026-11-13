@@ -261,6 +261,9 @@ Source artboard: `design/overlays/03-compact-command.html`.
 The connection badge heads the profile rail; when the rail is compact it is a 12px tone-coloured dot
 whose text stays as its accessible name and tooltip. The header keeps the title and the detail line.
 
+Confirm dialogs (discard, delete, import) read left-aligned: a 16px bold title, a muted
+explanation, then the buttons; the cancel button carries an `Esc` key hint (monospace 11px chip).
+
 ## 4. Spacing and layout
 
 Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px

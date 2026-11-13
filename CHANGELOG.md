@@ -88,6 +88,8 @@ All notable changes to this project are documented here. The format follows
   the top of the profile rail (a tone-coloured dot while the rail is compact, with the text as its
   tooltip). The header keeps the title, the connection detail line, the model selector, updates and
   the menu.
+- **Confirm dialogs:** the title and explanation read left-aligned and the cancel button shows its
+  keyboard hint (`Esc`) after its caption, in the discard, delete and import confirmations.
 - **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
   radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
   edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and

@@ -3373,17 +3373,11 @@ fn confirm_discard_in(
         .text("Discard unsaved changes?")
         .secondary_text(explanation)
         .build();
-    dialog.add_css_class("confirm-dialog");
-    let mut child = dialog.message_area().first_child();
-    while let Some(widget) = child {
-        if let Some(label) = widget.downcast_ref::<Label>() {
-            label.set_justify(gtk::Justification::Center);
-        }
-        child = widget.next_sibling();
-    }
-    dialog.set_resizable(false);
-    dialog.set_default_size(360, -1);
-    dialog.add_button("Keep editing", gtk::ResponseType::Cancel);
+    ui::style_confirm_dialog(&dialog);
+    ui::add_key_hint(
+        &dialog.add_button("Keep editing", gtk::ResponseType::Cancel),
+        "Esc",
+    );
     dialog
         .add_button("Discard changes", gtk::ResponseType::Accept)
         .add_css_class("destructive-action");

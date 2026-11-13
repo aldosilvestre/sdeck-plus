@@ -218,7 +218,7 @@ impl FeatureRuntime {
             .secondary_text(detail)
             .build();
         style_confirm_dialog(&dialog);
-        dialog.add_button("Keep", ResponseType::Cancel);
+        crate::ui::add_key_hint(&dialog.add_button("Keep", ResponseType::Cancel), "Esc");
         dialog
             .add_button(action, ResponseType::Accept)
             .add_css_class("destructive-action");
@@ -261,14 +261,5 @@ impl FeatureRuntime {
 /// Gives a destructive confirmation the app's compact, centred native style.
 /// Pair with a `destructive-action` button; colours come from the theme tokens.
 pub(super) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
-    dialog.add_css_class("confirm-dialog");
-    let mut child = dialog.message_area().first_child();
-    while let Some(widget) = child {
-        if let Some(label) = widget.downcast_ref::<Label>() {
-            label.set_justify(gtk::Justification::Center);
-        }
-        child = widget.next_sibling();
-    }
-    dialog.set_resizable(false);
-    dialog.set_default_size(360, -1);
+    crate::ui::style_confirm_dialog(dialog);
 }

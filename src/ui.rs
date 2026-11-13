@@ -186,6 +186,41 @@ pub(crate) fn mirror_badge(source: &Label) -> Label {
     badge
 }
 
+/// A confirm dialog reads like a dialog: title and explanation start at the left edge.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
+    dialog.add_css_class("confirm-dialog");
+    let mut child = dialog.message_area().first_child();
+    while let Some(widget) = child {
+        if let Some(label) = widget.downcast_ref::<Label>() {
+            label.set_justify(gtk::Justification::Left);
+            label.set_xalign(0.0);
+        }
+        child = widget.next_sibling();
+    }
+    dialog.set_resizable(false);
+    dialog.set_default_size(360, -1);
+}
+
+/// Shows a keyboard hint (for example `Esc`) after a button's caption. The caption stays the
+/// button's accessible name.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn add_key_hint(button: &gtk::Widget, hint: &str) {
+    let Some(button) = button.downcast_ref::<Button>() else {
+        return;
+    };
+    let Some(caption) = button.label() else {
+        return;
+    };
+    let content = GtkBox::new(Orientation::Horizontal, 8);
+    content.append(&Label::new(Some(&caption)));
+    let key = Label::new(Some(hint));
+    key.add_css_class("key-hint");
+    content.append(&key);
+    button.set_child(Some(&content));
+    button.update_property(&[gtk::accessible::Property::Label(&caption)]);
+}
+
 /// Shows or hides the caption of a menu button made by [`menu_button`], leaving its
 /// icon, tooltip and accessible name, so a narrow rail can show icons only.
 #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file

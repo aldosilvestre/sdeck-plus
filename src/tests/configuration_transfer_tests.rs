@@ -242,6 +242,20 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
 
     menu.select_path_for_test(true, bundle.clone());
     let confirmation = menu.confirmation_for_test().unwrap();
+    // The cancel button shows its keyboard hint.
+    let mut hints = Vec::new();
+    let mut stack = vec![confirmation.clone().upcast::<gtk::Widget>()];
+    while let Some(widget) = stack.pop() {
+        if widget.has_css_class("key-hint") {
+            hints.push(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            stack.push(current.clone());
+            child = current.next_sibling();
+        }
+    }
+    assert_eq!(hints.len(), 1, "the import dialog's Cancel shows Esc");
     capture_themes("import-confirmation", confirmation.upcast_ref());
     confirmation.response(ResponseType::Cancel);
     assert!(completed.try_recv().is_err());

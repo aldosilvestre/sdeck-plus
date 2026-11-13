@@ -988,3 +988,74 @@ fn the_rail_badge_mirrors_the_connection_label_and_turns_into_a_dot_when_compact
         assert_eq!(badge.text(), "Stream Deck + connected");
     });
 }
+
+fn descendants_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+    if widget.has_css_class(class) {
+        found.push(widget.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        descendants_with_class(&current, class, found);
+        child = current.next_sibling();
+    }
+}
+
+#[test]
+fn confirm_dialogs_read_left_aligned_and_their_cancel_button_shows_an_escape_hint() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let dialog = gtk::MessageDialog::builder()
+            .message_type(gtk::MessageType::Question)
+            .text("Delete \"Studio\"?")
+            .secondary_text("Its pages and bindings go with it.")
+            .build();
+        ui::style_confirm_dialog(&dialog);
+        let cancel = dialog.add_button("Keep", gtk::ResponseType::Cancel);
+        ui::add_key_hint(&cancel, "Esc");
+        let destroy = dialog.add_button("Delete", gtk::ResponseType::Accept);
+        assert!(dialog.has_css_class("confirm-dialog"));
+        // The title and the explanation start at the left edge, as a dialog reads.
+        let mut labels = Vec::new();
+        let mut child = dialog.message_area().first_child();
+        while let Some(widget) = child {
+            if let Some(label) = widget.downcast_ref::<Label>() {
+                assert_eq!(label.justify(), gtk::Justification::Left);
+                assert_eq!(label.xalign(), 0.0);
+                labels.push(label.text().to_string());
+            }
+            child = widget.next_sibling();
+        }
+        assert_eq!(
+            labels,
+            ["Delete \"Studio\"?", "Its pages and bindings go with it."]
+        );
+        // Only the cancel button has the hint, and its accessible name stays "Keep".
+        let mut hints = Vec::new();
+        descendants_with_class(dialog.upcast_ref(), "key-hint", &mut hints);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].downcast_ref::<Label>().unwrap().text(), "Esc");
+        assert!(cancel.is_ancestor(dialog.upcast_ref::<gtk::Widget>()));
+        assert!(hints[0].is_ancestor(&cancel));
+        assert!(!hints[0].is_ancestor(&destroy));
+        assert_eq!(
+            cancel.downcast_ref::<Button>().unwrap().label().as_deref(),
+            None,
+            "the caption moved into the button's content"
+        );
+        let mut captions = Vec::new();
+        // The button holds one box with the caption and the hint.
+        let mut inside = cancel
+            .first_child()
+            .and_then(|content| content.first_child());
+        while let Some(widget) = inside {
+            captions.push(widget.downcast_ref::<Label>().map(|l| l.text().to_string()));
+            inside = widget.next_sibling();
+        }
+        assert_eq!(
+            captions,
+            [Some("Keep".to_string()), Some("Esc".to_string())]
+        );
+    });
+}

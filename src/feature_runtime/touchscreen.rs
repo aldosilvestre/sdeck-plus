@@ -188,7 +188,7 @@ impl FeatureRuntime {
             .secondary_text("Its bindings and artwork are deleted. This cannot be undone.")
             .build();
         super::pages::style_confirm_dialog(&dialog);
-        dialog.add_button("Keep", gtk::ResponseType::Cancel);
+        crate::ui::add_key_hint(&dialog.add_button("Keep", gtk::ResponseType::Cancel), "Esc");
         dialog
             .add_button("Delete page", gtk::ResponseType::Accept)
             .add_css_class("destructive-action");

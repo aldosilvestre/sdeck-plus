@@ -580,3 +580,15 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
     font-weight: 700;
     padding: 8px 8px 2px 8px;
 }
+
+/* Keyboard hint after a button caption, as in "Keep editing  Esc". */
+.key-hint {
+    font-family: monospace;
+    font-size: 11px;
+    color: @desk_muted;
+    background-color: @desk_field;
+    border: 1px solid @desk_edge;
+    border-radius: 6px;
+    padding: 0 6px;
+}
+.confirm-dialog button.destructive-action .key-hint { color: inherit; }
