@@ -5348,6 +5348,7 @@ mod tests {
         profile_manager_tests::assert_compact_profile_manager();
         control_feedback_tests::assert_control_feedback();
         assert_profile_tabs_and_focus();
+        assert_return_to_previous_profile();
         assert_binding_save_toasts();
         assert_select_control_validates_ranges_and_preserves_valid_events();
         assert_direct_button_click_selects_button_8_and_loads_existing_assignment();
@@ -5366,6 +5367,221 @@ mod tests {
         eprintln!("GTK assertions executed: selection, styles, summaries and refresh paths");
         assert!(ui.summaries[0].text().contains("Unassigned"));
         assert_production_layout_fits();
+    }
+
+    fn collect_check_buttons(widget: &gtk::Widget, found: &mut Vec<gtk::CheckButton>) {
+        if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
+            found.push(check.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            child = current.next_sibling();
+            collect_check_buttons(&current, found);
+        }
+    }
+
+    fn profile_picker(manager: &GtkBox) -> gtk::DropDown {
+        let mut child = manager.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = widget.downcast_ref::<GtkBox>() {
+                if row
+                    .first_child()
+                    .and_then(|child| child.downcast::<Label>().ok())
+                    .is_some_and(|label| label.text() == "Profile to edit")
+                {
+                    return row
+                        .last_child()
+                        .and_then(|child| child.downcast::<gtk::DropDown>().ok())
+                        .unwrap();
+                }
+            }
+            child = widget.next_sibling();
+        }
+        panic!("the profile picker is part of the Edit profile panel");
+    }
+
+    fn profile_names(picker: &gtk::DropDown) -> Vec<String> {
+        let model = picker.model().unwrap();
+        (0..model.n_items())
+            .map(|index| {
+                model
+                    .item(index)
+                    .unwrap()
+                    .downcast::<gtk::StringObject>()
+                    .unwrap()
+                    .string()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn assert_return_to_previous_profile() {
+        let (root, mut store, artwork_store, _) = artwork_fixture("profile-return");
+        for name in ["Studio", "Music"] {
+            if !store.layers().contains_key(name) {
+                store.create(name).unwrap();
+            }
+        }
+        store.select("Base");
+        let layers = Rc::new(RefCell::new(store));
+        let window = ApplicationWindow::builder()
+            .default_width(DEFAULT_WIDTH)
+            .default_height(DEFAULT_HEIGHT)
+            .build();
+        install_style(&window);
+        let (output, _device) = mpsc::channel();
+        let artwork = ArtworkUi {
+            store: Rc::new(RefCell::new(Some(artwork_store))),
+            layers: layers.clone(),
+            pictures: Rc::new(RefCell::new(Vec::new())),
+            output,
+            last_layer: Rc::new(RefCell::new(None)),
+            chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
+            selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
+        };
+        let (requests, commands) = mpsc::channel();
+        let widgets = build_widgets(window.clone(), layers.clone(), artwork, requests);
+        window.set_child(Some(&widgets.root));
+        window.present();
+        let runtime = &widgets.feature_runtime;
+        let tabs = runtime.profile_tabs();
+        let picker = profile_picker(runtime.management());
+        assert_eq!(profile_names(&picker), ["Base", "Music", "Studio"]);
+        let mut buttons = Vec::new();
+        collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+        let save = buttons
+            .iter()
+            .find(|button| button_caption(button).as_deref() == Some("Save changes"))
+            .unwrap();
+        let mut entries = Vec::new();
+        collect_entries(widgets.root.upcast_ref(), &mut entries);
+        let application = entries
+            .iter()
+            .find(|entry| entry.placeholder_text().as_deref() == Some("Window class or executable"))
+            .unwrap();
+        let mut checks = Vec::new();
+        collect_check_buttons(widgets.root.upcast_ref(), &mut checks);
+        let check = checks
+            .iter()
+            .find(|check| {
+                check
+                    .child()
+                    .and_then(|child| child.downcast::<Label>().ok())
+                    .is_some_and(|label| label.text() == feature_runtime::RETURN_OPTION_LABEL)
+            })
+            .expect("the return option sits in the Edit profile panel");
+        let saved_organization = || {
+            let mut saved = None;
+            while let Ok(command) = commands.try_recv() {
+                if let LayerCommand::SaveProfile(_, Some(organization)) = command {
+                    saved = Some(organization);
+                }
+            }
+            saved.expect("Save changes persists the organization")
+        };
+
+        // Base can never have the option; a profile needs text in the application field first.
+        picker.set_selected(0);
+        assert!(!check.is_sensitive(), "Base has no application rule");
+        picker.set_selected(2);
+        assert_eq!(application.text(), "");
+        assert!(!check.is_sensitive(), "no application, no option");
+        assert!(!save.is_sensitive());
+        application.set_text("ui_showcase");
+        assert!(check.is_sensitive(), "text in the application enables it");
+        assert!(save.is_sensitive());
+        application.set_text("   ");
+        assert!(!check.is_sensitive(), "blank text does not count");
+        application.set_text("ui_showcase");
+        check.set_active(true);
+        save.emit_clicked();
+        assert!(saved_organization().profile_returns_to_previous("Studio"));
+        assert!(!save.is_sensitive(), "saved: nothing left to save");
+        check.set_active(false);
+        assert!(save.is_sensitive(), "the option alone is a change");
+        check.set_active(true);
+        assert!(!save.is_sensitive(), "back to the saved state");
+        picker.set_selected(1);
+        assert!(
+            !check.is_active() && !check.is_sensitive(),
+            "Music has no rule"
+        );
+        picker.set_selected(2);
+        assert!(check.is_active() && check.is_sensitive(), "Studio keeps it");
+
+        // From Music, the application shows Studio; leaving it brings Music back, not Base.
+        let ui_showcase = sdeck_plus::app_focus::FocusedApplication {
+            window_class: "dev.streamdeck.UiShowcase".into(),
+            executable: Some("ui_showcase".into()),
+        };
+        let other = sdeck_plus::app_focus::FocusedApplication {
+            window_class: "other-app".into(),
+            executable: None,
+        };
+        let active_profile = || {
+            let layers = layers.borrow();
+            let active = layers.active().to_owned();
+            active
+        };
+        tabs.set_current_page(Some(1));
+        assert_eq!(active_profile(), "Music");
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "back to where the user was");
+        runtime.focus_changed(Ok(Some(sdeck_plus::app_focus::FocusedApplication {
+            window_class: "another".into(),
+            executable: None,
+        })));
+        assert_eq!(active_profile(), "Music", "and it stays there");
+        // Without a previous profile (started on Base) it is Base again.
+        tabs.set_current_page(Some(0));
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Err("test unavailable".into()));
+        assert_eq!(active_profile(), "Base");
+        // A tab the user clicks while the application is focused is kept.
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        tabs.set_current_page(Some(0));
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Base");
+        // A tab picked by hand while the application is shown is where the user is after leaving,
+        // and the next visit remembers that tab, not the profile of an earlier visit.
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "the user's own tab stays");
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "remembered from this visit");
+        tabs.set_current_page(Some(0));
+
+        // Turned off, leaving goes to Base as it always did.
+        picker.set_selected(2);
+        check.set_active(false);
+        save.emit_clicked();
+        assert!(!saved_organization().profile_returns_to_previous("Studio"));
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(ui_showcase)));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other)));
+        assert_eq!(active_profile(), "Base");
+
+        // Clearing the application removes the option with it.
+        check.set_active(true);
+        application.set_text("");
+        assert!(!check.is_sensitive());
+        save.emit_clicked();
+        assert!(!saved_organization().profile_returns_to_previous("Studio"));
+        window.destroy();
+        std::fs::remove_dir_all(root).unwrap();
+        eprintln!("GTK return-to-previous option executed: enablement, saving and focus behaviour");
     }
 
     fn assert_profile_tabs_and_focus() {

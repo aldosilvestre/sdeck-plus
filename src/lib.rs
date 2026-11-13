@@ -11,6 +11,7 @@ pub mod device_model;
 pub mod device_roots;
 pub mod event_api;
 pub mod features;
+pub mod focus_profile;
 pub mod image_output;
 pub mod info;
 pub mod info_render;
