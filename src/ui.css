@@ -547,3 +547,25 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
     outline: 2px solid @desk_cyan;
     outline-offset: -2px;
 }
+
+/* Category chips and group sub-headings of the action catalog. */
+.catalog-chips { margin: 2px 0 4px; }
+.catalog-chip {
+    min-height: 24px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    border-color: @desk_edge;
+}
+.catalog-chip:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    border-color: @desk_violet;
+    font-weight: 600;
+}
+.catalog-group {
+    color: @desk_muted;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 8px 8px 2px 8px;
+}

@@ -80,6 +80,10 @@ All notable changes to this project are documented here. The format follows
   Organize and OBS at its foot. Below a 1200 px window it shows one letter per profile and icon-only
   tools. The default window is now 1080 x 700 (it was 1000 x 700) so the + XL still sits beside the
   action catalog.
+- **Action catalog chips and groups:** a row of category chips (All, Basic, System, Multimedia,
+  Organization, Device, OBS, and Plugins while one is installed) narrows the catalog to one category,
+  opened at once; it combines with the search and is remembered. Multimedia is grouped into Media,
+  Output, Input and Files, with the headings hidden while searching.
 - **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
   radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
   edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and

@@ -49,6 +49,8 @@ impl CatalogAction {
 #[derive(Clone, Default)]
 pub(crate) struct CatalogMemory {
     query: Rc<RefCell<String>>,
+    /// The category chip in use; `None` is "All".
+    category: Rc<RefCell<Option<String>>>,
     open: Rc<RefCell<std::collections::HashMap<String, bool>>>,
 }
 
@@ -67,6 +69,41 @@ pub(crate) fn connect(
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Search actions"));
     catalog.append(&search);
+    // One chip per category narrows the list to it; "All" lists everything.
+    let chips = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .min_children_per_line(1)
+        // Four to a line keeps the panel as narrow as before; the rest wrap below.
+        .max_children_per_line(4)
+        .column_spacing(4)
+        .row_spacing(4)
+        .build();
+    chips.add_css_class("catalog-chips");
+    let mut chip_buttons: Vec<gtk::ToggleButton> = Vec::new();
+    for name in [
+        "All",
+        "Basic",
+        "System",
+        "Multimedia",
+        "Organization",
+        "Device",
+        "OBS",
+        "Plugins",
+    ] {
+        let chip = gtk::ToggleButton::with_label(name);
+        chip.add_css_class("catalog-chip");
+        if let Some(first) = chip_buttons.first() {
+            chip.set_group(Some(first));
+        }
+        let chosen = memory.category.borrow().clone();
+        chip.set_active(chosen.as_deref().map_or(name == "All", |c| c == name));
+        chips.append(&chip);
+        chip_buttons.push(chip);
+    }
+    // Plugins only get a chip while at least one is installed.
+    let plugins_chip = chip_buttons[chip_buttons.len() - 1].clone();
+    plugins_chip.set_visible(false);
+    catalog.append(&chips);
     let list = GtkBox::new(Orientation::Vertical, 6);
     list.add_css_class("catalog-list");
     let assign: Assign = {
@@ -235,12 +272,26 @@ pub(crate) fn connect(
                 )
             })
             .collect();
+        let groups = if category == 1 {
+            // Multimedia is long: media transport, the speakers, the microphone, then files.
+            vec![
+                (0, "Media"),
+                (4, "Output (speakers, headphones)"),
+                (8, "Input (microphone)"),
+                (12, "Files"),
+            ]
+        } else {
+            Vec::new()
+        };
         sections.push(Section::new(
             &list,
             label,
             Choice::category_icon(category as u32),
             entries,
-            Extras::open(false),
+            Extras {
+                groups,
+                ..Extras::open(false)
+            },
             &wiring,
         ));
     }
@@ -248,7 +299,11 @@ pub(crate) fn connect(
     let plugin_region = GtkBox::new(Orientation::Vertical, 6);
     list.append(&plugin_region);
     let plugin_sections: Rc<RefCell<Vec<Section>>> = Rc::default();
+    // Reapplies search and chip; filled in once the section list is complete.
+    let refresh_view: RefreshHook = Rc::default();
     let build_plugins = {
+        let refresh_view = refresh_view.clone();
+        let plugins_chip = plugins_chip.clone();
         let (region, built) = (plugin_region.downgrade(), plugin_sections.clone());
         let (memory, ui, assign) = (memory.clone(), ui.clone(), assign.clone());
         move || {
@@ -264,10 +319,16 @@ pub(crate) fn connect(
                     assign: &assign,
                 },
             );
+            plugins_chip.set_visible(!built.borrow().is_empty());
             // A filter typed before the rebuild still applies to the new items.
-            let query = memory.query.borrow().to_lowercase();
-            for section in built.borrow().iter() {
-                section.filter(&query);
+            let refresh = refresh_view.borrow().clone();
+            if let Some(refresh) = refresh {
+                refresh();
+            } else {
+                let query = memory.query.borrow().to_lowercase();
+                for section in built.borrow().iter() {
+                    section.filter(&query);
+                }
             }
             true
         }
@@ -291,21 +352,48 @@ pub(crate) fn connect(
     empty.add_css_class("catalog-empty");
     empty.set_visible(false);
     list.append(&empty);
+    let sections = Rc::new(sections);
+    let refresh: Rc<dyn Fn()> = {
+        let (sections, plugins) = (sections.clone(), plugin_sections.clone());
+        let (query, category) = (memory.query.clone(), memory.category.clone());
+        Rc::new(move || {
+            let query = query.borrow().to_lowercase();
+            let category = category.borrow().clone();
+            let chosen = category.is_some();
+            // Every section must be updated, so this cannot short-circuit.
+            let mut found = false;
+            for section in sections.iter() {
+                let inside = category.as_deref().is_none_or(|name| name == section.title);
+                found |= section.show(&query, inside, chosen);
+            }
+            let plugins_inside = category.as_deref().is_none_or(|name| name == "Plugins");
+            for section in plugins.borrow().iter() {
+                found |= section.show(&query, plugins_inside, chosen);
+            }
+            empty.set_visible(!found);
+        })
+    };
+    *refresh_view.borrow_mut() = Some(refresh.clone());
     let remembered_query = memory.query.clone();
-    let search_plugins = plugin_sections.clone();
+    let apply_search = refresh.clone();
     search.connect_search_changed(move |search| {
         *remembered_query.borrow_mut() = search.text().to_string();
-        let query = search.text().to_lowercase();
-        // Every section must be filtered, so this cannot short-circuit.
-        let mut found = false;
-        for section in sections.iter().chain(search_plugins.borrow().iter()) {
-            found |= section.filter(&query);
-        }
-        empty.set_visible(!found);
+        apply_search();
     });
+    for chip in &chip_buttons {
+        let (category, apply) = (memory.category.clone(), refresh.clone());
+        chip.connect_toggled(move |chip| {
+            if chip.is_active() {
+                let name = chip.label().map(|name| name.to_string());
+                *category.borrow_mut() = name.filter(|name| name != "All");
+                apply();
+            }
+        });
+    }
     // A rebuilt catalog shows the search the user had typed.
     let remembered = memory.query.borrow().clone();
     search.set_text(&remembered);
+    refresh();
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .min_content_height(320)
@@ -394,6 +482,9 @@ enum Target {
 
 type Assign = Rc<dyn Fn(CatalogAction, Target) -> bool>;
 
+/// Reapplies the search and the category chip to the whole catalog, once it is built.
+type RefreshHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 /// What every category row is connected to.
 struct Wiring<'a> {
     memory: &'a CatalogMemory,
@@ -407,6 +498,8 @@ struct Extras<'a> {
     expanded: bool,
     preface: Option<&'a GtkBox>,
     key: Option<String>,
+    /// Sub-headings of long categories: the row index each one precedes, and its text.
+    groups: Vec<(usize, &'static str)>,
 }
 
 impl Extras<'_> {
@@ -420,6 +513,9 @@ impl Extras<'_> {
 
 /// One collapsible category: a header toggle and its action rows.
 struct Section {
+    title: String,
+    /// Group sub-headings; they only make sense while the whole category is listed.
+    headings: Vec<Label>,
     container: GtkBox,
     header: Button,
     revealer: gtk::Revealer,
@@ -444,6 +540,7 @@ impl Section {
             expanded,
             preface,
             key,
+            groups,
         } = extras;
         // Remembered open state is keyed apart from the title, which can show a status.
         let key = key.unwrap_or_else(|| title.to_owned());
@@ -474,20 +571,26 @@ impl Section {
         if let Some(preface) = preface {
             body.append(preface);
         }
-        let rows: Vec<_> = entries
-            .into_iter()
-            .map(|(label, subtitle, icon, action)| {
-                add_row(
-                    &body,
-                    label,
-                    subtitle.as_deref(),
-                    icon,
-                    action,
-                    ui,
-                    (*assign).clone(),
-                )
-            })
-            .collect();
+        let mut headings = Vec::new();
+        let mut rows = Vec::new();
+        for (index, (label, subtitle, icon, action)) in entries.into_iter().enumerate() {
+            if let Some((_, text)) = groups.iter().find(|(at, _)| *at == index) {
+                let heading = Label::new(Some(text));
+                heading.set_xalign(0.0);
+                heading.add_css_class("catalog-group");
+                body.append(&heading);
+                headings.push(heading);
+            }
+            rows.push(add_row(
+                &body,
+                label,
+                subtitle.as_deref(),
+                icon,
+                action,
+                ui,
+                (*assign).clone(),
+            ));
+        }
         let revealer = gtk::Revealer::builder()
             .transition_type(gtk::RevealerTransitionType::SlideDown)
             .child(&body)
@@ -495,6 +598,8 @@ impl Section {
         container.append(&revealer);
         list.append(&container);
         let section = Self {
+            title: title.clone(),
+            headings,
             container,
             header,
             revealer,
@@ -545,6 +650,20 @@ impl Section {
         }
     }
 
+    /// Applies the search and the category chip: a section outside the chosen category is
+    /// hidden, and the chosen one opens so its actions are reachable at once.
+    fn show(&self, query: &str, in_category: bool, chosen: bool) -> bool {
+        let matches = self.filter(query);
+        if !in_category {
+            self.container.set_visible(false);
+            return false;
+        }
+        if chosen && query.is_empty() {
+            self.apply(true);
+        }
+        matches
+    }
+
     /// Show only matching rows; an empty query restores the user's own open/closed state.
     fn filter(&self, query: &str) -> bool {
         let mut matches = 0;
@@ -554,6 +673,9 @@ impl Section {
             matches += usize::from(shown);
         }
         self.container.set_visible(matches > 0);
+        for heading in &self.headings {
+            heading.set_visible(query.is_empty());
+        }
         if query.is_empty() {
             self.apply(self.expanded.get());
         } else {
@@ -613,6 +735,7 @@ fn populate_plugins(region: &GtkBox, built: &RefCell<Vec<Section>>, wiring: &Wir
                 expanded: false,
                 preface: Some(&preface),
                 key: Some(format!("plugin:{}", manifest.id)),
+                groups: Vec::new(),
             },
             wiring,
         );

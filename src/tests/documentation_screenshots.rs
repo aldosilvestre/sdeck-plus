@@ -71,14 +71,22 @@ fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
         assert!(widget.is_mapped(), "{name} did not map");
     }
     let window = widget.root().unwrap().downcast::<gtk::Window>().unwrap();
-    wait_for_frame(widget);
-    let snapshot = gtk::Snapshot::new();
-    gtk::WidgetPaintable::new(Some(widget)).snapshot(
-        &snapshot,
-        f64::from(widget.width()),
-        f64::from(widget.height()),
-    );
-    let node = snapshot.to_node().expect("native GTK render node");
+    // A profile switch rebuilds the catalog in an idle step: snapshot only once something is drawn.
+    let mut node = None;
+    for _ in 0..10 {
+        wait_for_frame(widget);
+        let snapshot = gtk::Snapshot::new();
+        gtk::WidgetPaintable::new(Some(widget)).snapshot(
+            &snapshot,
+            f64::from(widget.width()),
+            f64::from(widget.height()),
+        );
+        node = snapshot.to_node();
+        if node.is_some() {
+            break;
+        }
+    }
+    let node = node.expect("native GTK render node");
     let texture = window.renderer().unwrap().render_texture(&node, None);
     assert!(texture.width() > 0 && texture.height() > 0);
     texture

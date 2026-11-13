@@ -240,3 +240,121 @@ fn searching_the_catalog_shows_only_matching_actions_and_restores_on_clear() {
         });
     });
 }
+
+fn collect_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+    if widget.has_css_class(class) {
+        found.push(widget.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        collect_with_class(&current, class, found);
+        child = current.next_sibling();
+    }
+}
+
+fn label_text(widget: &gtk::Widget) -> String {
+    widget
+        .downcast_ref::<gtk::Label>()
+        .map(|label| label.text().to_string())
+        .or_else(|| {
+            widget
+                .downcast_ref::<gtk::ToggleButton>()
+                .and_then(|button| button.label())
+                .map(|text| text.to_string())
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn category_chips_filter_the_catalog_to_one_category_and_all_restores_it() {
+    run_gtk_test(|| {
+        catalog_fixture("catalog-chips", |widgets, _layers, _requests| {
+            let mut chips = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "catalog-chip", &mut chips);
+            let names: Vec<_> = chips
+                .iter()
+                .filter(|chip| chip.is_visible())
+                .map(label_text)
+                .collect();
+            assert_eq!(
+                names,
+                [
+                    "All",
+                    "Basic",
+                    "System",
+                    "Multimedia",
+                    "Organization",
+                    "Device",
+                    "OBS"
+                ],
+                "plugins add their own chip only when a plugin is installed"
+            );
+            let chip = |name: &str| {
+                chips
+                    .iter()
+                    .find(|chip| label_text(chip) == name)
+                    .unwrap()
+                    .downcast_ref::<gtk::ToggleButton>()
+                    .unwrap()
+                    .clone()
+            };
+            assert!(chip("All").is_active());
+            let mut buttons = Vec::new();
+            collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
+            let find = |caption: &str| {
+                buttons
+                    .iter()
+                    .find(|b| {
+                        b.tooltip_text().as_deref()
+                            == Some(&format!(
+                                "Drag {caption} onto a key or dial, or click to assign to the selected control."
+                            ))
+                    })
+                    .unwrap()
+                    .clone()
+            };
+            let section = |row: &Button| row.parent().unwrap().parent().unwrap().parent().unwrap();
+            let volume = find("Volume up");
+            let command = find("Run command");
+            chip("Multimedia").set_active(true);
+            assert!(!chip("All").is_active(), "chips behave as one choice");
+            assert!(section(&volume).is_visible() && !section(&command).is_visible());
+            // The chosen category is open so its actions are reachable at once.
+            let revealer = volume.parent().unwrap().parent().unwrap();
+            assert!(revealer
+                .downcast_ref::<gtk::Revealer>()
+                .unwrap()
+                .reveals_child());
+            chip("All").set_active(true);
+            assert!(section(&command).is_visible() && section(&volume).is_visible());
+        });
+    });
+}
+
+#[test]
+fn multimedia_is_grouped_into_media_output_input_and_files_and_search_hides_the_headings() {
+    run_gtk_test(|| {
+        catalog_fixture("catalog-groups", |widgets, _layers, _requests| {
+            let mut headings = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "catalog-group", &mut headings);
+            let names: Vec<_> = headings.iter().map(label_text).collect();
+            assert_eq!(
+                names,
+                [
+                    "Media",
+                    "Output (speakers, headphones)",
+                    "Input (microphone)",
+                    "Files"
+                ]
+            );
+            let search = descendant_search(widgets.root.upcast_ref()).unwrap();
+            set_search_text(&search, "microphone");
+            assert!(
+                headings.iter().all(|heading| !heading.is_visible()),
+                "headings disappear while filtering"
+            );
+            set_search_text(&search, "");
+            assert!(headings.iter().all(|heading| heading.is_visible()));
+        });
+    });
+}

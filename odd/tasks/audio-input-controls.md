@@ -39,3 +39,4 @@ L14: T5 docs text done (OBS actions list, return-to-previous profile, plugin val
 L15: design/overlays/ created with 01-quiet-surfaces, 02-tonal-feedback, 03-compact-command (modals, popovers, hover/tooltip, alerts, toast, help). Waiting for the user to choose.
 L16: la tercer propuesta es la mejor (overlays: 03-compact-command chosen). Implemented in src/ui.css (popover/tooltip radius+shadow, selected rows, pill toast, banner binding status). A global min-height on popover rows clipped the Organize popover, so row sizing stays unchanged.
 L17: docs screenshots regenerated with the official generator (35 PNGs, window 1000x950 captures; Microphone preset uses a microphone icon); img width/height attributes aligned to the PNG sizes.
+L18: y por que no lo hiciste, debes hacer todo. (finish every pending part of the chosen artboards: catalog chips + grouping, title/status in the rail, confirm dialogs, toast Undo, banners for all feedback, menu rows + hover/focus)
