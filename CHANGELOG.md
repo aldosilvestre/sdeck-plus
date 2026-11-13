@@ -57,6 +57,13 @@ All notable changes to this project are documented here. The format follows
   or tag selection, removal from the app or automatic updates. A real HTTPS clone is not exercised
   by the automated tests (a fake git and a local repository only), and keyboard and screen-reader
   behaviour of the dialog was not verified with real input.
+- **Return to the previous profile:** a profile with an auto-switch application has a new
+  **Return to the previous profile when focus leaves** check (off by default; enabled only while
+  the application field has text). When on, the profile that was shown before the application took
+  over comes back once focus matches no profile, instead of Base. A tab you pick yourself is kept,
+  and a previous profile that was deleted or needs another application falls back to Base.
+  `organization.json` gains an optional `return_to_previous` list that is written only when some
+  profile uses it.
 
 ### Changed
 
