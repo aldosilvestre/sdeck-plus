@@ -1,0 +1,28 @@
+{
+  "title": "Main window",
+  "brief": "Improve the sdeck-plus main window: less vertical chrome, a clearer editor/catalog split, and room for the longer Multimedia catalog (new microphone actions) while keeping the app's dark charcoal/violet/cyan system.",
+  "feature": "odd/tasks/audio-input-controls.md",
+  "artboards": [
+    {
+      "file": "01-compact-shell.html",
+      "title": "Compact shell",
+      "tradeoff": "One header bar (title, status, profiles, tools); page strip joins the preview column; catalog groups audio by Output / Input. Saves ~90px of height; tabs and tools share one row so narrow widths need an overflow menu.",
+      "width": 1000,
+      "height": 950
+    },
+    {
+      "file": "02-inspector-first.html",
+      "title": "Inspector first",
+      "tradeoff": "Editor merges into one inspector with Binding / Actions / Dials tabs; the preview gets the whole left column. Fewer panels and a clear job per tab; the catalog needs one extra click when browsing.",
+      "width": 1000,
+      "height": 950
+    },
+    {
+      "file": "03-profile-rail.html",
+      "title": "Profile rail",
+      "tradeoff": "Profiles move to a vertical rail, categories become filter chips and audio is grouped Media / Output / Input. Scales to many profiles; needs 1200px+ and a stacked layout below that.",
+      "width": 1240,
+      "height": 900
+    }
+  ]
+}

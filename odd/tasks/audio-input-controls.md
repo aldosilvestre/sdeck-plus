@@ -24,3 +24,5 @@ L1: hagamos una modificacion mas en el proyecto, necesito que al igual que el vo
 L2: scope chosen: volume +/- with step, mute, rotate input device, live info + dial preset.
 L3: "continuemos con estos cambios por que seguramente tendremos que agregar esta informacion a la documentacion" (docs edits from the earlier docs task stay uncommitted and ship with T5).
 L4: ah adicionalmente, tendremos que agregar al plugin de OBS la posibilidad de subir o bajar el volumen de las fuentes de entrada de audio.
+L5: vi tambien que las capturas en la documentacion no 100% fieles a la app. Tambien usemos el gentle design para mejorar la interfaz de la aplicacion. (decisions: screenshots regenerated all at the end; redesign = design directions first; redesign before the remaining tasks)
+L6: design/main-window/ created with artboards 01-compact-shell, 02-inspector-first, 03-profile-rail (none chosen yet). Pending: T6 OBS input volume, T3 live info, T4 dial preset, T5 docs, final screenshots. Pre-existing GTK failures on base: plus_preview_is_identical_to_the_shipped_one, 2 update_check gtk tests.
