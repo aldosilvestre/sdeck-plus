@@ -250,6 +250,14 @@ dial's caption is 10px/600 pale graphite ink; neither carries configuration
 instructions or reaches the physical device.
 Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
+## Overlays and feedback
+
+Popovers, help popovers and tooltips share a 12px radius and the `0 8px 24px` shadow; tooltips are
+8px-radius labels (12px text). Selected popover rows use the selection fill with a 1px violet
+inset edge. The toast is a pill (`desk_hover` fill, 999px radius). The binding status is a banner:
+8px radius, tone text on `alpha(tone, 0.16)` for errors, warnings and successes, always with words.
+Source artboard: `design/overlays/03-compact-command.html`.
+
 ## 4. Spacing and layout
 
 Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px

@@ -97,16 +97,23 @@ popover > contents, tooltip {
     background-color: @desk_surface;
     color: @desk_ink;
     border: 1px solid @desk_edge;
-    border-radius: 14px;
+    border-radius: 12px;
     box-shadow: 0 8px 24px alpha(@desk_bg, 0.55);
 }
+/* Compact command: tooltips are small labels, not panels. */
+tooltip { border-radius: 8px; padding: 0; }
+tooltip label { padding: 5px 8px; font-size: 12px; }
 popover scrolledwindow, popover viewport, popover listview {
     background-color: @desk_surface;
     color: @desk_ink;
 }
 popover modelbutton, popover row { color: @desk_ink; }
-popover modelbutton:hover, popover row:hover,
-popover row:selected { background-color: @desk_hover; }
+popover modelbutton, popover row { border-radius: 8px; }
+popover modelbutton:hover, popover row:hover { background-color: @desk_hover; }
+popover row:selected, popover modelbutton:checked {
+    background-color: @desk_selection;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
 popover arrow { background-color: @desk_surface; border-color: @desk_edge; }
 separator { background-color: @desk_edge; min-height: 1px; }
 checkbutton { color: @desk_ink; }
@@ -269,10 +276,18 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .toast {
     background-color: @desk_hover;
     border: 1px solid @desk_edge;
-    border-radius: 12px;
-    padding: 12px 16px;
+    border-radius: 999px;
+    padding: 6px 6px 6px 16px;
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
+.toast button { border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
+/* Alerts read as banners: a tinted fill with the tone's text; words always say what happened. */
+.binding-status.feedback-error,
+.binding-status.feedback-warning,
+.binding-status.feedback-success { padding: 6px 10px; border-radius: 8px; }
+.binding-status.feedback-error { background-color: alpha(@desk_error, 0.16); }
+.binding-status.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
+.binding-status.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .profile-tabs, .profile-tabs > stack { background-color: transparent; }
 .profile-tabs > stack { margin-left: 8px; }
 /* Profiles sit in a vertical rail at the left; tools gather at its foot. */
@@ -487,12 +502,12 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .plugin-error-row:first-child label { font-weight: 600; }
 .binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
-popover.organize-popover > contents { border-radius: 14px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 14px 34px alpha(black, 0.28); }
+popover.organize-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 8px 24px alpha(black, 0.45); }
 popover.organize-popover .section-label { font-size: 15px; }
 popover.organize-popover .popover-icon { color: @desk_violet; }
 popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; border-radius: 8px; }
 popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
-.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 10px 28px alpha(black, 0.28); }
+.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
 .organize-subtitle { color: @desk_muted; margin-top: -8px; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
 .profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "chosen": "03-compact-command.html",
+  "handoffs": {
+    "03-compact-command.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-13T14:37:03.257Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-13T14:44:18.354Z",
+      "feature": "odd/tasks/audio-input-controls.md",
+      "note": "CSS in src/ui.css; confirm dialog layout unchanged beyond radius"
+    }
+  }
+}

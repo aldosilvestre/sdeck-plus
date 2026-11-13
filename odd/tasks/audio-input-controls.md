@@ -37,3 +37,4 @@ L12: T6 implemented inline (workers kept failing with auth; the gentle sync rewr
 L13: T3 (microphone live info: input-volume, input-device, appended to InfoSource::ALL) and T4 (Microphone dial preset) done inline.
 L14: T5 docs text done (OBS actions list, return-to-previous profile, plugin values, microphone, OBS input volume, profile rail, 1080px window). Screenshots, catalog grouping and overlay redesign (modals, popovers, hover, alerts, toasts) pending.
 L15: design/overlays/ created with 01-quiet-surfaces, 02-tonal-feedback, 03-compact-command (modals, popovers, hover/tooltip, alerts, toast, help). Waiting for the user to choose.
+L16: la tercer propuesta es la mejor (overlays: 03-compact-command chosen). Implemented in src/ui.css (popover/tooltip radius+shadow, selected rows, pill toast, banner binding status). A global min-height on popover rows clipped the Organize popover, so row sizing stays unchanged.

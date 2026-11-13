@@ -80,6 +80,10 @@ All notable changes to this project are documented here. The format follows
   Organize and OBS at its foot. Below a 1200 px window it shows one letter per profile and icon-only
   tools. The default window is now 1080 x 700 (it was 1000 x 700) so the + XL still sits beside the
   action catalog.
+- **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
+  radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
+  edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and
+  successes (always with words).
 - The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
   about the toolbar's Add plugin button and the plugins folder.
 - The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |
