@@ -506,7 +506,7 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 }
 .plugin-error-icon { color: @desk_error; margin-top: 1px; }
 .plugin-error-row:first-child label { font-weight: 600; }
-.binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
+.binding-toolbar button.icon-only, .editor-heading-row button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
 popover.organize-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 8px 24px alpha(black, 0.45); }
 popover.organize-popover .section-label { font-size: 15px; }

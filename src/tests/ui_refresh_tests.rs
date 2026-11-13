@@ -401,9 +401,11 @@ fn assert_inspector_grouping() {
     let actions = ui
         .status
         .prev_sibling()
-        .expect("status follows the action row");
+        .expect("status follows the toolbar row");
+    // Save/Test/Remove moved to the editor heading row; the plugin controls fill this row.
     let save = find_button(widgets, "Save binding");
-    assert_eq!(save.parent().as_ref(), Some(&actions));
+    assert!(save.parent().unwrap().has_css_class("editor-heading-row"));
+    assert_ne!(save.parent().as_ref(), Some(&actions));
     let gap = bounds(ui.status.upcast_ref()).y() - bounds(&actions).y() - actions.height() as f32;
     assert!(
         (0.0..=8.5).contains(&gap),

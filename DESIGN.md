@@ -423,7 +423,9 @@ New; both show the real Esc hint) hides the dialog without saving; Cancel and Es
 New draft.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width: the connection badge, then the Organize and OBS tools (at the top so their popovers stay
-reachable in short windows), then the profile names (about 12 characters, ellipsized). Organize and OBS are frameless (hover shows the surface) so they stay secondary
+reachable in short windows; the artboard's foot placement is not used because the shell scrolls
+as one page, 814px tall in a 700px window, which would put a foot-of-rail tool below the fold;
+`rail_tests` guards that the tools stay visible without scrolling), then the profile names (about 12 characters, ellipsized). Organize and OBS are frameless (hover shows the surface) so they stay secondary
 to the tabs. The Organize menu only opens the profile creation, application
 association and profile deletion dialogs. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
@@ -634,11 +636,14 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 - **Artwork disclosure:** independent key/strip/zone artwork editing remains
   reachable in a clearly named expandable section of the selected editor.
   An Appearance group separates text and artwork from the action form.
-  Save binding, Test action and Remove binding are icon-only buttons in a
-  toolbar at the top of the right-hand panel, above its tabs: a floppy disk
-  (violet fill), a play triangle (neutral) and a red X in a circle. Each tooltip
-  has two lines, its name then what it does, and doubles as the accessible name
-  and test caption. The status line and Undo remove sit directly under it. The
+  Save binding, Test action and Remove binding are icon-only buttons that end
+  the editor card's heading row, level with "Configuring: <control> · <event>"
+  (artboard 03-profile-rail): a floppy disk (violet fill), a play triangle
+  (neutral) and a red X in a circle. Each tooltip has two lines, its name then
+  what it does, and doubles as the accessible name and test caption. The status
+  line and Undo remove stay at the top of the right-hand panel, in its toolbar
+  row with the plugin buttons. The row is inside the editor card, so it scrolls
+  with a form taller than the card's scroll region. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
   The same row ends with **Add plugin…** and **Update plugins**, two icon-only buttons of the

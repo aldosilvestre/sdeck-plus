@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Editor toolbar:** Save binding, Test action and Remove binding now sit in the editor card's heading row, level with "Configuring: …", as in the approved design; their icons, tooltips, accessible names and behaviour are unchanged. The status line, Undo remove and the plugin buttons stay at the top of the right-hand panel.
 - **Deletion confirmations:** deleting a profile, page, folder or touchscreen page asks `Delete “name”?` with what goes with it (a profile lists its page and binding counts) and ends "This cannot be undone."; the buttons are **Cancel** (Esc) and a red **Delete**. The import confirmation uses the same layout.
 - **Menu popover:** the header Menu is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.
 - **Organize menu:** a red **Delete profile** row after a divider opens the same confirmation for the shown profile; it is disabled for Base.

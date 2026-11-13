@@ -1307,7 +1307,13 @@ fn build_body(
     settings_heading.add_css_class("section-label");
     settings_heading.add_css_class("control-heading");
     settings_heading.set_xalign(0.0);
-    settings_card.append(&settings_heading);
+    settings_heading.set_hexpand(true);
+    settings_heading.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    // Save, Test and Remove join the heading in this row once they are built below.
+    let heading_row = GtkBox::new(Orientation::Horizontal, 8);
+    heading_row.add_css_class("editor-heading-row");
+    heading_row.append(&settings_heading);
+    settings_card.append(&heading_row);
     settings_card.append(feature_runtime.touchscreen_controls());
     // Keep a usable form width without padding short actions to the chassis height.
     settings_card.set_size_request(300, -1);
@@ -1386,14 +1392,15 @@ fn build_body(
         "Test action",
         "Runs this action now. Saving a binding never runs it.",
     );
-    binding_buttons.append(&save_binding);
-    binding_buttons.append(&test_action);
-    binding_buttons.append(&remove_binding);
-    // Adding and rescanning plugins are not binding actions: they sit apart at the right end.
+    // The binding actions end the editor's heading row, as in the approved artboard.
+    heading_row.append(&save_binding);
+    heading_row.append(&test_action);
+    heading_row.append(&remove_binding);
+    // Adding and rescanning plugins are not binding actions: they stay in the side panel's
+    // toolbar, at its right end.
     let toolbar_gap = GtkBox::new(Orientation::Horizontal, 0);
     toolbar_gap.set_hexpand(true);
     binding_buttons.append(&toolbar_gap);
-    binding_buttons.append(&gtk::Separator::new(Orientation::Vertical));
     let plugin_installed: plugin_add_ui::Notify = {
         let ui = binding_ui.clone();
         Rc::new(move |message, failed| {
@@ -1406,8 +1413,8 @@ fn build_body(
         plugin_installed,
     ));
     binding_buttons.append(&plugin_ui::rescan_button(&binding_ui.plugins));
-    // The status line sits right under Save/Test/Remove so results stay visible.
-    // The toolbar tops the right-hand panel, above its tabs.
+    // The status line and Undo remove top the right-hand panel, above its tabs, beside the
+    // plugin buttons; Save/Test/Remove sit in the editor card's heading row.
     let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
     binding_feedback.add_css_class("binding-toolbar");
     binding_feedback.append(&binding_buttons);
@@ -5197,6 +5204,7 @@ mod tests {
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
     mod profile_organize_dialog_tests;
+    mod rail_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
@@ -7289,6 +7297,8 @@ mod tests {
                 let heading = sidebar_settings(widgets)
                     .first_child()
                     .unwrap()
+                    .first_child()
+                    .unwrap()
                     .downcast::<Label>()
                     .unwrap();
                 assert_eq!(heading.text().as_str(), control_heading(control, number));
@@ -8037,6 +8047,8 @@ mod tests {
                     assert_eq!(widgets.binding_ui.control_number(), Some(*zone));
                     assert_eq!(widgets.binding_ui.event_model.n_items(), 7);
                     let heading = sidebar_settings(widgets)
+                        .first_child()
+                        .unwrap()
                         .first_child()
                         .unwrap()
                         .downcast::<Label>()

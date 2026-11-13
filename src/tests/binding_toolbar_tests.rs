@@ -1,4 +1,4 @@
-//! Save, Test and Remove live as icon-only buttons above the sidebar tabs.
+//! Save, Test and Remove live as icon-only buttons in the editor card's heading row.
 use super::ui_refresh_tests::fixture;
 use super::*;
 
@@ -14,7 +14,7 @@ fn collect<T: IsA<gtk::Widget> + glib::object::IsClass>(widget: &gtk::Widget, ou
 }
 
 #[test]
-fn save_test_and_remove_are_icon_buttons_above_the_sidebar_tabs() {
+fn save_test_and_remove_are_icon_buttons_in_the_editor_heading_row() {
     run_gtk_test(assert_binding_toolbar);
 }
 
@@ -40,13 +40,23 @@ fn assert_binding_toolbar() {
     }
     let mut buttons: Vec<Button> = Vec::new();
     collect(widgets.root.upcast_ref(), &mut buttons);
-    let mut switchers: Vec<gtk::StackSwitcher> = Vec::new();
-    collect(widgets.root.upcast_ref(), &mut switchers);
-    let switcher = switchers
+    let mut labels: Vec<Label> = Vec::new();
+    collect(widgets.root.upcast_ref(), &mut labels);
+    let heading = labels
         .into_iter()
-        .find(|switcher| switcher.has_css_class("sidebar-tabs"))
-        .expect("sidebar tabs");
-    let tabs = switcher.compute_bounds(&widgets.root).unwrap();
+        .find(|label| label.has_css_class("control-heading"))
+        .expect("editor heading");
+    let heading_row = heading.parent().expect("heading row");
+    assert!(
+        heading_row.has_css_class("editor-heading-row"),
+        "the heading sits in its own row"
+    );
+    assert!(
+        heading_row.is_ancestor(&sidebar_settings(widgets)),
+        "the heading row is inside the editor card"
+    );
+    let heading_bounds = heading.compute_bounds(&widgets.root).unwrap();
+    let mut previous_x = heading_bounds.x() + heading_bounds.width();
     for (name, icon, hint) in [
         ("Save binding", "sdeck-save-symbolic", "without running"),
         ("Test action", "media-playback-start-symbolic", "Runs"),
@@ -70,14 +80,21 @@ fn assert_binding_toolbar() {
         let (title, explanation) = tip.split_once('\n').expect("explanatory tooltip");
         assert_eq!(title, name);
         assert!(explanation.contains(hint), "{name}: {explanation}");
-        assert!(
-            !button.is_ancestor(&sidebar_settings(widgets)),
-            "{name} left the inspector"
+        assert_eq!(
+            button.parent().as_ref(),
+            Some(&heading_row),
+            "{name} shares the heading row"
         );
         let bounds = button.compute_bounds(&widgets.root).unwrap();
+        let centre = bounds.y() + bounds.height() / 2.0;
         assert!(
-            bounds.y() + bounds.height() <= tabs.y() + 0.5,
-            "{name} sits above the tabs: {bounds:?} vs {tabs:?}"
+            centre >= heading_bounds.y() && centre <= heading_bounds.y() + heading_bounds.height(),
+            "{name} is level with the heading: {bounds:?} vs {heading_bounds:?}"
         );
+        assert!(
+            bounds.x() >= previous_x - 0.5,
+            "{name} follows the heading and the previous button"
+        );
+        previous_x = bounds.x() + bounds.width();
     }
 }
