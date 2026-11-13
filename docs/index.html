@@ -399,7 +399,7 @@
         <article class="tile tile-2 reveal reveal-delay-1">
           <span class="tile-icon" style="--c: var(--fam-org)"><svg aria-hidden="true"><use href="#i-layers"/></svg></span>
           <h3>Profiles</h3>
-          <p>Profile tabs with pages and folders, switched automatically by the focused application.</p>
+          <p>A profile rail with pages and folders, switched automatically by the focused application.</p>
         </article>
         <article class="tile tile-2 reveal reveal-delay-2">
           <span class="tile-icon" style="--c: var(--fam-web)"><svg aria-hidden="true"><use href="#i-image"/></svg></span>
@@ -536,7 +536,7 @@
             <p class="feature-num">03 · Dials and strip</p>
             <h3>Dials and touch strip</h3>
             <p>Each dial has independent <strong>Press</strong>, <strong>Clockwise</strong> and <strong>Counterclockwise</strong> bindings,
-               perfect for volume or brightness. Drop any catalog action on a dial and choose its event, or use the <strong>Dials</strong> tab for Volume, Brightness, Tracks, Scroll and Pages presets. Presets replace only the events they list, without executing them. The touch strip binds tap, hold, flick and directional swipes.</p>
+               perfect for volume or brightness. Drop any catalog action on a dial and choose its event, or use the <strong>Dials</strong> tab for Volume, Microphone, Brightness, Tracks, Scroll and Pages presets. Presets replace only the events they list, without executing them. The touch strip binds tap, hold, flick and directional swipes.</p>
             <p>Touchscreen settings, images and dial press/turn assignments follow the profile's selected touch page,
                independently of keypad pages and folders. Existing touch pages receive their profile's main-page dials
                on upgrade, without replacing touch edits or discarding legacy records.
@@ -555,8 +555,8 @@
               <img width="1000" height="950" src="screenshots/touch-strip.png" loading="lazy" decoding="async" alt="Touch strip selected in the binding editor">
               <span class="zoom-badge" aria-hidden="true"><svg><use href="#i-zoom"/></svg></span>
             </a>
-            <a class="zoom" href="screenshots/dials-tab.png" data-caption="Dials tab with ready-to-use Volume, Brightness, Tracks, Scroll and Pages presets">
-              <img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" alt="Dials tab with ready-to-use Volume, Brightness, Tracks, Scroll and Pages presets">
+            <a class="zoom" href="screenshots/dials-tab.png" data-caption="Dials tab with ready-to-use Volume, Microphone, Brightness, Tracks, Scroll and Pages presets">
+              <img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" alt="Dials tab with ready-to-use Volume, Microphone, Brightness, Tracks, Scroll and Pages presets">
               <span class="zoom-badge" aria-hidden="true"><svg><use href="#i-zoom"/></svg></span>
             </a>
           </div>
@@ -588,7 +588,9 @@
             <h3>Choose or rotate audio outputs</h3>
             <p><strong>More actions &gt; Multimedia &gt; Change audio output</strong> can select a fixed PipeWire output
                or <strong>Rotate</strong> through connected outputs on each press. Saved fixed targets use stable names,
-               not temporary numeric IDs. Choosing or saving never changes audio.</p>
+               not temporary numeric IDs. Choosing or saving never changes audio. The microphone has its own
+               <strong>Input volume up/down</strong>, <strong>Mute microphone</strong> and <strong>Change audio input</strong> actions, plus a
+               <strong>Microphone</strong> dial preset.</p>
           </div>
           <div class="stage">
             <a class="zoom" href="screenshots/more-actions-audio-output.png" data-caption="Change audio output with Rotate selected and a Refresh button">
@@ -655,7 +657,8 @@
             <p class="feature-num">09 · Organization</p>
             <h3>Profiles, pages and folders</h3>
             <p>Each profile is a tab with its own pages, folders, bindings and artwork. Associate a profile with a window
-               class or executable and it is selected automatically when that application gets focus (Hyprland IPC).</p>
+               class or executable and it is selected automatically when that application gets focus (Hyprland IPC).
+               An optional check makes the profile hand the screen back to the one it replaced, instead of Base, when focus leaves.</p>
           </div>
           <div class="stage overlay">
             <a class="zoom inset" style="--w: 300px" href="screenshots/organize-profiles-pages.png" data-caption="Organize panel for editing profiles and application association">
@@ -933,13 +936,16 @@
         </section>
         <section class="panel reveal" id="panel-obs" role="tabpanel" aria-labelledby="tab-obs" style="--c: var(--fam-obs)">
           <h3><span class="tile-icon" style="--c: var(--fam-obs)"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>OBS</h3>
-          <p>Select a scene, toggle recording or streaming, toggle input mute, show/hide a source.</p>
+          <p>Select a scene, toggle or explicitly start, stop, pause and resume recording and streaming, toggle input mute, raise or lower an input volume, show/hide a source.</p>
           <ul class="action-grid">
             <li><svg aria-hidden="true"><use href="#i-scene"/></svg>Select a scene</li>
             <li><svg aria-hidden="true"><use href="#i-record"/></svg>Toggle recording</li>
             <li><svg aria-hidden="true"><use href="#i-broadcast"/></svg>Toggle streaming</li>
+            <li><svg aria-hidden="true"><use href="#i-record"/></svg>Start, stop, pause, resume recording</li>
+            <li><svg aria-hidden="true"><use href="#i-broadcast"/></svg>Start, stop streaming</li>
             <li><svg aria-hidden="true"><use href="#i-mic-off"/></svg>Toggle input mute</li>
             <li><svg aria-hidden="true"><use href="#i-eye"/></svg>Show/hide a source</li>
+            <li><svg aria-hidden="true"><use href="#i-mic-off"/></svg>Input volume up/down (dB)</li>
           </ul>
         </section>
       </div>
@@ -998,7 +1004,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
           <span class="text-link">Open the development notes <svg aria-hidden="true"><use href="#i-arrow"/></svg></span>
         </a>
       </div>
-      <p class="note" style="margin-top: 1.6rem">Plugins can be added from the app with the <strong>Add plugin</strong> button, from a folder or an HTTPS repository. Want to add your own actions? <a class="text-link" href="plugin-sdk.html">Write a plugin with the plugin SDK <svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
+      <p class="note" style="margin-top: 1.6rem">Plugins can be added from the app with the <strong>Add plugin</strong> button, from a folder or an HTTPS repository, and a plugin action can show a live value (a level, a scene) on the key, dial or touch section it is bound to. Want to add your own actions? <a class="text-link" href="plugin-sdk.html">Write a plugin with the plugin SDK <svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
     </div>
   </section>
 

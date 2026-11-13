@@ -405,7 +405,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             <article class="card">
               <h4>Configure an action</h4>
               <p>For keypad buttons, use the right-hand panel, which has three tabs. <strong>Actions</strong>: search the catalog, open a category and drag an action onto a key or a dial. Dropping on a dial asks whether it belongs to <strong>Turn clockwise</strong>, <strong>Turn counterclockwise</strong> or <strong>Press</strong>; clicking an action with a dial selected uses the event chosen in the inspector.
-                 <strong>Dials</strong>: drag a preset (Volume, Brightness, Tracks, Scroll or Pages) onto a dial. A preset assigns turn and, where it makes sense, press, replaces only the events it lists and saves immediately without running anything.
+                 <strong>Dials</strong>: drag a preset (Volume, Microphone, Brightness, Tracks, Scroll or Pages) onto a dial. A preset assigns turn and, where it makes sense, press, replaces only the events it lists and saves immediately without running anything.
                  <strong>Binding</strong>: options saved with the selected control, such as live information.
                  Its configuration opens below the fixed-size device preview; long forms scroll inside the settings area. Actions without parameters save on drop without executing;
                  actions that need settings keep the previous binding active until you complete the form and click <strong>Save binding</strong>.
@@ -461,10 +461,10 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>Device brightness is the Stream Deck's display, not the monitor backlight. Sleep sets brightness to zero and wake restores the remembered level;
                  before an explicit absolute level, relative and wake actions assume 100% because the device cannot report its brightness.
                  Legacy exact-tick rotation bindings remain supported and take priority over directional ones.</p>
-              <p>The <strong>Dials</strong> tab provides Volume, Brightness, Tracks, Scroll and Pages presets. Drag one onto a dial to save its listed events; unlisted events are preserved. For a single action, drag it from <strong>Actions</strong> and choose the dial event in the popup.</p>
+              <p>The <strong>Dials</strong> tab provides Volume, Microphone, Brightness, Tracks, Scroll and Pages presets (Microphone: turns change the input volume, press mutes the microphone). Drag one onto a dial to save its listed events; unlisted events are preserved. For a single action, drag it from <strong>Actions</strong> and choose the dial event in the popup.</p>
               <figure>
-                <a href="screenshots/dials-tab.png"><img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dials tab with the five ready-to-use presets."></a>
-                <figcaption>Dials tab with the five ready-to-use presets.</figcaption>
+                <a href="screenshots/dials-tab.png"><img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dials tab with the ready-to-use presets."></a>
+                <figcaption>Dials tab with the ready-to-use presets.</figcaption>
               </figure>
               <figure>
                 <a href="screenshots/dial-event-choice.png"><img width="266" height="216" src="screenshots/dial-event-choice.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dropping a catalog action on a dial asks which event to bind."></a>
@@ -487,10 +487,19 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Volume uses the default output; the step of <strong>Volume up</strong> and <strong>Volume down</strong> is configurable from 1 to 100 percent (default 5%), and raising is capped at 100%. Dial turns apply one step per event. Media transport uses the session's MPRIS player.</p>
             </article>
             <article class="card">
+              <h4>Microphone (audio input)</h4>
+              <p>The same controls exist for the default <strong>input</strong> (microphone), under <strong>More actions &gt; Multimedia</strong>:
+                 <strong>Input volume up</strong> and <strong>Input volume down</strong> (a step of 1 to 100 percent, default 5%, raising capped at 100%; the step is always saved with the action),
+                 <strong>Mute microphone</strong> (toggles the default input) and <strong>Change audio input</strong>.
+                 Change audio input picks a fixed microphone by its stable PipeWire name or <strong>Rotate</strong> advances from the system's current input to the next connected one on each press, wrapping after the last; <strong>Refresh</strong> discovers new inputs.
+                 Inputs are the devices PipeWire lists as audio sources; a disconnected saved device reports an error when used. Output and input actions are independent: changing the output never touches the microphone.
+                 Dial turns apply one step per event, and the <strong>Microphone</strong> preset in the Dials tab binds them in one drop.</p>
+            </article>
+            <article class="card">
               <h4>Text, files, websites and processes</h4>
               <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
                  and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
-                 Closing an application targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
+                 <strong>Close application</strong> targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
             </article>
             <article class="card">
               <h4>Commands and application launch</h4>
@@ -568,7 +577,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Live information on keys and dials</h4>
               <p>In the <strong>Binding</strong> tab of the right-hand panel, tick <strong>Show live information on the key</strong> for the selected key or dial and choose volume (crossed out while muted), audio output device,
                  Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load), OBS state (recording, streaming and scene)
-                 or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
+                 the microphone (<strong>Microphone volume and mute</strong>, crossed out while muted, or the <strong>Audio input device</strong> name) or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
                  On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
                  beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
                  window preview matches the device.</p>
@@ -676,7 +685,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>Window layout and themes</h4>
-              <p>The window opens at 1000 × 700 with a fixed 440 × 428 device preview and the selected control's settings on the left; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; at 640 px the panels stack without horizontal scrolling.
+              <p>The window opens at 1080 × 700. Profiles sit in a vertical rail at the left (below 1200 px wide it shows one letter per profile and icon-only Organize and OBS tools, with the full name in the tooltip; from 1200 px it shows names), then a fixed 440 × 428 device preview with the selected control's settings; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; at 640 px the panels stack without horizontal scrolling.
                  Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
                  Bare information icons show their help on hover or keyboard-visible focus. The Organize panel uses Edit profile and New profile tabs; the Base profile callout explains its restrictions. Transitions follow GTK's animation setting. The full layout contract is in
                  <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
@@ -718,6 +727,15 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>Only loopback endpoints are accepted. Requests run on a worker with bounded waits, and authentication, connection and request errors appear in the window.
                  Credentials are stored in owner-only <code>obs.json</code>, not in bindings, and are masked in the editor and diagnostics.
                  The app does not enable the OBS server or change its configuration.</p>
+            </article>
+            <article class="card wide">
+              <h4>OBS actions</h4>
+              <p>Under <strong>More actions &gt; OBS</strong>: <strong>Switch scene</strong>, <strong>Toggle recording</strong> and <strong>Toggle streaming</strong>,
+                 the explicit <strong>Start recording</strong>, <strong>Stop recording</strong>, <strong>Pause recording</strong>, <strong>Resume recording</strong>,
+                 <strong>Start streaming</strong> and <strong>Stop streaming</strong> (use these when a key should never flip the current state),
+                 <strong>Toggle input mute</strong> (an OBS input name) and <strong>Set source visibility</strong> (a scene and a source name, with <strong>Visible</strong> cleared to hide it).
+                 <strong>OBS input volume up</strong> and <strong>OBS input volume down</strong> change the volume of a named OBS audio input by a step of 1 to 20 dB (default 2): the action reads the input's current level and sets the new one, never below -100 dB or above +26 dB, the limits OBS accepts.
+                 Names are matched exactly and may be up to 512 characters without control characters. The OBS state can also be shown as live information on a key or dial.</p>
             </article>
           </div>
         </div>
@@ -856,7 +874,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
   tests::button_text_alignment_icons_update_preview_and_save \
   -- --exact --nocapture --test-threads=1</code></pre>
               </div>
-              <p>The serialized layout test checks the thirteen artwork paths and every action at 1000 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
+              <p>The serialized layout test checks the thirteen artwork paths and every action at 1080 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
                  reachability at 640 × 480. These checks do not replace real file-chooser, accessibility or device verification.</p>
             </article>
             <article class="card wide" id="dev-screenshots">
@@ -885,10 +903,11 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-device-checks">
               <h4>Opt-in real-device checks</h4>
               <p>These need a real device and have been run on a single Stream Deck + only; nothing was run on a Stream Deck + XL or with two devices connected. Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
-                 brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture.</p>
+                 brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture; <code>--button-text</code> uploads horizontal and vertical text to key 1.</p>
               <div class="code-block">
 <pre><code>cargo run --offline --example verify_streamdeck -- --device-controls
 cargo run --offline --example verify_streamdeck -- --input
+cargo run --offline --example verify_streamdeck -- --button-text
 cargo run --offline --example verify_obs -- "$HOME/.local/share/sdeck-plus"
 cargo run --offline --example verify_desktop
 dbus-run-session -- cargo run --offline --example verify_multimedia -- /path/to/silent.wav
@@ -896,7 +915,7 @@ cargo run --offline --example plugin_validate -- /path/to/plugin-project</code><
               </div>
               <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
                  through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
-                 silent audio file and the <code>mpv-mpris</code> plugin. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
+                 silent audio file and the <code>mpv-mpris</code> plugin. <code>cargo run --offline --example ui_showcase -- &lt;capture-dir&gt;</code> captures the primitive UI widgets with no device and runs no actions. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
             </article>
             <article class="card wide" id="dev-event-api">
               <h4>In-process event API</h4>

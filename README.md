@@ -43,18 +43,23 @@ permissions on its own.
 
 - **Every control:** the keys, the dials with press and clockwise/counterclockwise
   bindings, and touch-strip sections with tap, hold, flick and swipes.
-- **Profiles, pages and folders:** profile tabs switched automatically by the
-  focused application (Hyprland), plus touchscreen pages navigated by swiping.
+- **Profiles, pages and folders:** a profile rail switched automatically by the
+  focused application (Hyprland), with an optional return to the previous profile
+  when focus leaves, plus touchscreen pages navigated by swiping.
 - **Artwork, button text and action icons** on keys, the touch strip and its zones.
 - **Live information:** volume, audio output, time, weather, CPU, memory,
   temperature, device brightness, OBS state and now playing, updated on the
   device.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume
-  control (configurable volume step, default 5%), audio-output switching, sounds, brightness, timers and page returns.
-- **OBS Studio:** switch scenes, toggle recording and streaming, mute inputs and
-  show or hide sources over the local WebSocket server.
+  control (configurable volume step, default 5%), audio-output switching, the same
+  for the microphone (input volume, mute, rotate input devices, a dial preset), sounds, closing an application, brightness, timers, page
+  returns and an optional two-second key hold for a secondary action.
+- **OBS Studio:** switch scenes, toggle or explicitly start, stop, pause and resume
+  recording and streaming, mute inputs, raise or lower an input's volume in dB
+  and show or hide sources over the local WebSocket server.
 - **External plugins:** extra actions from separate programs you enable explicitly; add one from the
-  app by folder path or public HTTPS repository address, checked before anything is installed (see
+  app by folder path or public HTTPS repository address, checked before anything is installed; plugin actions can show a live value on keys,
+  dials and touch sections (see
   [docs/plugins.md](docs/plugins.md)); to write one, follow the
   [plugin SDK guide](docs/plugin-sdk.html) and the starter in `examples/plugin-template` (an AI agent
   can follow [docs/SKILL.md](docs/SKILL.md)).

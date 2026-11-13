@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Microphone (audio input) controls:** **Input volume up** and **Input volume down** (1-100%
+  step, default 5%, raising capped at 100%, always saved with the action), **Mute microphone** and
+  **Change audio input** (rotate through connected `Audio/Source` devices or fix one by its stable
+  name), all on `@DEFAULT_AUDIO_SOURCE@`. Output actions are unchanged. New live information
+  sources **Microphone volume and mute** and **Audio input device**, and a **Microphone** preset in
+  the Dials tab. A `layers.conf` using these actions is not readable by builds older than the one
+  that keeps unknown actions.
+- **OBS input volume:** **OBS input volume up/down** change a named OBS input by 1-20 dB (default
+  2) through `GetInputVolume`/`SetInputVolume`, clamped to OBS's -100..+26 dB.
 - **Plugin values on keys and the touch strip:** a plugin action that declares a `display` now
   shows the value its plugin reports (headline, optional detail, optional level bar) on the key,
   dial zone or touch section it is bound to, in the window and on the device, through the
@@ -67,6 +76,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Profile rail:** profiles move from a horizontal tab strip to a vertical rail at the left, with
+  Organize and OBS at its foot. Below a 1200 px window it shows one letter per profile and icon-only
+  tools. The default window is now 1080 x 700 (it was 1000 x 700) so the + XL still sits beside the
+  action catalog.
 - The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
   about the toolbar's Add plugin button and the plugins folder.
 - The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |
@@ -77,6 +90,12 @@ All notable changes to this project are documented here. The format follows
 - The demonstration plugins now live in their own local Git projects, `sdeck-plugin-discord` and
   `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
   Their manifests need a build that knows `requirements`; older builds reject unknown fields.
+
+- Documentation: the OBS section of the documentation now lists every OBS action (explicit
+  start, stop, pause and resume recording, start and stop streaming, input mute, source
+  visibility); the README and the landing page now mention the optional return to the previous
+  profile, plugin values on controls, the two-second key hold and Close application; the
+  development notes list `verify_streamdeck --button-text`.
 
 ### Removed
 

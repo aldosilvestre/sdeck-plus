@@ -19,7 +19,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - T4 (S5) dial preset. inline. commit: see git log
 - T6 (S7) OBS input volume up/down actions (obs-websocket). inline (workers unavailable: provider auth). commit: see git log
 - T7 (S8) main-window redesign: implement design/main-window/03-profile-rail.html in GTK keeping the current hardware preview look. rail done (default window 1080x700, compact rail <1200px). Remaining from the artboard: category chips and Media/Output/Input grouping in the catalog; title/status inside the rail (kept in the top header). commit: see git log
-- T5 (S6) docs: README, index, docs.html, CHANGELOG. inline. commit: pending
+- T5 (S6) docs: README, index, docs.html, CHANGELOG. inline. commit: see git log (screenshots regenerated at the end)
 
 ## Log
 L1: hagamos una modificacion mas en el proyecto, necesito que al igual que el volumen de salida se pueda tener controles de dial para el volumen de entrada y que se pueda rotar entre los dispositivos de entrada de audio.
@@ -35,3 +35,4 @@ L10: T7 state (uncommitted): vertical profile rail implemented (Notebook tab_pos
 L11: width decision: default window raised to 1080x700 (XL fits beside the catalog again). GTK suite back to the 3 baseline failures.
 L12: T6 implemented inline (workers kept failing with auth; the gentle sync rewrites model profiles back to claude-bridge). OBS input volume: step 1-20 dB (default 2), clamp -100..+26 dB.
 L13: T3 (microphone live info: input-volume, input-device, appended to InfoSource::ALL) and T4 (Microphone dial preset) done inline.
+L14: T5 docs text done (OBS actions list, return-to-previous profile, plugin values, microphone, OBS input volume, profile rail, 1080px window). Screenshots, catalog grouping and overlay redesign (modals, popovers, hover, alerts, toasts) pending.
