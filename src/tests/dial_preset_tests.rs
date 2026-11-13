@@ -1,7 +1,7 @@
 use super::action_catalog_tests::{catalog_fixture, collect_catalog_buttons};
 use super::*;
 use sdeck_plus::{
-    desktop_actions::{DesktopAction, MediaCommand},
+    desktop_actions::{DesktopAction, MediaCommand, VolumeDirection},
     device_control::DeviceAction,
     features::FeatureAction,
 };
@@ -70,6 +70,42 @@ fn dropping_volume_preset_on_a_dial_assigns_turn_and_press_without_executing() {
                 }
             }
             assert!(saved, "drop must enqueue persistence");
+        })
+    });
+}
+
+#[test]
+fn dropping_the_microphone_preset_assigns_input_volume_turns_and_mute_without_executing() {
+    run_gtk_test(|| {
+        catalog_fixture("dial-microphone", |widgets, layers, requests| {
+            while requests.try_recv().is_ok() {}
+            assert!(preset_drop(widgets, "Microphone", 0));
+            let input = |action| Action::Feature(FeatureAction::Desktop(action));
+            let store = layers.borrow();
+            assert_eq!(
+                store.binding("Base", &Trigger::EncoderClockwise(1)),
+                Some(input(DesktopAction::InputVolumeStep {
+                    direction: VolumeDirection::Up,
+                    percent: 5
+                }))
+            );
+            assert_eq!(
+                store.binding("Base", &Trigger::EncoderCounterClockwise(1)),
+                Some(input(DesktopAction::InputVolumeStep {
+                    direction: VolumeDirection::Down,
+                    percent: 5
+                }))
+            );
+            assert_eq!(
+                store.binding("Base", &Trigger::EncoderPress(1)),
+                Some(input(DesktopAction::ToggleInputMute))
+            );
+            while let Ok(command) = requests.try_recv() {
+                assert!(
+                    !matches!(command, LayerCommand::Execute { .. }),
+                    "assigning must not execute"
+                );
+            }
         })
     });
 }

@@ -2,7 +2,10 @@
 use crate::*;
 use action_catalog::row_button;
 use sdeck_plus::{
-    desktop_actions::{DesktopAction as D, MediaCommand as M, ScrollDirection},
+    desktop_actions::{
+        DesktopAction as D, MediaCommand as M, ScrollDirection, VolumeDirection,
+        DEFAULT_VOLUME_STEP,
+    },
     device_control::DeviceAction,
     features::FeatureAction,
     organization::NavigationAction as N,
@@ -57,6 +60,27 @@ fn presets() -> Vec<Preset> {
                 (Clockwise, desktop(D::Media(M::VolumeUp))),
                 (CounterClockwise, desktop(D::Media(M::VolumeDown))),
                 (Press, desktop(D::Media(M::Mute))),
+            ],
+        },
+        Preset {
+            label: "Microphone",
+            summary: "Turn: input volume · Press: mute microphone",
+            events: vec![
+                (
+                    Clockwise,
+                    desktop(D::InputVolumeStep {
+                        direction: VolumeDirection::Up,
+                        percent: DEFAULT_VOLUME_STEP,
+                    }),
+                ),
+                (
+                    CounterClockwise,
+                    desktop(D::InputVolumeStep {
+                        direction: VolumeDirection::Down,
+                        percent: DEFAULT_VOLUME_STEP,
+                    }),
+                ),
+                (Press, desktop(D::ToggleInputMute)),
             ],
         },
         Preset {
