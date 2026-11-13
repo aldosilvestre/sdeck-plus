@@ -39,6 +39,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - T5 (S6) docs: README, index, docs.html, CHANGELOG. inline. commit: see git log (screenshots regenerated at the end)
 
 ## Log
+L55: independent verify mwfjxviy-h-int4 (Risk item 3) on 9654337: pass, S14/S13/S11 met, full GTK 373 pass + 3 baseline, headless 0, clippy/fmt 0. Advisories: Menu now framed (was frameless in the rail); header min-width test does not assert Menu/selector separation; rendering at 640/872/1002 not observed (X11 without WM), relies on measured minimums (header 255px).
 L54: T18: header = title row (title, status, update indicator, Menu at far right) + detail row (connection detail, Current selector right). menu_slot/place_in removed; rail TOOLS = Organize, OBS. RED 2 failing rail tests then GREEN; full GTK 373 pass + 3 baseline; headless 0; plugin_sdk 24/24; generator ok, 0 img mismatches. Parent: fmt, diff-check, rail_tests 8/8; viewed main-window-two-devices.png.
 L53: "El boton de menu deberia ir en la parte superior derecha a la altura del titulo de SDECK-PLUS pero completamente a la derecha" -> S14/T18.
 L52: independent verify mwfj2cu6-f-tany (Risk item 3) for fc496ac..8992913: pass, S12/S13/S8/S11 met, full GTK 371 pass + 3 baseline, headless 0. Advisories: catalog row titles ellipsize without tooltip near the 250px minimum; editor card no longer grows with wide windows.
