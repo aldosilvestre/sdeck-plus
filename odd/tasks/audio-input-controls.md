@@ -36,3 +36,4 @@ L11: width decision: default window raised to 1080x700 (XL fits beside the catal
 L12: T6 implemented inline (workers kept failing with auth; the gentle sync rewrites model profiles back to claude-bridge). OBS input volume: step 1-20 dB (default 2), clamp -100..+26 dB.
 L13: T3 (microphone live info: input-volume, input-device, appended to InfoSource::ALL) and T4 (Microphone dial preset) done inline.
 L14: T5 docs text done (OBS actions list, return-to-previous profile, plugin values, microphone, OBS input volume, profile rail, 1080px window). Screenshots, catalog grouping and overlay redesign (modals, popovers, hover, alerts, toasts) pending.
+L15: design/overlays/ created with 01-quiet-surfaces, 02-tonal-feedback, 03-compact-command (modals, popovers, hover/tooltip, alerts, toast, help). Waiting for the user to choose.
