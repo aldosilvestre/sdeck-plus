@@ -379,7 +379,7 @@ fn plus_preview_is_identical_to_the_shipped_one() {
             "Tab keeps visiting keys, the strip, its sections, then the dials"
         );
         let rendered = render_preview(&f.window, &preview_of(&root), None);
-        assert_eq!((rendered.width, rendered.height), (528, 428));
+        assert_eq!((rendered.width, rendered.height), (520, 428));
         assert_eq!(
             rendered.hash(),
             PLUS_GOLDEN_HASH,

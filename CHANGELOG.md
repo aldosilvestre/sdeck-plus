@@ -76,17 +76,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Profile rail:** profiles move from a horizontal tab strip to a vertical rail at the left, with
-  Organize and OBS at its foot. Below a 1200 px window it shows one letter per profile and icon-only
-  tools. The default window is now 1080 x 700 (it was 1000 x 700) so the + XL still sits beside the
-  action catalog.
+- **Profile rail:** profiles move from a horizontal tab strip to a vertical rail at the left. It is
+  the same at every window width: the connection badge, the Organize and OBS tools (kept at the top
+  so their popovers stay reachable in short windows), then the profile names (long names are
+  ellipsized). The default window is now 1120 x 700 (it was 1000 x 700) so the + XL still sits beside
+  the action catalog.
 - **Action catalog chips and groups:** a row of category chips (All, Basic, System, Multimedia,
   Organization, Device, OBS, and Plugins while one is installed) narrows the catalog to one category,
   opened at once; it combines with the search and is remembered. Multimedia is grouped into Media,
   Output, Input and Files, with the headings hidden while searching.
 - **Connection badge in the rail:** the "Not connected" / connected badge moves from the header to
-  the top of the profile rail (a tone-coloured dot while the rail is compact, with the text as its
-  tooltip). The header keeps the title, the connection detail line, the model selector, updates and
+  the top of the profile rail as a small labelled pill. The header keeps the title, the connection detail line, the model selector, updates and
   the menu.
 - **Confirm dialogs:** the title and explanation read left-aligned and the cancel button shows its
   keyboard hint (`Esc`) after its caption, in the discard, delete and import confirmations.

@@ -207,17 +207,12 @@ pub(crate) fn mirror_badge(source: &Label) -> Label {
             let Some(badge) = badge.upgrade() else { return };
             badge.set_text(&source.text());
             badge.set_tooltip_text(source.tooltip_text().as_deref());
-            // Keep the compact marker, which the rail owns, across style updates.
-            let compact = badge.has_css_class("rail-compact");
             let mut classes: Vec<String> = source
                 .css_classes()
                 .iter()
                 .map(ToString::to_string)
                 .collect();
             classes.push("rail-badge".into());
-            if compact {
-                classes.push("rail-compact".into());
-            }
             let classes: Vec<&str> = classes.iter().map(String::as_str).collect();
             badge.set_css_classes(&classes);
         }
@@ -264,19 +259,6 @@ pub(crate) fn add_key_hint(button: &gtk::Widget, hint: &str) {
     content.append(&key);
     button.set_child(Some(&content));
     button.update_property(&[gtk::accessible::Property::Label(&caption)]);
-}
-
-/// Shows or hides the caption of a menu button made by [`menu_button`], leaving its
-/// icon, tooltip and accessible name, so a narrow rail can show icons only.
-#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
-pub(crate) fn set_caption_visible(button: &gtk::MenuButton, visible: bool) {
-    let mut child = button.child().and_then(|content| content.first_child());
-    while let Some(widget) = child {
-        if widget.is::<Label>() {
-            widget.set_visible(visible);
-        }
-        child = widget.next_sibling();
-    }
 }
 
 pub(crate) fn decorate_button(button: &Button, icon: &str, caption: &str) {

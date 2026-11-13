@@ -686,7 +686,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>Window layout and themes</h4>
-              <p>The window opens at 1080 × 700. Profiles sit in a vertical rail at the left (below 1200 px wide it shows one letter per profile and icon-only Organize and OBS tools, with the full name in the tooltip; from 1200 px it shows names), then a fixed 440 × 428 device preview with the selected control's settings; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; at 640 px the panels stack without horizontal scrolling.
+              <p>The window opens at 1120 × 700. Profiles sit in a vertical rail at the left, the same at every width: the connection badge, the Organize and OBS tools, then the profile names (long names are shortened with an ellipsis), then a fixed 440 × 428 device preview with the selected control's settings; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; at 640 px the panels stack without horizontal scrolling.
                  Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
                  Bare information icons show their help on hover or keyboard-visible focus. The Organize panel uses Edit profile and New profile tabs; the Base profile callout explains its restrictions. Transitions follow GTK's animation setting. The full layout contract is in
                  <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
@@ -875,7 +875,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
   tests::button_text_alignment_icons_update_preview_and_save \
   -- --exact --nocapture --test-threads=1</code></pre>
               </div>
-              <p>The serialized layout test checks the thirteen artwork paths and every action at 1080 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
+              <p>The serialized layout test checks the thirteen artwork paths and every action at 1120 × 700, horizontal fit at 1840 × 980, 1280 × 720 and 960 × 640, and scroll
                  reachability at 640 × 480. These checks do not replace real file-chooser, accessibility or device verification.</p>
             </article>
             <article class="card wide" id="dev-screenshots">

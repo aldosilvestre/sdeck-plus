@@ -295,8 +295,6 @@ pub(crate) struct FeatureRuntime {
     profile_delete: Button,
     profile_tabs: gtk::Notebook,
     profile_pages: Rc<RefCell<Vec<(String, GtkBox)>>>,
-    /// The profile rail shows one-letter initials instead of names when narrow.
-    rail_compact: Rc<Cell<bool>>,
     profile_content: Rc<RefCell<Option<GtkBox>>>,
     profile_memory: Rc<RefCell<std::collections::BTreeMap<String, String>>>,
     legacy_picker: GtkBox,
@@ -462,7 +460,6 @@ impl FeatureRuntime {
             profile_delete,
             profile_tabs,
             profile_pages: Rc::new(RefCell::new(Vec::new())),
-            rail_compact: Rc::new(Cell::new(false)),
             profile_content: Rc::new(RefCell::new(None)),
             profile_memory: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             legacy_picker,
@@ -588,25 +585,6 @@ impl FeatureRuntime {
         &self.organization_management
     }
 
-    /// Switches the profile rail between full names and one-letter initials; the
-    /// full name stays in each tab's tooltip.
-    pub(crate) fn set_rail_compact(&self, compact: bool) {
-        if self.rail_compact.replace(compact) == compact {
-            return;
-        }
-        for (profile, page) in self.profile_pages.borrow().iter() {
-            if let Some(label) = self
-                .profile_tabs
-                .tab_label(page)
-                .and_then(|widget| widget.downcast::<Label>().ok())
-            {
-                let text = rail_caption(profile, compact);
-                label.set_width_chars(text.chars().count().min(18) as i32);
-                label.set_text(&text);
-            }
-        }
-    }
-
     pub(crate) fn profile_tabs(&self) -> &gtk::Notebook {
         &self.profile_tabs
     }
@@ -700,16 +678,12 @@ impl FeatureRuntime {
             self.profile_pages.borrow_mut().clear();
             for profile in profiles {
                 let page = GtkBox::new(Orientation::Vertical, 0);
-                let label = Label::new(Some(&rail_caption(&profile, self.rail_compact.get())));
+                let label = Label::new(Some(&profile));
                 label.set_xalign(0.0);
                 label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_max_width_chars(18);
-                label.set_width_chars(
-                    rail_caption(&profile, self.rail_compact.get())
-                        .chars()
-                        .count()
-                        .min(18) as i32,
-                );
+                label.set_max_width_chars(12);
+                // One width for every rail: long names ellipsize instead of widening it.
+                label.set_width_chars(10);
                 label.set_tooltip_text(Some(&profile));
                 self.profile_tabs.append_page(&page, Some(&label));
                 self.profile_pages.borrow_mut().push((profile, page));
@@ -1517,23 +1491,5 @@ impl FeatureRuntime {
             self.obs_status.set_text(message);
             crate::ui::feedback(&self.obs_status, failed);
         }
-    }
-}
-
-/// Tab caption of a profile in the rail: its name, or one uppercase initial when compact.
-pub(crate) fn rail_caption(profile: &str, compact: bool) -> String {
-    if !compact {
-        return profile.to_owned();
-    }
-    let initials: String = profile
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .take(1)
-        .flat_map(char::to_uppercase)
-        .collect();
-    if initials.is_empty() {
-        profile.chars().take(1).collect()
-    } else {
-        initials
     }
 }

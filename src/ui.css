@@ -296,17 +296,8 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .profile-tabs > stack { margin-left: 8px; }
 /* Profiles sit in a vertical rail at the left; tools gather at its foot. */
 .profile-tabs > header.left { padding: 6px 4px; }
-/* The connection badge heads the rail; compact, it is a tone-coloured dot (its text stays
-   for assistive technology and the tooltip). */
-.rail-badge { margin: 2px 4px 6px 4px; }
-.rail-badge.rail-compact {
-    font-size: 0;
-    min-width: 12px;
-    min-height: 12px;
-    padding: 0;
-    margin: 6px 0 8px 18px;
-    border-radius: 999px;
-}
+/* The connection badge heads the rail as a small labelled pill, at every window width. */
+.rail-badge { margin: 2px 4px 8px 4px; padding: 3px 8px; font-size: 11px; }
 .profile-tabs > header.left tab { padding: 8px 10px; margin: 1px 0; }
 .profile-tabs > header {
     background-color: @desk_surface;
@@ -610,3 +601,6 @@ popover.dial-event-choice > contents { padding: 6px; }
 /* Rows of a menu popover (Menu: Help, Updates, Import, Export). */
 button.menu-row { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
 button.menu-row:hover { background-color: @desk_hover; }
+
+/* The rail's tools line up with the profile names: same inner gap, frameless until hovered. */
+.profile-tabs > header.left menubutton.icon-action > button { padding: 6px 10px; }

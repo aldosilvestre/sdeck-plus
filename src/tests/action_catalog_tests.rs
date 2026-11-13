@@ -406,3 +406,44 @@ fn the_dial_event_menu_lists_compact_left_aligned_rows() {
         window.destroy();
     });
 }
+
+#[test]
+fn the_profile_rail_is_the_same_at_every_width_with_names_and_labeled_tools() {
+    run_gtk_test(|| {
+        catalog_fixture("rail-consistent", |widgets, _layers, _requests| {
+            let tabs = widgets.feature_runtime.profile_tabs();
+            let names: Vec<String> = (0..tabs.n_pages())
+                .filter_map(|index| tabs.nth_page(Some(index)))
+                .filter_map(|page| tabs.tab_label(&page))
+                .filter_map(|label| label.downcast::<gtk::Label>().ok())
+                .map(|label| label.text().to_string())
+                .collect();
+            assert!(
+                names.iter().all(|name| name.chars().count() > 1),
+                "profile tabs show names, never initials: {names:?}"
+            );
+            assert!(names.contains(&"Base".to_string()));
+            // The tools keep their captions beside their icons.
+            for menu in [&widgets.management_menu, &widgets.obs_menu] {
+                let content = menu.child().expect("menu button content");
+                // Both tools start at the same left edge as the profile names below them.
+                assert_eq!(content.halign(), gtk::Align::Start);
+                let mut caption = None;
+                let mut child = content.first_child();
+                while let Some(widget) = child {
+                    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                        caption = Some(label.is_visible());
+                    }
+                    child = widget.next_sibling();
+                }
+                assert_eq!(caption, Some(true), "the tool shows its caption");
+            }
+            // The connection badge is a labelled pill, not a dot.
+            let mut badges = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "rail-badge", &mut badges);
+            assert_eq!(badges.len(), 1);
+            assert!(!badges[0].has_css_class("rail-compact"));
+            assert!(!label_text(&badges[0]).is_empty());
+        })
+    });
+}

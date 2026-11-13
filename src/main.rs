@@ -59,9 +59,7 @@ mod scaled_bin;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
-const DEFAULT_WIDTH: i32 = 1080;
-/// Window width from which the profile rail shows names and tool captions.
-const RAIL_EXPANDED_WIDTH: i32 = 1200;
+const DEFAULT_WIDTH: i32 = 1120;
 const DEFAULT_HEIGHT: i32 = 700;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
@@ -1010,7 +1008,7 @@ fn build_body(
     layer_card.add_css_class("navigation-card");
     layer_card.set_spacing(8);
     let layer_row = GtkBox::new(Orientation::Vertical, 4);
-    layer_row.set_valign(gtk::Align::End);
+    layer_row.set_valign(gtk::Align::Start);
     let layer_model = gtk::StringList::new(&[]);
     for name in layers.borrow().names() {
         layer_model.append(&name);
@@ -1218,39 +1216,22 @@ fn build_body(
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
-    feature_runtime
-        .profile_tabs()
-        .set_action_widget(&layer_row, gtk::PackType::End);
-    // The connection badge heads the rail: a mirror of the header's label, a dot when compact.
+    // The rail's head holds the connection badge (a mirror of the header's label) and the
+    // profile tools, so both stay reachable however short the window is; profiles follow.
     let rail_status = ui::mirror_badge(connection_badge);
+    // Both tools start at the left edge, like the profile names below them.
+    for menu in [&management_menu, &obs_menu] {
+        if let Some(content) = menu.child() {
+            content.set_halign(gtk::Align::Start);
+        }
+    }
+    layer_row.set_margin_bottom(8);
+    let rail_head = GtkBox::new(Orientation::Vertical, 2);
+    rail_head.append(&rail_status);
+    rail_head.append(&layer_row);
     feature_runtime
         .profile_tabs()
-        .set_action_widget(&rail_status, gtk::PackType::Start);
-    // The rail shows initials and icon-only tools below this window width.
-    let rail_runtime = feature_runtime.clone();
-    let rail_menus = [management_menu.clone(), obs_menu.clone()];
-    let rail_badge = rail_status.clone();
-    let apply_rail: Rc<dyn Fn(i32)> = Rc::new(move |width| {
-        let compact = width < RAIL_EXPANDED_WIDTH;
-        if compact {
-            rail_badge.add_css_class("rail-compact");
-        } else {
-            rail_badge.remove_css_class("rail-compact");
-        }
-        rail_runtime.set_rail_compact(compact);
-        for menu in &rail_menus {
-            ui::set_caption_visible(menu, !compact);
-        }
-    });
-    apply_rail(window.default_width());
-    let apply = apply_rail.clone();
-    window.connect_default_width_notify(move |window| apply(window.default_width()));
-    window.connect_realize(move |window| {
-        if let Some(surface) = window.surface() {
-            let apply = apply_rail.clone();
-            surface.connect_layout(move |_, width, _| apply(width));
-        }
-    });
+        .set_action_widget(&rail_head, gtk::PackType::Start);
     // Navigation (linked arrows + breadcrumb) leads; page management trails.
     let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);

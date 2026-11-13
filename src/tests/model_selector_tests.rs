@@ -957,7 +957,7 @@ fn switching_back_and_forth_leaves_every_root_byte_identical_and_asks_nothing() 
 }
 
 #[test]
-fn the_rail_badge_mirrors_the_connection_label_and_turns_into_a_dot_when_compact() {
+fn the_rail_badge_mirrors_the_connection_label() {
     run_gtk_test(|| {
         if !init_gtk_for_test() {
             return;
@@ -981,10 +981,7 @@ fn the_rail_badge_mirrors_the_connection_label_and_turns_into_a_dot_when_compact
         source.add_css_class("status-online");
         source.set_text("Connected");
         assert!(badge.has_css_class("status-online") && !badge.has_css_class("status-idle"));
-        // The compact marker belongs to the rail and survives updates.
-        badge.add_css_class("rail-compact");
         source.set_text("Stream Deck + connected");
-        assert!(badge.has_css_class("rail-compact"));
         assert_eq!(badge.text(), "Stream Deck + connected");
     });
 }

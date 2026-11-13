@@ -259,8 +259,8 @@ inset edge. The toast is a pill (`desk_hover` fill, 999px radius). Every feedbac
 always with words (inside a toast the banner styling is dropped).
 Source artboard: `design/overlays/03-compact-command.html`.
 
-The connection badge heads the profile rail; when the rail is compact it is a 12px tone-coloured dot
-whose text stays as its accessible name and tooltip. The header keeps the title and the detail line.
+The connection badge heads the profile rail as a small pill (11px text). The header keeps the title
+and the detail line.
 
 Confirm dialogs (discard, delete, import) read left-aligned: a 16px bold title, a muted
 explanation, then the buttons; the cancel button carries an `Esc` key hint (monospace 11px chip).
@@ -270,7 +270,7 @@ binding; using it runs it once and closes the toast, and any later message drops
 
 ## 4. Spacing and layout
 
-Default window: 1080x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
+Default window: 1120x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
@@ -374,8 +374,8 @@ hardware behavior.
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the + XL key at
-40px). At the default 1080x700 window the + XL card still sits beside the
-352px action catalog (570 + 16 + 352 = 938 of the usable width left of the compact rail), so
+40px). At the default 1120x700 window the + XL card still sits beside the
+352px action catalog (570 + 16 + 352 = 938 of the usable width left of the rail), so
 the settings column stays usable; a narrower window wraps the catalog below
 the workspace exactly as it does for the +, and the page scrolls vertically.
 The + XL chassis is 42px taller than the + (456px against 414px); its card
@@ -411,11 +411,9 @@ The Organize popover has a header with the menu's icon, the title "Profiles", a 
 subtitle and a frameless icon-only Close; its Edit/New tabs use the segmented style of the
 sidebar tabs; the Base note is a callout with a cyan accent edge; the footer has a divider
 and two equal-width buttons (Save changes primary, Delete profile destructive).
-The profile tabs form a vertical rail at the left of the content, with the profile
-organization menu and the OBS menu at its foot. Below a 1200px window the rail is
-compact: each tab shows the profile's first letter (the full name stays in its tooltip)
-and the two tools show only their icons; from 1200px it shows names and captions.
-Organize and OBS are frameless (hover shows the surface) so they stay secondary
+The profile tabs form a vertical rail at the left of the content, identical at every window
+width: the connection badge, then the Organize and OBS tools (at the top so their popovers stay
+reachable in short windows), then the profile names (about 12 characters, ellipsized). Organize and OBS are frameless (hover shows the surface) so they stay secondary
 to the tabs. The organization popover contains only profile creation, application
 association and profile deletion. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
