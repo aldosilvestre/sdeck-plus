@@ -26,6 +26,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - Delivery strategy: branch is 8274 authored lines past origin/main (42 commits); each T9 unit is its own work-unit commit; PR splitting is the user's decision at delivery.
 - T15 (S12) keep the actions catalog beside the preview at every width: replace the wrapping FlowBox with a two-column layout; catalog shrinks from its natural width to its 250px minimum; below that the content column scrolls horizontally instead of stacking. done; worker mwfg72gu-c-4qxi + continuation mwfifyn1-d-avnk; commit: see L50.
 - T16 (S13) rail: tools at the very top, then PROFILES with + New profile beside the heading, then profiles. done; worker mwfifyn1-d-avnk; commit: see L50. Docs screenshots still to regenerate (T17).
+- T17 (S12,S13) regenerate docs screenshots for the tools-first rail and side-by-side catalog; align docs. done; worker mwfiz03b-e-758p; commit: see L51.
 - T10 (S9,S10,S11) verify, reconcile docs, regenerate captures. done; worker mwfedv73-9-yt8r + parent glyph fix; commit: see L41.
 - T1 (S1,S2,S3) core actions: DesktopAction variants, wpctl/pw-dump, serde, validate, summary. inline. commit: c656412 (bin did not compile alone; fixed by T2 commit)
 - T2 (S1,S2,S3) editor choices, icons, catalog. inline. commit: pending
@@ -36,6 +37,7 @@ Branch: feat/audio-input-controls. Scope chosen by the user: step volume, mute, 
 - T5 (S6) docs: README, index, docs.html, CHANGELOG. inline. commit: see git log (screenshots regenerated at the end)
 
 ## Log
+L51: T17: generator exit 0, 40 PNGs (28 changed), every PNG viewed against its caption; one wrong caption fixed (artwork-touch-zones); 2 img widths fixed, 0 mismatches; Menu wording fixed in docs/index.html. fmt, clippy 0; plugin_sdk 24/24. Parent viewed docs/screenshots/main-window.png: tools first, PROFILES +, catalog beside preview; diff-check pass.
 L50: T15+T16 committed together (shared main.rs rail/sidebar code). Sidebar min now 250 (StackSwitcher min-width cleared, wrapping live-info caption): side by side without scroll from 872px (Plus) / 1002px (XL). Rail: badge, TOOLS (Organize, OBS, Menu with descriptive tooltips), PROFILES + New profile, profiles; nothing at the foot. Worker: RED via partial revert (sidebar) and clean RED (rail); full GTK 370 pass + 3 baseline + intermittent selector (passes alone); headless 0; plugin_sdk 24/24. Parent: fmt, diff-check, rail_tests 7/7; viewed 900px dark and 1120px light captures. Open: docs screenshots stale; light-theme connection badge low contrast (pre-existing).
 L49: user: "deberia ser arriba, del todo las herramientas y luego a continuacion los perfiles." -> S13 rewritten. New profile goes beside the PROFILES heading (directly before the list; the Notebook offers no slot after the tabs).
 L48: "tampoco en ningun momento aprobe que las tools al igual que la creacion del nuevo perfil esten en la seccion de abajo, no se sabe para que sirve, no es claro que funcionalidad expresa." -> S13, T16 opened (blocked on placement choice). Note: the L38 option text did say tools at the foot; New profile at the foot was an unapproved deviation.
