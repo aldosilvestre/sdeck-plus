@@ -3,12 +3,13 @@
   "chosen": "03-profile-rail.html",
   "handoffs": {
     "03-profile-rail.html": {
-      "status": "sent",
+      "status": "implemented",
       "queued": false,
       "sentAt": "2026-11-13T13:26:22.457Z",
       "startedAt": null,
-      "implementedAt": null,
-      "feature": "odd/tasks/audio-input-controls.md"
+      "implementedAt": "2026-11-13T20:20:05.837Z",
+      "feature": "odd/tasks/audio-input-controls.md",
+      "note": "Fixed rail (PROFILES, New profile, TOOLS with Organize/OBS/Menu at foot), content-only scroll, toolbar in editor heading row. Deviations: New profile sits at the rail foot; title stays in header."
     }
   }
 }
