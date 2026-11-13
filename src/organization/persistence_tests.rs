@@ -422,3 +422,121 @@ fn invalid_owner_references_scopes_cycles_and_duplicates_are_rejected() {
         );
     }
 }
+
+#[test]
+fn returning_to_the_previous_profile_needs_an_application_rule_and_follows_it() {
+    let mut f = Fixture::new();
+    f.layers.create("Studio").unwrap();
+    f.organization.sync(&f.layers);
+    assert!(!f.organization.profile_returns_to_previous("Studio"));
+    for profile in ["Studio", "Base", "Missing"] {
+        let before = f.organization.profile_returns.clone();
+        assert!(f
+            .organization
+            .set_profile_returns_to_previous(profile, true)
+            .is_err());
+        assert_eq!(f.organization.profile_returns, before);
+    }
+    f.organization
+        .set_profile_application("Studio", "obs")
+        .unwrap();
+    f.organization
+        .set_profile_returns_to_previous("Studio", true)
+        .unwrap();
+    assert!(f.organization.profile_returns_to_previous("Studio"));
+    f.organization
+        .set_profile_application("Studio", "kitty")
+        .unwrap();
+    assert!(
+        f.organization.profile_returns_to_previous("Studio"),
+        "changing the application keeps the option"
+    );
+    f.organization
+        .set_profile_returns_to_previous("Studio", false)
+        .unwrap();
+    assert!(!f.organization.profile_returns_to_previous("Studio"));
+    f.organization
+        .set_profile_returns_to_previous("Studio", true)
+        .unwrap();
+    f.organization
+        .set_profile_application("Studio", "")
+        .unwrap();
+    assert!(
+        !f.organization.profile_returns_to_previous("Studio"),
+        "clearing the application clears the option"
+    );
+}
+
+#[test]
+fn the_return_option_is_written_only_when_used_and_round_trips() {
+    let mut f = Fixture::new();
+    f.organization = Organization::open_at(&f.root, &f.layers).unwrap();
+    f.layers.create("Studio").unwrap();
+    f.organization.sync(&f.layers);
+    f.organization
+        .set_profile_application("Studio", "obs")
+        .unwrap();
+    f.organization.persist().unwrap();
+    let path = f.root.join("organization.json");
+    let without = fs::read_to_string(&path).unwrap();
+    assert!(
+        !without.contains("return_to_previous"),
+        "files that never use the option stay as before: {without}"
+    );
+    f.organization
+        .set_profile_returns_to_previous("Studio", true)
+        .unwrap();
+    f.organization.persist().unwrap();
+    assert!(fs::read_to_string(&path)
+        .unwrap()
+        .contains(r#""return_to_previous": ["#));
+    let reopened = Organization::open_at(&f.root, &f.layers).unwrap();
+    assert!(reopened.profile_returns_to_previous("Studio"));
+    assert!(!reopened.profile_returns_to_previous("Base"));
+    f.organization
+        .set_profile_returns_to_previous("Studio", false)
+        .unwrap();
+    f.organization.persist().unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), without);
+}
+
+#[test]
+fn invalid_return_metadata_remains_untouched() {
+    for returns in [
+        r#"["Studio"]"#,
+        r#"["Base"]"#,
+        r#"["Missing"]"#,
+        r#"[1]"#,
+        r#""Studio""#,
+    ] {
+        let mut f = Fixture::new();
+        f.layers.create("Studio").unwrap();
+        let text = format!(
+            r#"{{"version":2,"views":{{"Base":{{"profile":"Base","folder":[],"page":1}},"Studio":{{"profile":"Studio","folder":[],"page":1}}}},"return_to_previous":{returns}}}"#
+        );
+        let path = f.root.join("organization.json");
+        fs::write(&path, &text).unwrap();
+        assert!(
+            Organization::open_at(&f.root, &f.layers).is_err(),
+            "{returns}"
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), text);
+    }
+}
+
+#[test]
+fn removing_the_last_view_of_a_profile_drops_its_return_option() {
+    let mut f = Fixture::new();
+    f.layers.create("Studio").unwrap();
+    f.organization.sync(&f.layers);
+    f.organization
+        .set_profile_application("Studio", "obs")
+        .unwrap();
+    f.organization
+        .set_profile_returns_to_previous("Studio", true)
+        .unwrap();
+    f.layers.remove("Studio").unwrap();
+    f.organization.sync(&f.layers);
+    assert!(!f.organization.profile_returns_to_previous("Studio"));
+    assert!(f.organization.profile_returns.is_empty());
+}

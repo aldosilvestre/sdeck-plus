@@ -6,7 +6,11 @@
 
 use crate::layers::LayerStore;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, io, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io,
+    path::PathBuf,
+};
 
 mod action;
 mod creation;
@@ -87,6 +91,9 @@ pub struct Organization {
     root: Option<PathBuf>,
     views: BTreeMap<String, View>,
     profile_applications: BTreeMap<String, String>,
+    /// Profiles (always with an application rule) that give the screen back to the profile they
+    /// replaced when their application loses focus.
+    profile_returns: BTreeSet<String>,
 }
 
 impl Organization {
@@ -102,6 +109,7 @@ impl Organization {
             root: Some(root),
             views: metadata.views,
             profile_applications: metadata.profile_applications,
+            profile_returns: metadata.profile_returns,
         };
         organization.sync(layers);
         storage::validate(&organization.views)?;
@@ -114,6 +122,7 @@ impl Organization {
             root: None,
             views: BTreeMap::new(),
             profile_applications: BTreeMap::new(),
+            profile_returns: BTreeSet::new(),
         };
         organization.sync(layers);
         organization
@@ -132,6 +141,8 @@ impl Organization {
         let profiles = self.profiles();
         self.profile_applications
             .retain(|profile, _| profiles.contains(profile));
+        self.profile_returns
+            .retain(|profile| self.profile_applications.contains_key(profile));
     }
 
     /// Distinct profiles, independent of their backing pages and folders.
@@ -178,6 +189,36 @@ impl Organization {
         !self.profile_applications.is_empty()
     }
 
+    /// Whether the profile gives the screen back to the profile it replaced once its application
+    /// loses focus (instead of going to Base).
+    pub fn profile_returns_to_previous(&self, profile: &str) -> bool {
+        self.profile_returns.contains(profile)
+    }
+
+    /// Turn the "return to the previous profile" option on or off for a profile.
+    ///
+    /// # Errors
+    /// Rejects unknown profiles and turning it on for a profile without an application rule.
+    pub fn set_profile_returns_to_previous(
+        &mut self,
+        profile: &str,
+        enabled: bool,
+    ) -> io::Result<()> {
+        if !self.profiles().iter().any(|name| name == profile) {
+            return Err(invalid("unknown profile"));
+        }
+        if !enabled {
+            self.profile_returns.remove(profile);
+        } else if self.profile_applications.contains_key(profile) {
+            self.profile_returns.insert(profile.to_owned());
+        } else {
+            return Err(invalid(
+                "returning to the previous profile needs an application rule",
+            ));
+        }
+        Ok(())
+    }
+
     /// Set or clear a profile's optional focused application identity.
     ///
     /// # Errors
@@ -195,6 +236,7 @@ impl Organization {
         let application = application.trim();
         if application.is_empty() {
             self.profile_applications.remove(profile);
+            self.profile_returns.remove(profile);
         } else {
             if profile == crate::layers::DEFAULT_LAYER {
                 return Err(invalid(
@@ -270,7 +312,12 @@ impl Organization {
     /// previous organization.json.
     pub fn persist(&self) -> io::Result<()> {
         match &self.root {
-            Some(root) => storage::persist(root, &self.views, &self.profile_applications),
+            Some(root) => storage::persist(
+                root,
+                &self.views,
+                &self.profile_applications,
+                &self.profile_returns,
+            ),
             None => Ok(()),
         }
     }

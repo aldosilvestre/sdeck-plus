@@ -20,6 +20,13 @@ pub(super) struct Metadata {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub(super) profile_applications: BTreeMap<String, String>,
+    /// Written only when some profile uses it, so other files stay as before.
+    #[serde(
+        default,
+        rename = "return_to_previous",
+        skip_serializing_if = "BTreeSet::is_empty"
+    )]
+    pub(super) profile_returns: BTreeSet<String>,
 }
 
 fn unique_map<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
@@ -61,6 +68,7 @@ pub(super) fn load(root: &Path, layers: &crate::layers::LayerStore) -> io::Resul
                         version: 1,
                         views: BTreeMap::new(),
                         profile_applications: BTreeMap::new(),
+                        profile_returns: BTreeSet::new(),
                     });
                 }
                 Ok(_) => return Err(error),
@@ -78,6 +86,7 @@ pub(super) fn load(root: &Path, layers: &crate::layers::LayerStore) -> io::Resul
     }
     validate(&metadata.views)?;
     validate_applications(&metadata.views, &metadata.profile_applications)?;
+    validate_returns(&metadata.profile_applications, &metadata.profile_returns)?;
     Ok(metadata)
 }
 
@@ -192,18 +201,35 @@ fn validate_applications(
     Ok(())
 }
 
+fn validate_returns(
+    applications: &BTreeMap<String, String>,
+    returns: &BTreeSet<String>,
+) -> io::Result<()> {
+    if returns
+        .iter()
+        .all(|profile| applications.contains_key(profile))
+    {
+        Ok(())
+    } else {
+        Err(bad_metadata("invalid return to previous profile"))
+    }
+}
+
 pub(super) fn persist(
     root: &Path,
     views: &BTreeMap<String, View>,
     profile_applications: &BTreeMap<String, String>,
+    profile_returns: &BTreeSet<String>,
 ) -> io::Result<()> {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     validate(views)?;
     validate_applications(views, profile_applications)?;
+    validate_returns(profile_applications, profile_returns)?;
     let bytes = serde_json::to_vec_pretty(&Metadata {
         version: 2,
         views: views.clone(),
         profile_applications: profile_applications.clone(),
+        profile_returns: profile_returns.clone(),
     })
     .map_err(io::Error::other)?;
     fs::create_dir_all(root)?;
