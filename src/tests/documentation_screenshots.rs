@@ -352,7 +352,18 @@ fn capture_documentation_screenshots() {
     widgets.binding_ui.return_seconds.set_text("10");
     assert!(widgets.binding_ui.return_model.n_items() > 0);
     widgets.binding_ui.return_target.set_selected(0);
-    capture("page-return");
+    // The page-return fields sit at the foot of the editor: scroll the form to show them.
+    wait_for_frame(&widgets.root);
+    let form = widgets
+        .binding_ui
+        .return_seconds
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+        .expect("the editor form scroller");
+    let adjustment = form.vadjustment();
+    adjustment.set_value(adjustment.upper() - adjustment.page_size());
+    save(&directory, widgets.root.upcast_ref(), "page-return");
+    adjustment.set_value(0.0);
     widgets.binding_ui.return_toggle.set_active(false);
     // Keys take their action from the catalog; dials still choose it here.
     widgets.binding_ui.mark_clean();
@@ -478,6 +489,12 @@ fn capture_documentation_screenshots() {
     save(&directory, reference.upcast_ref(), "shortcut-reference");
     reference.response(ResponseType::Close);
     widgets.feature_runtime.edit_profile("Studio");
+    // Studio is the current profile, so the menu shows Delete profile enabled (Base cannot be deleted).
+    widgets
+        .feature_runtime
+        .profile_tabs()
+        .set_current_page(Some(2));
+    wait_for_frame(&widgets.root);
     // The compact command menu, then each command's dedicated modal dialog.
     menu(&directory, &widgets.management_menu, "organize-menu");
     let organize = widgets.management_menu.popover().unwrap();

@@ -302,7 +302,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Stream Deck + XL: the simulator checks the report formats against that documentation, not the hardware. Details that the documentation leaves open are separate fields in the registry,
                  so they can be corrected once a real unit is available.</p>
               <figure style="margin: 1rem 0 0">
-                <a href="screenshots/main-window-xl.png"><img width="1120" height="700" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window configuring the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
+                <a href="screenshots/main-window-xl.png"><img width="1088" height="668" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window configuring the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
                 <figcaption>The window configuring the Stream Deck + XL (rendered by the screenshot generator, with no device).</figcaption>
               </figure>
             </article>
@@ -345,7 +345,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>The window draws the shown model: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials.
                  Control pickers, accessible names and keyboard order describe the same model.</p>
               <figure style="margin: 1rem 0 0">
-                <a href="screenshots/main-window-two-devices.png"><img width="1000" height="700" src="screenshots/main-window-two-devices.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window with a Stream Deck + and a Stream Deck + XL connected: the header shows the Current selector set to Stream Deck +"></a>
+                <a href="screenshots/main-window-two-devices.png"><img width="968" height="668" src="screenshots/main-window-two-devices.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window with a Stream Deck + and a Stream Deck + XL connected: the header shows the Current selector set to Stream Deck +"></a>
                 <figcaption>Two models connected: the header shows <strong>Current</strong> (simulated devices; not tested on two real units).</figcaption>
               </figure>
             </article>
@@ -421,8 +421,8 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
                  Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
               <figure>
-                <a href="screenshots/main-window.png"><img width="1000" height="950" src="screenshots/main-window.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Actions catalog, selected key settings and the Save, Test and Remove toolbar."></a>
-                <figcaption>Actions catalog, selected key settings and the Save, Test and Remove toolbar.</figcaption>
+                <a href="screenshots/main-window.png"><img width="968" height="918" src="screenshots/main-window.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile rail, Actions catalog and the selected key settings under the Save, Test and Remove icons of the editor heading row."></a>
+                <figcaption>Profile rail, Actions catalog and the selected key's settings under the Save, Test and Remove icons of its heading row.</figcaption>
               </figure>
             </article>
             <article class="card">
@@ -464,7 +464,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Legacy exact-tick rotation bindings remain supported and take priority over directional ones.</p>
               <p>The <strong>Dials</strong> tab provides Volume, Microphone, Brightness, Tracks, Scroll and Pages presets (Microphone: turns change the input volume, press mutes the microphone). Drag one onto a dial to save its listed events; unlisted events are preserved. For a single action, drag it from <strong>Actions</strong> and choose the dial event in the popup.</p>
               <figure>
-                <a href="screenshots/dials-tab.png"><img width="1000" height="950" src="screenshots/dials-tab.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dials tab with the ready-to-use presets."></a>
+                <a href="screenshots/dials-tab.png"><img width="968" height="918" src="screenshots/dials-tab.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dials tab with the ready-to-use presets."></a>
                 <figcaption>Dials tab with the ready-to-use presets.</figcaption>
               </figure>
               <figure>
@@ -479,7 +479,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  not other media players.</p>
               <p>Saving a <strong>Play sound</strong> or <strong>Open file or folder</strong> binding with an absolute path creates a symbolic link to the target inside the app's data directory (<code>links/</code>) and stores that link. Relative paths are kept unchanged. The editor still shows the real file, and the same file reuses one link. If the original is moved or deleted, or a relative path such as <code>dry-fart.mp3</code> or <code>~/Music/dry-fart.mp3</code> points nowhere (playback does not expand <code>~</code>), the key or touch section shows a red cross so you can see it could not run: it replaces the key's own image while the file is missing, and any button text stays on top of the cross, otherwise it is labeled <strong>Missing file</strong>. Live information still takes priority over the warning. The warning updates when the control is redrawn (for example after saving or changing pages), not immediately when a file disappears. Images are different: they are copied into the app's own storage when chosen. Exports contain relative file references only: <code>./sonidos/name.mp3</code>, <code>./imagenes/name.png</code> and <code>./archivos/name</code>. Neither file contents nor original parent paths or symlink destinations are included.</p>
               <figure>
-                <a href="screenshots/missing-file.png"><img width="1000" height="950" src="screenshots/missing-file.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 shows a missing sound as a red cross behind its text."></a>
+                <a href="screenshots/missing-file.png"><img width="968" height="918" src="screenshots/missing-file.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 shows a missing sound as a red cross behind its text."></a>
                 <figcaption>Key 8 shows a missing sound as a red cross behind its text.</figcaption>
               </figure>
               <p><strong>Change audio output</strong> switches the default PipeWire output with <code>wpctl</code>; <strong>Refresh</strong> discovers new outputs with <code>pw-dump</code>.
@@ -516,7 +516,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Parameterless actions such as <strong>Cancel timer</strong> save automatically; otherwise fill the settings and use <strong>Save binding</strong>.
                  Release before two seconds to run only the short action; hold for two seconds to run only the secondary action. Releasing afterwards does nothing.
                  For example, assign <strong>Start timer</strong> to the short action and <strong>Cancel timer</strong> to the hold action.</p>
-              <a href="screenshots/key-hold-action.png"><img width="1000" height="950" src="screenshots/key-hold-action.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Hold 2 seconds selected for key 8 with Cancel timer as its secondary action."></a>
+              <a href="screenshots/key-hold-action.png"><img width="968" height="918" src="screenshots/key-hold-action.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Hold 2 seconds selected for key 8 with Cancel timer as its secondary action."></a>
               <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> removes the whole key, the short and the hold action together (<strong>Undo remove</strong> restores both);
                  without a hold action, keys run immediately on key-down. Hold actions keep independent page returns and do not replace primary artwork or live information.
                  Dial presses and touch-strip gestures are unchanged.</p>
@@ -538,7 +538,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Audio output, volume and theme sound availability still determine audibility. If the helper is missing or playback fails, the GTK bell is attempted
                  (it may be silent); the notification is still sent. An ignored start does not add a notification or chime. <strong>Cancel timer</strong> cancels the countdown
                  without a completion notification or chime, and <strong>Quit</strong> cancels pending timers. Saving a binding does not start it.</p>
-              <a href="screenshots/timer-countdown.png"><img width="1000" height="950" src="screenshots/timer-countdown.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="A two-hour timer shown on key 8 as 02:00 with the hh:mm units above the digits."></a>
+              <a href="screenshots/timer-countdown.png"><img width="968" height="918" src="screenshots/timer-countdown.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="A two-hour timer shown on key 8 as 02:00 with the hh:mm units above the digits."></a>
             </article>
             <article class="card">
               <h4>Return to a page afterwards</h4>
@@ -583,7 +583,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
                  window preview matches the device.</p>
               <figure>
-                <a href="screenshots/binding-tab.png"><img src="screenshots/binding-tab.png" width="1000" height="950" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Binding tab with the live-information toggle for the selected control"></a>
+                <a href="screenshots/binding-tab.png"><img src="screenshots/binding-tab.png" width="968" height="918" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Binding tab with the live-information toggle for the selected control"></a>
                 <figcaption>Binding tab with the live-information toggle for the selected control.</figcaption>
               </figure>
               <p>Each touch section can show information for its Tap or Hold binding. A dial's section shows its press binding first, then its turns, then a tap or hold on
@@ -643,6 +643,14 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>Detection uses Hyprland IPC focus events, not process polling. A matching application selects its profile; unmatched or unavailable focus returns to Base (or, with the return check on, to the profile that was shown before it, if that profile still exists and does not need another application);
                  focusing the configuration window keeps the last external context. A manual tab choice lasts until the next external focus change. Selecting a profile never
                  launches its application. Every start opens on Base's first page.</p>
+              <figure>
+                <a href="screenshots/organize-menu.png"><img width="268" height="223" src="screenshots/organize-menu.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="The Organize command menu: Edit profile, New profile, a divider and a red Delete profile."></a>
+                <figcaption>The Organize menu in the rail: Edit profile and New profile open their own dialogs; Delete profile asks for confirmation.</figcaption>
+              </figure>
+              <figure>
+                <a href="screenshots/organize-profiles-pages.png"><img width="400" height="421" src="screenshots/organize-profiles-pages.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="The Edit profile dialog with the profile picker, the auto-switch application, the return check and the Save changes and Delete profile buttons."></a>
+                <figcaption>The Edit profile dialog.</figcaption>
+              </figure>
             </article>
             <article class="card">
               <h4>Pages</h4>
@@ -691,7 +699,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Bare information icons show their help on hover or keyboard-visible focus. The Organize menu opens Edit profile and New profile dialogs, and Menu (Help, Updates, Import, Export) is the last tool of the rail; the Base profile callout explains its restrictions. Transitions follow GTK's animation setting. The full layout contract is in
                  <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
               <figure>
-                <a href="screenshots/field-help.png"><img width="417" height="242" src="screenshots/field-help.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile auto-switch help shown by hovering its information icon."></a>
+                <a href="screenshots/field-help.png"><img width="417" height="240" src="screenshots/field-help.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile auto-switch help shown by hovering its information icon."></a>
                 <figcaption>Profile auto-switch help shown by hovering its information icon.</figcaption>
               </figure>
             </article>
@@ -881,7 +889,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-screenshots">
               <h4>Documentation screenshots</h4>
               <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
-                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (both 1000 × 700; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
+                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (1088 × 668 and 968 × 668; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
   cargo test --offline --bin sdeck-plus \

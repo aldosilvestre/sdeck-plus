@@ -32,7 +32,7 @@ impl Toast {
             .build();
         let content = GtkBox::new(Orientation::Horizontal, 12);
         content.add_css_class("toast");
-        let tone = Image::from_icon_name("emblem-ok-symbolic");
+        let tone = Image::from_icon_name("object-select-symbolic");
         tone.add_css_class("toast-tone");
         tone.set_accessible_role(gtk::AccessibleRole::Presentation);
         content.append(&tone);
@@ -136,7 +136,7 @@ impl Toast {
         self.tone.set_icon_name(Some(if failed {
             "dialog-error-symbolic"
         } else {
-            "emblem-ok-symbolic"
+            "object-select-symbolic"
         }));
         self.dismiss.set_visible(failed);
         self.root.set_reveal_child(true);
@@ -611,7 +611,7 @@ pub(crate) fn feedback(label: &Label, failed: bool) {
             icon.set_icon_name(Some(if failed {
                 "dialog-error-symbolic"
             } else {
-                "emblem-ok-symbolic"
+                "object-select-symbolic"
             }));
             icon.set_visible(true);
         }
@@ -637,7 +637,7 @@ fn wrap_in_banner(label: &Label) -> Option<GtkBox> {
     banner.set_hexpand(label.hexpands());
     banner.set_halign(label.halign());
     banner.set_valign(label.valign());
-    let icon = Image::from_icon_name("emblem-ok-symbolic");
+    let icon = Image::from_icon_name("object-select-symbolic");
     icon.add_css_class("banner-tone");
     icon.set_valign(gtk::Align::Start);
     icon.set_accessible_role(gtk::AccessibleRole::Presentation);

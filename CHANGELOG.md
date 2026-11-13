@@ -11,10 +11,13 @@ All notable changes to this project are documented here. The format follows
 - **Editor toolbar:** Save, Test and Remove stay visible while a tall editor form scrolls (the heading row is fixed above the form).
 - **Editor toolbar:** Save binding, Test action and Remove binding now sit in the editor card's heading row, level with "Configuring: …", as in the approved design; their icons, tooltips, accessible names and behaviour are unchanged. The status line, Undo remove and the plugin buttons stay at the top of the right-hand panel.
 - **Deletion confirmations:** deleting a profile, page, folder or touchscreen page asks `Delete “name”?` with what goes with it (a profile lists its page and binding counts) and ends "This cannot be undone."; the buttons are **Cancel** (Esc) and a red **Delete**. The import confirmation uses the same layout.
-- **Menu popover:** the header Menu is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.
+- **Menu popover:** the Menu (the last tool of the rail) is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.
 - **Organize menu:** a red **Delete profile** row after a divider opens the same confirmation for the shown profile; it is disabled for Base.
 - **Organize menu:** the Organize tool is now a compact menu with **Edit profile** and **New profile** rows. Each opens its form in a dedicated modal dialog (Esc closes it); profile creation, editing, validation and deletion work as before.
 
+- **Documentation screenshots:** regenerated for the profile rail, the Organize command menu and its
+  Edit/New profile dialogs, headerless menus and banners; the generator now also writes
+  `organize-menu.png`, and every image's width/height matches its PNG.
 - **Feedback:** toasts start with a tone glyph and keep the message in ink; a success toast has no
   Dismiss button (it hides itself), an error keeps one. Inline status messages are banners with a
   tone glyph and ink text instead of coloured text.

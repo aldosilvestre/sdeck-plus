@@ -285,7 +285,7 @@ Profile tabs have a 12px gap before page navigation; navigation and the
 device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
-the added return and information options within the default 1000x700 layout.
+the added return and information options within the default 1120x700 layout.
 Event/action selectors (shown for dials and the touch strip only; a key has one
 event and takes its action from the catalog) and Save/Test/Remove controls have
 12px inline gaps. The "Do nothing…" hint is also hidden for an unassigned key, and a key's extended
@@ -321,7 +321,7 @@ their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.
 The inspector-below-preview workspace uses vertical scrolling at the default
-1000x700 size, while retaining the form's compact field groups.
+1120x700 size, while retaining the form's compact field groups.
 
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
@@ -365,9 +365,9 @@ drawn because they have no preview control.
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
 is the device card alone (426x414 for the +, 556x456 for the + XL) and
-`main-window-xl.png` is the 1000x700 window content configuring the + XL (no
-selector: one model). `main-window-two-devices.png` (1000x700, scrolled to the
-header) shows the "Current" selector with a simulated + and + XL connected through
+`main-window-xl.png` is the window content configuring the + XL (1088x668: the
++ XL workspace needs 1088px; no selector: one model). `main-window-two-devices.png`
+(968x668, scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
 the real hub. They are written by the documentation screenshot generator, which
 iterates `DeviceModel::supported()` for the per-model images, so a model that
 becomes supported gets its image without editing the generator. The + XL images
@@ -387,7 +387,7 @@ needs no vertical scroll to reach the dials (a test pins this for both
 models). A shorter window scrolls the page, never the preview. Dial captions are 72px wide on the + XL (86px
 on the +) so neighbours never touch.
 
-The complete configuration shell (header, profile toolbar, page navigation and
+The complete configuration shell (header, profile rail, page navigation and
 body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
 share the shell's leading/trailing edges. The native FlowBox decides wrapping
@@ -426,7 +426,7 @@ width, full height and never scrolling (artboard 03-profile-rail): the connectio
 "PROFILES" sub-heading (11px, bold, muted), the profile names (about 12 characters, ellipsized),
 a flat "New profile" button that opens the same dialog as the Organize menu's New profile row,
 then at the foot a "TOOLS" sub-heading with Organize, OBS and Menu. Because the rail is outside
-the scrolling region the tools are always visible and their popovers open fully, in a 1080x700
+the scrolling region the tools are always visible and their popovers open fully, in a 1120x700
 window and at the smallest window. The tools are frameless (hover shows the surface) so they stay
 secondary to the tabs. Menu is the window's one configuration menu button seated in the shown
 model's rail (moved, not copied, when the shown model changes); the header keeps the title,
@@ -706,7 +706,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   `Esc` key hint and the default, and a red destructive **Delete**; Escape or Cancel changes
   nothing. Page, folder, touchscreen-page and profile deletion share this dialog; the import
   confirmation uses the same layout with an **Import** button.
-- **Menu popover:** the header Menu is a headerless command menu (about 6px padding, no title
+- **Menu popover:** the rail's Menu is a headerless command menu (about 6px padding, no title
   row and no Close button) of Help, Updates, Import configuration... and Export
   configuration...; Escape or a click outside dismisses it.
 - **Feedback:** countdown, completion, connection and errors use inline text
@@ -764,7 +764,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
-  color alone. The header menu lists Help, Updates, Import configuration... and Export
+  color alone. The Menu lists Help, Updates, Import configuration... and Export
   configuration...; Updates opens a modal dialog (same width, margins and Close
   button as Help) that groups its status, Check for updates button and Check
   for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
@@ -835,7 +835,7 @@ Navigation refreshes selector, bindings, summaries and artwork together.
 ## 7. Depth and surface
 
 Use ink-toned layering, neutral edges and a faint inset top light for
-toolbar/editor surfaces. The profile toolbar has no competing outer outline.
+toolbar/editor surfaces. The profile rail has no competing outer outline.
 Profile tabs use a violet tonal fill and fine inset edge instead of an underline;
 the active tab and keyboard focus remain different states.
 The dimensional chassis, artwork cover/crop and circular encoder material

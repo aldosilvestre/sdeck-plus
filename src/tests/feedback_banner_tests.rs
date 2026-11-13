@@ -27,7 +27,7 @@ fn toast_body() {
     assert!(toast.tone.has_css_class("feedback-success"));
     assert_eq!(
         toast.tone.icon_name().as_deref(),
-        Some("emblem-ok-symbolic")
+        Some("object-select-symbolic")
     );
     assert!(toast.action.is_visible(), "Undo sits beside the message");
     assert!(!toast.dismiss.is_visible(), "a success needs no Dismiss");
@@ -78,7 +78,7 @@ fn banner_body() {
     assert!(banner.has_css_class("feedback-success"));
     let glyph = banner.first_child().and_downcast::<gtk::Image>().unwrap();
     assert!(glyph.is_visible());
-    assert_eq!(glyph.icon_name().as_deref(), Some("emblem-ok-symbolic"));
+    assert_eq!(glyph.icon_name().as_deref(), Some("object-select-symbolic"));
     assert_eq!(status.text(), "Saved.", "the message text is unchanged");
 
     ui::feedback(&status, true);
