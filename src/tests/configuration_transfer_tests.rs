@@ -96,7 +96,7 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     let unknown = format!(
         "binding\t{}\tk:8\tfeature-v1:{}",
         hex("Base"),
-        hex(r#"{"Plugin":{"plugin_id":"x","action_id":"y","settings":{}}}"#)
+        hex(r#"{"FutureKind":{"plugin_id":"x","action_id":"y","settings":{}}}"#)
     );
     let mut stored = std::fs::read_to_string(root.join("layers.conf")).unwrap();
     stored.push_str(&unknown);

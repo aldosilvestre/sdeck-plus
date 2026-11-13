@@ -48,7 +48,7 @@ const HEADER: &str = "streamdeck-layers-v1\nactive\t42617365\n";
 fn plugin_action() -> String {
     format!(
         "feature-v1:{}",
-        hex(br#"{"Plugin":{"plugin_id":"x","action_id":"y","settings":{}}}"#)
+        hex(br#"{"FutureKind":{"plugin_id":"x","action_id":"y","settings":{}}}"#)
     )
 }
 
@@ -116,9 +116,9 @@ fn conflict_log_says_kept_for_unknown_rows_and_logs_them_once() {
     let plugin = plugin_row(BASE, 5);
     let expected = vec![
         format!("ERROR\tprofile=\"Base\"\tcontrol=k:1\treason=unknown information source\tkept=info\t{BASE}\tk:1\tfuture-source"),
-        format!("ERROR\tprofile=\"Base\"\tcontrol=k:5\treason=unknown feature variant 'Plugin'\tkept={plugin}"),
+        format!("ERROR\tprofile=\"Base\"\tcontrol=k:5\treason=unknown feature variant 'FutureKind'\tkept={plugin}"),
         format!("ERROR\tprofile=\"Base\"\tcontrol=k:6\treason=unknown action kind 'plugin-v1'\tkept=binding\t{BASE}\tk:6\tplugin-v1:7a"),
-        format!("ERROR\tprofile=\"Other\"\tcontrol=k:5\treason=unknown feature variant 'Plugin'\tkept={}", plugin_row(OTHER, 5)),
+        format!("ERROR\tprofile=\"Other\"\tcontrol=k:5\treason=unknown feature variant 'FutureKind'\tkept={}", plugin_row(OTHER, 5)),
     ];
     let mut actual = fixture.log();
     actual.sort();
@@ -262,7 +262,7 @@ fn touchscreen_store_with_an_unknown_action_stays_untouched_and_unwritable() {
     assert_eq!(store.diagnostics().len(), 1);
     assert!(
         store.diagnostics()[0].contains("uses an action this build cannot read")
-            && store.diagnostics()[0].contains("unknown feature variant 'Plugin'")
+            && store.diagnostics()[0].contains("unknown feature variant 'FutureKind'")
             && store.diagnostics()[0].contains("saving is disabled"),
         "{:?}",
         store.diagnostics()
