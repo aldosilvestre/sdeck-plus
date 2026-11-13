@@ -30,6 +30,22 @@ pub(super) struct Request<'a> {
     pub settings: &'a Settings,
 }
 
+/// Query written as one JSON line on the child's stdin. It names a value, not an action.
+#[derive(Debug, Serialize)]
+pub(super) struct QueryRequest<'a> {
+    pub protocol_version: u32,
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub request_id: &'a str,
+    pub value: &'a str,
+    pub settings: &'a Settings,
+}
+
+/// Longest accepted headline of a reported value.
+pub const MAX_HEADLINE_CHARS: usize = 32;
+/// Longest accepted detail line of a reported value.
+pub const MAX_DETAIL_CHARS: usize = 64;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Response {
@@ -58,10 +74,13 @@ pub(super) struct RawOutput {
     pub stderr: Vec<u8>,
 }
 
-pub(super) fn parse_response(
+/// Exit status, UTF-8, exactly one JSON line, protocol version and request id: everything the
+/// invoke and query responses have in common. Returns the parsed body and the stderr text.
+fn parse_envelope<T: serde::de::DeserializeOwned>(
     output: RawOutput,
     request_id: &str,
-) -> Result<InvokeOutcome, PluginError> {
+    envelope: impl FnOnce(&T) -> (u32, &str),
+) -> Result<(T, String), PluginError> {
     let diagnostics = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.success {
         return Err(PluginError::NonZeroExit {
@@ -76,19 +95,39 @@ pub(super) fn parse_response(
     if lines.next().is_some() {
         return Err(malformed("stdout must contain exactly one JSON line"));
     }
-    let response: Response = serde_json::from_str(line)
+    let body: T = serde_json::from_str(line)
         .map_err(|error| PluginError::MalformedResponse(error.to_string()))?;
-    if response.protocol_version != PROTOCOL_VERSION {
+    let (version, id) = envelope(&body);
+    if version != PROTOCOL_VERSION {
         return Err(malformed("unsupported response protocol_version"));
     }
-    if response.request_id != request_id {
+    if id != request_id {
         return Err(PluginError::RequestIdMismatch);
     }
-    for text in [&response.message, &response.error].into_iter().flatten() {
-        if text.chars().count() > MAX_MESSAGE_CHARS {
-            return Err(malformed("message exceeds the length limit"));
-        }
+    Ok((body, diagnostics))
+}
+
+fn check_message(text: &Option<String>) -> Result<(), PluginError> {
+    match text {
+        Some(text) if text.chars().count() > MAX_MESSAGE_CHARS => Err(
+            PluginError::MalformedResponse("message exceeds the length limit".into()),
+        ),
+        _ => Ok(()),
     }
+}
+
+fn reported(error: Option<String>) -> PluginError {
+    PluginError::Reported(error.unwrap_or_else(|| "plugin reported failure".into()))
+}
+
+pub(super) fn parse_response(
+    output: RawOutput,
+    request_id: &str,
+) -> Result<InvokeOutcome, PluginError> {
+    let (response, diagnostics) =
+        parse_envelope::<Response>(output, request_id, |r| (r.protocol_version, &r.request_id))?;
+    check_message(&response.message)?;
+    check_message(&response.error)?;
     if response.ok {
         Ok(InvokeOutcome {
             request_id: response.request_id,
@@ -96,12 +135,78 @@ pub(super) fn parse_response(
             diagnostics,
         })
     } else {
-        Err(PluginError::Reported(
-            response
-                .error
-                .unwrap_or_else(|| "plugin reported failure".into()),
-        ))
+        Err(reported(response.error))
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryResponse {
+    protocol_version: u32,
+    request_id: String,
+    ok: bool,
+    #[serde(default)]
+    value: Option<ValueBody>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValueBody {
+    headline: String,
+    #[serde(default)]
+    detail: Option<String>,
+    #[serde(default)]
+    level: Option<u8>,
+}
+
+/// The value a plugin reported for a `query`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryOutcome {
+    /// 1-32 printable characters.
+    pub headline: String,
+    /// At most 64 printable characters.
+    pub detail: Option<String>,
+    /// An integer from 0 to 100, for a bar or gauge.
+    pub level: Option<u8>,
+}
+
+pub(super) fn parse_query_response(
+    output: RawOutput,
+    request_id: &str,
+) -> Result<QueryOutcome, PluginError> {
+    let (response, _) = parse_envelope::<QueryResponse>(output, request_id, |r| {
+        (r.protocol_version, &r.request_id)
+    })?;
+    check_message(&response.error)?;
+    if !response.ok {
+        return Err(reported(response.error));
+    }
+    let malformed = |message: &str| PluginError::MalformedResponse(message.to_owned());
+    let body = response
+        .value
+        .ok_or_else(|| malformed("a successful query needs a `value`"))?;
+    let printable =
+        |text: &str, max: usize| text.chars().count() <= max && !text.chars().any(char::is_control);
+    if body.headline.is_empty() || !printable(&body.headline, MAX_HEADLINE_CHARS) {
+        return Err(malformed("headline must be 1-32 printable characters"));
+    }
+    if body
+        .detail
+        .as_deref()
+        .is_some_and(|text| !printable(text, MAX_DETAIL_CHARS))
+    {
+        return Err(malformed("detail must be at most 64 printable characters"));
+    }
+    if body.level.is_some_and(|level| level > 100) {
+        return Err(malformed("level must be an integer from 0 to 100"));
+    }
+    Ok(QueryOutcome {
+        headline: body.headline,
+        detail: body.detail,
+        level: body.level,
+    })
 }
 
 #[cfg(not(target_os = "linux"))]

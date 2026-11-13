@@ -434,3 +434,153 @@ fn a_regular_file_named_dot_git_is_skipped_like_the_directory() {
     assert_eq!(output.status.code(), Some(0), "{}", out(&output));
     nothing_left(&scratch);
 }
+
+fn with_value(mut manifest: Value) -> Value {
+    manifest["values"] = json!([{"id": "brightness", "label": "Brightness"}]);
+    manifest["actions"][0]["display"] = json!("brightness");
+    manifest
+}
+
+fn query_script(marker: &Path) -> String {
+    format!(
+        "#!/bin/sh\ncat >/dev/null\ntouch '{}'\nprintf '%s\\n' '{}'\n",
+        marker.display(),
+        r#"{"protocol_version":1,"request_id":"req-1","ok":true,"value":{"headline":"70%","detail":"Brightness","level":70}}"#
+    )
+}
+
+#[test]
+fn validation_prints_declared_values_and_displays_without_running_anything() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let project = scratch.project(
+        "p",
+        &with_value(manifest("fixture")),
+        &query_script(&scratch.marker()),
+    );
+    let output = run(&binary, &scratch, &[project.to_str().unwrap()]);
+    let text = out(&output);
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("value: brightness (Brightness)"), "{text}");
+    assert!(text.contains("display: brightness"), "{text}");
+    assert!(!scratch.marker().exists());
+    nothing_left(&scratch);
+}
+
+#[test]
+fn query_runs_the_plugin_once_warns_first_and_prints_the_value() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let project = scratch.project(
+        "p",
+        &with_value(manifest("fixture")),
+        &query_script(&scratch.marker()),
+    );
+    let output = run(
+        &binary,
+        &scratch,
+        &[
+            project.to_str().unwrap(),
+            "--query",
+            "send",
+            "--settings",
+            r#"{"channel":"general"}"#,
+            "--request-id",
+            "req-1",
+            "--timeout",
+            "10",
+        ],
+    );
+    let text = out(&output);
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    let warning = text.find("RUNS the plugin").expect("warning");
+    let outcome = text.find("PLUGIN_QUERY_OK:").expect("outcome");
+    assert!(warning < outcome, "{text}");
+    assert!(
+        text.contains("70%") && text.contains("Brightness") && text.contains("70"),
+        "{text}"
+    );
+    assert!(!text.contains("PLUGIN_INVOKE_OK"), "{text}");
+    assert!(scratch.marker().exists());
+    nothing_left(&scratch);
+}
+
+#[test]
+fn query_failures_are_reported_and_exit_one_without_running_rejected_requests() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let failing = scratch.project(
+        "fail",
+        &with_value(manifest("fixture")),
+        "#!/bin/sh\ncat >/dev/null\necho boom >&2\nexit 3\n",
+    );
+    let output = run(
+        &binary,
+        &scratch,
+        &[
+            failing.to_str().unwrap(),
+            "--query",
+            "send",
+            "--settings",
+            r#"{"channel":"a"}"#,
+        ],
+    );
+    let text = out(&output);
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("PLUGIN_QUERY_ERROR:") && text.contains("boom"),
+        "{text}"
+    );
+
+    // `send` displays a value in this project; the plain manifest has no display at all.
+    let plain = scratch.project(
+        "plain",
+        &manifest("fixture"),
+        &query_script(&scratch.marker()),
+    );
+    let shown = scratch.project(
+        "shown",
+        &with_value(manifest("fixture")),
+        &query_script(&scratch.marker()),
+    );
+    for (dir, args) in [
+        (
+            &plain,
+            vec!["--query", "send", "--settings", r#"{"channel":"a"}"#],
+        ),
+        (&shown, vec!["--query", "nope"]),
+        (&shown, vec!["--query", "send"]),
+    ] {
+        let mut all = vec![dir.to_str().unwrap()];
+        all.extend(args);
+        let output = run(&binary, &scratch, &all);
+        assert_eq!(output.status.code(), Some(1), "{all:?}: {}", out(&output));
+        assert!(
+            out(&output).contains("PLUGIN_QUERY_ERROR:"),
+            "{}",
+            out(&output)
+        );
+    }
+    assert!(!scratch.marker().exists());
+    nothing_left(&scratch);
+}
+
+#[test]
+fn query_usage_errors_exit_two() {
+    let binary = binary!();
+    let scratch = Scratch::new();
+    let project = scratch.project("p", &with_value(manifest("fixture")), "#!/bin/sh\n");
+    let dir = project.to_str().unwrap();
+    for args in [
+        vec![dir, "--query"],
+        vec![dir, "--query", "send", "--invoke", "send"],
+        vec![dir, "--query", "send", "--timeout", "0"],
+        vec![dir, "--query", "send", "--settings", "[1]"],
+    ] {
+        let output = run(&binary, &scratch, &args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {}", out(&output));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("usage"));
+    }
+    assert!(!scratch.marker().exists());
+    nothing_left(&scratch);
+}

@@ -5,15 +5,17 @@
 //! cargo run --offline --example plugin_validate -- <plugin-dir>
 //! cargo run --offline --example plugin_validate -- <plugin-dir> --invoke <action> \
 //!     [--settings '<json>'] [--timeout <seconds, default 5, max 60>] [--request-id <id>]
+//! cargo run --offline --example plugin_validate -- <plugin-dir> --query <action> [same options]
 //! ```
 //!
 //! This is a thin client of `sdeck_plus::plugins::stage`, the same code the app's Add plugin flow
 //! uses: the project is copied (regular files only, bounded, every copy problem reported) into a
 //! private staging directory and loaded with `PluginRegistry::open`, which executes nothing.
 //! Output markers: `PLUGIN_VALIDATE_OK:` / `PLUGIN_VALIDATE_ERROR:` and, only with `--invoke`,
-//! `PLUGIN_INVOKE_OK:` / `PLUGIN_INVOKE_ERROR:`. Exit status: 0 ok, 1 problems or a failed
-//! invocation, 2 usage. `--invoke` RUNS the plugin with your privileges; nothing else here ever
-//! does.
+//! `PLUGIN_INVOKE_OK:` / `PLUGIN_INVOKE_ERROR:`, and only with `--query`, `PLUGIN_QUERY_OK:` /
+//! `PLUGIN_QUERY_ERROR:` (asks the action's plugin for the value it displays). Exit status: 0 ok,
+//! 1 problems or a failed request, 2 usage. `--invoke` and `--query` RUN the plugin with your
+//! privileges; nothing else here ever does.
 
 use sdeck_plus::plugins::{
     install, stage, CancelToken, InstallMode, InvokeOptions, PluginBinding, PluginPreview,
@@ -25,10 +27,17 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-const USAGE: &str = "usage: plugin_validate <plugin-dir> [--invoke <action> [--settings '<json>'] \
-[--timeout <1-60 seconds>] [--request-id <id>]]";
+const USAGE: &str = "usage: plugin_validate <plugin-dir> [--invoke|--query <action> \
+[--settings '<json>'] [--timeout <1-60 seconds>] [--request-id <id>]]";
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Invoke,
+    Query,
+}
 
 struct Invoke {
+    mode: Mode,
     action: String,
     settings: Settings,
     timeout: Duration,
@@ -37,6 +46,7 @@ struct Invoke {
 
 fn parse_args(args: &[String]) -> Result<(PathBuf, Option<Invoke>), String> {
     let mut dir = None;
+    let mut mode = None;
     let (mut action, mut settings, mut timeout, mut request_id) = (None, None, None, None);
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -46,7 +56,17 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, Option<Invoke>), String> {
                 .ok_or_else(|| format!("{name} needs a value"))
         };
         match arg.as_str() {
-            "--invoke" => action = Some(value("--invoke")?),
+            "--invoke" | "--query" => {
+                if action.is_some() {
+                    return Err("--invoke and --query are mutually exclusive".into());
+                }
+                mode = Some(if arg == "--invoke" {
+                    Mode::Invoke
+                } else {
+                    Mode::Query
+                });
+                action = Some(value(arg)?);
+            }
             "--settings" => settings = Some(value("--settings")?),
             "--timeout" => timeout = Some(value("--timeout")?),
             "--request-id" => request_id = Some(value("--request-id")?),
@@ -58,7 +78,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, Option<Invoke>), String> {
     let dir = dir.ok_or("a plugin directory is required")?;
     let Some(action) = action else {
         if settings.is_some() || timeout.is_some() || request_id.is_some() {
-            return Err("--settings, --timeout and --request-id need --invoke".into());
+            return Err("--settings, --timeout and --request-id need --invoke or --query".into());
         }
         return Ok((dir, None));
     };
@@ -86,6 +106,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, Option<Invoke>), String> {
     Ok((
         dir,
         Some(Invoke {
+            mode: mode.unwrap_or(Mode::Invoke),
             action,
             settings,
             timeout: Duration::from_secs(seconds),
@@ -143,6 +164,12 @@ fn summarize(preview: &PluginPreview, executable: &str) {
             let suffix = if setting.required { ", required" } else { "" };
             println!("    setting: {} ({}{suffix})", setting.id, setting.kind);
         }
+        if let Some(display) = &action.display {
+            println!("    display: {display}");
+        }
+    }
+    for value in &preview.values {
+        println!("  value: {} ({})", value.id, value.label);
     }
     if preview.requirements.is_empty() {
         println!("  requirements: none");
@@ -211,8 +238,12 @@ fn validate(dir: &Path, invoke: Option<&Invoke>) -> bool {
         return true;
     };
     let id = staged.manifest().id.clone();
+    let (flag, marker) = match invoke.mode {
+        Mode::Invoke => ("--invoke", "PLUGIN_INVOKE_WARNING"),
+        Mode::Query => ("--query", "PLUGIN_QUERY_WARNING"),
+    };
     println!(
-        "PLUGIN_INVOKE_WARNING: --invoke RUNS the plugin `{id}` with your user's privileges (you asked for it).",
+        "{marker}: {flag} RUNS the plugin `{id}` with your user's privileges (you asked for it).",
     );
     // Only this private temp root is ever written to or enabled in, never the user's plugins.
     let result = TempRoot::new()
@@ -224,23 +255,51 @@ fn validate(dir: &Path, invoke: Option<&Invoke>) -> bool {
             let options = InvokeOptions::new(&invoke.request_id).timeout(invoke.timeout);
             registry
                 .set_enabled(&id, true)
-                .and_then(|()| registry.invoke(&binding, &options))
-                .map_err(|error| error.to_string())
-        });
-    match result {
-        Ok(outcome) => {
-            println!(
-                "PLUGIN_INVOKE_OK: request {} message: {}",
-                outcome.request_id,
-                outcome.message.as_deref().unwrap_or("(none)")
-            );
-            if !outcome.diagnostics.is_empty() {
-                println!("  stderr: {}", outcome.diagnostics.trim_end());
+                .map_err(|error| error.to_string())?;
+            match invoke.mode {
+                Mode::Invoke => registry
+                    .invoke(&binding, &options)
+                    .map(|outcome| {
+                        let mut text = format!(
+                            "PLUGIN_INVOKE_OK: request {} message: {}",
+                            outcome.request_id,
+                            outcome.message.as_deref().unwrap_or("(none)")
+                        );
+                        if !outcome.diagnostics.is_empty() {
+                            text.push_str(&format!(
+                                "\n  stderr: {}",
+                                outcome.diagnostics.trim_end()
+                            ));
+                        }
+                        text
+                    })
+                    .map_err(|error| error.to_string()),
+                Mode::Query => registry
+                    .query(&binding, &options)
+                    .map(|value| {
+                        format!(
+                            "PLUGIN_QUERY_OK: request {} headline: {} detail: {} level: {}",
+                            invoke.request_id,
+                            value.headline,
+                            value.detail.as_deref().unwrap_or("(none)"),
+                            value.level.map_or("(none)".to_owned(), |n| n.to_string())
+                        )
+                    })
+                    .map_err(|error| error.to_string()),
             }
+        });
+    let kind = if invoke.mode == Mode::Query {
+        "QUERY"
+    } else {
+        "INVOKE"
+    };
+    match result {
+        Ok(text) => {
+            println!("{text}");
             true
         }
         Err(error) => {
-            println!("PLUGIN_INVOKE_ERROR: {error}");
+            println!("PLUGIN_{kind}_ERROR: {error}");
             false
         }
     }
