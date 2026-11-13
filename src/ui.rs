@@ -149,6 +149,7 @@ pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
 
 /// A label that follows `source`: its text, tooltip and style classes. Used to show the
 /// connection badge in the profile rail while the header's label stays the one written to.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
 pub(crate) fn mirror_badge(source: &Label) -> Label {
     let badge = Label::new(None);
     badge.set_halign(gtk::Align::Start);

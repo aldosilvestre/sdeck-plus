@@ -603,9 +603,11 @@ fn build_session(
         layers,
         artwork.clone(),
         layer_sender,
-        host.toast.clone(),
-        host.shell,
-        host.labels.0,
+        BodyHost {
+            toast: host.toast.clone(),
+            shell: host.shell,
+            connection_badge: host.labels.0,
+        },
         send_initial,
     );
     // Editing is switched off on the body alone: the header stays usable.
@@ -888,9 +890,11 @@ fn build_widgets(
         layers,
         artwork,
         layer_sender,
-        toast.clone(),
-        &shell,
-        &header.status,
+        BodyHost {
+            toast: toast.clone(),
+            shell: &shell,
+            connection_badge: &header.status,
+        },
         true,
     );
     header.configuration_menu.bind(body.feature_runtime.clone());
@@ -958,16 +962,27 @@ fn build_widgets(
     }
 }
 
+/// The shared window parts a body is built into.
+struct BodyHost<'a> {
+    toast: ui::Toast,
+    shell: &'a GtkBox,
+    /// The header's connection label, which the rail's badge mirrors.
+    connection_badge: &'a Label,
+}
+
 fn build_body(
     window: ApplicationWindow,
     layers: Rc<RefCell<LayerStore>>,
     artwork: ArtworkUi,
     layer_sender: mpsc::Sender<LayerCommand>,
-    toast: ui::Toast,
-    shell: &GtkBox,
-    connection_badge: &Label,
+    host: BodyHost<'_>,
     send_initial: bool,
 ) -> Body {
+    let BodyHost {
+        toast,
+        shell,
+        connection_badge,
+    } = host;
     let updating_layers = Rc::new(Cell::new(false));
     let conflicts = layers.borrow().conflicts().to_vec();
     let kept = conflicts.iter().filter(|conflict| conflict.kept).count();
