@@ -254,8 +254,9 @@ Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
 Popovers, help popovers and tooltips share a 12px radius and the `0 8px 24px` shadow; tooltips are
 8px-radius labels (12px text). Selected popover rows use the selection fill with a 1px violet
-inset edge. The toast is a pill (`desk_hover` fill, 999px radius). The binding status is a banner:
-8px radius, tone text on `alpha(tone, 0.16)` for errors, warnings and successes, always with words.
+inset edge. The toast is a pill (`desk_hover` fill, 999px radius). Every feedback label is a banner:
+8px radius, 6px 10px padding, tone text on `alpha(tone, 0.16)` for errors, warnings and successes,
+always with words (inside a toast the banner styling is dropped).
 Source artboard: `design/overlays/03-compact-command.html`.
 
 The connection badge heads the profile rail; when the rail is compact it is a 12px tone-coloured dot

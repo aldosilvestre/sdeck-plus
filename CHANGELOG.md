@@ -94,8 +94,9 @@ All notable changes to this project are documented here. The format follows
   **Undo** action in the toast (the same undo as the toolbar's **Undo remove**, which stays).
 - **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
   radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
-  edge, the toast is a pill, and the binding status reads as a tinted banner for errors, warnings and
-  successes (always with words).
+  edge, the toast is a pill, and every feedback message (binding status, text editor, profile and
+  OBS forms, plugin notices) reads as a tinted banner for errors, warnings and successes, always with
+  words; inside a toast the message keeps the pill's spacing.
 - The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
   about the toolbar's Add plugin button and the plugins folder.
 - The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |

@@ -282,12 +282,16 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .toast button { border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
 /* Alerts read as banners: a tinted fill with the tone's text; words always say what happened. */
-.binding-status.feedback-error,
-.binding-status.feedback-warning,
-.binding-status.feedback-success { padding: 6px 10px; border-radius: 8px; }
-.binding-status.feedback-error { background-color: alpha(@desk_error, 0.16); }
-.binding-status.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
-.binding-status.feedback-success { background-color: alpha(@desk_success, 0.16); }
+label.feedback-error,
+label.feedback-warning,
+label.feedback-success { padding: 6px 10px; border-radius: 8px; }
+label.feedback-error { background-color: alpha(@desk_error, 0.16); }
+label.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
+label.feedback-success { background-color: alpha(@desk_success, 0.16); }
+/* Inside a toast the message keeps the pill's own spacing, tone text only. */
+.toast label.feedback-error,
+.toast label.feedback-warning,
+.toast label.feedback-success { padding: 0; background-color: transparent; }
 .profile-tabs, .profile-tabs > stack { background-color: transparent; }
 .profile-tabs > stack { margin-left: 8px; }
 /* Profiles sit in a vertical rail at the left; tools gather at its foot. */

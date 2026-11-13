@@ -933,6 +933,7 @@ impl FeatureRuntime {
                         .starts_with("Organization writes disabled")
                     {
                         self.status.set_text("");
+                        crate::ui::clear_feedback(&self.status);
                     }
                 }
             }

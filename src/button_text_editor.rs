@@ -325,6 +325,7 @@ impl ButtonTextEditor {
         self.image_choose.set_sensitive(available);
         self.refresh_image_state();
         self.status.set_text("");
+        ui::clear_feedback(&self.status);
         if let Err(error) = self.render_preview(&value) {
             self.feedback(&error, true);
         }

@@ -1101,3 +1101,48 @@ fn a_toast_can_carry_one_action_that_runs_once_and_closes_it() {
         assert_eq!(runs.get(), 11);
     });
 }
+
+#[test]
+fn every_feedback_message_reads_as_a_banner_except_inside_a_toast() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder()
+            .default_width(400)
+            .default_height(400)
+            .build();
+        install_style(&window);
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let plain = Label::new(Some("Plain"));
+        let error = Label::new(Some("Error"));
+        let warning = Label::new(Some("Warning"));
+        let success = Label::new(Some("Success"));
+        error.add_css_class("feedback-error");
+        warning.add_css_class("feedback-warning");
+        success.add_css_class("feedback-success");
+        let toast_message = Label::new(Some("In a toast"));
+        toast_message.add_css_class("feedback-error");
+        let toast = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        toast.add_css_class("toast");
+        toast.append(&toast_message);
+        let toast_plain = Label::new(Some("In a toast"));
+        toast.append(&toast_plain);
+        for widget in [&plain, &error, &warning, &success] {
+            column.append(widget);
+        }
+        column.append(&toast);
+        window.set_child(Some(&column));
+        window.present();
+        wait_for_frame(&window);
+        // The padding is part of the measured size, not of the allocated content height.
+        let tall = |label: &Label| label.measure(gtk::Orientation::Vertical, -1).0;
+        // A banner adds 6px above and below its text, in any tone.
+        for banner in [&error, &warning, &success] {
+            assert_eq!(tall(banner), tall(&plain) + 12, "{}", banner.text());
+        }
+        // Inside the toast pill the message keeps the pill's own spacing.
+        assert_eq!(tall(&toast_message), tall(&toast_plain));
+        window.close();
+    });
+}
