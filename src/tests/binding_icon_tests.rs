@@ -455,12 +455,7 @@ fn assert_icon_action_consistency() {
             deletes.push((caption, image_names(button.upcast_ref())));
         }
     }
-    for caption in [
-        "Delete page",
-        "Delete folder",
-        "Delete touchscreen page",
-        "Delete the selected profile",
-    ] {
+    for caption in ["Delete page", "Delete folder", "Delete touchscreen page"] {
         assert!(
             deletes.iter().any(|(shown, _)| shown.starts_with(caption)),
             "{caption} is an icon action: {deletes:?}"

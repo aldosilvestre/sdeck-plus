@@ -121,14 +121,21 @@ popover scrolledwindow, popover viewport, popover listview {
     color: @desk_ink;
 }
 popover modelbutton, popover row { color: @desk_ink; }
+/* Artboard rows (menus, dropdown lists, the key menu): 38px high (22 + 2 x 8 padding; GTK
+   min-height is the content box), padding 8px 10px, radius 8, 10px gap. */
 popover modelbutton, popover row { border-radius: 8px; }
+popover listview > row, popover row { min-height: 22px; padding: 8px 10px; }
+popover listview > row > box { border-spacing: 10px; }
 popover modelbutton:hover, popover row:hover { background-color: @desk_hover; }
 popover row:selected, popover modelbutton:checked {
     background-color: @desk_selection;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
 popover arrow { background-color: @desk_surface; border-color: @desk_edge; }
+/* Every popover: 6px padding inside the 1px edge. */
+popover > contents { padding: 6px; }
 separator { background-color: @desk_edge; min-height: 1px; }
+popover separator { margin: 6px 0; }
 checkbutton { color: @desk_ink; }
 checkbutton check {
     background-color: @desk_field;
@@ -210,15 +217,19 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .field-help > button image { color: @desk_muted; }
 .field-help > button:hover image, .field-help > button:focus-visible image { color: @desk_cyan; }
 .field-help > button:hover, .field-help > button:active { background: none; }
-.page-name-dialog button { margin: 0 6px 16px; }
-.page-name-dialog button:first-child { margin-left: 16px; }
-.page-name-dialog button:last-child { margin-right: 16px; }
-.confirm-dialog label { margin: 0 16px; font-size: 14px; color: @desk_muted; }
-.confirm-dialog label.title { margin: 16px 16px 4px; font-size: 16px; font-weight: 700; color: @desk_ink; }
+/* Dialogs: radius-12 surface, 14px padding (set on the content), 10px gap, title 16/700, muted
+   body, one right-aligned action row of natural-width buttons. */
+window.popup-dialog, window.profile-dialog {
+    background-color: @desk_surface;
+    border: 1px solid @desk_edge;
+    border-radius: 12px;
+}
+.popup-dialog .dialog-vbox { padding: 14px; border-spacing: 10px; }
+.popup-dialog .dialog-action-box { margin: 0; padding: 0; }
+.dialog-title { font-size: 16px; font-weight: 700; color: @desk_ink; }
+.confirm-dialog label { margin: 0; font-size: 13px; color: @desk_muted; }
+.confirm-dialog label.title { margin: 0; font-size: 16px; font-weight: 700; color: @desk_ink; }
 .confirm-dialog button label { margin: 0; font-size: inherit; color: inherit; }
-.confirm-dialog button { margin: 12px 4px 16px; min-height: 20px; padding: 4px 12px; }
-.confirm-dialog button:first-child { margin-left: 16px; }
-.confirm-dialog button:last-child { margin-right: 16px; }
 .confirm-dialog button.destructive-action {
     color: @desk_error;
     background-image: none;
@@ -314,7 +325,7 @@ button.destructive-action.flat:disabled { background-color: transparent; border-
     background-color: @desk_hover;
     border: 1px solid @desk_edge;
     border-radius: 999px;
-    padding: 6px 6px 6px 16px;
+    padding: 8px 8px 8px 16px;
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
 .toast button { border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
@@ -545,20 +556,21 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .plugin-error-row:first-child label { font-weight: 600; }
 .binding-toolbar button.icon-only, .editor-heading-row button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
-popover.organize-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 8px 24px alpha(black, 0.45); }
-popover.organize-popover .section-label { font-size: 15px; }
-popover.organize-popover .popover-icon { color: @desk_violet; }
-popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; border-radius: 8px; }
-popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
-.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
-.organize-subtitle { color: @desk_muted; margin-top: -8px; }
-popover.command-menu button.command-row { padding: 8px 12px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
+popover.organize-popover > contents, .form-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
+popover.organize-popover .popover-icon, .form-popover .popover-icon { color: @desk_violet; }
+/* Form popovers: a bold title and a muted subtitle head the body, like the help popover. */
+.form-popover .popover-title { font-weight: 700; }
+.form-popover .popover-subtitle { color: @desk_muted; }
+/* The help popover pads its own body (12px), so its contents add none. */
+.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); padding: 0; }
+.organize-subtitle { color: @desk_muted; margin-top: -6px; }
+popover.command-menu button.command-row { padding: 8px 10px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
 popover.command-menu button.command-row:hover { background-color: @desk_hover; }
-popover.command-menu separator { margin: 4px 6px; background-color: @desk_edge; min-height: 1px; }
+popover.command-menu button.command-row:checked { background-color: @desk_selection; box-shadow: inset 0 0 0 1px @desk_violet; }
+popover.command-menu separator { margin: 6px 0; background-color: @desk_edge; min-height: 1px; }
 popover.command-menu button.command-row.destructive { color: @desk_error; }
 popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
-.profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
 .reference-head { background-color: @desk_field; border-radius: 9px 9px 0 0; }
 .reference-head label { color: @desk_muted; font-size: 11px; font-weight: 700; padding: 8px 12px; }
@@ -569,7 +581,6 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .reference-head label.reference-key { border-right: 1px solid alpha(@desk_edge, 0.7); }
 .reference-chip { font-family: monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; background-color: @desk_field; border: 1px solid @desk_edge; }
 .catalog-subtitle { color: @desk_muted; font-size: 11px; }
-.dial-event-choice button, .key-context-menu button { padding: 6px 10px; }
 .sidebar-tabs, .popover-tabs { margin-bottom: 6px; }
 .sidebar-tabs > button, .popover-tabs > button { padding: 5px 4px; }
 .sidebar-tabs > button { min-width: 0; }
@@ -630,8 +641,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }
 
 /* The dial event menu: compact rows that fill on hover and keep the keyboard focus ring. */
-popover.dial-event-choice > contents { padding: 6px; }
-.dial-event-choice button.flat { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
+.dial-event-choice button.flat { min-height: 20px; padding: 8px 10px; border-radius: 8px; border-color: transparent; background-color: transparent; }
 .dial-event-choice button.flat:hover { background-color: @desk_hover; }
 .dial-event-choice button.flat:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
 

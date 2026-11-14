@@ -681,7 +681,9 @@ fn context_menu_entry(key: &gtk::Widget) -> Button {
     popovers(key, &mut found);
     let menu = found.into_iter().next().expect("the key's context menu");
     wait_until_mapped(&menu);
-    menu.child().unwrap().downcast::<Button>().unwrap()
+    let mut buttons = Vec::new();
+    super::profile_row_tests::collect::<Button>(menu.upcast_ref(), &mut buttons);
+    buttons.into_iter().next().expect("the menu's only row")
 }
 
 #[test]

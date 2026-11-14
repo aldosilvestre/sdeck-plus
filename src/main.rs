@@ -1050,7 +1050,6 @@ fn build_body(
     ui::field_help(&name_row, "New profile help",
         "Create a separate set of bindings and artwork. The new profile starts empty. Add pages and folders from the page bar after creating it.");
     creation.append(&name_row);
-    creation.append(&create_layer);
     let creation_error = ui::helper("");
     creation_error.set_visible(false);
     creation.append(&creation_error);
@@ -1199,9 +1198,10 @@ fn build_body(
     let edit_dialog = ui::profile_dialog(
         &window,
         "Edit profile",
-        "Choose a profile to edit its automatic switching or delete it.",
+        "Choose a profile to edit its automatic switching.",
         feature_runtime.management(),
-        "Close",
+        "Cancel",
+        Some(feature_runtime.profile_save_button()),
     );
     feature_runtime.attach_profile_editor(&edit_dialog);
     let new_dialog = ui::profile_dialog(
@@ -1210,6 +1210,7 @@ fn build_body(
         "Create a separate, empty set of bindings and artwork.",
         &creation,
         "Cancel",
+        Some(&create_layer),
     );
     {
         // A closed (cancelled or dismissed) draft never lingers into the next opening.
@@ -1221,7 +1222,11 @@ fn build_body(
         });
     }
     // Integration settings are global, not part of every action's form.
-    let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
+    let obs_popover = ui::form_popover(
+        "OBS Studio",
+        Some("Address and password used for OBS actions."),
+        &ui::panel_body(&feature_runtime.obs_panel),
+    );
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
@@ -4835,9 +4840,11 @@ fn show_artwork_error(window: &impl IsA<gtk::Window>, message: &str) {
         .transient_for(window)
         .modal(true)
         .message_type(gtk::MessageType::Error)
-        .buttons(gtk::ButtonsType::Close)
         .text(message)
         .build();
+    ui::style_confirm_dialog(&dialog);
+    ui::dismiss_button(dialog.upcast_ref(), "Close", gtk::ResponseType::Close);
+    dialog.set_default_response(gtk::ResponseType::Close);
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.show();
 }
@@ -5234,6 +5241,7 @@ mod tests {
     mod plugin_add_ui_tests;
     mod plugin_ui_tests;
     mod plugin_value_tests;
+    mod popup_design_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
@@ -7376,8 +7384,6 @@ mod tests {
                 assert!(panel.width() <= width, "{name} exceeds the client width");
                 assert!(panel.height() <= height, "{name} exceeds the client height");
                 let content = panel.child().unwrap();
-                let header = content.first_child().unwrap();
-                let close = header.last_child().unwrap().downcast::<Button>().unwrap();
                 // The configuration menu is a compact button group, while
                 // organization/folders/OBS wrap their longer forms in a scroller.
                 if let Ok(scroller) = content
@@ -7392,11 +7398,8 @@ mod tests {
                 rendered_texture(window, &panel)
                     .save_to_png(directory.join(format!("{width}x{height}-popover-{name}-end.png")))
                     .unwrap();
-                let close_bounds = close.compute_bounds(&content).unwrap();
-                assert!(close_bounds.y() >= 0.0);
-                assert!(close_bounds.y() + close_bounds.height() <= header.height() as f32);
-                close.emit_clicked();
-                assert!(!panel.is_visible(), "popover Close must dismiss its panel");
+                panel.popdown();
+                assert!(!panel.is_visible(), "popdown dismisses the panel");
                 panel.set_autohide(autohide);
             }
             page_ui_tests::capture_page_workflow(window, widgets, (width, height));

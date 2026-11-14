@@ -60,13 +60,10 @@ impl ConfigurationMenu {
             .destroy_with_parent(true)
             .default_width(480)
             .build();
-        help_dialog.add_button("Close", ResponseType::Close);
+        ui::style_dialog(&help_dialog);
+        ui::dismiss_button(&help_dialog, "Close", ResponseType::Close);
         help_dialog.set_default_response(ResponseType::Close);
         let content = help_dialog.content_area();
-        content.set_margin_start(16);
-        content.set_margin_end(16);
-        content.set_margin_top(16);
-        content.set_margin_bottom(16);
         let help_scroller = ui::panel_body(help_body);
         help_scroller.set_max_content_height(420);
         content.append(&help_scroller);
@@ -82,13 +79,10 @@ impl ConfigurationMenu {
             .destroy_with_parent(true)
             .default_width(480)
             .build();
-        updates_dialog.add_button("Close", ResponseType::Close);
+        ui::style_dialog(&updates_dialog);
+        ui::dismiss_button(&updates_dialog, "Close", ResponseType::Close);
         updates_dialog.set_default_response(ResponseType::Close);
         let updates_content = updates_dialog.content_area();
-        updates_content.set_margin_start(16);
-        updates_content.set_margin_end(16);
-        updates_content.set_margin_top(16);
-        updates_content.set_margin_bottom(16);
         updates_dialog.connect_response(|dialog, _| dialog.hide());
         updates_dialog.connect_close_request(|dialog| {
             dialog.hide();
@@ -248,7 +242,7 @@ impl ConfigurationMenu {
             .build();
         ui::style_confirm_dialog(&dialog);
         dialog.set_default_size(440, -1);
-        ui::add_key_hint(&dialog.add_button("Cancel", ResponseType::Cancel), "Esc");
+        ui::dismiss_button(dialog.upcast_ref(), "Cancel", ResponseType::Cancel);
         dialog
             .add_button("Import", ResponseType::Accept)
             .add_css_class("destructive-action");

@@ -253,8 +253,16 @@ Long summaries ellipsize with full tooltips; editable fields preserve the value.
 ## Overlays and feedback
 
 Popovers, help popovers and tooltips share a 12px radius and the `0 8px 24px` shadow; tooltips are
-8px-radius labels (12px text). Selected popover rows use the selection fill with a 1px violet
-inset edge. The toast is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
+8px-radius labels (12px text). Every popover has a 1px edge, 6px padding and no arrow, and no
+title bar or Close button: Escape or a click outside dismisses it (GTK's autohide; the Button text
+popover keeps autohide off so its native font dialog cannot dismiss it, and closes on Escape or
+its trigger). Rows of command menus, dropdown lists and the key context menu are 38px high
+(`min-height` 22px + 8px padding, because GTK's min-height is the content box), padding 8px 10px,
+radius 8, 10px between icon and label, a hover fill; selected rows use the selection fill with a
+1px violet inset edge. Separators are 1px with a 6px vertical margin. A trailing `kbd` hint
+appears only on rows with a real shortcut (none today). Form popovers (OBS settings, Button text,
+Page folders) start with a bold title and a muted subtitle inside the body, like the help
+popover, and pad their content 12px inside the popover's own 6px. The toast is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
 success, red alert for an error), the message in ink, then its optional action. A success hides
 itself after a few seconds and has no Dismiss button; an error stays and shows an icon-only Dismiss.
 Every feedback label sits in a banner row the first time it shows feedback: 8px radius, 6px 10px
@@ -265,8 +273,12 @@ Source artboard: `design/overlays/03-compact-command.html`.
 The connection badge heads the profile rail as a small pill (11px text). The header keeps the title
 and the detail line.
 
-Confirm dialogs (discard, delete, import) read left-aligned: a 16px bold title, a muted
-explanation, then the buttons; the cancel button carries an `Esc` key hint (monospace 11px chip).
+Dialogs (confirmations, the artwork error, page name, New/Edit profile, setup help, Updates and
+the shortcut reference) share one frame: surface fill, 1px edge, radius 12, 14px padding, 10px
+gap, a 16px/700 title, a muted body, and ONE right-aligned action row of natural-width buttons
+with an 8px gap: the dismissal first with its `Esc` key hint (monospace 11px chip: Cancel, Keep
+editing or Close), then the primary (suggested) or danger action. No action is full width and none
+sits in a second row. Destructive confirmations default to Cancel.
 
 A toast may carry one action (violet, 600 weight) beside its message, as "Undo" after removing a
 binding; using it runs it once and closes the toast, and any later message drops it.
@@ -278,7 +290,7 @@ compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
 6px so hardware/artwork geometry is unchanged. Icons are 16px, or 20px for
-section identity. Popover padding and header/body separation are 16px; text measure is at most 38
+section identity. Popover padding is 6px (12px more around form content), dialog padding 14px; text measure is at most 38
 characters.
 
 Under Hyprland the window floats: each time the main window maps (first show and
@@ -431,11 +443,11 @@ focused does not pop the help open by itself.
 There is no Organize menu: profiles are edited and deleted from their own rail rows (below) and
 created with the "+" beside PROFILES. Each of those controls opens its form in its own modal
 dialog, transient for the main window, titled "Edit profile" or "New profile", with a one-line
-subtitle; the Base note is a callout with a cyan accent edge; the Edit footer has a divider and
-two equal-width buttons (Save changes primary, Delete profile destructive). Escape or the footer
-button (Close in Edit, Cancel in New; both show the real Esc hint) hides the dialog without
-saving; Cancel and Esc discard a New draft. Deleting asks for confirmation (below); Base cannot
-be deleted.
+subtitle; the Base note is a callout with a cyan accent edge; the footer is the single
+right-aligned action row: Cancel (with the real Esc hint) then the primary (Save changes in Edit,
+Create profile in New). Edit no longer carries a Delete profile button: the rail row's Delete icon
+covers every profile and asks first. Escape or Cancel hides the dialog without saving; Cancel and
+Esc discard a New draft. Deleting asks for confirmation (below); Base cannot be deleted.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
 badge, the OBS tool, then a "PROFILES" sub-heading (11px, bold, muted) with a compact "+" New
@@ -478,7 +490,8 @@ creates a page. Destructive page, folder and profile operations confirm their
 specific scope. Folder creation, renaming, linking and deletion belong to the
 current page, not the whole profile. Linking persists the selected control's
 navigation binding without executing it.
-The **Page folders** popover keeps the shared header (title, Close) and reads
+The **Page folders** popover heads its body with the title "Page folders" and a muted subtitle (no
+Close; Escape or an outside click dismisses it) and reads
 top to bottom: a context line "Folders on “page”" with a one-line helper about
 linking; a linked create row (entry with the "New folder name" placeholder and
 a suggested-action add icon; Enter creates) with live validation beneath it
@@ -679,17 +692,17 @@ two columns fit.
   Editing groups the profile selector, optional auto-switch application, the
   "Return to the previous profile when focus leaves" check (wrapped text, enabled
   only while the application field has text and never for Base) and
-  Save changes/Delete profile actions with 12px gaps. New profile has a name
-  and Create profile action; creating a profile closes that dialog and opens
+  Save changes in the footer action row (Delete lives on the profile row). New profile has a name
+  and the Create profile action in its footer; creating a profile closes that dialog and opens
   Edit profile on it. Deleting still asks for confirmation. Extended
   explanations use named question-mark controls with hover tooltips and
-  click/keyboard help popovers, not paragraphs in the form. Dialogs use 16px
-  padding and 4px field-label gaps.
+  click/keyboard help popovers, not paragraphs in the form. Dialogs use 14px
+  padding, a 10px gap and 4px field-label gaps.
   Create profile is disabled for empty or duplicate names and says why under the
   field; Save changes is enabled only when the application rule or the return
   check differs from the saved state, and never for Base.
-- **Popover:** organization, setup help and OBS settings stay anchored to the
-  trigger, with a visible close action and native Escape/outside dismissal.
+- **Popover:** OBS settings and Page folders stay anchored to the trigger, with no arrow, no
+  title bar and no Close button, and native Escape/outside dismissal.
   Never open one automatically at startup.
 - **Artwork disclosure:** independent key/strip/zone artwork editing remains
   reachable in a clearly named expandable section of the selected editor.
@@ -750,16 +763,16 @@ two columns fit.
   key or profile closes the popup and reloads that context. Editor chrome
   continues to use the GTK system font and existing spacing/field primitives.
   This editing popover is non-modal: opening the native font dialog must not
-  dismiss it or discard its draft. Close, the trigger, Save/Remove and a
+  dismiss it or discard its draft. Escape, the trigger, Save/Remove and a
   key/profile change provide explicit exits.
 - **Deletion confirmation:** the title names the item in curly quotes (`Delete “Studio”?`);
   the body says what goes with it and ends "This cannot be undone." (a profile counts its
-  pages and bindings: "2 pages and 14 bindings go with it."). Buttons are **Cancel**, with an
-  `Esc` key hint and the default, and a red destructive **Delete**; Escape or Cancel changes
+  pages and bindings: "2 pages and 14 bindings go with it."). One right-aligned row: **Cancel**,
+  with an `Esc` key hint and the default, then a red destructive **Delete**; Escape or Cancel changes
   nothing. Page, folder, touchscreen-page and profile deletion share this dialog; the import
   confirmation uses the same layout with an **Import** button.
-- **Menu popover:** the header's Menu is a headerless command menu (about 6px padding, no title
-  row and no Close button) of Help, Updates, Import configuration... and Export
+- **Menu popover:** the header's Menu is a headerless command menu (6px padding, 38px rows, no
+  title row, no arrow and no Close button) of Help, Updates, Import configuration... and Export
   configuration...; Escape or a click outside dismisses it.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
@@ -892,9 +905,9 @@ Profile tabs use a violet tonal fill and fine inset edge instead of an underline
 the active tab and keyboard focus remain different states.
 The dimensional chassis, artwork cover/crop and circular encoder material
 remain intact. No new fonts, heavy shadows, ambient backgrounds or accent borders.
-Secondary panels align their trailing edge with their trigger. Their header
-and Close action remain outside a bounded vertical scroller, so tall forms do
-not hide the exit. The scroller's natural content height is capped at 288px,
+Secondary panels align their trailing edge with their trigger. Their title and subtitle head
+the body; the form below sits in a bounded vertical scroller, and Escape or an outside click is
+the exit. The scroller's natural content height is capped at 288px,
 leaving room for the header and GTK popup material within a 480px-tall client.
 Button text retains its full-size preview.
 

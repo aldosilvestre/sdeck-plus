@@ -851,8 +851,9 @@ pub(crate) fn row_button(
 pub(crate) fn choose_event(anchor: &gtk::Widget, pick: impl Fn(EventKind) + Clone + 'static) {
     let popover = gtk::Popover::new();
     popover.set_parent(anchor);
+    popover.set_has_arrow(false);
     popover.add_css_class("dial-event-choice");
-    let choices = GtkBox::new(Orientation::Vertical, 2);
+    let choices = GtkBox::new(Orientation::Vertical, 0);
     for (label, event) in [
         ("Turn clockwise", EventKind::EncoderClockwise),
         ("Turn counterclockwise", EventKind::EncoderCounterClockwise),

@@ -176,7 +176,11 @@ pub(super) fn capture_page_workflow(
     button("New folder").emit_clicked();
     let edit_profile = open_command("Edit profile");
     save("edit-profile", edit_profile.upcast_ref());
-    dialog_button(&edit_profile, "Delete profile").emit_clicked();
+    // Deleting a profile is its rail row's Delete icon (the dialog carries no second path).
+    edit_profile.close();
+    super::profile_row_tests::delete_button(widgets, &profile)
+        .expect("the new profile's row Delete icon")
+        .emit_clicked();
     let dialog = current_dialog();
     assert!(
         all_text(dialog.upcast_ref()).contains(&profile),

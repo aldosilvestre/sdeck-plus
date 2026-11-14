@@ -14,7 +14,7 @@ Branch: feat/popups-buttons-design (from main 6e1b151).
 
 ## Tasks
 - T1 (S2,S5,S6) button system in CSS + page bar + catalog filters. done; worker mwfuk0l3-p-w2rk; commit: see L4.
-- T2 (S3,S4,S6) popovers, dropdown rows, key context menu, form popovers and dialogs. pending; route: bounded worker after T1; commit: pending.
+- T2 (S3,S4,S6) popovers, dropdown rows, key context menu, form popovers and dialogs. done; worker mwfw36mo-r-thij; commit: see L8.
 - T4 (S8) main window opens floating via Hyprland IPC. done; worker mwfvnkk6-q-3zr0; commit: see L6. Not verified in a live Hyprland session.
 - T3 (S7) docs, design/system.md, screenshots; final verification. pending; commit: pending.
 
@@ -25,3 +25,5 @@ L3: "tambien si podemos hacer el cambio que cuando se abra la ventana de sdeck-p
 L4: T1: base buttons 34px radius 8, flat = no fill and no border, danger style, 34px icon buttons, pressed = sel + inset violet, chips radius 8 34px, page bar unlinked flat. RED 4/4 then GREEN 5/5; full GTK 384 pass + 3 baseline + selector intermittent + model_session widget-count test (passes alone); headless 0; fmt/clippy 0. Parent: fmt, diff-check, button_system 5/5, viewed main-window-dark capture. Worker left stash@{0} (subset of the tree) — awaiting OK to drop.
 L5: user chose "La app lo pide a Hyprland al abrir" for S8 and "Sí, borralo" for the leftover stash; stash dropped after checking its files are in 61c66ce.
 L6: T4: src/window_float.rs (lib) + thin connect_map hook; own window = mapped client with this pid, class dev.streamdeck.EventMonitor and title sdeck-plus; batch setfloating + resizewindowpixel exact (clamped to the monitor's usable area) + movewindowpixel exact (centered); once per map; worker thread, 500 ms socket timeouts, 3 s poll; no-op outside Hyprland. Tests 19 lib + 2 integration (fake socket); RED not observed (tests written with the module). Worker: full GTK 384 pass + 3 baseline + 2 known intermittents; headless 0. Parent: fmt, diff-check, clippy 0, window_float 19/19 + 2/2; confirmed the JSON field names against the live Hyprland session read-only (hyprctl -j clients/monitors). The batch reply format and the actual floating were not exercised live.
+L7: "cuando termines, apaga la computadora. Mas tarde seguiremos." -> after T3 and verification, power off.
+L8: T2: form_popover/style_dialog/dismiss_button helpers; popovers arrowless, padding 6, title inside, no Close; rows 38px; dialogs one right-aligned action row [Cancel Esc][primary/danger]; Delete profile removed from the Edit dialog (row trash covers it); key context menu is a command row; toast padding 8. RED 11/12 on a HEAD copy, GREEN 12/12; full GTK 397 pass + 3 baseline + model_session intermittent; headless 0. Parent: fmt, diff-check, popup_design 12/12, viewed OBS and Edit captures.

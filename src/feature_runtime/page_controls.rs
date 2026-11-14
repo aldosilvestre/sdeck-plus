@@ -52,7 +52,7 @@ impl PageControls {
         }
         let folder_panel = FolderPanel::new();
         let folders = folder_panel.root.clone();
-        let panel = ui::popover("Page folders", &folders);
+        let panel = ui::form_popover("Page folders", Some("Group pages into folders."), &folders);
         let folder_count = gtk::Label::new(Some("0"));
         let folder_button = GtkBox::new(Orientation::Horizontal, 8);
         folder_button.append(&gtk::Image::from_icon_name("folder-symbolic"));

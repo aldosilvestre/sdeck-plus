@@ -145,11 +145,15 @@ fn edit_profile_opens_its_form_in_a_modal_and_close_changes_nothing() {
         let dialog = choose(&fixture, "Edit profile");
         assert!(dialog.is_modal() && dialog.transient_for().is_some());
         let save = named(dialog.upcast_ref(), "Save changes");
-        let delete = named(dialog.upcast_ref(), "Delete profile");
         assert!(save.has_css_class("suggested-action"));
-        assert!(delete.has_css_class("destructive-action"));
+        assert!(
+            all::<Button>(dialog.upcast_ref())
+                .iter()
+                .all(|button| caption(button) != "Delete profile"),
+            "deleting is the rail row's Delete icon"
+        );
         assert!(!all::<gtk::DropDown>(dialog.upcast_ref()).is_empty());
-        named(dialog.upcast_ref(), "Close").emit_clicked();
+        named(dialog.upcast_ref(), "Cancel").emit_clicked();
         assert!(open_window(&fixture, "Edit profile").is_none());
         assert_eq!(fixture.layers.borrow().names(), before);
     });
@@ -250,14 +254,19 @@ pub(super) fn assert_compact_profile_manager() {
     assert!(commands
         .try_iter()
         .any(|command| matches!(command, LayerCommand::SaveProfile(_, _))));
-    let delete = named(edit.upcast_ref(), "Delete profile");
-    delete.emit_clicked();
+    // Deleting is the profile row's Delete icon, which asks first.
+    edit.close();
+    let delete = || {
+        super::profile_row_tests::delete_button(&widgets, "Created from manager")
+            .expect("the new profile's row Delete icon")
+    };
+    delete().emit_clicked();
     current_dialog().response(ResponseType::Cancel);
     assert!(layers
         .borrow()
         .layers()
         .contains_key("Created from manager"));
-    delete.emit_clicked();
+    delete().emit_clicked();
     current_dialog().response(ResponseType::Accept);
     assert!(!layers
         .borrow()
