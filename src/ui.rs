@@ -259,9 +259,58 @@ pub(crate) fn mirror_badge(source: &Label) -> Label {
     badge
 }
 
+/// The first descendant of `widget` carrying the CSS class `class`.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+fn descendant_with_class(widget: &gtk::Widget, class: &str) -> Option<gtk::Widget> {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if current.has_css_class(class) {
+            return Some(current);
+        }
+        if let Some(found) = descendant_with_class(&current, class) {
+            return Some(found);
+        }
+        child = current.next_sibling();
+    }
+    None
+}
+
+/// The artboard dialog frame for a `gtk::Dialog`: radius-12 surface, 14px padding, 10px gap and
+/// ONE right-aligned action row of natural-width buttons with an 8px gap. Add the buttons in
+/// reading order: the dismissal first, then the primary or danger action.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn style_dialog(dialog: &gtk::Dialog) {
+    dialog.add_css_class("popup-dialog");
+    let content = dialog.content_area();
+    content.set_spacing(10);
+    if let Some(area) = descendant_with_class(dialog.upcast_ref(), "dialog-action-area")
+        .and_then(|area| area.downcast::<GtkBox>().ok())
+    {
+        area.set_homogeneous(false);
+        area.set_spacing(8);
+        area.set_halign(gtk::Align::End);
+        area.set_hexpand(true);
+    }
+}
+
+/// Adds the dismissing button of a dialog: its caption followed by the `Esc` hint.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn dismiss_button(
+    dialog: &gtk::Dialog,
+    caption: &str,
+    response: gtk::ResponseType,
+) -> Button {
+    let button = dialog.add_button(caption, response);
+    add_key_hint(button.upcast_ref(), "Esc");
+    button
+        .downcast::<Button>()
+        .expect("dialog action buttons are buttons")
+}
+
 /// A confirm dialog reads like a dialog: title and explanation start at the left edge.
 #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
 pub(crate) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
+    style_dialog(dialog.upcast_ref());
     dialog.add_css_class("confirm-dialog");
     let mut child = dialog.message_area().first_child();
     while let Some(widget) = child {
@@ -272,6 +321,16 @@ pub(crate) fn style_confirm_dialog(dialog: &gtk::MessageDialog) {
             label.set_hexpand(true);
         }
         child = widget.next_sibling();
+    }
+    // The theme insets the message block by 30px; the dialog's own 14px padding replaces that.
+    let mut block = dialog.message_area().parent();
+    while let Some(widget) = block {
+        if widget.has_css_class("dialog-vbox") {
+            break;
+        }
+        widget.set_margin_start(0);
+        widget.set_margin_end(0);
+        block = widget.parent();
     }
     dialog.set_resizable(false);
     dialog.set_default_size(360, -1);
@@ -370,8 +429,9 @@ pub(crate) fn command_row(icon: &str, caption: &str) -> Button {
     let row = button(icon, caption);
     row.add_css_class("command-row");
     row.set_has_frame(false);
-    if let Some(content) = row.child() {
+    if let Some(content) = row.child().and_downcast::<GtkBox>() {
         content.set_halign(gtk::Align::Start);
+        content.set_spacing(10);
     }
     row
 }
@@ -387,14 +447,12 @@ pub(crate) fn command_menu(rows: &[Button]) -> Popover {
 pub(crate) fn command_menu_sections(sections: &[&[Button]]) -> Popover {
     let panel = Popover::new();
     panel.set_halign(gtk::Align::End);
+    panel.set_has_arrow(false);
     panel.add_css_class("organize-popover");
     panel.add_css_class("command-menu");
     track_motion(&panel);
-    let list = GtkBox::new(Orientation::Vertical, 2);
-    list.set_margin_top(6);
-    list.set_margin_bottom(6);
-    list.set_margin_start(6);
-    list.set_margin_end(6);
+    // The popover's own 6px padding frames the rows; rows touch, as in the artboard.
+    let list = GtkBox::new(Orientation::Vertical, 0);
     for (index, section) in sections.iter().enumerate() {
         if index > 0 {
             list.append(&gtk::Separator::new(Orientation::Horizontal));
@@ -407,8 +465,10 @@ pub(crate) fn command_menu_sections(sections: &[&[Button]]) -> Popover {
     panel
 }
 
-/// A transient modal dialog holding one profile form. Escape and the footer button
+/// A transient modal dialog holding one profile form. Escape and the footer's dismissal
 /// close (hide) it; the form widgets are reused, never rebuilt, so state is not duplicated.
+/// The footer is the artboard's single right-aligned action row: the dismissal with its `Esc`
+/// hint, then `primary` (the form's create or save button) when there is one.
 #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
 pub(crate) fn profile_dialog(
     parent: &impl IsA<gtk::Window>,
@@ -416,6 +476,7 @@ pub(crate) fn profile_dialog(
     subtitle: &str,
     body: &impl IsA<gtk::Widget>,
     dismiss: &str,
+    primary: Option<&Button>,
 ) -> gtk::Window {
     let dialog = gtk::Window::builder()
         .title(title)
@@ -427,29 +488,36 @@ pub(crate) fn profile_dialog(
         .default_width(400)
         .build();
     dialog.add_css_class("profile-dialog");
-    let content = GtkBox::new(Orientation::Vertical, 16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
+    dialog.add_css_class("popup-dialog");
+    let content = GtkBox::new(Orientation::Vertical, 10);
+    content.set_margin_top(14);
+    content.set_margin_bottom(14);
+    content.set_margin_start(14);
+    content.set_margin_end(14);
     let heading = Label::new(Some(title));
-    heading.add_css_class("section-label");
+    heading.add_css_class("dialog-title");
     heading.set_xalign(0.0);
     content.append(&heading);
     let note = helper(subtitle);
     note.add_css_class("organize-subtitle");
     content.append(&note);
     content.append(body);
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.add_css_class("dialog-actions");
+    actions.set_halign(gtk::Align::End);
     let close = Button::with_label(dismiss);
     add_key_hint(close.upcast_ref(), "Esc");
-    close.set_halign(gtk::Align::End);
     let weak = dialog.downgrade();
     close.connect_clicked(move |_| {
         if let Some(dialog) = weak.upgrade() {
             dialog.close();
         }
     });
-    content.append(&close);
+    actions.append(&close);
+    if let Some(primary) = primary {
+        actions.append(primary);
+    }
+    content.append(&actions);
     dialog.set_child(Some(&content));
     let escape = gtk::ShortcutController::new();
     escape.add_shortcut(gtk::Shortcut::new(
@@ -504,13 +572,14 @@ pub(crate) fn field_help(row: &GtkBox, title: &str, explanation: &str) {
     panel.set_autohide(false);
     panel.set_can_target(false);
     panel.set_position(gtk::PositionType::Bottom);
+    panel.set_has_arrow(false);
     panel.add_css_class("help-popover");
     track_motion(&panel);
     let body = GtkBox::new(Orientation::Vertical, 6);
     body.set_margin_top(12);
     body.set_margin_bottom(12);
-    body.set_margin_start(14);
-    body.set_margin_end(14);
+    body.set_margin_start(12);
+    body.set_margin_end(12);
     let heading = Label::new(Some(title));
     heading.add_css_class("section-label");
     heading.set_xalign(0.0);
@@ -665,8 +734,9 @@ pub(crate) fn panel_body(body: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
-/// Give a titled popover an icon, a one-line subtitle and an icon-only Close.
-/// Organize no longer uses it; the `ui_showcase` example still does.
+/// Give a titled popover an icon beside its title and a one-line subtitle under it.
+/// Only the `ui_showcase` example uses it; the form popovers pass their subtitle to
+/// [`form_popover`].
 #[allow(dead_code)]
 pub(crate) fn refine_popover_header(panel: &Popover, icon: &str, subtitle: &str) {
     let Some(content) = panel.child().and_downcast::<GtkBox>() else {
@@ -675,49 +745,60 @@ pub(crate) fn refine_popover_header(panel: &Popover, icon: &str, subtitle: &str)
     let Some(header) = content.first_child().and_downcast::<GtkBox>() else {
         return;
     };
+    let Some(title) = header.first_child() else {
+        return;
+    };
+    header.remove(&title);
+    let line = GtkBox::new(Orientation::Horizontal, 8);
     let image = Image::from_icon_name(icon);
     image.set_pixel_size(20);
     image.add_css_class("popover-icon");
-    header.prepend(&image);
-    if let Some(close) = header.last_child().and_downcast::<Button>() {
-        let glyph = Image::from_icon_name("window-close-symbolic");
-        glyph.set_pixel_size(16);
-        close.set_child(Some(&glyph));
-        close.set_tooltip_text(Some("Close"));
-        close.add_css_class("popover-close");
-        close.update_property(&[gtk::accessible::Property::Label("Close")]);
-    }
+    line.append(&image);
+    line.append(&title);
+    header.prepend(&line);
     let note = helper(subtitle);
-    note.add_css_class("organize-subtitle");
-    content.insert_child_after(&note, Some(&header));
+    note.add_css_class("popover-subtitle");
+    header.append(&note);
 }
 
-pub(crate) fn popover(title: &str, body: &impl IsA<gtk::Widget>) -> Popover {
+/// A popover with a bold title line inside its body, like the help popover. It has no title bar
+/// and no Close button: Escape or a click outside dismisses it (GTK's default autohide).
+#[allow(dead_code)] // the ui_showcase example mounts this file and only uses `popover`
+pub(crate) fn form_popover(
+    title: &str,
+    subtitle: Option<&str>,
+    body: &impl IsA<gtk::Widget>,
+) -> Popover {
     let panel = Popover::new();
     panel.set_halign(gtk::Align::End);
+    panel.set_has_arrow(false);
+    panel.add_css_class("form-popover");
+    panel.update_property(&[gtk::accessible::Property::Label(title)]);
     track_motion(&panel);
-    let content = GtkBox::new(Orientation::Vertical, 16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    let title = Label::new(Some(title));
-    title.add_css_class("section-label");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    header.append(&title);
-    let close = button("window-close-symbolic", "Close");
-    close.set_has_frame(false);
-    let weak = panel.downgrade();
-    close.connect_clicked(move |_| {
-        if let Some(panel) = weak.upgrade() {
-            panel.popdown();
-        }
-    });
-    header.append(&close);
+    // The popover keeps its 6px padding; the form content sits 12px inside it.
+    let content = GtkBox::new(Orientation::Vertical, 12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    let header = GtkBox::new(Orientation::Vertical, 2);
+    let heading = Label::new(Some(title));
+    heading.add_css_class("section-label");
+    heading.add_css_class("popover-title");
+    heading.set_xalign(0.0);
+    header.append(&heading);
+    if let Some(subtitle) = subtitle {
+        let note = helper(subtitle);
+        note.add_css_class("popover-subtitle");
+        header.append(&note);
+    }
     content.append(&header);
     content.append(body);
     panel.set_child(Some(&content));
     panel
+}
+
+#[allow(dead_code)] // only the ui_showcase example uses the subtitle-less form
+pub(crate) fn popover(title: &str, body: &impl IsA<gtk::Widget>) -> Popover {
+    form_popover(title, None, body)
 }

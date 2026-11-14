@@ -162,9 +162,25 @@ impl ButtonTextEditor {
         buttons.append(&save);
         buttons.append(&remove);
         content.append(&buttons);
-        let panel = ui::popover("Button text", &content);
-        // The native font dialog must not dismiss and reset this editing form.
+        let panel = ui::form_popover(
+            "Button text",
+            Some("Text and image for the selected key."),
+            &content,
+        );
+        // The native font dialog must not dismiss and reset this editing form, so this popover
+        // does not autohide; Escape still closes it (and its menu button toggles it).
         panel.set_autohide(false);
+        let escape = gtk::ShortcutController::new();
+        escape.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("Escape"),
+            Some(gtk::CallbackAction::new(|widget, _| {
+                if let Some(panel) = widget.downcast_ref::<gtk::Popover>() {
+                    panel.popdown();
+                }
+                glib::Propagation::Stop
+            })),
+        ));
+        panel.add_controller(escape);
         let save_shortcut = gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>Return|<Control>KP_Enter"),
             None::<gtk::ShortcutAction>,
@@ -425,13 +441,18 @@ impl ButtonTextEditor {
     }
 
     fn show_menu(self: &Rc<Self>, key: &gtk::Widget, x: f64, y: f64) {
-        let menu = gtk::Popover::new();
+        // The same menu rows as every command menu: 38px, hover fill, left-aligned.
+        let entry = ui::command_row(
+            "document-edit-symbolic",
+            &format!("{} and image…", self.caption()),
+        );
+        let menu = ui::command_menu(std::slice::from_ref(&entry));
         menu.set_parent(key);
-        menu.set_has_arrow(false);
+        // Like a plain popover: anchored at the click, not right-aligned like the header Menu.
+        menu.set_halign(gtk::Align::Start);
         menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
         menu.add_css_class("key-context-menu");
-        let entry = gtk::Button::with_label(&format!("{} and image…", self.caption()));
-        entry.add_css_class("flat");
+        menu.update_property(&[gtk::accessible::Property::Label("Key menu")]);
         let weak = Rc::downgrade(self);
         let menu_ref = menu.downgrade();
         entry.connect_clicked(move |_| {
@@ -446,7 +467,6 @@ impl ButtonTextEditor {
                 }
             });
         });
-        menu.set_child(Some(&entry));
         menu.connect_closed(|menu| menu.unparent());
         menu.popup();
     }

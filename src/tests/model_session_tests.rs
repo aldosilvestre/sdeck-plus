@@ -121,6 +121,7 @@ pub(super) fn start(tag: &str, prepare: impl FnOnce(&SessionRoots)) -> Option<Ha
         }),
         update_preference: Ok(updates),
         observe_focus: false,
+        float_window: false,
     };
     let session = build_ui_in(&app, true, || environment).expect("the window opens");
     let (events, artwork, controls) = monitor.borrow_mut().take().unwrap();

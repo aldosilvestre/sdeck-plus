@@ -6,12 +6,20 @@
 @define-color desk_control_edge #76828f;
 @define-color desk_ink #f1f4f7;
 @define-color desk_muted #b0bac6;
+@define-color desk_faint #858e98;
 @define-color desk_violet #b6a1ef;
 @define-color desk_selection #4e426d;
 @define-color desk_cyan #85dce8;
-@define-color desk_error #fb7185;
+@define-color desk_error #fb778a;
 @define-color desk_success #7de2b3;
 @define-color desk_warning #f9cc7a;
+@define-color desk_violet_hover #c7b6f5;
+@define-color desk_violet_pressed #a58cde;
+@define-color desk_ring #7c3aed;
+@define-color desk_ring_gap #f0f0f2;
+@define-color desk_live_press #22c55e;
+@define-color desk_live_rotate #f59e0b;
+@define-color desk_live_touch #67e8f9;
 
 window, scrolledwindow, viewport, .app-shell {
     background-color: @desk_bg;
@@ -57,8 +65,13 @@ button, dropdown > button, spinbutton, entry, textview, textview text {
     border-color: @desk_control_edge;
     caret-color: @desk_cyan;
 }
+/* Artboard button: field fill, 1px control edge, radius 8, 6px 12px, 34px high (GTK min-height
+   excludes padding and edge), 6px icon-label gap. */
 button {
     border-radius: 8px;
+    padding: 6px 12px;
+    min-height: 20px; /* + 2 x 6px padding + the 1px edge = the artboard's 34px */
+    border-spacing: 6px;
     box-shadow: none;
     text-shadow: none;
     transition: background-color 0ms, color 0ms;
@@ -68,16 +81,25 @@ button {
 }
 button:hover { background-color: @desk_hover; }
 button:active { background-color: mix(@desk_hover, @desk_violet, 0.18); }
-button:checked { background-color: alpha(@desk_violet, 0.20); color: @desk_ink; }
+/* Pressed / selected: selection fill and a 1px inset violet edge. */
+button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
+spinbutton > button { min-height: 0; padding: 4px 8px; }
 stackswitcher button { background-color: transparent; color: @desk_muted; }
 stackswitcher button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 600; }
-button.flat { background-color: transparent; }
+/* Flat: transparent fill AND transparent border until hovered or pressed. */
+button.flat { background-color: transparent; border-color: transparent; }
 button.flat:hover { background-color: @desk_hover; }
+button.flat:checked { background-color: @desk_selection; }
+button.flat:disabled { background-color: transparent; border-color: transparent; }
 button:disabled, button:disabled label, button:disabled image,
 entry:disabled, dropdown:disabled {
     color: @desk_muted;
-    background-color: @desk_field;
 }
+button:disabled, entry:disabled, dropdown:disabled { background-color: @desk_field; }
 textview text {
     box-shadow: inset 0 0 0 1px @desk_control_edge;
 }
@@ -107,14 +129,21 @@ popover scrolledwindow, popover viewport, popover listview {
     color: @desk_ink;
 }
 popover modelbutton, popover row { color: @desk_ink; }
+/* Artboard rows (menus, dropdown lists, the key menu): 38px high (22 + 2 x 8 padding; GTK
+   min-height is the content box), padding 8px 10px, radius 8, 10px gap. */
 popover modelbutton, popover row { border-radius: 8px; }
+popover listview > row, popover row { min-height: 22px; padding: 8px 10px; }
+popover listview > row > box { border-spacing: 10px; }
 popover modelbutton:hover, popover row:hover { background-color: @desk_hover; }
 popover row:selected, popover modelbutton:checked {
     background-color: @desk_selection;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
 popover arrow { background-color: @desk_surface; border-color: @desk_edge; }
+/* Every popover: 6px padding inside the 1px edge. */
+popover > contents { padding: 6px; }
 separator { background-color: @desk_edge; min-height: 1px; }
+popover separator { margin: 6px 0; }
 checkbutton { color: @desk_ink; }
 checkbutton check {
     background-color: @desk_field;
@@ -136,18 +165,22 @@ scrollbar slider {
 }
 scrollbar slider:hover { background-color: @desk_muted; }
 scrollbar slider:active { background-color: @desk_cyan; }
-button.icon-action, menubutton.icon-action > button { min-height: 20px; padding: 6px 10px; }
-button.icon-only { min-width: 20px; padding: 6px; }
+button.icon-action { min-height: 20px; padding: 6px 12px; }
+menubutton.icon-action > button { min-height: 20px; padding: 6px 12px; }
+/* Icon-only buttons are 34px squares. */
+button.icon-only { min-width: 32px; min-height: 32px; padding: 0; }
 /* Style the MenuButton's real hit surface, not its outer widget: otherwise
    host-theme button padding and arrow material create a second inset frame. */
 menubutton.icon-action { padding: 0; }
 menubutton.icon-action > button > box { border-spacing: 0; }
 .page-folder-menu { padding: 0; }
-/* Page navigation reads as one segmented control ahead of the breadcrumb. */
+/* Linked groups (modifier toggles, source selector) read as one segmented control. */
 .linked > button { border-radius: 0; }
 .linked > button:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
 .linked > button:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
 .linked > button:not(:first-child) { border-left-width: 0; }
+/* Page navigation: flat icon buttons ahead of the breadcrumb, not a linked group. */
+.page-navigation { border-spacing: 4px; }
 /* Secondary page edits and profile tools: frameless until hovered. */
 .page-edits button.flat, menubutton.icon-action > button.flat {
     border-color: transparent;
@@ -188,19 +221,23 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .folder-row-actions button.flat:disabled { background-color: transparent; }
 .folder-empty { padding: 20px 0 12px; }
 .folder-empty image { color: @desk_muted; opacity: 0.6; }
-.field-help > button { min-height: 20px; min-width: 20px; padding: 0 2px; border: none; background: none; box-shadow: none; }
+.field-help > button { min-height: 24px; min-width: 24px; padding: 0; border: none; background: none; box-shadow: none; }
 .field-help > button image { color: @desk_muted; }
 .field-help > button:hover image, .field-help > button:focus-visible image { color: @desk_cyan; }
 .field-help > button:hover, .field-help > button:active { background: none; }
-.page-name-dialog button { margin: 0 6px 16px; }
-.page-name-dialog button:first-child { margin-left: 16px; }
-.page-name-dialog button:last-child { margin-right: 16px; }
-.confirm-dialog label { margin: 0 16px; font-size: 14px; color: @desk_muted; }
-.confirm-dialog label.title { margin: 16px 16px 4px; font-size: 16px; font-weight: 700; color: @desk_ink; }
+/* Dialogs: radius-12 surface, 14px padding (set on the content), 10px gap, title 16/700, muted
+   body, one right-aligned action row of natural-width buttons. */
+window.popup-dialog, window.profile-dialog {
+    background-color: @desk_surface;
+    border: 1px solid @desk_edge;
+    border-radius: 12px;
+}
+.popup-dialog .dialog-vbox { padding: 14px; border-spacing: 10px; }
+.popup-dialog .dialog-action-box { margin: 0; padding: 0; }
+.dialog-title { font-size: 16px; font-weight: 700; color: @desk_ink; }
+.confirm-dialog label { margin: 0; font-size: 13px; color: @desk_muted; }
+.confirm-dialog label.title { margin: 0; font-size: 16px; font-weight: 700; color: @desk_ink; }
 .confirm-dialog button label { margin: 0; font-size: inherit; color: inherit; }
-.confirm-dialog button { margin: 12px 4px 16px; min-height: 20px; padding: 4px 12px; }
-.confirm-dialog button:first-child { margin-left: 16px; }
-.confirm-dialog button:last-child { margin-right: 16px; }
 .confirm-dialog button.destructive-action {
     color: @desk_error;
     background-image: none;
@@ -226,10 +263,10 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
     font-weight: 600;
 }
 .suggested-action:hover {
-    background-color: #c7b6f5;
+    background-color: @desk_violet_hover;
 }
 .suggested-action:active {
-    background-color: #a58cde;
+    background-color: @desk_violet_pressed;
 }
 .suggested-action:disabled {
     background-color: @desk_field;
@@ -265,6 +302,26 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .feedback-error { color: @desk_error; }
 .destructive-action:not(:disabled) { color: @desk_error; }
+/* Danger button: error text, tinted fill, half-strength error edge. */
+button.destructive-action {
+    background-image: none;
+    background-color: alpha(@desk_error, 0.14);
+    border-color: alpha(@desk_error, 0.5);
+    font-weight: 600;
+}
+button.destructive-action:hover { background-color: alpha(@desk_error, 0.24); }
+button.destructive-action:disabled { background-color: @desk_field; border-color: @desk_control_edge; font-weight: 400; }
+/* Flat destructive icons stay frameless: danger colour, tint on hover only. */
+button.destructive-action.flat { background-color: transparent; border-color: transparent; font-weight: inherit; }
+button.destructive-action.flat:hover:not(:disabled) { background-color: alpha(@desk_error, 0.12); }
+button.destructive-action.flat:disabled { background-color: transparent; border-color: transparent; }
+/* The editor heading row keeps its neutral icon toolbar; only the glyph is red. */
+.editor-heading-row button.destructive-action, .editor-heading-row button.destructive-action:hover {
+    background-color: @desk_field;
+    border-color: @desk_control_edge;
+    font-weight: 400;
+}
+.editor-heading-row button.destructive-action:hover { background-color: @desk_hover; }
 .icon-action.destructive-action.flat {
     background-image: none;
     background-color: transparent;
@@ -276,7 +333,7 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
     background-color: @desk_hover;
     border: 1px solid @desk_edge;
     border-radius: 999px;
-    padding: 6px 6px 6px 16px;
+    padding: 8px 8px 8px 16px;
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
 .toast button { border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
@@ -348,9 +405,9 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     color: @desk_ink;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
-.button-text-context { font-size: 0.9em; margin-bottom: 4px; }
-.button-text-unsaved { font-size: 0.9em; }
-.button-text-overflow { font-size: 0.9em; }
+.button-text-context { font-size: 13px; margin-bottom: 4px; }
+.button-text-unsaved { font-size: 13px; }
+.button-text-overflow { font-size: 13px; }
 
 .hardware-chassis {
     background: linear-gradient(135deg, #414951, #272d34);
@@ -387,21 +444,21 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .encoder:hover { background: radial-gradient(circle at 35% 30%, #7b8793, #414b55); }
 .encoder:active { background: radial-gradient(circle at 35% 30%, #505b66, #2b3239); }
 .encoder .control-tile { background: transparent; border: none; }
-.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
-.key-surface.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
+.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
+.key-surface.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .control-pressed {
-    outline: 4px solid #22c55e;
+    outline: 4px solid @desk_live_press;
     outline-offset: -4px;
     filter: brightness(1.25);
 }
 .control-rotated {
-    outline: 4px solid #f59e0b;
+    outline: 4px solid @desk_live_rotate;
     outline-offset: -4px;
     filter: brightness(1.25);
 }
 .control-touched {
-    background-color: alpha(#67e8f9, 0.35);
-    outline: 3px solid #67e8f9;
+    background-color: alpha(@desk_live_touch, 0.35);
+    outline: 3px solid @desk_live_touch;
     outline-offset: -3px;
 }
 .control-tile { color: #c2ccdc; font-size: 11px; font-weight: 700; padding: 0; }
@@ -507,20 +564,22 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .plugin-error-row:first-child label { font-weight: 600; }
 .binding-toolbar button.icon-only, .editor-heading-row button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
-popover.organize-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 8px 24px alpha(black, 0.45); }
-popover.organize-popover .section-label { font-size: 15px; }
-popover.organize-popover .popover-icon { color: @desk_violet; }
-popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; border-radius: 8px; }
-popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
-.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
-.organize-subtitle { color: @desk_muted; margin-top: -8px; }
-popover.command-menu button.command-row { padding: 8px 12px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
+popover.organize-popover > contents, .form-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
+popover.organize-popover .popover-icon, .form-popover .popover-icon { color: @desk_violet; }
+/* Form popovers: a bold title and a muted subtitle head the body, like the help popover. */
+.form-popover .popover-title { font-weight: 700; }
+.form-popover .popover-subtitle { color: @desk_muted; }
+/* The help popover pads its own body (12px), so its contents add none. */
+.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); padding: 0; }
+.organize-subtitle { color: @desk_muted; margin-top: -6px; }
+popover.command-menu button.command-row { padding: 8px 10px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
 popover.command-menu button.command-row:hover { background-color: @desk_hover; }
-popover.command-menu separator { margin: 4px 6px; background-color: @desk_edge; min-height: 1px; }
+popover.command-menu button.command-row:checked { background-color: @desk_selection; box-shadow: inset 0 0 0 1px @desk_violet; }
+popover.command-menu separator { margin: 6px 0; background-color: @desk_edge; min-height: 1px; }
 popover.command-menu button.command-row.destructive { color: @desk_error; }
+popover.command-menu button.command-row.destructive:hover { background-color: alpha(@desk_error, 0.12); }
 popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
-.profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
 .reference-head { background-color: @desk_field; border-radius: 9px 9px 0 0; }
 .reference-head label { color: @desk_muted; font-size: 11px; font-weight: 700; padding: 8px 12px; }
@@ -531,7 +590,6 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .reference-head label.reference-key { border-right: 1px solid alpha(@desk_edge, 0.7); }
 .reference-chip { font-family: monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; background-color: @desk_field; border: 1px solid @desk_edge; }
 .catalog-subtitle { color: @desk_muted; font-size: 11px; }
-.dial-event-choice button, .key-context-menu button { padding: 6px 10px; }
 .sidebar-tabs, .popover-tabs { margin-bottom: 6px; }
 .sidebar-tabs > button, .popover-tabs > button { padding: 5px 4px; }
 .sidebar-tabs > button { min-width: 0; }
@@ -559,21 +617,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
     outline-offset: -2px;
 }
 
-/* Category chips and group sub-headings of the action catalog. */
-.catalog-chips { margin: 2px 0 4px; }
-.catalog-chip {
-    min-height: 24px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 12px;
-    border-color: @desk_edge;
-}
-.catalog-chip:checked {
-    background-color: @desk_selection;
-    color: @desk_ink;
-    border-color: @desk_violet;
-    font-weight: 600;
-}
+/* Group sub-headings of the action catalog. */
 .catalog-group {
     color: @desk_muted;
     font-size: 11px;
@@ -598,8 +642,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }
 
 /* The dial event menu: compact rows that fill on hover and keep the keyboard focus ring. */
-popover.dial-event-choice > contents { padding: 6px; }
-.dial-event-choice button.flat { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
+.dial-event-choice button.flat { min-height: 20px; padding: 8px 10px; border-radius: 8px; border-color: transparent; background-color: transparent; }
 .dial-event-choice button.flat:hover { background-color: @desk_hover; }
 .dial-event-choice button.flat:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
 
@@ -621,11 +664,12 @@ popover.dial-event-choice > contents { padding: 6px; }
 .banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }
 
 /* Rail sub-headings (TOOLS, PROFILES) and the compact New profile action beside PROFILES. */
-.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: @desk_muted; }
+/* A plain label, dimmer and lighter than the controls beside it: only the + reads as a control. */
+.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 400; letter-spacing: 1px; color: @desk_faint; }
 .profile-tabs > header.left button.rail-new-profile { min-height: 20px; padding: 4px 6px; margin: 8px 4px 0 0; }
 /* The scrolling form shares the editor card's surface (the heading row above it is fixed). */
 scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
-button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
+button.rail-new-profile.flat { border-color: transparent; background-color: transparent; color: @desk_ink; }
 button.rail-new-profile.flat:hover { background-color: @desk_hover; }
 
 /* Each profile row: the name, then small frameless Edit and Delete icons that fill on hover. */

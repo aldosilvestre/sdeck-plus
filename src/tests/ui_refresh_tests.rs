@@ -86,15 +86,15 @@ fn assert_page_toolbar_hierarchy() {
     let content = widgets.scroller.child().unwrap();
     let bounds = |widget: &gtk::Widget| widget.compute_bounds(&content).unwrap();
 
-    // Navigation: previous/next/parent form one linked group before the breadcrumb.
+    // Navigation: previous/next/parent are flat icon buttons (not linked) before the breadcrumb.
     let navigation: Vec<Button> = ["Previous", "Next", "Parent"]
         .iter()
         .map(|caption| find_button(widgets, caption))
         .collect();
     let group = navigation[0].parent().unwrap();
     assert!(
-        group.has_css_class("linked"),
-        "navigation is one linked group"
+        !group.has_css_class("linked"),
+        "navigation buttons are separate flat buttons"
     );
     for button in &navigation {
         assert_eq!(button.parent().as_ref(), Some(&group));

@@ -27,12 +27,8 @@ fn show(parent: &gtk::Window) {
         .default_width(560)
         .default_height(420)
         .build();
+    ui::style_dialog(&dialog);
     let area = dialog.content_area();
-    area.set_margin_top(16);
-    area.set_margin_bottom(16);
-    area.set_margin_start(16);
-    area.set_margin_end(16);
-    area.set_spacing(16);
     area.append(&ui::helper(
         "Names are case-insensitive. Enter one key or a chord such as CTRL + mute_mic. Modifier checkboxes add CTRL, SHIFT, ALT or SUPER.",
     ));
@@ -115,9 +111,7 @@ fn show(parent: &gtk::Window) {
         .overlay_scrolling(false)
         .build();
     area.append(&scroller);
-    let close = dialog.add_button("Close", ResponseType::Close);
-    close.set_margin_end(16);
-    close.set_margin_bottom(16);
+    ui::dismiss_button(&dialog, "Close", ResponseType::Close);
     dialog.set_default_response(ResponseType::Close);
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.present();

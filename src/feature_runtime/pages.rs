@@ -66,19 +66,9 @@ impl FeatureRuntime {
         else {
             return;
         };
-        let (title, action, icon, name) = match mode {
-            PageEdit::Create => (
-                "New page",
-                "Create page",
-                "document-new-symbolic",
-                String::new(),
-            ),
-            PageEdit::Rename => (
-                "Rename page",
-                "Save name",
-                "document-edit-symbolic",
-                info.page_name,
-            ),
+        let (title, action, name) = match mode {
+            PageEdit::Create => ("New page", "Create page", String::new()),
+            PageEdit::Rename => ("Rename page", "Save name", info.page_name),
         };
         let dialog = gtk::Dialog::builder()
             .title(title)
@@ -89,18 +79,17 @@ impl FeatureRuntime {
             .default_width(360)
             .build();
         dialog.add_css_class("page-name-dialog");
-        dialog.add_button("Cancel", ResponseType::Cancel);
+        crate::ui::style_dialog(&dialog);
+        crate::ui::dismiss_button(&dialog, "Cancel", ResponseType::Cancel);
         dialog
             .add_button(action, ResponseType::Accept)
             .add_css_class("suggested-action");
         dialog.set_default_response(ResponseType::Accept);
         let content = dialog.content_area();
-        content.set_spacing(16);
-        content.set_margin_start(16);
-        content.set_margin_end(16);
-        content.set_margin_top(16);
-        content.set_margin_bottom(16);
-        content.append(&crate::ui::section_heading(icon, title));
+        let heading = Label::new(Some(title));
+        heading.add_css_class("dialog-title");
+        heading.set_xalign(0.0);
+        content.append(&heading);
         let entry = Entry::builder()
             .text(&name)
             .placeholder_text("Page name")
@@ -160,18 +149,6 @@ impl FeatureRuntime {
         dialog.present();
         entry.grab_focus();
         entry.select_region(0, -1);
-    }
-
-    pub(crate) fn confirm_profile_removal(&self) {
-        let Some(profile) = self
-            .profile_settings_picker
-            .selected_item()
-            .and_then(|item| item.downcast::<gtk::StringObject>().ok())
-            .map(|item| item.string().to_string())
-        else {
-            return;
-        };
-        self.confirm_removal(Removal::Profile(profile));
     }
 
     /// Ask before deleting a profile row's profile (Base is never offered).

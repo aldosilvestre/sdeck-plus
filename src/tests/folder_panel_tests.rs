@@ -147,7 +147,11 @@ fn assert_folder_creation() {
             Some(&*format!("{action} Audio"))
         );
     }
-    button(w, "Link folder Audio to control");
+    let link = button(w, "Link folder Audio to selected key or dial");
+    assert_eq!(
+        link.tooltip_text().as_deref(),
+        Some("Link folder Audio to selected key or dial")
+    );
 }
 
 #[test]

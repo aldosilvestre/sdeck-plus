@@ -62,7 +62,7 @@ mod stable_width;
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
 const DEFAULT_WIDTH: i32 = 1120;
-const DEFAULT_HEIGHT: i32 = 700;
+const DEFAULT_HEIGHT: i32 = 884;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
 const PREVIEW_MAX_SCALE: f64 = 1.0;
@@ -333,6 +333,8 @@ struct AppEnvironment {
     update_preference: std::io::Result<std::path::PathBuf>,
     /// Follow the focused application in the compositor.
     observe_focus: bool,
+    /// Ask Hyprland to float the window each time it is mapped.
+    float_window: bool,
 }
 
 impl AppEnvironment {
@@ -342,6 +344,7 @@ impl AppEnvironment {
             start_monitor: Box::new(event_api::start_hid_monitor),
             update_preference: update_preference::path(),
             observe_focus: true,
+            float_window: true,
         }
     }
 }
@@ -369,6 +372,7 @@ fn build_ui_in(
         start_monitor,
         update_preference,
         observe_focus,
+        float_window,
     } = environment();
     let window = ApplicationWindow::builder()
         .application(app)
@@ -378,6 +382,13 @@ fn build_ui_in(
         .default_height(DEFAULT_HEIGHT)
         .build();
     configure_window_close(&window, app);
+    if float_window {
+        // Once per map: first show and every show again from the tray; never
+        // on resize. The worker does the IPC, so the callback returns at once.
+        window.connect_map(|_| {
+            sdeck_plus::window_float::spawn(APP_ID, APP_NAME, (DEFAULT_WIDTH, DEFAULT_HEIGHT));
+        });
+    }
     let unavailable = |error: &dyn std::fmt::Display| {
         window.set_child(Some(&Label::new(Some(
             "Configuration unavailable. Writes are disabled.",
@@ -1039,7 +1050,6 @@ fn build_body(
     ui::field_help(&name_row, "New profile help",
         "Create a separate set of bindings and artwork. The new profile starts empty. Add pages and folders from the page bar after creating it.");
     creation.append(&name_row);
-    creation.append(&create_layer);
     let creation_error = ui::helper("");
     creation_error.set_visible(false);
     creation.append(&creation_error);
@@ -1188,9 +1198,10 @@ fn build_body(
     let edit_dialog = ui::profile_dialog(
         &window,
         "Edit profile",
-        "Choose a profile to edit its automatic switching or delete it.",
+        "Choose a profile to edit its automatic switching.",
         feature_runtime.management(),
-        "Close",
+        "Cancel",
+        Some(feature_runtime.profile_save_button()),
     );
     feature_runtime.attach_profile_editor(&edit_dialog);
     let new_dialog = ui::profile_dialog(
@@ -1199,6 +1210,7 @@ fn build_body(
         "Create a separate, empty set of bindings and artwork.",
         &creation,
         "Cancel",
+        Some(&create_layer),
     );
     {
         // A closed (cancelled or dismissed) draft never lingers into the next opening.
@@ -1210,7 +1222,11 @@ fn build_body(
         });
     }
     // Integration settings are global, not part of every action's form.
-    let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
+    let obs_popover = ui::form_popover(
+        "OBS Studio",
+        Some("Address and password used for OBS actions."),
+        &ui::panel_body(&feature_runtime.obs_panel),
+    );
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
@@ -1775,6 +1791,8 @@ fn build_body(
     workspace.set_hexpand(false);
     workspace.append(preview.widget());
     // A tall form scrolls here, within its own region, instead of stretching the page.
+    // The overlay scrollbar (15px wide) sits over the right edge: keep the fields clear of it.
+    form.set_margin_end(16);
     let settings_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -4824,9 +4842,11 @@ fn show_artwork_error(window: &impl IsA<gtk::Window>, message: &str) {
         .transient_for(window)
         .modal(true)
         .message_type(gtk::MessageType::Error)
-        .buttons(gtk::ButtonsType::Close)
         .text(message)
         .build();
+    ui::style_confirm_dialog(&dialog);
+    ui::dismiss_button(dialog.upcast_ref(), "Close", gtk::ResponseType::Close);
+    dialog.set_default_response(gtk::ResponseType::Close);
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.show();
 }
@@ -5193,9 +5213,11 @@ mod tests {
     use std::sync::Mutex;
     mod action_catalog_tests;
     mod asset_link_save_tests;
+    mod audit_layout_tests;
     mod binding_icon_tests;
     mod binding_toolbar_tests;
     mod button_swap_tests;
+    mod button_system_tests;
     mod button_text_popup_tests;
     mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
@@ -5222,6 +5244,7 @@ mod tests {
     mod plugin_add_ui_tests;
     mod plugin_ui_tests;
     mod plugin_value_tests;
+    mod popup_design_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
@@ -6879,7 +6902,9 @@ mod tests {
         assert!(mapped.get(), "window did not map before timeout");
         wait_for_frame(&window);
         eprintln!(
-            "GTK requested initial size 1000x700; window-manager allocation {}x{}",
+            "GTK requested initial size {}x{}; window-manager allocation {}x{}",
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
             window.width(),
             window.height()
         );
@@ -6890,7 +6915,7 @@ mod tests {
             (window.width(), window.height()),
             (DEFAULT_WIDTH, DEFAULT_HEIGHT)
         );
-        eprintln!("GTK actual test client allocation 1000x700 executed");
+        eprintln!("GTK actual test client allocation {DEFAULT_WIDTH}x{DEFAULT_HEIGHT} executed");
         let content = widgets.root.first_child().unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
@@ -7364,8 +7389,6 @@ mod tests {
                 assert!(panel.width() <= width, "{name} exceeds the client width");
                 assert!(panel.height() <= height, "{name} exceeds the client height");
                 let content = panel.child().unwrap();
-                let header = content.first_child().unwrap();
-                let close = header.last_child().unwrap().downcast::<Button>().unwrap();
                 // The configuration menu is a compact button group, while
                 // organization/folders/OBS wrap their longer forms in a scroller.
                 if let Ok(scroller) = content
@@ -7380,11 +7403,8 @@ mod tests {
                 rendered_texture(window, &panel)
                     .save_to_png(directory.join(format!("{width}x{height}-popover-{name}-end.png")))
                     .unwrap();
-                let close_bounds = close.compute_bounds(&content).unwrap();
-                assert!(close_bounds.y() >= 0.0);
-                assert!(close_bounds.y() + close_bounds.height() <= header.height() as f32);
-                close.emit_clicked();
-                assert!(!panel.is_visible(), "popover Close must dismiss its panel");
+                panel.popdown();
+                assert!(!panel.is_visible(), "popdown dismisses the panel");
                 panel.set_autohide(autohide);
             }
             page_ui_tests::capture_page_workflow(window, widgets, (width, height));
@@ -7603,7 +7623,7 @@ mod tests {
         assert_eq!(layers.borrow().active(), active);
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
         while commands.try_recv().is_ok() {}
-        folder_button(widgets, "Link folder Studio to control").emit_clicked();
+        folder_button(widgets, "Link folder Studio to selected key or dial").emit_clicked();
         let LayerCommand::SaveBinding(snapshot, Some(_)) = commands.try_recv().unwrap() else {
             panic!("linking must save without entering the folder");
         };
@@ -8072,9 +8092,9 @@ mod tests {
         for action in 0..5 {
             widgets.binding_ui.action_picker.set_selected(action);
             widgets.binding_ui.update_action_visibility();
-            widgets
-                .root
-                .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
+            // The default window is tall enough to hold everything; exercise the
+            // scrolling layout at the former, shorter default height.
+            widgets.root.allocate(DEFAULT_WIDTH, 700, -1, None);
             let minimum = content.measure(Orientation::Vertical, DEFAULT_WIDTH - 48).0;
             let horizontal = widgets.scroller.hadjustment();
             let vertical = widgets.scroller.vadjustment();
@@ -8703,6 +8723,8 @@ mod tests {
         let button = ui::icon_button("go-previous-symbolic", "Previous page");
         let caption = ui::button("document-new-symbolic", "New page");
         let row = GtkBox::new(Orientation::Horizontal, 8);
+        // The window may be taller than the row; measure natural button sizes.
+        row.set_valign(gtk::Align::Start);
         row.append(&button);
         row.append(&caption);
         let window = gtk::Window::new();
@@ -8714,7 +8736,9 @@ mod tests {
             button.height(),
             "icon-only hit area must be square"
         );
-        assert_eq!(button.height(), caption.height());
+        // GTK sizes report the content box; compare the full 34px outer heights.
+        let outer_height = |widget: &Button| widget.measure(Orientation::Vertical, -1).0;
+        assert_eq!(outer_height(&button), outer_height(&caption));
         let icon = button.child().unwrap();
         let bounds = icon.compute_bounds(&button).unwrap();
         assert!((bounds.x() + bounds.width() / 2.0 - button.width() as f32 / 2.0).abs() <= 1.0);

@@ -296,7 +296,6 @@ pub(crate) struct FeatureRuntime {
     page_controls: page_controls::PageControls,
     touchscreen_controls: touchscreen::TouchscreenControls,
     organization_management: GtkBox,
-    profile_delete: Button,
     /// The Edit profile dialog the rail rows' Edit icons present (owned by the window).
     profile_editor: Rc<RefCell<Option<glib::WeakRef<gtk::Window>>>>,
     profile_tabs: gtk::Notebook,
@@ -392,8 +391,6 @@ impl FeatureRuntime {
         profile_returns.set_tooltip_text(Some(
             "Needs an application above. While that application has focus this profile is shown; when focus moves to something that matches no profile, the profile that was shown before comes back instead of Base.",
         ));
-        let profile_delete = crate::ui::button("user-trash-symbolic", "Delete profile");
-        profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
         let fields = GtkBox::new(Orientation::Vertical, 8);
         fields.append(&crate::ui::helper(
@@ -463,7 +460,6 @@ impl FeatureRuntime {
             page_controls,
             touchscreen_controls: touchscreen::TouchscreenControls::new(),
             organization_management,
-            profile_delete,
             profile_editor: Rc::new(RefCell::new(None)),
             profile_tabs,
             profile_pages: Rc::new(RefCell::new(Vec::new())),
@@ -529,19 +525,8 @@ impl FeatureRuntime {
         runtime
             .organization_management
             .append(&runtime.profile_application_status);
-        let actions = GtkBox::new(Orientation::Horizontal, 12);
-        actions.set_homogeneous(true);
-        actions.add_css_class("profile-actions");
-        actions.append(&runtime.profile_application_apply);
-        actions.append(&runtime.profile_delete);
-        runtime.profile_delete.set_tooltip_text(Some(
-            "Delete the selected profile and all its pages, folders, bindings and artwork. Base cannot be deleted.",
-        ));
-        runtime.organization_management.append(&actions);
-        let callback = runtime.clone();
-        runtime
-            .profile_delete
-            .connect_clicked(move |_| callback.confirm_profile_removal());
+        // Save changes sits in the dialog's action row. Deleting a profile is the rail row's
+        // Delete icon (with its confirmation), so the form carries no second path to it.
         let callback = runtime.clone();
         runtime
             .profile_settings_picker
@@ -578,7 +563,7 @@ impl FeatureRuntime {
         &self.page_controls.root
     }
 
-    /// Linked previous/next/parent buttons that lead the page breadcrumb.
+    /// Flat previous/next/parent buttons that lead the page breadcrumb.
     pub(crate) fn page_navigation(&self) -> &GtkBox {
         &self.page_controls.navigation_group
     }
@@ -590,6 +575,11 @@ impl FeatureRuntime {
 
     pub(crate) fn management(&self) -> &GtkBox {
         &self.organization_management
+    }
+
+    /// The Edit profile dialog's primary action, shown in the dialog's action row.
+    pub(crate) fn profile_save_button(&self) -> &Button {
+        &self.profile_application_apply
     }
 
     pub(crate) fn profile_tabs(&self) -> &gtk::Notebook {
@@ -798,8 +788,6 @@ impl FeatureRuntime {
             && profile.is_some()
             && organization.is_some();
         self.profile_application.set_sensitive(editable);
-        self.profile_delete
-            .set_sensitive(editable && self.artwork.store.borrow().is_some());
         self.profile_settings_picker
             .set_sensitive(organization.is_some());
         let application = profile
@@ -1209,6 +1197,11 @@ impl FeatureRuntime {
         let submitted = self.submit(command(store, metadata));
         self.refresh_indicator();
         submitted
+    }
+
+    #[cfg(test)]
+    pub(crate) fn organization_snapshot(&self) -> Organization {
+        self.organization.borrow().clone().expect("organization")
     }
 
     pub(crate) fn refresh_indicator(&self) {

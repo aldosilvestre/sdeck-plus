@@ -6,14 +6,23 @@
 @define-color desk_control_edge #7a8491;
 @define-color desk_ink #242c35;
 @define-color desk_muted #536170;
+@define-color desk_faint #6b7682;
 @define-color desk_violet #6746bb;
 @define-color desk_selection #e8e1f6;
 @define-color desk_cyan #0e7183;
-@define-color desk_error #c0243f;
-@define-color desk_success #1b7f55;
-@define-color desk_warning #9a6a00;
+@define-color desk_error #b4223b;
+@define-color desk_success #176d49;
+@define-color desk_warning #815900;
+@define-color desk_violet_hover #5939a9;
+@define-color desk_violet_pressed #4c2f95;
+@define-color desk_ring #7c3aed;
+@define-color desk_ring_gap #f0f0f2;
+@define-color desk_live_press #22c55e;
+@define-color desk_live_rotate #f59e0b;
+@define-color desk_live_touch #67e8f9;
 
-.suggested-action:hover { background-color: #5939a9; }
-.suggested-action:active { background-color: #4c2f95; }
 popover > contents, tooltip { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
+/* These popovers set a darker shadow with class selectors, which outrank the rule above. */
+popover.organize-popover > contents, .form-popover > contents { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
+.help-popover > contents { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
 .toast { box-shadow: 0 4px 16px alpha(@desk_ink, 0.18); }

@@ -25,6 +25,7 @@ pub mod organization;
 pub mod plugins;
 pub mod preview_layout;
 pub mod protocol;
+pub mod window_float;
 
 pub mod app_focus;
 #[cfg(test)]

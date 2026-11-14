@@ -78,7 +78,8 @@ fn profile_dialogs_have_a_titled_header_and_a_clear_button_hierarchy() {
             "{}",
             subtitle.text()
         );
-        // Save is the primary action; Delete is destructive; both share the row evenly.
+        // Save is the primary action in the dialog's single action row, after Cancel; deleting
+        // a profile is the rail row's Delete icon, not a second button here.
         let mut buttons = Vec::new();
         buttons_of(dialog.upcast_ref(), &mut buttons);
         let named = |name: &str| {
@@ -89,15 +90,25 @@ fn profile_dialogs_have_a_titled_header_and_a_clear_button_hierarchy() {
                 .clone()
         };
         let save = named("Save changes");
-        let delete = named("Delete profile");
         assert!(save.has_css_class("suggested-action"));
-        assert!(delete.has_css_class("destructive-action"));
         let actions = save.parent().unwrap().downcast::<GtkBox>().unwrap();
-        assert!(actions.is_homogeneous(), "equal-width footer buttons");
-        assert_eq!(delete.parent().as_ref(), Some(actions.upcast_ref()));
+        assert!(actions.has_css_class("dialog-actions"));
+        assert!(!actions.is_homogeneous(), "natural-width footer buttons");
+        let mut first = Vec::new();
+        super::profile_row_tests::collect::<Label>(
+            actions.first_child().unwrap().upcast_ref(),
+            &mut first,
+        );
+        assert_eq!(first[0].text(), "Cancel", "the dismissal comes first");
+        assert!(buttons
+            .iter()
+            .all(|button| button_caption(button).as_deref() != Some("Delete profile")));
         // The Base note stands out as a callout.
-        let note = actions.prev_sibling().unwrap().downcast::<Label>().unwrap();
-        assert!(note.has_css_class("profile-note"));
+        let mut labels = Vec::new();
+        super::profile_row_tests::collect::<Label>(dialog.upcast_ref(), &mut labels);
+        assert!(labels
+            .iter()
+            .any(|label| label.has_css_class("profile-note")));
         dialog.close();
     });
 }
