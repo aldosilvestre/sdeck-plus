@@ -32,10 +32,13 @@ h3{font-size:14px;font-weight:600;margin:28px 0 10px}
 .space div{display:flex;flex-direction:column;align-items:center;gap:4px;width:30px}
 .space i{display:block;background:var(--violet);width:24px}
 .space span{font:12px monospace;color:var(--muted)}
-.btn{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:6px 12px;min-height:20px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:none}
+.btn{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--control-edge);border-radius:8px;padding:6px 12px;min-height:34px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:none}
 .btn:hover{background:var(--hover)}
 .btn:disabled{color:var(--muted);cursor:default}
 .btn.flat{background:transparent;border-color:transparent}
+.btn.pressed{background:var(--selection);box-shadow:inset 0 0 0 1px var(--violet)}
+.btn.chip8{font-size:12px;padding:6px 8px}
+.btn.chip8.pressed{font-weight:600}
 .btn.flat:hover{background:var(--hover)}
 .btn.suggested{background:var(--violet);color:var(--bg);border-color:transparent;font-weight:600}
 .btn.suggested:hover{background:var(--violet-hover)}
@@ -57,7 +60,7 @@ h3{font-size:14px;font-weight:600;margin:28px 0 10px}
 .status.online{color:var(--success);background:color-mix(in srgb,var(--success) 16%,transparent);border:1px solid color-mix(in srgb,var(--success) 55%,transparent)}
 .status.error{color:var(--error);background:color-mix(in srgb,var(--error) 16%,transparent);border:1px solid color-mix(in srgb,var(--error) 55%,transparent)}
 .note{padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--field) 90%,transparent);border-left:3px solid var(--cyan);max-width:360px}
-.toast{background:var(--hover);border:1px solid var(--edge);border-radius:12px;padding:12px 16px;box-shadow:var(--toast);display:inline-block}
+.toast{background:var(--hover);border:1px solid var(--edge);border-radius:999px;padding:8px 8px 8px 16px;box-shadow:var(--toast);display:inline-block}
 .seg{display:inline-flex}
 .seg button{font:inherit;color:var(--muted);background:var(--field);border:1px solid var(--control-edge);padding:5px 14px;cursor:pointer;border-radius:0}
 .seg button+button{border-left-width:0}
@@ -69,6 +72,14 @@ h3{font-size:14px;font-weight:600;margin:28px 0 10px}
 .list div:last-child{border-bottom:0}
 .list svg{color:var(--violet)}
 .shadowbox{width:150px;height:72px;background:var(--surface);border:1px solid var(--edge);border-radius:14px;display:grid;place-items:center;font:12px monospace;color:var(--muted);text-align:center}
+.pop{width:230px;background:var(--surface);border:1px solid var(--edge);border-radius:12px;padding:6px;box-shadow:var(--pop,0 8px 24px rgba(0,0,0,.45))}
+.pop div{min-height:38px;padding:8px 10px;border-radius:8px;display:flex;align-items:center;gap:10px}
+.pop div.sel{background:var(--selection);box-shadow:inset 0 0 0 1px var(--violet)}
+.pop hr{border:0;height:1px;background:var(--edge);margin:6px 0}
+.dlg{width:300px;background:var(--surface);border:1px solid var(--edge);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.dlg b{font-size:16px;font-weight:700}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+.kh{font:11px monospace;color:var(--muted);background:var(--field);border:1px solid var(--edge);border-radius:6px;padding:0 6px}
 .plug{color:var(--muted);font-size:11px;font-weight:700}
 svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .space{align-items:flex-end}
@@ -119,6 +130,11 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke
 <button class="btn suggested" disabled>Install</button>
 <button class="btn icon" aria-label="Add plugin"><svg class="i"><use href="#i-plus"/></svg></button>
 </div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<button class="btn pressed">Pressed (All)</button><button class="btn chip8">Catalog filter</button>
+<div class="pop"><div>Menu row, 38px</div><div class="sel">Selected row</div><hr><div>After a 1px separator</div></div>
+<div class="dlg"><b>Delete &ldquo;Studio&rdquo;?</b><span class="helper">Dialog: radius 12, padding 14, gap 10.</span><div class="acts"><button class="btn">Cancel <span class="kh">Esc</span></button><button class="btn destructive">Delete</button></div></div>
+</div>
 <div class="row" style="margin-top:14px">
 <div class="entry"><input aria-label="Entry" placeholder="Folder path or https:// repository address"></div>
 <div class="entry is-focus"><input aria-label="Focused entry" value="Focused entry"></div>
@@ -136,7 +152,7 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke
 </div>
 <div class="row" style="margin-top:14px;align-items:flex-start">
 <div class="note">Profile note: 3px cyan left edge on a field fill.</div>
-<div class="toast">Toast: 12px radius</div>
+<div class="toast">Toast: 999px radius</div>
 </div>
 </section>
 
@@ -172,6 +188,11 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke
 <button class="btn suggested" disabled>Install</button>
 <button class="btn icon" aria-label="Add plugin"><svg class="i"><use href="#i-plus"/></svg></button>
 </div>
+<div class="row" style="margin-top:14px;align-items:flex-start">
+<button class="btn pressed">Pressed (All)</button><button class="btn chip8">Catalog filter</button>
+<div class="pop"><div>Menu row, 38px</div><div class="sel">Selected row</div><hr><div>After a 1px separator</div></div>
+<div class="dlg"><b>Delete &ldquo;Studio&rdquo;?</b><span class="helper">Dialog: radius 12, padding 14, gap 10.</span><div class="acts"><button class="btn">Cancel <span class="kh">Esc</span></button><button class="btn destructive">Delete</button></div></div>
+</div>
 <div class="row" style="margin-top:14px">
 <div class="entry"><input aria-label="Entry" placeholder="Folder path or https:// repository address"></div>
 <div class="entry is-focus"><input aria-label="Focused entry" value="Focused entry"></div>
@@ -189,7 +210,7 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke
 </div>
 <div class="row" style="margin-top:14px;align-items:flex-start">
 <div class="note">Profile note: 3px cyan left edge on a field fill.</div>
-<div class="toast">Toast: 12px radius</div>
+<div class="toast">Toast: 999px radius</div>
 </div>
 </section>
 
@@ -216,7 +237,8 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke
 <div class="demo" style="border-radius:6px">6 chip</div>
 <div class="demo" style="border-radius:8px">8 control</div>
 <div class="demo" style="border-radius:10px">10 list</div>
-<div class="demo" style="border-radius:12px">12 toast</div>
+<div class="demo" style="border-radius:12px">12 popover, dialog</div>
+<div class="demo" style="border-radius:999px">999 toast</div>
 <div class="demo" style="border-radius:14px">14 card</div>
 </div>
 </div>

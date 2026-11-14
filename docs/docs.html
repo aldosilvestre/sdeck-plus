@@ -418,7 +418,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
                 <li>The three icon buttons at the right end of the editor's heading row (beside <em>Configuring: …</em>) act on the selected control and stay visible while the form below them scrolls: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. <strong>Undo remove</strong>, right below, brings all of it back. If you changed that control after removing it, Undo refuses and keeps your changes. Hover any of them for a tooltip that explains what it does; the result message appears at the top of the right-hand panel.</li>
               </ol>
-              <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay until dismissed or replaced.
+              <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay, with an icon-only <strong>Dismiss</strong> button, until dismissed or replaced.
                  Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
               <figure>
                 <a href="screenshots/main-window.png"><img width="968" height="918" src="screenshots/main-window.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile rail, Actions catalog and the selected key settings under the Save, Test and Remove icons of the editor heading row."></a>
@@ -468,7 +468,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <figcaption>Dials tab with the ready-to-use presets.</figcaption>
               </figure>
               <figure>
-                <a href="screenshots/dial-event-choice.png"><img width="266" height="212" src="screenshots/dial-event-choice.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dropping a catalog action on a dial asks which event to bind."></a>
+                <a href="screenshots/dial-event-choice.png"><img width="262" height="196" src="screenshots/dial-event-choice.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Dropping a catalog action on a dial asks which event to bind."></a>
                 <figcaption>Dropping a catalog action on a dial asks which event to bind.</figcaption>
               </figure>
             </article>
@@ -553,7 +553,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Modifiers are never kept held between actions; failed sends attempt release cleanup. <strong>Key names and aliases</strong> opens a reference of every accepted name, with the aliases laid out as a table (key and the other names it answers to),
                  without saving or running the draft.</p>
               <figure>
-                <a href="screenshots/shortcut-reference.png"><img width="560" height="420" src="screenshots/shortcut-reference.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Shortcut reference with aligned key names and their accepted aliases."></a>
+                <a href="screenshots/shortcut-reference.png"><img width="558" height="418" src="screenshots/shortcut-reference.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Shortcut reference with aligned key names and their accepted aliases."></a>
                 <figcaption>Shortcut reference with aligned key names and their accepted aliases.</figcaption>
               </figure>
               <ul>
@@ -648,20 +648,20 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <figcaption>The profile rail: + creates a profile; each row's pencil edits that profile and its trash deletes it after a confirmation (Base's trash is off).</figcaption>
               </figure>
               <figure>
-                <a href="screenshots/organize-profiles-pages.png"><img width="400" height="421" src="screenshots/organize-profiles-pages.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="The Edit profile dialog with the profile picker, the auto-switch application, the return check and the Save changes and Delete profile buttons."></a>
-                <figcaption>The Edit profile dialog.</figcaption>
+                <a href="screenshots/organize-profiles-pages.png"><img width="398" height="341" src="screenshots/organize-profiles-pages.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="The Edit profile dialog with the profile picker, the auto-switch application, the return check and the Cancel (Esc) and Save changes buttons."></a>
+                <figcaption>The Edit profile dialog: Cancel and Save changes only; deleting a profile is its row's trash.</figcaption>
               </figure>
             </article>
             <article class="card">
               <h4>Pages</h4>
               <p><strong>New page</strong> asks for a name first. The pencil renames the current page (<strong>Save name</strong> or Enter): names must be non-blank, without control
                  characters and at most 64 UTF-8 bytes; surrounding spaces are trimmed. The trash button deletes the page with its folders, bindings and artwork after confirming.
-                 Previous, next and parent arrows sit before the page name. Navigation stays within the current profile and folder, and switching tabs restores that
+                 Previous, next and parent are separate flat 34 px icon buttons before the page name; Folders, New page, rename and delete are flat too. Navigation stays within the current profile and folder, and switching tabs restores that
                  profile's last page for the session.</p>
             </article>
             <article class="card wide">
               <h4>Page folders</h4>
-              <p>The folder icon in the page bar opens <strong>Page folders</strong>. Type a name in <strong>New folder name</strong> and press Enter; blank, duplicate and invalid names are explained
+              <p>The folder icon in the page bar opens <strong>Page folders</strong>, a popover with a title and subtitle in its body and no Close button (Escape or a click outside dismisses it). Type a name in <strong>New folder name</strong> and press Enter; blank, duplicate and invalid names are explained
                  while typing. Each row offers <strong>Open</strong>, <strong>Link to control</strong> (saves navigation to the folder on the selected control and event without opening it),
                  <strong>Rename</strong> (Enter saves, Escape cancels; linked controls follow the new name) and <strong>Delete</strong> (removes only this page's folder and its links).
                  <strong>Parent</strong> returns to the exact owning page.</p>
@@ -682,24 +682,24 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  Text is white with a black outline and may span several lines.</p>
               <p>The preview shows the key as the device will: over its image, over its action icon when the text leaves room, or over black, with a warning when the text does not fit
                  (the device clips it). <strong>Save text</strong> or <strong>Ctrl+Enter</strong> saves; it is enabled only for non-blank changes, flagged by "Unsaved changes".
-                 Closing discards the draft. <strong>Remove text</strong> keeps the background image, and clearing the image keeps the text.</p>
+                 Closing (Escape or its button; there is no Close button) discards the draft. <strong>Remove text</strong> keeps the background image, and clearing the image keeps the text.</p>
               <figure>
-                <a href="screenshots/key-context-menu.png"><img width="254" height="124" src="screenshots/key-context-menu.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Right-click a decorated key to edit its text and image."></a>
+                <a href="screenshots/key-context-menu.png"><img width="276" height="120" src="screenshots/key-context-menu.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Right-click a decorated key to edit its text and image."></a>
                 <figcaption>Right-click a decorated key to edit its text and image.</figcaption>
               </figure>
               <figure>
-                <a href="screenshots/button-text-editor.png"><img width="554" height="551" src="screenshots/button-text-editor.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Text and background image editing in one key popover."></a>
+                <a href="screenshots/button-text-editor.png"><img width="550" height="524" src="screenshots/button-text-editor.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Text and background image editing in one key popover."></a>
                 <figcaption>Text and background image editing in one key popover.</figcaption>
               </figure>
             </article>
             <article class="card">
               <h4>Window layout and themes</h4>
               <p>The window opens at 1120 × 700. Profiles sit in a vertical rail at the left, the same at every width, and the rail never scrolls: the connection badge, OBS (hover it to see what it does), then a <em>PROFILES</em> heading with a compact <em>+</em> New profile button beside it, then one row per profile: the name (long names are shortened with an ellipsis) followed by small pencil (Edit) and trash (Delete) icons, all always visible. The rail is 234 px wide. Only the content column beside it scrolls: a fixed 440 × 428 device preview with the selected control's settings; Actions, Dials and Binding tabs sit on the right. Long configuration forms scroll vertically within their own settings area rather than resizing the preview. The desk uses the window width up to 1240 px and centers beyond it; the Actions catalog always stays beside the preview, and a window narrower than about 940 px (1070 px for the Stream Deck + XL) scrolls the content column sideways instead of stacking the catalog below.
-                 Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline.
+                 Charcoal (dark) or pale-gray (light) surfaces follow the desktop GTK theme, with violet save actions and a cyan keyboard-focus outline. Buttons are 34 px high with 8 px corners; flat buttons have no border until hovered, destructive ones (Delete, Import) are red, and the catalog's category filters are rounded-rectangle toggle buttons, not pills. Popovers have no arrow or Close button, and dialogs end in one right-aligned row: Cancel with its Esc hint, then the primary or danger action.
                  Bare information icons show their help on hover or keyboard-visible focus. A profile row's pencil and the <em>+</em> open the Edit profile and New profile dialogs, and Menu (Help, Updates, Import, Export) is at the far right of the header, level with the title; the Base profile callout explains its restrictions. Transitions follow GTK's animation setting. The full layout contract is in
                  <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DESIGN.md">DESIGN.md</a>.</p>
               <figure>
-                <a href="screenshots/field-help.png"><img width="417" height="240" src="screenshots/field-help.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile auto-switch help shown by hovering its information icon."></a>
+                <a href="screenshots/field-help.png"><img width="397" height="212" src="screenshots/field-help.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Profile auto-switch help shown by hovering its information icon."></a>
                 <figcaption>Profile auto-switch help shown by hovering its information icon.</figcaption>
               </figure>
             </article>

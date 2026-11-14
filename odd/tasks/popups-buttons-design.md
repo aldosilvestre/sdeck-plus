@@ -16,7 +16,7 @@ Branch: feat/popups-buttons-design (from main 6e1b151).
 - T1 (S2,S5,S6) button system in CSS + page bar + catalog filters. done; worker mwfuk0l3-p-w2rk; commit: see L4.
 - T2 (S3,S4,S6) popovers, dropdown rows, key context menu, form popovers and dialogs. done; worker mwfw36mo-r-thij; commit: see L8.
 - T4 (S8) main window opens floating via Hyprland IPC. done; worker mwfvnkk6-q-3zr0; commit: see L6. Not verified in a live Hyprland session.
-- T3 (S7) docs, design/system.md, screenshots; final verification. pending; commit: pending.
+- T3 (S7) docs, design/system.md, screenshots. done; worker mwfx7772-s-k65g; commit: see L9.
 
 ## Log
 L1: "lo que vi es que no mejoraste el diseño de los popus y botones segun el diseño que me pasaste."
@@ -27,3 +27,4 @@ L5: user chose "La app lo pide a Hyprland al abrir" for S8 and "Sí, borralo" fo
 L6: T4: src/window_float.rs (lib) + thin connect_map hook; own window = mapped client with this pid, class dev.streamdeck.EventMonitor and title sdeck-plus; batch setfloating + resizewindowpixel exact (clamped to the monitor's usable area) + movewindowpixel exact (centered); once per map; worker thread, 500 ms socket timeouts, 3 s poll; no-op outside Hyprland. Tests 19 lib + 2 integration (fake socket); RED not observed (tests written with the module). Worker: full GTK 384 pass + 3 baseline + 2 known intermittents; headless 0. Parent: fmt, diff-check, clippy 0, window_float 19/19 + 2/2; confirmed the JSON field names against the live Hyprland session read-only (hyprctl -j clients/monitors). The batch reply format and the actual floating were not exercised live.
 L7: "cuando termines, apaga la computadora. Mas tarde seguiremos." -> after T3 and verification, power off.
 L8: T2: form_popover/style_dialog/dismiss_button helpers; popovers arrowless, padding 6, title inside, no Close; rows 38px; dialogs one right-aligned action row [Cancel Esc][primary/danger]; Delete profile removed from the Edit dialog (row trash covers it); key context menu is a command row; toast padding 8. RED 11/12 on a HEAD copy, GREEN 12/12; full GTK 397 pass + 3 baseline + model_session intermittent; headless 0. Parent: fmt, diff-check, popup_design 12/12, viewed OBS and Edit captures.
+L9: T3: generator exit 0, 40 PNGs viewed against captions (all match); 20 stale img sizes fixed (0 mismatches); docs wording (page bar, popovers, dialogs, filters, toast); design/system.md and system.html updated to src/ui.css values with source paths; sitemap lastmod 2026-11-14. fmt/clippy 0, plugin_sdk 24/24. Parent: diff-check, fmt.
