@@ -1199,6 +1199,11 @@ impl FeatureRuntime {
         submitted
     }
 
+    #[cfg(test)]
+    pub(crate) fn organization_snapshot(&self) -> Organization {
+        self.organization.borrow().clone().expect("organization")
+    }
+
     pub(crate) fn refresh_indicator(&self) {
         match self.organization.borrow().as_ref() {
             Some(organization) => {

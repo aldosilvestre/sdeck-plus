@@ -6,12 +6,20 @@
 @define-color desk_control_edge #76828f;
 @define-color desk_ink #f1f4f7;
 @define-color desk_muted #b0bac6;
+@define-color desk_faint #858e98;
 @define-color desk_violet #b6a1ef;
 @define-color desk_selection #4e426d;
 @define-color desk_cyan #85dce8;
-@define-color desk_error #fb7185;
+@define-color desk_error #fb778a;
 @define-color desk_success #7de2b3;
 @define-color desk_warning #f9cc7a;
+@define-color desk_violet_hover #c7b6f5;
+@define-color desk_violet_pressed #a58cde;
+@define-color desk_ring #7c3aed;
+@define-color desk_ring_gap #f0f0f2;
+@define-color desk_live_press #22c55e;
+@define-color desk_live_rotate #f59e0b;
+@define-color desk_live_touch #67e8f9;
 
 window, scrolledwindow, viewport, .app-shell {
     background-color: @desk_bg;
@@ -213,7 +221,7 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .folder-row-actions button.flat:disabled { background-color: transparent; }
 .folder-empty { padding: 20px 0 12px; }
 .folder-empty image { color: @desk_muted; opacity: 0.6; }
-.field-help > button { min-height: 20px; min-width: 20px; padding: 0 2px; border: none; background: none; box-shadow: none; }
+.field-help > button { min-height: 24px; min-width: 24px; padding: 0; border: none; background: none; box-shadow: none; }
 .field-help > button image { color: @desk_muted; }
 .field-help > button:hover image, .field-help > button:focus-visible image { color: @desk_cyan; }
 .field-help > button:hover, .field-help > button:active { background: none; }
@@ -255,10 +263,10 @@ window.popup-dialog, window.profile-dialog {
     font-weight: 600;
 }
 .suggested-action:hover {
-    background-color: #c7b6f5;
+    background-color: @desk_violet_hover;
 }
 .suggested-action:active {
-    background-color: #a58cde;
+    background-color: @desk_violet_pressed;
 }
 .suggested-action:disabled {
     background-color: @desk_field;
@@ -397,9 +405,9 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     color: @desk_ink;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
-.button-text-context { font-size: 0.9em; margin-bottom: 4px; }
-.button-text-unsaved { font-size: 0.9em; }
-.button-text-overflow { font-size: 0.9em; }
+.button-text-context { font-size: 13px; margin-bottom: 4px; }
+.button-text-unsaved { font-size: 13px; }
+.button-text-overflow { font-size: 13px; }
 
 .hardware-chassis {
     background: linear-gradient(135deg, #414951, #272d34);
@@ -436,21 +444,21 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .encoder:hover { background: radial-gradient(circle at 35% 30%, #7b8793, #414b55); }
 .encoder:active { background: radial-gradient(circle at 35% 30%, #505b66, #2b3239); }
 .encoder .control-tile { background: transparent; border: none; }
-.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
-.key-surface.control-selected { box-shadow: 0 0 0 2px #f0f0f2, 0 0 0 5px #7c3aed; }
+.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
+.key-surface.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .control-pressed {
-    outline: 4px solid #22c55e;
+    outline: 4px solid @desk_live_press;
     outline-offset: -4px;
     filter: brightness(1.25);
 }
 .control-rotated {
-    outline: 4px solid #f59e0b;
+    outline: 4px solid @desk_live_rotate;
     outline-offset: -4px;
     filter: brightness(1.25);
 }
 .control-touched {
-    background-color: alpha(#67e8f9, 0.35);
-    outline: 3px solid #67e8f9;
+    background-color: alpha(@desk_live_touch, 0.35);
+    outline: 3px solid @desk_live_touch;
     outline-offset: -3px;
 }
 .control-tile { color: #c2ccdc; font-size: 11px; font-weight: 700; padding: 0; }
@@ -569,6 +577,7 @@ popover.command-menu button.command-row:hover { background-color: @desk_hover; }
 popover.command-menu button.command-row:checked { background-color: @desk_selection; box-shadow: inset 0 0 0 1px @desk_violet; }
 popover.command-menu separator { margin: 6px 0; background-color: @desk_edge; min-height: 1px; }
 popover.command-menu button.command-row.destructive { color: @desk_error; }
+popover.command-menu button.command-row.destructive:hover { background-color: alpha(@desk_error, 0.12); }
 popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
@@ -608,15 +617,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
     outline-offset: -2px;
 }
 
-/* Category chips and group sub-headings of the action catalog. */
-.catalog-chips { margin: 2px 0 4px; }
-.catalog-chip {
-    min-height: 20px;
-    padding: 6px 8px;
-    border-radius: 8px;
-    font-size: 12px;
-}
-.catalog-chip:checked { font-weight: 600; }
+/* Group sub-headings of the action catalog. */
 .catalog-group {
     color: @desk_muted;
     font-size: 11px;
@@ -663,11 +664,12 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }
 
 /* Rail sub-headings (TOOLS, PROFILES) and the compact New profile action beside PROFILES. */
-.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: @desk_muted; }
+/* A plain label, dimmer and lighter than the controls beside it: only the + reads as a control. */
+.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 400; letter-spacing: 1px; color: @desk_faint; }
 .profile-tabs > header.left button.rail-new-profile { min-height: 20px; padding: 4px 6px; margin: 8px 4px 0 0; }
 /* The scrolling form shares the editor card's surface (the heading row above it is fixed). */
 scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
-button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
+button.rail-new-profile.flat { border-color: transparent; background-color: transparent; color: @desk_ink; }
 button.rail-new-profile.flat:hover { background-color: @desk_hover; }
 
 /* Each profile row: the name, then small frameless Edit and Delete icons that fill on hover. */

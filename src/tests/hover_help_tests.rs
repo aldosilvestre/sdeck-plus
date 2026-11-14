@@ -97,3 +97,28 @@ fn help_icons_are_bare_icons_without_a_button_frame() {
         window.destroy();
     });
 }
+
+#[test]
+fn the_help_button_target_is_at_least_24_by_24() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let entry = Entry::new();
+        let row = labeled("Profile name", &entry);
+        ui::field_help(&row, "Profile help", "Create a separate set of bindings.");
+        let window = ApplicationWindow::builder().default_width(400).build();
+        install_style(&window);
+        window.set_child(Some(&row));
+        window.present();
+        wait_for_frame(&window);
+        let help = help_button(row.upcast_ref());
+        let inner = help.first_child().unwrap();
+        let (width, height) = (inner.width(), inner.height());
+        assert!(
+            width >= 24 && height >= 24,
+            "help button target is {width}x{height}"
+        );
+        window.destroy();
+    });
+}

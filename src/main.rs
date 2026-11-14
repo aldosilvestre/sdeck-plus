@@ -62,7 +62,7 @@ mod stable_width;
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
 const DEFAULT_WIDTH: i32 = 1120;
-const DEFAULT_HEIGHT: i32 = 700;
+const DEFAULT_HEIGHT: i32 = 884;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
 const PREVIEW_MAX_SCALE: f64 = 1.0;
@@ -1791,6 +1791,8 @@ fn build_body(
     workspace.set_hexpand(false);
     workspace.append(preview.widget());
     // A tall form scrolls here, within its own region, instead of stretching the page.
+    // The overlay scrollbar (15px wide) sits over the right edge: keep the fields clear of it.
+    form.set_margin_end(16);
     let settings_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -5211,6 +5213,7 @@ mod tests {
     use std::sync::Mutex;
     mod action_catalog_tests;
     mod asset_link_save_tests;
+    mod audit_layout_tests;
     mod binding_icon_tests;
     mod binding_toolbar_tests;
     mod button_swap_tests;
@@ -6899,7 +6902,9 @@ mod tests {
         assert!(mapped.get(), "window did not map before timeout");
         wait_for_frame(&window);
         eprintln!(
-            "GTK requested initial size 1000x700; window-manager allocation {}x{}",
+            "GTK requested initial size {}x{}; window-manager allocation {}x{}",
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
             window.width(),
             window.height()
         );
@@ -6910,7 +6915,7 @@ mod tests {
             (window.width(), window.height()),
             (DEFAULT_WIDTH, DEFAULT_HEIGHT)
         );
-        eprintln!("GTK actual test client allocation 1000x700 executed");
+        eprintln!("GTK actual test client allocation {DEFAULT_WIDTH}x{DEFAULT_HEIGHT} executed");
         let content = widgets.root.first_child().unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
@@ -7618,7 +7623,7 @@ mod tests {
         assert_eq!(layers.borrow().active(), active);
         assert_eq!(folder_count.text().parse::<usize>().unwrap(), 1);
         while commands.try_recv().is_ok() {}
-        folder_button(widgets, "Link folder Studio to control").emit_clicked();
+        folder_button(widgets, "Link folder Studio to selected key or dial").emit_clicked();
         let LayerCommand::SaveBinding(snapshot, Some(_)) = commands.try_recv().unwrap() else {
             panic!("linking must save without entering the folder");
         };
@@ -8087,9 +8092,9 @@ mod tests {
         for action in 0..5 {
             widgets.binding_ui.action_picker.set_selected(action);
             widgets.binding_ui.update_action_visibility();
-            widgets
-                .root
-                .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
+            // The default window is tall enough to hold everything; exercise the
+            // scrolling layout at the former, shorter default height.
+            widgets.root.allocate(DEFAULT_WIDTH, 700, -1, None);
             let minimum = content.measure(Orientation::Vertical, DEFAULT_WIDTH - 48).0;
             let horizontal = widgets.scroller.hadjustment();
             let vertical = widgets.scroller.vadjustment();

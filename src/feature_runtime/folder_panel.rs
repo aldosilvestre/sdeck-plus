@@ -109,7 +109,7 @@ impl FolderPanel {
         context.add_css_class("folder-context");
         heading.append(&context);
         heading.append(&ui::helper(
-            "Link saves navigation on the selected control without opening it.",
+            "Link saves navigation on the selected key or dial without opening it.",
         ));
         root.append(&heading);
 
@@ -307,7 +307,7 @@ impl FolderPanel {
         let open = button("folder-open-symbolic", format!("Open folder {name}"));
         let link = button(
             "sdeck-link-symbolic",
-            format!("Link folder {name} to control"),
+            format!("Link folder {name} to selected key or dial"),
         );
         let rename = button("document-edit-symbolic", format!("Rename folder {name}"));
         let delete = button("user-trash-symbolic", format!("Delete folder {name}"));

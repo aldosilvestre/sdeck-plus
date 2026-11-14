@@ -266,69 +266,67 @@ pub(super) fn label_text(widget: &gtk::Widget) -> String {
 }
 
 #[test]
-fn category_chips_filter_the_catalog_to_one_category_and_all_restores_it() {
+fn the_catalog_offers_only_the_search_entry_without_category_chips_or_a_drag_hint() {
     run_gtk_test(|| {
-        catalog_fixture("catalog-chips", |widgets, _layers, _requests| {
-            let mut chips = Vec::new();
-            collect_with_class(widgets.root.upcast_ref(), "catalog-chip", &mut chips);
-            let names: Vec<_> = chips
-                .iter()
-                .filter(|chip| chip.is_visible())
-                .map(label_text)
-                .collect();
-            assert_eq!(
-                names,
-                [
-                    "All",
-                    "Basic",
-                    "System",
-                    "Multimedia",
-                    "Organization",
-                    "Device",
-                    "OBS"
-                ],
-                "plugins add their own chip only when a plugin is installed"
+        catalog_fixture("catalog-search-only", |widgets, _layers, _requests| {
+            let root: &gtk::Widget = widgets.root.upcast_ref();
+            assert!(descendant_search(root).is_some(), "the search entry stays");
+            for class in ["catalog-chips", "catalog-chip"] {
+                let mut found = Vec::new();
+                collect_with_class(root, class, &mut found);
+                assert!(found.is_empty(), "no .{class} widget is built");
+            }
+            let mut toggles = Vec::new();
+            collect_toggle_labels(root, &mut toggles);
+            for name in [
+                "All",
+                "Basic",
+                "System",
+                "Organization",
+                "Device",
+                "OBS",
+                "Plugins",
+            ] {
+                assert!(
+                    !toggles.iter().any(|label| label == name),
+                    "no {name} filter button"
+                );
+            }
+            let mut labels = Vec::new();
+            collect_label_texts(root, &mut labels);
+            assert!(
+                !labels
+                    .iter()
+                    .any(|text| text.starts_with("Drag an action onto")),
+                "the drag hint above the search is gone"
             );
-            let chip = |name: &str| {
-                chips
-                    .iter()
-                    .find(|chip| label_text(chip) == name)
-                    .unwrap()
-                    .downcast_ref::<gtk::ToggleButton>()
-                    .unwrap()
-                    .clone()
-            };
-            assert!(chip("All").is_active());
-            let mut buttons = Vec::new();
-            collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
-            let find = |caption: &str| {
-                buttons
-                    .iter()
-                    .find(|b| {
-                        b.tooltip_text().as_deref()
-                            == Some(&format!(
-                                "Drag {caption} onto a key or dial, or click to assign to the selected control."
-                            ))
-                    })
-                    .unwrap()
-                    .clone()
-            };
-            let section = |row: &Button| row.parent().unwrap().parent().unwrap().parent().unwrap();
-            let volume = find("Volume up");
-            let command = find("Run command");
-            chip("Multimedia").set_active(true);
-            assert!(!chip("All").is_active(), "chips behave as one choice");
-            assert!(section(&volume).is_visible() && !section(&command).is_visible());
-            // The chosen category is open so its actions are reachable at once.
-            let revealer = volume.parent().unwrap().parent().unwrap();
-            assert!(revealer
-                .downcast_ref::<gtk::Revealer>()
-                .unwrap()
-                .reveals_child());
-            chip("All").set_active(true);
-            assert!(section(&command).is_visible() && section(&volume).is_visible());
         });
     });
+}
+
+fn collect_toggle_labels(widget: &gtk::Widget, found: &mut Vec<String>) {
+    if let Some(label) = widget
+        .downcast_ref::<gtk::ToggleButton>()
+        .and_then(|button| button.label())
+    {
+        found.push(label.to_string());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        collect_toggle_labels(&current, found);
+        child = current.next_sibling();
+    }
+}
+
+fn collect_label_texts(widget: &gtk::Widget, found: &mut Vec<String>) {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        found.push(label.text().to_string());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        collect_label_texts(&current, found);
+        child = current.next_sibling();
+    }
 }
 
 #[test]

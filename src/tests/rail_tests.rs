@@ -241,6 +241,8 @@ fn the_rail_does_not_move_when_the_content_scrolls() {
             return;
         };
         let widgets = &fixture.widgets;
+        // The default window now holds the whole column; scroll at a shorter one.
+        widgets.root.set_size_request(DEFAULT_WIDTH, 700);
         wait_for_frame(&fixture.window);
         let adjustment = widgets.scroller.vadjustment();
         assert!(
@@ -368,5 +370,61 @@ fn main_window_capture() {
         }
         settings.set_gtk_theme_name(theme.as_deref());
         settings.set_gtk_application_prefer_dark_theme(dark);
+    });
+}
+
+/// The PROFILES heading reads as a plain label (regular weight, a dimmer grey than the
+/// helper text) so it does not look clickable; only the New profile "+" stays strong.
+#[test]
+fn the_profiles_heading_is_dim_and_regular_while_new_profile_stays_strong() {
+    run_gtk_test(|| {
+        let Some(fixture) = fixture("rail-heading-dim", |_| {}) else {
+            return;
+        };
+        let heading = rail_label(&fixture.widgets, "PROFILES");
+        let weight = heading.pango_context().font_description().unwrap().weight();
+        assert_eq!(weight, gtk::pango::Weight::Normal, "PROFILES is not bold");
+        let same = |color: gtk::gdk::RGBA, hex: u32| {
+            let channel = |shift: u32| f32::from(((hex >> shift) & 0xff) as u8) / 255.0;
+            (color.red() - channel(16)).abs() < 0.01
+                && (color.green() - channel(8)).abs() < 0.01
+                && (color.blue() - channel(0)).abs() < 0.01
+                && (color.alpha() - 1.0).abs() < 0.01
+        };
+        // desk_faint: dark #858e98 (4.6:1 on the rail), light #6b7682 (4.6:1).
+        #[allow(deprecated)]
+        let heading_color = heading.style_context().color();
+        assert!(
+            same(heading_color, 0x858e98) || same(heading_color, 0x6b7682),
+            "PROFILES uses desk_faint: {heading_color:?}"
+        );
+        let plus = new_profile_button(&fixture.widgets)
+            .child()
+            .and_downcast::<gtk::Image>()
+            .expect("the + icon");
+        // desk_ink: dark #f1f4f7, light #242c35.
+        #[allow(deprecated)]
+        let plus_color = plus.style_context().color();
+        assert!(
+            same(plus_color, 0xf1f4f7) || same(plus_color, 0x242c35),
+            "the + keeps the full ink colour: {plus_color:?}"
+        );
+    });
+}
+
+#[test]
+fn the_main_window_opens_at_1120_by_884() {
+    // The app window and the Hyprland float request both read these constants;
+    // a presented window reports its live size, not the requested default.
+    assert_eq!((DEFAULT_WIDTH, DEFAULT_HEIGHT), (1120, 884));
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder()
+            .default_width(DEFAULT_WIDTH)
+            .default_height(DEFAULT_HEIGHT)
+            .build();
+        assert_eq!(window.default_size(), (1120, 884));
     });
 }

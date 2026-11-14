@@ -18,19 +18,22 @@ Tokens are `@define-color desk_*` in `src/ui.css` (dark); `src/ui-light.css` red
 | `desk_control_edge` | `#76828f` | `#7a8491` | border of buttons, entries and check boxes (3:1 control boundary) | src/ui.css, src/ui-light.css |
 | `desk_ink` | `#f1f4f7` | `#242c35` | primary text | src/ui.css, src/ui-light.css |
 | `desk_muted` | `#b0bac6` | `#536170` | secondary text, helper, disabled text | src/ui.css, src/ui-light.css |
+| `desk_faint` | `#858e98` | `#6b7682` | non-interactive rail heading (PROFILES); 4.6:1 on `desk_surface` | src/ui.css, src/ui-light.css |
 | `desk_violet` | `#b6a1ef` | `#6746bb` | primary (suggested) action, check box on, text selection, folder icon | src/ui.css, src/ui-light.css |
 | `desk_selection` | `#4e426d` | `#e8e1f6` | selected segment / tab / toggle fill | src/ui.css, src/ui-light.css |
 | `desk_cyan` | `#85dce8` | `#0e7183` | focus outline, entry focus edge, links, caret, profile-note edge | src/ui.css, src/ui-light.css |
-| `desk_error` | `#fb7185` | `#c0243f` | error text, destructive actions, `.status-error` | src/ui.css, src/ui-light.css |
-| `desk_success` | `#7de2b3` | `#1b7f55` | success text, `.status-online` | src/ui.css, src/ui-light.css |
-| `desk_warning` | `#f9cc7a` | `#9a6a00` | warning text, `.status-idle` | src/ui.css, src/ui-light.css |
+| `desk_error` | `#fb778a` | `#b4223b` | error text, destructive actions, `.status-error` | src/ui.css, src/ui-light.css |
+| `desk_success` | `#7de2b3` | `#176d49` | success text, `.status-online` | src/ui.css, src/ui-light.css |
+| `desk_warning` | `#f9cc7a` | `#815900` | warning text, `.status-idle` | src/ui.css, src/ui-light.css |
 
 Derived (also from the sources):
 
 | Name | Dark | Light | Usage | Source |
 | --- | --- | --- | --- | --- |
-| suggested hover | `#c7b6f5` | `#5939a9` | `.suggested-action:hover` | src/ui.css, src/ui-light.css |
-| suggested active | `#a58cde` | `#4c2f95` | `.suggested-action:active` | src/ui.css, src/ui-light.css |
+| `desk_violet_hover` | `#c7b6f5` | `#5939a9` | `.suggested-action:hover` | src/ui.css, src/ui-light.css |
+| `desk_violet_pressed` | `#a58cde` | `#4c2f95` | `.suggested-action:active` | src/ui.css, src/ui-light.css |
+| `desk_ring` / `desk_ring_gap` | `#7c3aed` / `#f0f0f2` | same | selected-control ring and its 2px gap | src/ui.css, src/ui-light.css |
+| `desk_live_press` / `desk_live_rotate` / `desk_live_touch` | `#22c55e` / `#f59e0b` / `#67e8f9` | same | live-input outlines and touch wash | src/ui.css, src/ui-light.css |
 | tone fill | `alpha(tone, 0.16)` | same | `.status-*` badge fill | src/ui.css |
 | tone edge | `alpha(tone, 0.55)` | same | `.status-*` badge border | src/ui.css |
 | danger fill / edge | `alpha(error, 0.14)` / `alpha(error, 0.5)` (hover fill `alpha(error, 0.24)`) | same | `button.destructive-action`, `.confirm-dialog button.destructive-action` | src/ui.css |
@@ -52,7 +55,9 @@ Derived (also from the sources):
 | Muted / helper | 13 / 400, `desk_muted` | `.muted`, `.helper` | src/ui.css |
 | Status / inspector heading / binding status | 13 / 600-700 | `.status`, `.inspector-heading`, `.binding-status` | src/ui.css |
 | Plugin dialog preview section label | 13 / 600 | `.plugin-add-dialog .plugin-preview .section-label` | src/ui.css |
+| Button text editor lines (context, unsaved, overflow) | 13 | `.button-text-context`, `.button-text-unsaved`, `.button-text-overflow` | src/ui.css |
 | Chip | 12 monospace | `.reference-chip` | src/ui.css |
+| Rail heading (PROFILES) | 11 / 400, letter-spacing 1px, `desk_faint` | `.rail-heading` | src/ui.css |
 | Small muted label | 12 | `.model-selector label.muted` | src/ui.css |
 | Plugin heading / catalog subtitle / count | 11 / 700 (heading), 11 (subtitle, count) | `.plugin-heading`, `.catalog-subtitle`, `.catalog-count` | src/ui.css |
 
@@ -68,7 +73,7 @@ Declared paddings and gaps in the sources: 2, 4, 6, 8, 10, 12, 14, 16, 20 px (ca
 | Popover (menus, dropdown lists, form and help popovers), dialog | 12px | src/ui.css (`popover > contents`, `.form-popover > contents`, `.help-popover > contents`, `window.popup-dialog`) |
 | Toast, toast buttons | 999px | src/ui.css (`.toast`, `.toast button`) |
 | Boxed lists, reference table | 10px | src/ui.css (`.folder-list`, `.reference-table`) |
-| Buttons (34px), catalog filters, popover rows, tooltips, banners, fields, tabs, notes, status badges | 8px | src/ui.css (`button`, `.catalog-chip`, `popover row`, `tooltip`, `.banner`, `.status`, `.profile-note`) |
+| Buttons (34px), popover rows, tooltips, banners, fields, tabs, notes, status badges | 8px | src/ui.css (`button`, `popover row`, `tooltip`, `.banner`, `.status`, `.profile-note`) |
 | Chip, small toggle | 6px | src/ui.css (`.reference-chip`, `.button-text-position button`) |
 | Count pill | 999px | src/ui.css (`.catalog-count`) |
 
@@ -99,7 +104,6 @@ Keyboard focus is a 2px `desk_cyan` outline: `outline: 2px solid @desk_cyan; out
 | Suggested action (violet) | fill `desk_violet`, text `desk_bg`, weight 600, no edge; hover/active per Colors; disabled `desk_field`, muted text, `desk_edge` border | src/ui.css `.suggested-action` |
 | Danger (destructive) | error text while enabled, fill `alpha(error, 0.14)`, 1px `alpha(error, 0.5)` edge, weight 600; disabled falls back to field fill, control edge, weight 400; flat destructive icons stay transparent with `alpha(error, 0.12)` on hover; the editor heading row keeps the neutral field fill | src/ui.css `.destructive-action:not(:disabled)`, `button.destructive-action`, `.editor-heading-row button.destructive-action` |
 | Icon-only button | `button.icon-only` min 32px square + 1px edge = 34px, padding 0; the editor toolbar and heading row set 34px; needs an accessible name | src/ui.css `button.icon-only`, `.binding-toolbar button.icon-only` |
-| Catalog filter | toggle button: radius 8, padding 6px 8px, `min-height` 20px (34px total), 12px text, weight 600 when checked, pressed style from `button:checked` | src/ui.css `.catalog-chip` |
 | Page bar | Previous, Next and Parent are separate flat buttons, 4px apart (`.page-navigation`); edits use `button.flat` | src/ui.css `.page-navigation`, `.page-edits button.flat` |
 | Entry | field fill and control edge like a button, caret `desk_cyan`, selection violet on `desk_bg` text; `:focus-within` 1px inset cyan | src/ui.css |
 | Card | `desk_surface`, 1px `desk_edge`, radius 14, padding 12 (editor card 16), inset 1px highlight | src/ui.css `.card` |

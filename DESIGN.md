@@ -187,7 +187,7 @@ References consulted:
 
 ## 2. Color
 
-Application chrome uses the branded dark palette, and a matching light palette (`src/ui-light.css`) when the host GTK theme is not dark (the dark preference is off and the theme name does not contain "dark"). The light file only redefines the `@desk_*` tokens, primary-action states and two shadows, so both modes share every rule and follow theme changes live. Explicit field, popup, menu and button surfaces prevent
+Application chrome uses the branded dark palette, and a matching light palette (`src/ui-light.css`) when the host GTK theme is not dark (the dark preference is off and the theme name does not contain "dark"). The light file only redefines the `@desk_*` tokens, primary-action states and the popover, tooltip and toast shadows, so both modes share every rule and follow theme changes live. Explicit field, popup, menu and button surfaces prevent
 mixed light/dark controls. Native dialogs, fonts and accessibility remain GTK-owned.
 
 | Role | Token |
@@ -205,15 +205,20 @@ mixed light/dark controls. Native dialogs, fonts and accessibility remain GTK-ow
 | Selected tab | `@desk_selection`, `#4e426d`, with `@desk_ink` ink |
 | Primary action hover / press | `#c7b6f5` / `#a58cde` |
 | Keyboard focus / interaction cue | `@desk_cyan`, `#85dce8` |
-| Error ink | `@desk_error`, `#fb7185` |
+| Error ink | `@desk_error`, `#fb778a` |
 | Success ink | `@desk_success`, `#7de2b3` |
 | Warning ink | `@desk_warning`, `#f9cc7a` |
 
 Light palette values: base `#f3f5f7`, surface `#ffffff`, field `#f7f8fa`, hover
 `#e6eaef`, edge `#d7dde4`, interactive boundary `#7a8491`, ink `#242c35`,
 supporting ink `#536170`, primary action `#6746bb` (hover `#5939a9`, press
-`#4c2f95`), selected tab `#e8e1f6`, focus cue `#0e7183`, error `#c0243f`,
-success `#1b7f55`, warning `#9a6a00`. The graphite hardware is identical in both modes.
+`#4c2f95`), selected tab `#e8e1f6`, focus cue `#0e7183`, error `#b4223b`,
+success `#176d49`, warning `#815900`. Tone text on its own 16% tint and over `desk_surface` or
+`desk_bg` reaches 4.5:1 in both themes (guarded by `tests/ui_css.rs`). The primary hover and press
+fills, the selection ring and its gap and the live-input colours are `desk_*` tokens too
+(`desk_violet_hover`, `desk_violet_pressed`, `desk_ring`, `desk_ring_gap`, `desk_live_press`,
+`desk_live_rotate`, `desk_live_touch`), defined in both theme files; the hardware preview keeps
+its own literals. The graphite hardware is identical in both modes.
 
 Status badges pair semantic tones with visible text, a low-alpha fill and a
 55%-alpha edge of the same token: warning for Not connected/Disconnected, error
@@ -285,7 +290,7 @@ binding; using it runs it once and closes the toast, and any later message drops
 
 ## 4. Spacing and layout
 
-Default window: 1120x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
+Default window: 1120x884. Shell margins: 16px (set on the root widget, so window-content screenshots crop them). Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
@@ -297,7 +302,7 @@ Under Hyprland the window floats: each time the main window maps (first show and
 every show from the tray) an owned worker thread finds the app's own client in
 `j/clients` (pid, class `dev.streamdeck.EventMonitor`, title) and, only if it is
 tiled, sends one `[[BATCH]]` over the command socket: `setfloating`,
-`resizewindowpixel exact 1120 700` (clamped to the monitor's usable area) and
+`resizewindowpixel exact 1120 884` (clamped to the monitor's usable area) and
 `movewindowpixel` to center it, all with `address:0x...`. Floating windows,
 manual resizes, other compositors and any IPC error are left untouched. Code:
 `src/window_float.rs`.
@@ -306,7 +311,7 @@ Profile tabs have a 12px gap before page navigation; navigation and the
 device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
-the added return and information options within the default 1120x700 layout.
+the added return and information options within the default 1120x884 layout.
 Event/action selectors (shown for dials and the touch strip only; a key has one
 event and takes its action from the catalog) and Save/Test/Remove controls have
 12px inline gaps. The "Do nothing…" hint is also hidden for an unassigned key, and a key's extended
@@ -342,7 +347,7 @@ their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.
 The inspector-below-preview workspace uses vertical scrolling at the default
-1120x700 size, while retaining the form's compact field groups.
+1120x884 size, while retaining the form's compact field groups.
 
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
@@ -398,7 +403,7 @@ hardware behavior.
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the + XL key at
-40px). At the default 1120x700 window the + XL card still sits beside the
+40px). At the default 1120x884 window the + XL card still sits beside the
 action catalog: the 234px rail leaves 886px, so the catalog gives up part of its natural
 352px (down toward its 250px minimum) and the settings column stays usable. A narrower window never wraps the catalog
 below the workspace, for either model: the catalog shrinks toward its 250px
@@ -406,7 +411,7 @@ minimum and then the content column scrolls horizontally (the rail and header
 stay put), so an action can always be dragged from the catalog onto a key or
 dial that is on screen beside it.
 The + XL chassis is 42px taller than the + (456px against 414px); its card
-(570x470) ends inside the 700px viewport of the default window, so the page
+(570x470) ends inside the 884px viewport of the default window, so the page
 needs no vertical scroll to reach the dials (a test pins this for both
 models). A shorter window scrolls the page, never the preview. Dial captions are 72px wide on the + XL (86px
 on the +) so neighbours never touch.
@@ -450,8 +455,9 @@ covers every profile and asks first. Escape or Cancel hides the dialog without s
 Esc discard a New draft. Deleting asks for confirmation (below); Base cannot be deleted.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
-badge, the OBS tool, then a "PROFILES" sub-heading (11px, bold, muted) with a compact "+" New
-profile action beside it, then the profile rows. A lone tool needs no "TOOLS" heading, so OBS
+badge, the OBS tool, then a "PROFILES" sub-heading (11px, regular weight, `desk_faint`, dimmer than
+helper text so it reads as a label, not a control) with a compact "+" New profile action
+beside it in full `desk_ink`, then the profile rows. A lone tool needs no "TOOLS" heading, so OBS
 sits above PROFILES without one. The rail is 234px wide (it was 166px): 13 characters of name
 (ellipsized from 16, with the full name in a tooltip) and two small icons per row. "+" alone
 describes a new profile and is the only New profile control; it keeps its tooltip and accessible
@@ -465,7 +471,7 @@ confirmation for that profile; Base keeps a disabled Delete ("Base cannot be del
 row's icons line up. Nothing is packed at the rail foot. OBS and "+" have a tooltip that says
 what they do ("OBS: ...", "New profile: ...") and the same text as their accessible description.
 The badge, OBS and PROFILES row are the Notebook's start action widget. Because the rail is
-outside the scrolling region OBS is always visible and its popover opens fully, in a 1120x700
+outside the scrolling region OBS is always visible and its popover opens fully, in a 1120x884
 window and at the smallest window. OBS is frameless (hover shows the surface) so it stays
 secondary to the tabs. Menu is the window's one configuration menu button and lives in the
 header, not the rail: on the title row, completely at the right edge and vertically centred on the
@@ -499,7 +505,7 @@ a suggested-action add icon; Enter creates) with live validation beneath it
 show the reason in error color); then a boxed list of the page's folders,
 sorted by name, scrolling past about 240px. Each 40px row shows a violet
 folder icon, the bold name (ellipsized at the end) and frameless trailing
-icon actions Open, Link to control, Rename and red Delete, each with a tooltip
+icon actions Open, Link to selected key or dial, Rename and red Delete, each with a tooltip
 and accessible name that include the folder name ("Rename folder Studio").
 Activating a row opens the folder. Creating keeps the popover open, clears
 the entry and lists the new folder without leaving the page. Rename swaps the
@@ -519,7 +525,8 @@ two columns fit.
 ## 5. Components and states
 
 - **Card:** neutral tonal separation, readable heading and inline feedback;
-  subtle inset top light, no colored accent border.
+  subtle inset top light and no colored outline. Callouts (`.plugin-callout`) and the profile note
+  use a 3px tone left edge as a deliberate exception: warning or cyan for info, error for errors.
 - **Buttons** (`src/ui.css`, both themes; artboards `design/overlays/03-compact-command.html`
   and `design/main-window/03-profile-rail.html`):
   - *Default:* `desk_field` fill, 1px `desk_control_edge`, radius 8, padding 6px 12px, 34px high,
@@ -527,15 +534,14 @@ two columns fit.
   - *Primary* (`suggested-action`): `desk_violet` fill, weight 600, no border.
   - *Danger* (`destructive-action`): `desk_error` text, `alpha(desk_error, .14)` fill,
     `alpha(desk_error, .5)` border, weight 600. Flat destructive icons (page, folder, profile-row
-    delete) stay frameless: error-coloured glyph, tint on hover. The editor heading row keeps its
+    delete) stay frameless: error-coloured glyph, tint on hover. The destructive row of the key
+    context menu tints on hover with `alpha(desk_error, .12)`, keeping error text at 4.5:1. The editor heading row keeps its
     neutral toolbar with a red glyph.
   - *Flat* (`flat` / `has_frame(false)`): transparent fill and transparent border until hovered.
   - *Icon-only* (`icon-only`): 34px square; per-profile-row Edit/Delete and the rail's + stay
     compact (18-20px) by design.
   - *Pressed / selected* (`:checked`, toggles): `desk_selection` fill with an inset 1px
     `desk_violet` edge. *Focus:* 2px `desk_cyan` outline, offset -2.
-  - *Catalog filter chips:* radius-8, 34px high toggle buttons with the pressed style (still four
-    to a line, wrapping).
   - *Page bar:* Previous, Next and Parent are separate flat 34px icon buttons (no linked
     segment); Folders and New page are flat captioned buttons; rename and delete are flat icons.
   - Compact inspector groups (modifier toggles, artwork and button-text choices, the position grid,
@@ -904,7 +910,8 @@ toolbar/editor surfaces. The profile rail has no competing outer outline.
 Profile tabs use a violet tonal fill and fine inset edge instead of an underline;
 the active tab and keyboard focus remain different states.
 The dimensional chassis, artwork cover/crop and circular encoder material
-remain intact. No new fonts, heavy shadows, ambient backgrounds or accent borders.
+remain intact. No new fonts, heavy shadows, ambient backgrounds or accent outlines; the only accent
+edges are the 3px left edges of the callouts and the profile note.
 Secondary panels align their trailing edge with their trigger. Their title and subtitle head
 the body; the form below sits in a bounded vertical scroller, and Escape or an outside click is
 the exit. The scroller's natural content height is capped at 288px,

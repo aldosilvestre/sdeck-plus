@@ -1,7 +1,6 @@
 //! The button system of the approved artboards: flat buttons are frameless, destructive
 //! buttons read as danger, icon-only buttons are 34px squares, and the page bar and the
 //! catalog filter chips follow the same rules.
-use super::action_catalog_tests::{collect_with_class, label_text};
 use super::ui_refresh_tests::{fixture, Fixture};
 use super::*;
 
@@ -163,37 +162,6 @@ fn destructive_buttons_use_the_danger_style() {
             "default edge is neutral: {edge:?}"
         );
         window.close();
-    });
-}
-
-#[test]
-fn catalog_filter_chips_are_34px_radius_8_buttons_with_a_pressed_fill() {
-    run_gtk_test(|| {
-        let Some(fixture) = fixture("button-chips", |_| {}) else {
-            return;
-        };
-        let mut chips = Vec::new();
-        collect_with_class(
-            fixture.widgets.root.upcast_ref(),
-            "catalog-chip",
-            &mut chips,
-        );
-        let visible: Vec<_> = chips.iter().filter(|chip| chip.is_mapped()).collect();
-        assert!(!visible.is_empty(), "the catalog shows its filter chips");
-        for chip in &visible {
-            assert_eq!(outer(*chip).1, 34, "{} is 34px high", label_text(chip));
-        }
-        let all = visible
-            .iter()
-            .find(|chip| label_text(chip) == "All")
-            .expect("All chip");
-        let (pixels, width, height) = render(&fixture, *all);
-        // Selection token (dark #4e426d, light #e8e1f6): the pressed chip is filled.
-        let fill = pixel(&pixels, width, 5, height / 2);
-        assert!(
-            close(fill, [0x4e, 0x42, 0x6d]) || close(fill, [0xe8, 0xe1, 0xf6]),
-            "the active chip carries the selection fill: {fill:?}"
-        );
     });
 }
 
