@@ -1,5 +1,15 @@
 use super::*;
 
+/// Closes a window however the test ends, so a failed assertion never leaves a visible window
+/// behind for the tests that run after it in the same GTK process.
+pub(super) struct ClosesWindow(pub(super) gtk::Window);
+
+impl Drop for ClosesWindow {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
 pub(super) fn catalog_fixture(
     tag: &str,
     check: impl FnOnce(&MonitorWidgets, &Rc<RefCell<LayerStore>>, &mpsc::Receiver<LayerCommand>),
@@ -37,6 +47,7 @@ pub(super) fn catalog_fixture(
     install_style(&window);
     let widgets = build_widgets(window.clone(), layers.clone(), artwork, commands);
     window.set_child(Some(&widgets.root));
+    let closes = ClosesWindow(window.clone().upcast());
     window.present();
     wait_for_frame(&window);
     check(&widgets, &layers, &requests);
@@ -46,7 +57,7 @@ pub(super) fn catalog_fixture(
             .save_to_png(std::path::Path::new(&directory).join(format!("{tag}.png")))
             .unwrap();
     }
-    window.close();
+    drop(closes);
     std::fs::remove_dir_all(root).unwrap();
 }
 

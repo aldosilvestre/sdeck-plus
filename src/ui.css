@@ -384,7 +384,7 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 /* Binding results read as content, not metadata; tones override the ink. */
 .binding-status { color: @desk_ink; font-size: 13px; font-weight: 600; }
 .feedback-warning { color: @desk_warning; }
-.modifier-toggles > button { min-height: 20px; padding: 4px 10px; }
+.modifier-toggles > button { min-height: 20px; padding: 4px 8px; }
 .modifier-toggles > button:checked {
     background-color: @desk_selection;
     color: @desk_ink;

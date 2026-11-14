@@ -263,7 +263,42 @@ fn tab_order(
     visited
 }
 
-const PLUS_GOLDEN_HASH: u64 = 0x9d8dea7cc9a97e57;
+/// The 440x428 card drawn by [`software_rendered`] with [`ExplicitLook`]. Its pixels equal the
+/// middle 440 columns of the 520x428 picture the first golden (`0x9d8dea7cc9a97e57`) was taken
+/// from at ee5cdb3 (spare width was centred around the card then), drawn the same way: the look
+/// of the + did not change. That golden came from the window's GPU renderer, so it never
+/// matched another machine, driver or Xvfb, and the bin has been 440 wide since 6cca278.
+const PLUS_GOLDEN_HASH: u64 = 0x964cb53844c58062;
+
+/// Unrealizes the renderer however the test ends: GSK aborts if a realized renderer is freed.
+struct Realized(gtk::gsk::Renderer);
+
+impl Drop for Realized {
+    fn drop(&mut self) {
+        self.0.unrealize();
+    }
+}
+
+/// `widget` drawn by GTK's software (cairo) renderer instead of the window's. The window's
+/// GL or Vulkan renderer rounds gradients and edges differently on each GPU and driver (Mesa's
+/// llvmpipe under Xvfb included) and `GSK_RENDERER` can swap it, so its pixels are no golden.
+fn software_rendered(window: &ApplicationWindow, widget: &gtk::Widget) -> Rendered {
+    wait_for_frame(window);
+    let renderer = Realized(gtk::gsk::CairoRenderer::new().upcast());
+    renderer
+        .0
+        .realize(window.surface().as_ref())
+        .expect("the cairo renderer realizes");
+    let texture = rendered_texture_with(&renderer.0, widget);
+    let (width, height) = (widget.width(), widget.height());
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    texture.download(&mut pixels, width as usize * 4);
+    Rendered {
+        width,
+        height,
+        pixels,
+    }
+}
 
 /// The look settings the golden is rendered with, so the picture does not
 /// depend on the host's theme, font or display settings (nor on HOME).
@@ -308,8 +343,8 @@ impl Drop for ExplicitLook {
     }
 }
 
-/// Captured from the unmodified Stream Deck + preview (T4a code) rendered with
-/// [`ExplicitLook`] at the default window size: 520x428 around the 440x428 card.
+/// The unmodified Stream Deck + preview (T4a code) at the default window size, compared through
+/// [`PLUS_GOLDEN_HASH`]: software-rendered, so neither the GPU nor `GSK_RENDERER` changes it.
 #[test]
 fn plus_preview_is_identical_to_the_shipped_one() {
     run_gtk_test(|| {
@@ -378,7 +413,7 @@ fn plus_preview_is_identical_to_the_shipped_one() {
             buttons.iter().map(kind_of).collect::<Vec<_>>(),
             "Tab keeps visiting keys, the strip, its sections, then the dials"
         );
-        let rendered = render_preview(&f.window, &preview_of(&root), None);
+        let rendered = software_rendered(&f.window, &preview_of(&root));
         // The workspace keeps its natural width (the catalog takes the spare room), so the
         // bin is the card itself; it was 520px wide when spare width was centred around it.
         assert_eq!((rendered.width, rendered.height), (440, 428));

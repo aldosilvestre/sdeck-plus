@@ -1,6 +1,6 @@
 use super::*;
 use crate::plugin_add_ui::{self, AddPluginDialog, Phase};
-use action_catalog_tests::{catalog_fixture, collect_catalog_buttons};
+use action_catalog_tests::{catalog_fixture, collect_catalog_buttons, ClosesWindow};
 use gtk::glib::translate::IntoGlib;
 use sdeck_plus::plugins::{
     install, stage, CancelToken, InstallError, InstallMode, PluginSource, StageError, StageOptions,
@@ -222,6 +222,15 @@ fn open_dialog(widgets: &MonitorWidgets) -> AddPluginDialog {
     plugin_add_ui::current(&widgets.binding_ui.plugins).expect("the add dialog opened")
 }
 
+/// The width the window takes on screen: its border box. Without a compositing manager (Xvfb)
+/// GTK draws the `solid-csd` frame (5 px a side with Adwaita) inside the requested size, so
+/// `width()`, the content box, is 10 px narrower than asked there.
+fn shown_width(window: &gtk::Window) -> i32 {
+    window
+        .compute_bounds(window)
+        .map_or(0, |bounds| bounds.width().round() as i32)
+}
+
 /// A main window with a hub on `scratch` (temp plugins folder, injected staging options) and
 /// the dialog opened through the real add button.
 fn with_dialog(
@@ -236,8 +245,10 @@ fn with_dialog(
         hub.load(scratch.plugins());
         hub.use_stage_options(options);
         let dialog = open_dialog(widgets);
+        // A failed check must not leave this "Add plugin" window open for later tests.
+        let closes = ClosesWindow(dialog.window());
         check(widgets, &scratch, &dialog);
-        dialog.window().close();
+        drop(closes);
         assert!(
             !dialog.window().is_visible(),
             "the dialog closes at the end of every test"
@@ -1839,7 +1850,7 @@ fn the_window_defaults_to_660_by_760_and_nothing_is_clipped_there_or_at_520() {
                 for width in [660, 520] {
                     window.set_default_size(width, 760);
                     wait_until("the window to take its size", || {
-                        window.width() == width && window.height() > 0
+                        shown_width(&window) == width && window.height() > 0
                     });
                     wait_for_frame(&window);
                     let inside = |widget: &gtk::Widget, what: &str| {
@@ -1971,7 +1982,7 @@ fn the_missing_required_command_is_visible_without_scrolling_at_660_and_520() {
                     );
                     assert!(!expander_in(dialog, "Actions").is_expanded());
                     wait_until("the missing row to be visible", || {
-                        window.width() == width && missing_row_visible(dialog)
+                        shown_width(&window) == width && missing_row_visible(dialog)
                     });
                     let pinned = dialog.pinned();
                     assert!(

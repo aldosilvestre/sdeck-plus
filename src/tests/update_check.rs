@@ -191,7 +191,10 @@ fn gtk_updates_and_existing_help_content() {
         menu.add_updates(&updates.body);
         menu.bind_updates_button(&updates.indicator);
         updates.render(&UpdateState::UpToDate);
-        assert_eq!(updates.status.text(), "Up to date (v0.1.0)");
+        assert_eq!(
+            updates.status.text(),
+            format!("Up to date (v{})", env!("CARGO_PKG_VERSION"))
+        );
         assert!(!updates.indicator.is_visible());
         updates.render(&UpdateState::Available("v0.10.0".into()));
         assert!(updates.indicator.is_visible());
@@ -365,7 +368,10 @@ fn gtk_updates_dialog_is_unscrolled_live_and_help_has_no_updates() {
         assert!(texts.iter().any(|text| text == "Update available: v9.9.9"));
         // Live changes while open, and the same widgets after closing and re-opening.
         updates.render(&UpdateState::UpToDate);
-        assert_eq!(updates.status.text(), "Up to date (v0.1.0)");
+        assert_eq!(
+            updates.status.text(),
+            format!("Up to date (v{})", env!("CARGO_PKG_VERSION"))
+        );
         dialog.response(gtk::ResponseType::Close);
         assert!(!dialog.is_visible());
         dialog.present();
