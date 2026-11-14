@@ -180,6 +180,7 @@ code {
   text-decoration: none;
 }
 .skip-link:focus { top: 12px; color: var(--on-accent); }
+.skip-link:hover { color: var(--on-accent); }
 
 .wrap {
   width: min(var(--max), 100% - 2 * var(--gutter));
@@ -884,7 +885,9 @@ pre code { background: none; border: 0; padding: 0; color: inherit; font-size: i
 .copy-btn svg { width: 14px; height: 14px; }
 .copy-btn:hover, .copy-btn:focus-visible { opacity: 1; background: rgba(255, 255, 255, 0.16); }
 .copy-btn.is-copied { color: #0b2b1d; background: #7de2b3; border-color: #7de2b3; }
-.code-block.has-copy pre { padding-right: 5.6rem; }
+/* The Copy button sits in its own row above the first line at every width, so
+   no line (long, scrolled, or beside the wider "Copied" state) runs under it. */
+.code-block.has-copy pre, .terminal .code-block.has-copy pre { padding-top: 2.7rem; }
 
 /* ---------- Docs teaser + CTA ---------- */
 .teaser-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 1rem; }
@@ -956,6 +959,7 @@ pre code { background: none; border: 0; padding: 0; color: inherit; font-size: i
 }
 .doc-hero-grid { position: relative; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 2rem; align-items: end; }
 .doc-hero h1 { font-size: clamp(2.4rem, 5.5vw, 4.2rem); letter-spacing: -0.035em; margin-top: 0.8rem; }
+.doc-hero h1:first-child { margin-top: 0; }
 .doc-hero .lead { margin-top: 1rem; max-width: 40rem; }
 .search {
   position: relative; display: none;
@@ -1015,6 +1019,7 @@ pre code { background: none; border: 0; padding: 0; color: inherit; font-size: i
 .doc-section + .doc-section { margin-top: clamp(3.5rem, 7vw, 5rem); }
 .doc-section > header { padding-bottom: 1.4rem; margin-bottom: 1.6rem; border-bottom: 1px solid var(--border); }
 .doc-section > header h2 { font-size: clamp(1.9rem, 3.6vw, 2.6rem); margin-top: 0.5rem; }
+.doc-section > header h2:first-child { margin-top: 0; }
 .doc-section > header p { color: var(--muted); margin-top: 0.8rem; max-width: 52rem; }
 .doc-group + .doc-group { margin-top: 2.6rem; }
 .doc-group > h3 {
@@ -1038,7 +1043,8 @@ pre code { background: none; border: 0; padding: 0; color: inherit; font-size: i
 .card ul, .card ol { margin: 0.7rem 0 0; padding-left: 1.2rem; }
 .card li + li { margin-top: 0.3rem; }
 .card li::marker { color: var(--accent); }
-.card p + ul, .card p + ol, .card ul + p, .card ol + p, .card .code-block + p, .card table + p { margin-top: 0.7rem; }
+.card p + ul, .card p + ol, .card ul + p, .card ol + p, .card .code-block + p, .card table + p, .card .table-scroll + p { margin-top: 0.7rem; }
+.card > .code-block:first-child { margin-top: 0; }
 .card[hidden], .doc-group[hidden] { display: none; }
 mark { background: color-mix(in srgb, var(--fam-system) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .table-scroll { overflow-x: auto; margin-top: 0.7rem; border: 1px solid var(--border); border-radius: 12px; }
@@ -1117,6 +1123,11 @@ mark { background: color-mix(in srgb, var(--fam-system) 35%, transparent); color
   .bento { grid-template-columns: minmax(0, 1fr); }
   .tile-hero, .tile-2, .tile-3 { grid-column: auto; }
   .cards { grid-template-columns: minmax(0, 1fr); }
+  /* Key/description tables stack instead of squeezing the description into a
+     one-word column beside a no-wrap key. */
+  .key-table, .key-table tbody, .key-table tr, .key-table th, .key-table td { display: block; }
+  .key-table th { white-space: normal; padding-bottom: 0.15rem; border-bottom: 0; }
+  .key-table td { padding-top: 0; }
   .stage.duo > :last-child { transform: translateY(8%); }
   .footer-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .footer-grid > :first-child { grid-column: 1 / -1; }
@@ -1152,9 +1163,8 @@ mark { background: color-mix(in srgb, var(--fam-system) 35%, transparent); color
 
 @media print {
   .site-header, .toc, .copy-btn, .search, .to-top, .ticker, .lightbox { display: none !important; }
+  .code-block.has-copy pre { padding-top: 1rem; }
+  .terminal .code-block.has-copy pre { padding-top: 1.1rem; }
   .js .reveal { opacity: 1 !important; transform: none !important; }
 }
 .docs-page .site-footer { margin-top: clamp(4rem, 8vw, 6rem); }
-@media (max-width: 720px) {
-  .code-block.has-copy pre, .terminal .code-block.has-copy pre { padding-top: 2.7rem; padding-right: 1.1rem; }
-}

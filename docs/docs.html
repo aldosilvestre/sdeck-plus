@@ -142,8 +142,7 @@
   <section class="doc-hero" aria-labelledby="doc-title">
     <div class="wrap doc-hero-grid">
       <div>
-        <p class="eyebrow">Documentation</p>
-        <h1 id="doc-title">Install, configure and <span class="grad">develop</span>.</h1>
+        <h1 id="doc-title">Install, configure and develop.</h1>
         <p class="lead">Every requirement and installer option, how each part of sdeck-plus behaves and where it stores its data, and the checks for working on it.</p>
       </div>
       <div class="search" role="search">
@@ -193,7 +192,7 @@
             <li><a href="#dev-checks">Checks</a></li>
             <li><a href="#dev-screenshots">Documentation screenshots</a></li>
             <li><a href="#dev-simulated">Simulated devices</a></li>
-            <li><a href="#dev-device-checks">Real-device checks</a></li>
+            <li><a href="#dev-device-checks">Opt-in real-device checks</a></li>
             <li><a href="#dev-event-api">In-process event API</a></li>
             <li><a href="#dev-plugins">Writing a plugin</a></li>
             <li><a href="#dev-code">Code organization</a></li>
@@ -205,7 +204,6 @@
     <div class="doc-content" id="doc-content">
       <section class="doc-section" id="install" aria-labelledby="install-title">
         <header>
-          <p class="eyebrow">Get started</p>
           <h2 id="install-title">Install</h2>
           <p>Builds from source with Cargo and installs for the current user only. It never installs system packages or changes device permissions.</p>
         </header>
@@ -214,7 +212,6 @@
           <h3>Build and install</h3>
           <div class="cards">
             <article class="card wide">
-              <h4>Build and install</h4>
               <div class="code-block">
 <pre><code>sudo pacman -S gtk4 base-devel
 curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash</code></pre>
@@ -222,8 +219,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>A published GitHub release tagged <code>vX.Y.Z</code> is required, and the <code>version</code> in that release's <code>Cargo.toml</code> must equal <code>X.Y.Z</code> (otherwise the installer stops before building). Release mode needs <code>curl</code> and GNU <code>tar</code>, downloads the latest published release and builds it locally.
                  Downloaded sources, build output and a temporary <code>CARGO_HOME</code> live in one installer-owned temporary directory, removed on success, failure or interruption.
                  Only the binary, launcher, icon and license are installed; existing Cargo caches and checkouts are never removed.</p>
-              <p>To install a particular release, use <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --tag vX.Y.Z</code>
-                 (also accepts <code>--tag=vX.Y.Z</code>). This skips the latest-release lookup and downloads exactly that tag's archive with the same safety limits and cleanup.
+              <p>To install a particular release, use:</p>
+              <div class="code-block">
+<pre><code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/install.sh | bash -s -- --tag vX.Y.Z</code></pre>
+              </div>
+              <p>The installer also accepts <code>--tag=vX.Y.Z</code>. This skips the latest-release lookup and downloads exactly that tag's archive with the same safety limits and cleanup.
                  Invalid, missing or repeated tags exit with a usage error before downloading or creating files. The option is rejected in checkout mode.</p>
               <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">
@@ -270,7 +270,12 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
                  <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
               <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
-                 <code>TAG+="uaccess"</code>: <code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules</code>, then <code>sudo udevadm control --reload-rules</code> and reconnect the device (the installer prints these commands when needed). Missing tools or access are reported; the app never installs packages or changes permissions.</p>
+                 <code>TAG+="uaccess"</code>:</p>
+              <div class="code-block">
+<pre><code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules
+sudo udevadm control --reload-rules</code></pre>
+              </div>
+              <p>Then reconnect the device (the installer prints these commands when needed). Missing tools or access are reported; the app never installs packages or changes permissions.</p>
               <p>See <a href="#configuration">Configuration</a> for how each feature behaves.</p>
             </article>
           </div>
@@ -279,7 +284,6 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
 
       <section class="doc-section" id="devices" aria-labelledby="devices-title">
         <header>
-          <p class="eyebrow">Hardware</p>
           <h2 id="devices-title">Supported devices</h2>
           <p>sdeck-plus drives the Elgato Stream Deck + and the Stream Deck + XL, and several can be connected at the same time. Each model has its own window content, stores, editor and previews; the window shows the one you are configuring. Neither the XL nor running several devices at once has been tested on real hardware (see below).</p>
         </header>
@@ -383,7 +387,6 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
 
       <section class="doc-section" id="configuration" aria-labelledby="configuration-title">
         <header>
-          <p class="eyebrow">Reference</p>
           <h2 id="configuration-title">Configuration</h2>
           <p>How each part of the application behaves, where it stores its data and what it needs from the system.
             Saving or inspecting a binding never executes it; only <strong>Test action</strong> or input from the device does.
@@ -788,7 +791,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>Window under Hyprland</h4>
-              <p>Under Hyprland the window opens floating at 1120&times;884, centered (smaller if the monitor's usable area is), so the content never needs a horizontal scroll. The app asks Hyprland for this through its command socket each time the window is shown, including again from the tray, and only while the window is tiled; later manual resizing is left alone. Outside Hyprland nothing happens and no Hyprland configuration is edited. To choose otherwise, add a window rule for class <code>dev.streamdeck.EventMonitor</code> (for example <code>windowrulev2 = float, class:^(dev\.streamdeck\.EventMonitor)$</code> with your own <code>size</code> and <code>center</code>, or <code>tile</code> to keep it tiled): a window that is already floating is not touched.</p>
+              <p>Under Hyprland the window opens floating at 1120&times;884, centered (smaller if the monitor's usable area is), so the content never needs a horizontal scroll. The app asks Hyprland for this through its command socket each time the window is shown, including again from the tray, and only while the window is tiled; later manual resizing is left alone. Outside Hyprland nothing happens and no Hyprland configuration is edited. To choose otherwise, add a window rule for class <code>dev.streamdeck.EventMonitor</code>, for example:</p>
+              <div class="code-block">
+<pre><code>windowrulev2 = float, class:^(dev\.streamdeck\.EventMonitor)$</code></pre>
+              </div>
+              <p>Add your own <code>size</code> and <code>center</code>, or <code>tile</code> to keep it tiled. A window that is already floating is not touched.</p>
             </article>
             <article class="card">
               <h4>Backup and restore</h4>
@@ -866,11 +873,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
 
       <section class="doc-section" id="development" aria-labelledby="development-title">
         <header>
-          <p class="eyebrow">Contributing</p>
           <h2 id="development-title">Development</h2>
           <p>Checks and tools for working on sdeck-plus from a checkout. Build requirements are listed under <a href="#install">Install</a>.</p>
         </header>
         <div class="doc-group" style="--c: var(--fam-load)">
+          <h3>Working from a checkout</h3>
           <div class="cards">
             <article class="card wide" id="dev-checks">
               <h4>Checks</h4>
@@ -900,8 +907,12 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
   tests::documentation_screenshots::regenerate_documentation_screenshots_when_explicitly_requested \
   -- --exact --nocapture --test-threads=1</code></pre>
               </div>
-              <p>The model previews alone can be written with <code>STREAMDECK_PREVIEW_PNG_DIR=&lt;dir&gt;</code> set for the test
-                 <code>tests::preview_model_tests::previews_render_to_images_for_every_supported_model_without_a_device</code>; the list of models comes from the registry, so a newly supported model gets its image automatically.</p>
+              <p>The model previews alone can be written with <code>STREAMDECK_PREVIEW_PNG_DIR</code> set for the preview test; the list of models comes from the registry, so a newly supported model gets its image automatically:</p>
+              <div class="code-block">
+<pre><code>STREAMDECK_PREVIEW_PNG_DIR=&lt;dir&gt; GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::preview_model_tests::previews_render_to_images_for_every_supported_model_without_a_device \
+  -- --exact --nocapture --test-threads=1</code></pre>
+              </div>
             </article>
             <article class="card wide" id="dev-simulated">
               <h4>Simulated devices</h4>
@@ -928,7 +939,11 @@ cargo run --offline --example plugin_validate -- /path/to/plugin-project</code><
               </div>
               <p>The OBS check authenticates, queries scenes and output state and reselects the current scene, without recording or streaming; configure <code>obs.json</code>
                  through the app first. The desktop check pastes exact Unicode into its own window; the multimedia check runs mpv on an isolated D-Bus session and needs a local
-                 silent audio file and the <code>mpv-mpris</code> plugin. <code>cargo run --offline --example ui_showcase -- &lt;capture-dir&gt;</code> captures the primitive UI widgets with no device and runs no actions. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
+                 silent audio file and the <code>mpv-mpris</code> plugin. <code>plugin_validate</code> only reads a plugin project (it copies it into a temp root and runs nothing); add <code>--invoke &lt;action&gt;</code> to deliberately run that plugin once with your privileges.</p>
+              <p>To capture the primitive UI widgets with no device (it runs no actions):</p>
+              <div class="code-block">
+<pre><code>cargo run --offline --example ui_showcase -- &lt;capture-dir&gt;</code></pre>
+              </div>
             </article>
             <article class="card wide" id="dev-event-api">
               <h4>In-process event API</h4>
@@ -941,12 +956,16 @@ cargo run --offline --example plugin_validate -- /path/to/plugin-project</code><
             </article>
             <article class="card wide" id="dev-plugins">
               <h4>Writing a plugin</h4>
-              <p>Plugins are separate projects, one repository each, so adding one never touches this repository. The <a href="plugin-sdk.html">plugin SDK guide</a> is the author-facing documentation; <code>docs/plugins.md</code> is the host contract. Start from <code>examples/plugin-template</code> (a copyable Python 3 project with its own unit tests), check it with <code>cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt;</code> and keep the guide honest with <code>cargo test --offline --test plugin_sdk</code>, which runs the template through the validator and compares the guide's limits with the code.</p>
+              <p>Plugins are separate projects, one repository each, so adding one never touches this repository. The <a href="plugin-sdk.html">plugin SDK guide</a> is the author-facing documentation; <code>docs/plugins.md</code> is the host contract. Start from <code>examples/plugin-template</code> (a copyable Python 3 project with its own unit tests), check it with the first command below and keep the guide honest with the second, which runs the template through the validator and compares the guide's limits with the code:</p>
+              <div class="code-block">
+<pre><code>cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt;
+cargo test --offline --test plugin_sdk</code></pre>
+              </div>
             </article>
             <article class="card wide" id="dev-code">
               <h4>Code organization</h4>
               <div class="table-scroll">
-                <table class="ref-table">
+                <table class="ref-table key-table">
                   <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
                   <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
                   <tr><th><code>src/device_model.rs</code>, <code>src/device_roots.rs</code></th><td>Model registry (<a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>) and each model's data folder</td></tr>

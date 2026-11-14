@@ -21,12 +21,12 @@ Left for the user (not implemented): audit P2 "Binding status shown in the catal
 
 ## Tasks
 
-- [x] T1 (S2, S5) contrast of tone text and destructive hover; worker A (CSS); verified by tests/ui_css.rs; commit: pending
-- [x] T2 (S3) 24px field help button; worker A; verified by hover_help tests; commit: pending
-- [x] T3 (S4) tokenise the off-token colours; worker A; verified by tests/ui_css.rs; commit: pending
-- [x] T4 (S7, S8) light popover shadow (fixed: the class rules outranked the light override) and the `0.9em` sizes; parent; tests/ui_css.rs; commit: pending
-- [x] T5 (S6, S9, S10) DESIGN.md wording, dropdown against the scrollbar (form margin-end 12 -> 16, scrollbar is 15px), shell margin (present on the root); parent; src/tests/audit_layout_tests.rs; commit: pending
-- [x] T6 (S1-S10) CHANGELOG, screenshots, full checks; parent; fmt + clippy clean, screenshots regenerated, suite green except pre-existing failures (L7); commit: pending
+- [x] T1 (S2, S5) contrast of tone text and destructive hover; worker A (CSS); verified by tests/ui_css.rs; commit: 61f8965
+- [x] T2 (S3) 24px field help button; worker A; verified by hover_help tests; commit: 61f8965
+- [x] T3 (S4) tokenise the off-token colours; worker A; verified by tests/ui_css.rs; commit: 61f8965
+- [x] T4 (S7, S8) light popover shadow (fixed: the class rules outranked the light override) and the `0.9em` sizes; parent; tests/ui_css.rs; commit: 61f8965
+- [x] T5 (S6, S9, S10) DESIGN.md wording, dropdown against the scrollbar (form margin-end 12 -> 16, scrollbar is 15px), shell margin (present on the root); parent; src/tests/audit_layout_tests.rs; commit: 61f8965
+- [x] T6 (S1-S10) CHANGELOG, screenshots, full checks; parent; fmt + clippy clean, screenshots regenerated, suite green except pre-existing failures (L7); commit: 61f8965
 
 ## Log
 
@@ -37,3 +37,4 @@ Left for the user (not implemented): audit P2 "Binding status shown in the catal
 - L5: The off-screen wrapper `/tmp/sdeck-xvfb.sh` now takes a free display from :90-:119 per call, so parallel workers can run GTK tests at once.
 - L6: Resumed in a new session ("continua con la implementacion de la ultima sesion"). Found the S9 test vacuous (it picked action index 7 = None, and required a visible overlay scrollbar); fixed it to select More actions (index 5) and measure the scrollbar's natural width, which showed the real defect (dropdown right 394 > 391); fixed with form margin-end 16. S7 confirmed by specificity (`.form-popover > contents` outranks `popover > contents`) with a RED test, then fixed in src/ui-light.css.
 - L7: Full off-screen suite: 7 GTK failures, none caused by this work. Fail identically at HEAD dd9ffbd: `plus_preview_is_identical_to_the_shipped_one` (golden hash), both `plugin_add_ui_tests` size/visibility tests (20 s timeout), both `update_check` tests (expect v0.1.0, Cargo.toml is 0.2.0 since af37ae3). Pass alone (order-dependent in the full run): `binding_editor_hides_labeled_rows_for_inactive_controls_and_actions`, `plugin_ui_tests::the_toolbar_add_button_opens_one_dialog_and_the_hint_points_at_it`.
+- L8: User: "git haz un solo commit, y sube la rama y crea el PR." One commit 61f8965 (audit fixes + earlier requested polish), branch pushed, PR https://github.com/aldosilvestre/sdeck-plus/pull/9 (6 commits, ~3.3k lines).

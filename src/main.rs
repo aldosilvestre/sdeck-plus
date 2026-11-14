@@ -8326,9 +8326,17 @@ mod tests {
         window: &impl IsA<gtk::Native>,
         widget: &impl IsA<gtk::Widget>,
     ) -> gtk::gdk::Texture {
+        rendered_texture_with(&window.renderer().unwrap(), widget)
+    }
+
+    /// [`rendered_texture`] drawn by `renderer` instead of the window's own renderer.
+    fn rendered_texture_with(
+        renderer: &gtk::gsk::Renderer,
+        widget: &impl IsA<gtk::Widget>,
+    ) -> gtk::gdk::Texture {
         let widget = widget.as_ref();
         let paintable = gtk::WidgetPaintable::new(Some(widget));
-        let renderer = window.renderer().unwrap();
+        let renderer = renderer.clone();
         let main_loop = glib::MainLoop::new(None, false);
         let captured = Rc::new(RefCell::new(None));
         let result = captured.clone();

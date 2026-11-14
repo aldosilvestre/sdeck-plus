@@ -339,7 +339,7 @@ Executable and arguments are one related adaptive group: two columns with a
 16px gap when each can receive at least 180px, otherwise stacked with 12px
 separation. Shortcut input and modifiers use the same adaptive group; modifiers
 are one linked row of named toggle buttons ordered Ctrl, Alt, Shift, Super
-(4px/10px padding, checked state uses the selected-tab surface with a violet
+(4px/8px padding, checked state uses the selected-tab surface with a violet
 inset edge, tooltip "Hold X with the key"). A muted line under the row previews the chord
 once it parses (for example "Presses Ctrl + Alt + P") and stays hidden otherwise.
 Commands and named events occupy a full-width field. Hidden fields also hide
