@@ -826,15 +826,18 @@ fn build_header(window: &ApplicationWindow) -> Header {
     }
 }
 
+/// The outer margin between the window edge and the desk (DESIGN.md "Shell margins").
+const SHELL_MARGIN: i32 = 16;
+
 /// The padded, centered column the header and the shown body sit in.
 fn shell_box() -> GtkBox {
     let root = GtkBox::new(Orientation::Vertical, 16);
     // The complete desk fills the window up to SHELL_MAX_WIDTH (see the clamp
     // below), then centers; it still shrinks to narrow desktops.
-    root.set_margin_top(16);
-    root.set_margin_bottom(16);
-    root.set_margin_start(16);
-    root.set_margin_end(16);
+    root.set_margin_top(SHELL_MARGIN);
+    root.set_margin_bottom(SHELL_MARGIN);
+    root.set_margin_start(SHELL_MARGIN);
+    root.set_margin_end(SHELL_MARGIN);
     root.add_css_class("app-shell");
     ui::track_motion(&root);
     root

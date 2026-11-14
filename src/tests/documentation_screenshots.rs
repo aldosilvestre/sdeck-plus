@@ -52,6 +52,17 @@ fn click(widgets: &MonitorWidgets, caption: &str) {
 }
 
 pub(super) fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
+    save_with_margin(directory, widget, name, 0.0);
+}
+
+/// A whole-window capture of the desk. The running app wraps the desk in `shell_box`, whose
+/// margin a plain widget snapshot never shows (the test windows hold the desk in a stage), so the
+/// image looked pressed against its edge: paint the shell margin with the window background.
+fn save_desk(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
+    save_with_margin(directory, widget, name, crate::SHELL_MARGIN as f32);
+}
+
+fn save_with_margin(directory: &std::path::Path, widget: &gtk::Widget, name: &str, margin: f32) {
     if !widget.is_mapped() {
         let main_loop = glib::MainLoop::new(None, false);
         let done = main_loop.clone();
@@ -71,15 +82,28 @@ pub(super) fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str
         assert!(widget.is_mapped(), "{name} did not map");
     }
     let window = widget.root().unwrap().downcast::<gtk::Window>().unwrap();
+    let (start, end, top, bottom) = (margin, margin, margin, margin);
+    let background = widget
+        .style_context()
+        .lookup_color("desk_bg")
+        .unwrap_or(gtk::gdk::RGBA::BLACK);
     // A profile switch rebuilds the catalog in an idle step: snapshot only once something is drawn.
     let mut node = None;
     for _ in 0..10 {
         wait_for_frame(widget);
+        let (width, height) = (widget.width() as f32, widget.height() as f32);
         let snapshot = gtk::Snapshot::new();
+        if start + end + top + bottom > 0.0 {
+            snapshot.append_color(
+                &background,
+                &gtk::graphene::Rect::new(0.0, 0.0, width + start + end, height + top + bottom),
+            );
+            snapshot.translate(&gtk::graphene::Point::new(start, top));
+        }
         gtk::WidgetPaintable::new(Some(widget)).snapshot(
             &snapshot,
-            f64::from(widget.width()),
-            f64::from(widget.height()),
+            f64::from(width),
+            f64::from(height),
         );
         node = snapshot.to_node();
         if node.is_some() {
@@ -327,7 +351,7 @@ fn capture_documentation_screenshots() {
     // The setup above edits fields directly, so treat the editor as saved before navigating.
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
-    let capture = |name: &str| save(&directory, widgets.root.upcast_ref(), name);
+    let capture = |name: &str| save_desk(&directory, widgets.root.upcast_ref(), name);
     capture("main-window");
     settings.set_gtk_theme_name(Some("Adwaita"));
     settings.set_gtk_application_prefer_dark_theme(false);
@@ -362,7 +386,7 @@ fn capture_documentation_screenshots() {
         .expect("the editor form scroller");
     let adjustment = form.vadjustment();
     adjustment.set_value(adjustment.upper() - adjustment.page_size());
-    save(&directory, widgets.root.upcast_ref(), "page-return");
+    save_desk(&directory, widgets.root.upcast_ref(), "page-return");
     adjustment.set_value(0.0);
     widgets.binding_ui.return_toggle.set_active(false);
     // Keys take their action from the catalog; dials still choose it here.
@@ -931,7 +955,7 @@ fn capture_model_previews(directory: &std::path::Path) {
             key_button(&fixture.widgets.key_labels[0]).emit_clicked();
             sidebar_tabs(&fixture.widgets).set_visible_child_name("dials");
             wait_for_frame(&fixture.widgets.root);
-            save(
+            save_desk(
                 directory,
                 fixture.widgets.root.upcast_ref(),
                 "main-window-xl",
@@ -982,5 +1006,5 @@ fn capture_two_device_window(directory: &std::path::Path) {
         .expect("the page viewport");
     page.vadjustment().set_value(0.0);
     wait_for_frame(&content);
-    save(directory, &content, "main-window-two-devices");
+    save_desk(directory, &content, "main-window-two-devices");
 }
