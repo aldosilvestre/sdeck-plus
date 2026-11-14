@@ -489,23 +489,36 @@ fn capture_documentation_screenshots() {
     save(&directory, reference.upcast_ref(), "shortcut-reference");
     reference.response(ResponseType::Close);
     widgets.feature_runtime.edit_profile("Studio");
-    // Studio is the current profile, so the menu shows Delete profile enabled (Base cannot be deleted).
+    // Studio is the current profile; its row shows Edit and Delete next to the name.
     widgets
         .feature_runtime
         .profile_tabs()
         .set_current_page(Some(2));
     wait_for_frame(&widgets.root);
-    // The compact command menu, then each command's dedicated modal dialog.
-    menu(&directory, &widgets.management_menu, "organize-menu");
-    let organize = widgets.management_menu.popover().unwrap();
-    organize.set_autohide(false);
+    // The rail head and every profile row, each with its own Edit and Delete icons.
+    let rail = {
+        let mut child = widgets.feature_runtime.profile_tabs().first_child();
+        loop {
+            let current = child.expect("the tab strip");
+            if current.css_name() == "header" {
+                break current;
+            }
+            child = current.next_sibling();
+        }
+    };
+    // A short window makes the strip hug its rows for the capture; restore the size after.
+    widgets.root.set_size_request(1000, 440);
+    wait_for_frame(&widgets.root);
+    save(&directory, &rail, "profile-rail");
+    widgets.root.set_size_request(1000, 950);
+    wait_for_frame(&widgets.root);
+    // The rail opens each profile dialog: a row's pencil edits that profile, "+" creates one.
     let open_profile_dialog = |command: &str| {
-        widgets.management_menu.popup();
-        descendants::<Button>(organize.upcast_ref())
-            .into_iter()
-            .find(|row| button_caption(row).as_deref() == Some(command))
-            .unwrap_or_else(|| panic!("{command} command row"))
-            .emit_clicked();
+        if command == "New profile" {
+            super::rail_tests::new_profile_button(&widgets).emit_clicked();
+        } else {
+            super::profile_row_tests::edit_button(&widgets, "Studio").emit_clicked();
+        }
         gtk::Window::toplevels()
             .snapshot()
             .into_iter()

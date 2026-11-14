@@ -415,7 +415,8 @@ fn the_profile_rail_is_the_same_at_every_width_with_names_and_labeled_tools() {
             let names: Vec<String> = (0..tabs.n_pages())
                 .filter_map(|index| tabs.nth_page(Some(index)))
                 .filter_map(|page| tabs.tab_label(&page))
-                .filter_map(|label| label.downcast::<gtk::Label>().ok())
+                // A row is the name followed by its Edit and Delete icons.
+                .filter_map(|row| row.first_child()?.downcast::<gtk::Label>().ok())
                 .map(|label| label.text().to_string())
                 .collect();
             assert!(
@@ -423,10 +424,11 @@ fn the_profile_rail_is_the_same_at_every_width_with_names_and_labeled_tools() {
                 "profile tabs show names, never initials: {names:?}"
             );
             assert!(names.contains(&"Base".to_string()));
-            // The tools keep their captions beside their icons.
-            for menu in [&widgets.management_menu, &widgets.obs_menu] {
+            // The tool keeps its caption beside its icon.
+            {
+                let menu = &widgets.obs_menu;
                 let content = menu.child().expect("menu button content");
-                // Both tools start at the same left edge as the profile names below them.
+                // The tool starts at the same left edge as the profile names below them.
                 assert_eq!(content.halign(), gtk::Align::Start);
                 let mut caption = None;
                 let mut child = content.first_child();

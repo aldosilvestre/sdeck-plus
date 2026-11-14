@@ -56,6 +56,8 @@ mod clamp;
 mod preview;
 #[path = "ui/scaled_bin.rs"]
 mod scaled_bin;
+#[path = "ui/stable_width.rs"]
+mod stable_width;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
@@ -705,8 +707,6 @@ struct MonitorWidgets {
     #[cfg(test)]
     help_menu: gtk::MenuButton,
     #[cfg(test)]
-    management_menu: gtk::MenuButton,
-    #[cfg(test)]
     artwork_section: gtk::Expander,
     #[cfg(test)]
     target_picker: gtk::DropDown,
@@ -855,8 +855,6 @@ struct Body {
     #[cfg(test)]
     obs_menu: gtk::MenuButton,
     #[cfg(test)]
-    management_menu: gtk::MenuButton,
-    #[cfg(test)]
     artwork_section: gtk::Expander,
     #[cfg(test)]
     target_picker: gtk::DropDown,
@@ -922,8 +920,6 @@ fn build_widgets(
         #[cfg(test)]
         obs_menu,
         #[cfg(test)]
-        management_menu,
-        #[cfg(test)]
         artwork_section,
         #[cfg(test)]
         target_picker,
@@ -944,8 +940,6 @@ fn build_widgets(
         obs_menu,
         #[cfg(test)]
         help_menu: header.help_menu,
-        #[cfg(test)]
-        management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
@@ -1190,7 +1184,7 @@ fn build_body(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    // Organize is a compact command menu; each profile form lives in its own modal dialog.
+    // Each profile form lives in its own modal dialog; the rail opens them.
     let edit_dialog = ui::profile_dialog(
         &window,
         "Edit profile",
@@ -1198,6 +1192,7 @@ fn build_body(
         feature_runtime.management(),
         "Close",
     );
+    feature_runtime.attach_profile_editor(&edit_dialog);
     let new_dialog = ui::profile_dialog(
         &window,
         "New profile",
@@ -1214,64 +1209,6 @@ fn build_body(
             error.set_visible(false);
         });
     }
-    let command_rows = [
-        (
-            ui::command_row("document-edit-symbolic", "Edit profile"),
-            edit_dialog.clone(),
-        ),
-        (
-            ui::command_row("list-add-symbolic", "New profile"),
-            new_dialog.clone(),
-        ),
-    ];
-    // Delete sits apart, after a divider; it is off while the shown profile is Base.
-    let delete_row = ui::command_row("user-trash-symbolic", "Delete profile");
-    delete_row.add_css_class("destructive");
-    let management_popover = ui::command_menu_sections(&[
-        &command_rows.each_ref().map(|(row, _)| row.clone()),
-        std::slice::from_ref(&delete_row),
-    ]);
-    for (row, dialog) in &command_rows {
-        let popover = management_popover.downgrade();
-        let dialog = dialog.downgrade();
-        row.connect_clicked(move |_| {
-            if let Some(popover) = popover.upgrade() {
-                popover.popdown();
-            }
-            if let Some(dialog) = dialog.upgrade() {
-                dialog.present();
-            }
-        });
-    }
-    {
-        let runtime = feature_runtime.clone();
-        let row = delete_row.clone();
-        let refresh = move || {
-            row.set_sensitive(
-                runtime
-                    .current_profile()
-                    .is_some_and(|profile| profile != sdeck_plus::layers::DEFAULT_LAYER),
-            );
-        };
-        refresh();
-        management_popover.connect_show(move |_| refresh());
-        let runtime = feature_runtime.clone();
-        let popover = management_popover.downgrade();
-        delete_row.connect_clicked(move |_| {
-            if let Some(popover) = popover.upgrade() {
-                popover.popdown();
-            }
-            runtime.confirm_current_profile_removal();
-        });
-    }
-    let management_menu = ui::menu_button(
-        "preferences-system-symbolic",
-        "Organize",
-        &management_popover,
-    );
-    // Profile tools stay secondary to the profile tabs they sit beside.
-    management_menu.set_has_frame(false);
-    layer_row.append(&management_menu);
     // Integration settings are global, not part of every action's form.
     let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
     feature_runtime.obs_panel.set_expanded(true);
@@ -1279,25 +1216,19 @@ fn build_body(
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
     // The rail never scrolls. Its head, top-down: the connection badge (a mirror of the header's
-    // label), the TOOLS heading with Organize and OBS, then the PROFILES heading with a
-    // compact New profile action beside it. The profile tabs follow; nothing sits at the foot.
+    // label), the OBS tool (a lone tool needs no TOOLS heading), then the PROFILES heading with
+    // a compact New profile action beside it. The profile tabs follow, each row carrying its own
+    // Edit and Delete icons; nothing sits at the foot.
     let rail_status = ui::mirror_badge(connection_badge);
-    // Tools start at the left edge, like the profile names below them.
-    for (menu, what) in [
-        (
-            &management_menu,
-            "Organize: edit the shown profile, create a new one or delete it.",
-        ),
-        (
-            &obs_menu,
-            "OBS: set the address and password used to connect to OBS Studio for OBS actions.",
-        ),
-    ] {
-        if let Some(content) = menu.child() {
+    // The tool starts at the left edge, like the profile names below it.
+    {
+        let what =
+            "OBS: set the address and password used to connect to OBS Studio for OBS actions.";
+        if let Some(content) = obs_menu.child() {
             content.set_halign(gtk::Align::Start);
         }
-        menu.set_tooltip_text(Some(what));
-        menu.update_property(&[gtk::accessible::Property::Description(what)]);
+        obs_menu.set_tooltip_text(Some(what));
+        obs_menu.update_property(&[gtk::accessible::Property::Description(what)]);
     }
     let new_profile = ui::icon_button("list-add-symbolic", "New profile");
     new_profile.set_has_frame(false);
@@ -1311,7 +1242,7 @@ fn build_body(
         new_profile.update_property(&[gtk::accessible::Property::Description(what)]);
     }
     {
-        // The same dialog the Organize menu's New profile row opens.
+        // The only New profile control.
         let dialog = new_dialog.downgrade();
         new_profile.connect_clicked(move |_| {
             if let Some(dialog) = dialog.upgrade() {
@@ -1328,7 +1259,6 @@ fn build_body(
     profiles_row.append(&new_profile);
     let rail_head = GtkBox::new(Orientation::Vertical, 2);
     rail_head.append(&rail_status);
-    rail_head.append(&ui::rail_heading("TOOLS"));
     rail_head.append(&layer_row);
     rail_head.append(&profiles_row);
     feature_runtime
@@ -1918,7 +1848,8 @@ fn build_body(
     side_panel.append(&binding_feedback);
     side_panel.append(&switcher);
     side_panel.append(&tabs);
-    sidebar.append(&side_panel);
+    // The catalog's width must not depend on the height the grid allocates it (see stable_width).
+    sidebar.append(&stable_width::StableWidth::new(&side_panel));
     body.append(&sidebar);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
@@ -1959,8 +1890,6 @@ fn build_body(
         binding_ui,
         #[cfg(test)]
         obs_menu,
-        #[cfg(test)]
-        management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
@@ -5298,6 +5227,7 @@ mod tests {
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
     mod profile_organize_dialog_tests;
+    mod profile_row_tests;
     mod rail_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
@@ -6209,7 +6139,7 @@ mod tests {
         let ui = widgets.binding_ui.clone();
         let toast = widgets.toast.clone();
         let viewport = widgets.root.clone();
-        let management_menu = widgets.management_menu.clone();
+        let tabs = widgets.feature_runtime.profile_tabs().clone();
         let surface = toast.wrap(&viewport);
         let stage = gtk::Fixed::new();
         stage.put(&surface, 0.0, 0.0);
@@ -6377,23 +6307,18 @@ mod tests {
                         .unwrap();
                 }
                 if scenario == 3 {
-                    // The profile forms live in modal dialogs: each shows its primary
+                    // The rail opens the profile forms in modal dialogs: each shows its primary
                     // button completely, with no scrolling.
-                    let panel = management_menu.popover().unwrap();
-                    panel.set_autohide(false);
                     for (command, button, file) in [
                         ("New profile", create_profile, "profile-create-panel"),
                         ("Edit profile", save_profile, "profile-save-panel"),
                     ] {
-                        management_menu.popup();
-                        let mut rows = Vec::new();
-                        collect_all_buttons(panel.upcast_ref(), &mut rows);
-                        let row = rows
-                            .iter()
-                            .find(|row| button_caption(row).as_deref() == Some(command));
-                        row.unwrap_or_else(|| panic!("{command} command row"))
-                            .emit_clicked();
-                        assert!(!panel.is_visible(), "a command closes the menu");
+                        if command == "New profile" {
+                            rail_tests::new_profile_button_in(&tabs).emit_clicked();
+                        } else {
+                            profile_row_tests::edit_button_in(&tabs, "Saved profile")
+                                .emit_clicked();
+                        }
                         let dialog = button.root().and_downcast::<gtk::Window>().unwrap();
                         assert!(dialog.is_visible() && dialog.is_modal());
                         wait_for_frame(&dialog);
@@ -7856,17 +7781,6 @@ mod tests {
             .unwrap_or_else(|| panic!("folder action {caption:?} is listed"))
     }
 
-    fn collect_all_buttons(widget: &gtk::Widget, found: &mut Vec<Button>) {
-        if let Some(button) = widget.downcast_ref::<Button>() {
-            found.push(button.clone());
-        }
-        let mut child = widget.first_child();
-        while let Some(current) = child {
-            child = current.next_sibling();
-            collect_all_buttons(&current, found);
-        }
-    }
-
     /// The forms of the New/Edit profile dialogs of `window`, shown or not.
     fn profile_dialog_bodies(window: &ApplicationWindow) -> Vec<gtk::Widget> {
         gtk::Window::toplevels()
@@ -8728,8 +8642,9 @@ mod tests {
             // The profile rail hugs the left edge; the page bar fills the rest of the measure.
             assert!((tab_header.x()).abs() <= 1.0);
             assert!(
-                tab_header.width() < shell.width() / 4.0,
-                "the profile rail stays narrow"
+                tab_header.width() < 260.0 && tab_header.width() < shell.width() / 2.0,
+                "the profile rail stays narrow: {}px",
+                tab_header.width()
             );
             assert!(pagebar.x() >= tab_header.x() + tab_header.width() - 1.0);
             // The content column scrolls horizontally when its minimum width exceeds the

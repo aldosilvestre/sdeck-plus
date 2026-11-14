@@ -1,4 +1,6 @@
-//! The Organize command menu and the profile dialogs it opens.
+//! The profile dialogs the rail opens (a row's pencil, the "+" beside PROFILES).
+use super::profile_row_tests::edit_button;
+use super::rail_tests::new_profile_button;
 use super::ui_refresh_tests::fixture;
 use super::*;
 
@@ -27,38 +29,26 @@ fn buttons_of(widget: &gtk::Widget, found: &mut Vec<Button>) {
     }
 }
 
-fn row(panel: &gtk::Popover, caption: &str) -> Button {
-    let mut found = Vec::new();
-    buttons_of(panel.upcast_ref(), &mut found);
-    found
-        .into_iter()
-        .find(|button| button_caption(button).as_deref() == Some(caption))
-        .unwrap_or_else(|| panic!("{caption} row"))
-}
-
 #[test]
-fn organize_popover_capture() {
+fn profile_dialog_capture() {
     run_gtk_test(|| {
-        let Some(fixture) = fixture("organize-popover", |_| {}) else {
+        let Some(fixture) = fixture("profile-dialog-capture", |_| {}) else {
             return;
         };
         let widgets = &fixture.widgets;
-        let panel = widgets.management_menu.popover().unwrap();
-        panel.set_autohide(false);
         let Some(directory) = std::env::var_os("STREAMDECK_CATALOG_QA_DIR") else {
             return;
         };
         let directory = std::path::Path::new(&directory);
-        let texture = rendered_text_popup(&panel, || widgets.management_menu.popup());
-        texture
-            .save_to_png(directory.join("organize-menu.png"))
-            .unwrap();
         for (caption, file) in [
             ("Edit profile", "organize-edit.png"),
             ("New profile", "organize-new.png"),
         ] {
-            widgets.management_menu.popup();
-            row(&panel, caption).emit_clicked();
+            if caption == "New profile" {
+                new_profile_button(widgets).emit_clicked();
+            } else {
+                edit_button(widgets, "Base").emit_clicked();
+            }
             let dialog = dialog_titled(&fixture.window, caption);
             wait_for_frame(&dialog);
             rendered_texture(&dialog, &dialog.child().unwrap())
@@ -75,11 +65,7 @@ fn profile_dialogs_have_a_titled_header_and_a_clear_button_hierarchy() {
         let Some(fixture) = fixture("organize-style", |_| {}) else {
             return;
         };
-        let panel = fixture.widgets.management_menu.popover().unwrap();
-        assert!(panel.has_css_class("organize-popover"));
-        panel.set_autohide(false);
-        fixture.widgets.management_menu.popup();
-        row(&panel, "Edit profile").emit_clicked();
+        edit_button(&fixture.widgets, "Base").emit_clicked();
         let dialog = dialog_titled(&fixture.window, "Edit profile");
         assert!(dialog.has_css_class("profile-dialog"));
         let content = dialog.child().unwrap();

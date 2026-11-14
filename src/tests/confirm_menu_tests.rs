@@ -1,5 +1,6 @@
-//! Confirmation dialogs, the headerless Menu popover and the Organize "Delete profile" row,
+//! Confirmation dialogs, the headerless Menu popover and the profile rows' Delete icons,
 //! as drawn in design/overlays/03-compact-command.html.
+use super::profile_row_tests::delete_button;
 use super::ui_refresh_tests::fixture;
 use super::*;
 
@@ -64,11 +65,9 @@ fn with_studio(store: &mut LayerStore) {
     store.select("Studio");
 }
 
-fn organize_delete(fixture: &super::ui_refresh_tests::Fixture) -> Button {
-    let panel = fixture.widgets.management_menu.popover().unwrap();
-    panel.set_autohide(false);
-    fixture.widgets.management_menu.popup();
-    find_row(panel.upcast_ref(), "Delete profile")
+/// The Delete icon in a profile's rail row.
+fn row_delete(fixture: &super::ui_refresh_tests::Fixture, profile: &str) -> Button {
+    delete_button(&fixture.widgets, profile).unwrap_or_else(|| panic!("{profile} Delete icon"))
 }
 
 #[test]
@@ -77,7 +76,7 @@ fn deleting_a_profile_asks_in_the_artboard_wording() {
         let Some(fixture) = fixture("confirm-profile", with_studio) else {
             return;
         };
-        organize_delete(&fixture).emit_clicked();
+        row_delete(&fixture, "Studio").emit_clicked();
         let dialog = open_confirmation().expect("confirmation is open");
         assert!(dialog.has_css_class("confirm-dialog"));
         assert_eq!(
@@ -142,7 +141,7 @@ fn cancel_and_escape_keep_the_profile_and_delete_removes_it() {
         let Some(fixture) = fixture("confirm-keep", with_studio) else {
             return;
         };
-        let row = organize_delete(&fixture);
+        let row = row_delete(&fixture, "Studio");
         let stores = || {
             fixture
                 .layers
@@ -167,32 +166,20 @@ fn cancel_and_escape_keep_the_profile_and_delete_removes_it() {
 }
 
 #[test]
-fn organize_ends_with_a_destructive_delete_row_that_is_off_for_base() {
+fn a_profile_delete_icon_is_destructive_and_off_for_base() {
     run_gtk_test(|| {
         let Some(base) = fixture("confirm-base", |_| {}) else {
             return;
         };
-        let row = organize_delete(&base);
+        let row = row_delete(&base, "Base");
         assert!(!row.is_sensitive(), "Base cannot be deleted");
         let Some(studio) = fixture("confirm-studio", with_studio) else {
             return;
         };
-        let row = organize_delete(&studio);
+        let row = row_delete(&studio, "Studio");
         assert!(row.is_sensitive());
-        assert!(row.has_css_class("destructive"));
-        // A divider separates it from Edit/New, and no shortcut chip is faked.
-        let divider = row.parent().and_then(|list| {
-            let mut child = list.first_child();
-            let mut seen = None;
-            while let Some(widget) = child {
-                if widget.downcast_ref::<gtk::Separator>().is_some() {
-                    seen = widget.next_sibling();
-                }
-                child = widget.next_sibling();
-            }
-            seen
-        });
-        assert_eq!(divider.as_ref(), Some(row.upcast_ref::<gtk::Widget>()));
+        assert!(row.has_css_class("destructive-action"));
+        // No shortcut chip is faked on the icon.
         let mut chips = Vec::new();
         descendants_with_class(row.upcast_ref(), "key-hint", &mut chips);
         assert!(chips.is_empty());
@@ -275,7 +262,7 @@ fn the_import_confirmation_reads_like_the_other_confirmations() {
     });
 }
 
-/// Opt-in capture (STREAMDECK_CATALOG_QA_DIR): confirmation, Menu popover and Organize menu.
+/// Opt-in capture (STREAMDECK_CATALOG_QA_DIR): confirmation and Menu popover.
 #[test]
 fn confirm_and_menu_capture() {
     run_gtk_test(|| {
@@ -286,13 +273,6 @@ fn confirm_and_menu_capture() {
             return;
         };
         let directory = std::path::Path::new(&directory);
-        let widgets = &fixture.widgets;
-        let organize = widgets.management_menu.popover().unwrap();
-        organize.set_autohide(false);
-        rendered_text_popup(&organize, || widgets.management_menu.popup())
-            .save_to_png(directory.join("organize-delete-menu.png"))
-            .unwrap();
-        widgets.management_menu.popdown();
         let menu = crate::configuration_menu::ConfigurationMenu::new(
             &fixture.window,
             &gtk::Box::new(gtk::Orientation::Vertical, 0),
@@ -305,8 +285,7 @@ fn confirm_and_menu_capture() {
             .save_to_png(directory.join("menu-popover.png"))
             .unwrap();
         anchor.popdown();
-        widgets.management_menu.popup();
-        find_row(organize.upcast_ref(), "Delete profile").emit_clicked();
+        row_delete(&fixture, "Studio").emit_clicked();
         let dialog = open_confirmation().expect("confirmation");
         wait_for_frame(&dialog);
         rendered_texture(&dialog, &dialog.child().unwrap())

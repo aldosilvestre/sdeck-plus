@@ -126,3 +126,32 @@ fn the_catalog_shrinks_to_its_250px_minimum_before_the_column_scrolls() {
         }
     });
 }
+
+/// The catalog's horizontal minimum never depends on the height it is allocated: the content
+/// grid sizes its columns from it, so a height-dependent minimum made the catalog overhang its
+/// slot in one of two stable layouts (645px high wanted 505px, 657px high fit in 250px).
+#[test]
+fn the_catalog_minimum_width_does_not_depend_on_its_height() {
+    run_gtk_test(|| {
+        for model in [&PLUS, &PLUS_XL] {
+            let Some(f) = model_fixture("height-free", model, |_, _| {}) else {
+                return;
+            };
+            let root: gtk::Widget = f.widgets.root.clone().upcast();
+            root.set_size_request(-1, -1);
+            root.allocate(DEFAULT_WIDTH, 700, -1, None);
+            let side = class_of(&root, "settings-sidebar");
+            let minimum = |height: i32| side.measure(Orientation::Horizontal, height).0;
+            let free = minimum(-1);
+            for height in [645, 657, 700, 900] {
+                assert_eq!(
+                    minimum(height),
+                    free,
+                    "{}: minimum width at height {height}",
+                    model.id
+                );
+            }
+            assert!(free <= 250, "{}: the catalog minimum is {free}", model.id);
+        }
+    });
+}

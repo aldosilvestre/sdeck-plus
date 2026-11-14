@@ -12,6 +12,10 @@ use sdeck_plus::{
 };
 
 pub(crate) const RETURN_OPTION_LABEL: &str = "Return to the previous profile when focus leaves";
+/// Rail profile names reserve this many characters and ellipsize past the maximum, so the rail
+/// keeps one width however long a name is.
+const PROFILE_NAME_WIDTH_CHARS: i32 = 13;
+const PROFILE_NAME_MAX_CHARS: i32 = 16;
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
@@ -293,6 +297,8 @@ pub(crate) struct FeatureRuntime {
     touchscreen_controls: touchscreen::TouchscreenControls,
     organization_management: GtkBox,
     profile_delete: Button,
+    /// The Edit profile dialog the rail rows' Edit icons present (owned by the window).
+    profile_editor: Rc<RefCell<Option<glib::WeakRef<gtk::Window>>>>,
     profile_tabs: gtk::Notebook,
     profile_pages: Rc<RefCell<Vec<(String, GtkBox)>>>,
     profile_content: Rc<RefCell<Option<GtkBox>>>,
@@ -458,6 +464,7 @@ impl FeatureRuntime {
             touchscreen_controls: touchscreen::TouchscreenControls::new(),
             organization_management,
             profile_delete,
+            profile_editor: Rc::new(RefCell::new(None)),
             profile_tabs,
             profile_pages: Rc::new(RefCell::new(Vec::new())),
             profile_content: Rc::new(RefCell::new(None)),
@@ -678,14 +685,8 @@ impl FeatureRuntime {
             self.profile_pages.borrow_mut().clear();
             for profile in profiles {
                 let page = GtkBox::new(Orientation::Vertical, 0);
-                let label = Label::new(Some(&profile));
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_max_width_chars(12);
-                // One width for every rail: long names ellipsize instead of widening it.
-                label.set_width_chars(10);
-                label.set_tooltip_text(Some(&profile));
-                self.profile_tabs.append_page(&page, Some(&label));
+                let row = self.profile_row(&profile);
+                self.profile_tabs.append_page(&page, Some(&row));
                 self.profile_pages.borrow_mut().push((profile, page));
             }
         }
@@ -715,6 +716,74 @@ impl FeatureRuntime {
         self.updating.set(previous);
         if settings_changed {
             self.refresh_application_editor();
+        }
+    }
+
+    /// A tab label: the profile name, then small Edit and Delete icons. The icons are buttons
+    /// inside the tab, so they take their own clicks while the name still selects the tab.
+    fn profile_row(&self, profile: &str) -> GtkBox {
+        let row = GtkBox::new(Orientation::Horizontal, 2);
+        row.add_css_class("profile-row");
+        let label = Label::new(Some(profile));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(PROFILE_NAME_MAX_CHARS);
+        // One width for every rail: long names ellipsize instead of widening it.
+        label.set_width_chars(PROFILE_NAME_WIDTH_CHARS);
+        label.set_tooltip_text(Some(profile));
+        row.append(&label);
+        let action = |icon: &str, class: &str, caption: String| {
+            let button = crate::ui::icon_button(icon, &caption);
+            button.set_has_frame(false);
+            button.add_css_class("rail-row-action");
+            button.add_css_class(class);
+            button.set_valign(gtk::Align::Center);
+            button
+        };
+        let edit = action(
+            "document-edit-symbolic",
+            "profile-row-edit",
+            format!("Edit {profile}"),
+        );
+        let callback = self.clone();
+        let name = profile.to_owned();
+        edit.connect_clicked(move |_| callback.open_profile_editor(&name));
+        row.append(&edit);
+        let delete = action(
+            "user-trash-symbolic",
+            "profile-row-delete",
+            format!("Delete {profile}"),
+        );
+        delete.add_css_class("destructive-action");
+        if profile == sdeck_plus::layers::DEFAULT_LAYER {
+            // Kept (disabled) so every row's icons line up.
+            delete.set_sensitive(false);
+            delete.set_tooltip_text(Some("Base cannot be deleted."));
+        }
+        let callback = self.clone();
+        let name = profile.to_owned();
+        delete.connect_clicked(move |_| callback.confirm_profile_row_removal(&name));
+        row.append(&delete);
+        row
+    }
+
+    /// The window registers its Edit profile dialog once; the rows' Edit icons present it.
+    pub(crate) fn attach_profile_editor(&self, dialog: &gtk::Window) {
+        *self.profile_editor.borrow_mut() = Some(dialog.downgrade());
+    }
+
+    /// Edit a profile's automatic switching without showing it first: the dialog edits the
+    /// profile its picker names, so point the picker at the row's profile.
+    fn open_profile_editor(&self, profile: &str) {
+        self.edit_profile(profile);
+        let dialog = self
+            .profile_editor
+            .borrow()
+            .as_ref()
+            .and_then(glib::WeakRef::upgrade);
+        if let Some(dialog) = dialog {
+            dialog.present();
         }
     }
 

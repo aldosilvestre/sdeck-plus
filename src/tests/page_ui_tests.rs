@@ -130,16 +130,12 @@ pub(super) fn capture_page_workflow(
     save("delete-page", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);
 
-    // New and Edit profile are dedicated modals behind the Organize command menu.
+    // New and Edit profile are dedicated modals: the rail's "+" and a row's pencil open them.
     let open_command = |command: &str| {
-        let organize = widgets.management_menu.popover().unwrap();
-        organize.set_autohide(false);
-        widgets.management_menu.popup();
-        buttons_in(organize.upcast_ref())
-            .iter()
-            .find(|row| button_caption(row).as_deref() == Some(command))
-            .unwrap_or_else(|| panic!("Organize command row: {command}"))
-            .emit_clicked();
+        match command {
+            "New profile" => super::rail_tests::new_profile_button(widgets).emit_clicked(),
+            _ => super::profile_row_tests::edit_button(widgets, "Base").emit_clicked(),
+        }
         gtk::Window::toplevels()
             .snapshot()
             .into_iter()

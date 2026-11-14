@@ -174,20 +174,10 @@ impl FeatureRuntime {
         self.confirm_removal(Removal::Profile(profile));
     }
 
-    /// The profile the rail currently shows, when organization is available.
-    pub(crate) fn current_profile(&self) -> Option<String> {
-        self.organization
-            .borrow()
-            .as_ref()
-            .map(|organization| organization.current(&self.layers.borrow()).profile)
-    }
-
-    /// Ask before deleting the profile shown now (Base is never offered).
-    pub(crate) fn confirm_current_profile_removal(&self) {
-        if let Some(profile) = self.current_profile() {
-            if profile != sdeck_plus::layers::DEFAULT_LAYER {
-                self.confirm_removal(Removal::Profile(profile));
-            }
+    /// Ask before deleting a profile row's profile (Base is never offered).
+    pub(crate) fn confirm_profile_row_removal(&self, profile: &str) {
+        if profile != sdeck_plus::layers::DEFAULT_LAYER {
+            self.confirm_removal(Removal::Profile(profile.to_owned()));
         }
     }
 

@@ -378,8 +378,8 @@ The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the + XL key at
 40px). At the default 1120x700 window the + XL card still sits beside the
-352px action catalog (570 + 16 + 352 = 938 of the usable width left of the rail), so
-the settings column stays usable. A narrower window never wraps the catalog
+action catalog: the 234px rail leaves 886px, so the catalog gives up part of its natural
+352px (down toward its 250px minimum) and the settings column stays usable. A narrower window never wraps the catalog
 below the workspace, for either model: the catalog shrinks toward its 250px
 minimum and then the content column scrolls horizontally (the rail and header
 stay put), so an action can always be dragged from the catalog onto a key or
@@ -408,7 +408,7 @@ captions may ellipsize) and the live-information check caption wraps.
 At narrow widths the shell shrinks to the available width; the two columns
 stay side by side down to their combined minimum (workspace + 16px + the 250px
 catalog; measured content minimum 706px for the + and 836px for the + XL, which
-with the 166px the rail takes (rail plus its gap) is a window of 872px and 1002px),
+with the 234px the rail takes (rail plus its gap) is a window of 940px and 1070px),
 and below that the content column scrolls horizontally, as it
 does at 640px, instead of stacking.
 These two size-only containers are the only custom layout; there is no resize
@@ -419,27 +419,33 @@ help on hover, or on keyboard focus when navigating with the keyboard, in a ligh
 with the topic as its title; no click is needed, the popover ignores the pointer so it never
 blocks the form, and there is no second native tooltip. A form that opens with the button
 focused does not pop the help open by itself.
-The Organize menu is the compact command menu of the approved overlay design: a small
-popover of frameless rows (Edit profile, New profile), a divider, then a red **Delete
-profile** row, with no header, tabs or form fields, and no shortcut hints, because none are
-bound. Delete profile asks for confirmation (below) and is disabled while the shown profile is
-Base, which cannot be deleted. Choosing a row closes the menu and opens that
-form in its own modal dialog (below). Each dialog is transient for the main window, titled
-"Edit profile" or "New profile", with a one-line subtitle; the Base note is a callout with a
-cyan accent edge; the Edit footer has a divider and two equal-width buttons (Save changes
-primary, Delete profile destructive). Escape or the footer button (Close in Edit, Cancel in
-New; both show the real Esc hint) hides the dialog without saving; Cancel and Esc discard a
-New draft.
+There is no Organize menu: profiles are edited and deleted from their own rail rows (below) and
+created with the "+" beside PROFILES. Each of those controls opens its form in its own modal
+dialog, transient for the main window, titled "Edit profile" or "New profile", with a one-line
+subtitle; the Base note is a callout with a cyan accent edge; the Edit footer has a divider and
+two equal-width buttons (Save changes primary, Delete profile destructive). Escape or the footer
+button (Close in Edit, Cancel in New; both show the real Esc hint) hides the dialog without
+saving; Cancel and Esc discard a New draft. Deleting asks for confirmation (below); Base cannot
+be deleted.
 The profile tabs form a vertical rail at the left of the content, identical at every window
 width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
-badge, a "TOOLS" sub-heading (11px, bold, muted) with Organize and OBS, then a "PROFILES"
-sub-heading with a compact "+" New profile action beside it (the same dialog as the Organize
-menu's New profile row), then the profile names (about 12 characters, ellipsized). Nothing is
-packed at the rail foot. Each tool and New profile has a tooltip that says what it does
-("Organize: ...", "OBS: ...", "New profile: ...") and the same text as its accessible
-description. The badge, tools and PROFILES row are the Notebook's start action widget. Because the rail is outside
-the scrolling region the tools are always visible and their popovers open fully, in a 1120x700
-window and at the smallest window. The tools are frameless (hover shows the surface) so they stay
+badge, the OBS tool, then a "PROFILES" sub-heading (11px, bold, muted) with a compact "+" New
+profile action beside it, then the profile rows. A lone tool needs no "TOOLS" heading, so OBS
+sits above PROFILES without one. The rail is 234px wide (it was 166px): 13 characters of name
+(ellipsized from 16, with the full name in a tooltip) and two small icons per row. "+" alone
+describes a new profile and is the only New profile control; it keeps its tooltip and accessible
+name ("New profile: ..."). Each row is the tab's label: the profile name, then a frameless
+pencil (Edit) and a frameless red trash (Delete), the same icons as the page bar, 18px hit areas
+that fill on hover and show the keyboard focus ring. Their tooltips and accessible names include
+the profile ("Edit Studio", "Delete Studio"). The icons are buttons inside the tab, so they take
+their own clicks and never switch the profile; clicking the name still does. Edit opens the Edit
+profile dialog pointed at that row's profile without switching to it. Delete opens the delete
+confirmation for that profile; Base keeps a disabled Delete ("Base cannot be deleted.") so every
+row's icons line up. Nothing is packed at the rail foot. OBS and "+" have a tooltip that says
+what they do ("OBS: ...", "New profile: ...") and the same text as their accessible description.
+The badge, OBS and PROFILES row are the Notebook's start action widget. Because the rail is
+outside the scrolling region OBS is always visible and its popover opens fully, in a 1120x700
+window and at the smallest window. OBS is frameless (hover shows the surface) so it stays
 secondary to the tabs. Menu is the window's one configuration menu button and lives in the
 header, not the rail: on the title row, completely at the right edge and vertically centred on the
 "SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
@@ -448,8 +454,7 @@ every model shown. The header has two rows: the title row (title, update indicat
 Menu) and, under it, the connection detail with the Current selector at its right when two models
 are connected, so the selector never overlaps the Menu. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
-inside the window. The Organize menu only opens the profile creation, application
-association and profile deletion dialogs. The page bar separates navigation from
+inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
 breadcrumb with a 12px gap, and page-owned folders and New page trail it,
 followed by frameless square pencil and red-trash icons (still named, with
@@ -497,8 +502,8 @@ two columns fit.
   label, accessible name and tooltip. Save is the editor's only primary action.
   Destructive actions use the native destructive style, and every delete or
   remove (binding, page, folder, touch page, profile) uses the same trash icon;
-  clearing text or artwork keeps the clear icon. Organize uses the manage
-  (tools) icon and button text uses the plain text icon.
+  clearing text or artwork keeps the clear icon. Profile rows use the pencil and
+  trash of the page bar, and button text uses the plain text icon.
 - **Binding icons:** one vocabulary (`src/binding_icons.rs`) maps every
   action to a duotone vector glyph on a 24-unit grid: a soft fill (35% of
   the ink) under a crisp 1.85-unit round stroke (2.2-2.6 for chevrons, bars
@@ -640,8 +645,8 @@ two columns fit.
   unrelated application focus; a matching application can select its profile
   automatically. Save new profile and Save profile use the existing native save
   primitive; completion feedback follows the actual disk result.
-- **Profile manager:** Organize lists Edit profile and New profile as command
-  rows; each opens a dedicated modal dialog, and only one task is shown at a time.
+- **Profile manager:** a profile row's pencil opens Edit profile for that profile and
+  the rail's "+" opens New profile, each a dedicated modal dialog; only one task is shown at a time.
   Editing groups the profile selector, optional auto-switch application, the
   "Return to the previous profile when focus leaves" check (wrapped text, enabled
   only while the application field has text and never for Base) and

@@ -627,3 +627,12 @@ popover.dial-event-choice > contents { padding: 6px; }
 scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
 button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
 button.rail-new-profile.flat:hover { background-color: @desk_hover; }
+
+/* Each profile row: the name, then small frameless Edit and Delete icons that fill on hover. */
+.profile-tabs > header.left tab { padding: 6px 6px 6px 10px; }
+.profile-row button.rail-row-action { min-width: 18px; min-height: 18px; padding: 3px; margin: 0; border-radius: 6px; border-color: transparent; background-color: transparent; }
+.profile-row button.rail-row-action:hover { background-color: @desk_hover; }
+.profile-row button.rail-row-action.destructive-action:hover:not(:disabled) { background-color: alpha(@desk_error, 0.12); }
+.profile-row button.rail-row-action:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.profile-row button.rail-row-action.destructive-action:disabled { background-color: transparent; border-color: transparent; }
+.profile-row button.rail-row-action:disabled image { background-color: transparent; }

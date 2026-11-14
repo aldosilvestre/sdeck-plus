@@ -1,5 +1,6 @@
-//! The fixed profile rail: badge, TOOLS (Organize, OBS), then PROFILES with New profile beside its
-//! heading and the profile tabs, while only the content column scrolls. The Menu button is in the
+//! The fixed profile rail: badge, the OBS tool, then PROFILES with New profile beside its heading
+//! and the profile tabs (each row with its own Edit and Delete icons), while only the content
+//! column scrolls. The Menu button is in the
 //! header, on the title row.
 use super::organize_popover_tests::dialog_titled;
 use super::ui_refresh_tests::fixture;
@@ -28,12 +29,13 @@ fn rail_label(widgets: &MonitorWidgets, text: &str) -> Label {
         .unwrap_or_else(|| panic!("rail label {text}"))
 }
 
-fn new_profile_button(widgets: &MonitorWidgets) -> Button {
+pub(super) fn new_profile_button(widgets: &MonitorWidgets) -> Button {
+    new_profile_button_in(widgets.feature_runtime.profile_tabs())
+}
+
+pub(super) fn new_profile_button_in(tabs: &gtk::Notebook) -> Button {
     let mut buttons: Vec<Button> = Vec::new();
-    collect(
-        widgets.feature_runtime.profile_tabs().upcast_ref(),
-        &mut buttons,
-    );
+    collect(tabs.upcast_ref(), &mut buttons);
     buttons
         .into_iter()
         .find(|button| button.has_css_class("rail-new-profile"))
@@ -45,7 +47,7 @@ fn top(widget: &impl IsA<gtk::Widget>, widgets: &MonitorWidgets) -> f32 {
 }
 
 #[test]
-fn the_rail_lists_badge_tools_then_profiles_with_new_profile_beside_its_heading() {
+fn the_rail_lists_badge_obs_then_profiles_with_new_profile_beside_its_heading() {
     run_gtk_test(|| {
         let Some(fixture) = fixture("rail-order", |_| {}) else {
             return;
@@ -66,15 +68,13 @@ fn the_rail_lists_badge_tools_then_profiles_with_new_profile_beside_its_heading(
         let base_tab = rail_label(widgets, "Base");
         let ordered = [
             top(&badge, widgets),
-            top(&rail_label(widgets, "TOOLS"), widgets),
-            top(&widgets.management_menu, widgets),
             top(&widgets.obs_menu, widgets),
             top(&profiles_heading, widgets),
             top(&base_tab, widgets),
         ];
         assert!(
             ordered.windows(2).all(|pair| pair[0] < pair[1]),
-            "badge, TOOLS, Organize, OBS, PROFILES, profiles: {ordered:?}"
+            "badge, OBS, PROFILES, profiles: {ordered:?}"
         );
         // New profile sits on the PROFILES heading's row, to its right, before the tabs.
         let heading = profiles_heading.compute_bounds(&widgets.root).unwrap();
@@ -96,16 +96,13 @@ fn the_rail_lists_badge_tools_then_profiles_with_new_profile_beside_its_heading(
             .map(|label| label.compute_bounds(&widgets.root).unwrap())
             .map(|bounds| bounds.y() + bounds.height())
             .fold(0.0_f32, f32::max);
-        for tool in [
-            top(&widgets.management_menu, widgets),
-            top(&widgets.obs_menu, widgets),
-            top(&new_profile, widgets),
-        ] {
+        for tool in [top(&widgets.obs_menu, widgets), top(&new_profile, widgets)] {
             assert!(tool < last_tab, "no tool or action below the last tab");
         }
         assert!(!widgets.help_menu.is_ancestor(tabs), "Menu left the rail");
         let content = widgets.scroller.compute_bounds(&widgets.root).unwrap();
-        for tool in [&widgets.management_menu, &widgets.obs_menu] {
+        {
+            let tool = &widgets.obs_menu;
             let bounds = tool.compute_bounds(&widgets.root).unwrap();
             assert!(
                 bounds.x() + bounds.width() <= content.x() + 0.5,
@@ -175,11 +172,7 @@ fn every_rail_tool_explains_what_it_does_in_its_tooltip_and_accessible_descripti
             return;
         };
         let widgets = &fixture.widgets;
-        for (name, tool) in [
-            ("Organize", &widgets.management_menu),
-            ("OBS", &widgets.obs_menu),
-            ("Menu", &widgets.help_menu),
-        ] {
+        for (name, tool) in [("OBS", &widgets.obs_menu), ("Menu", &widgets.help_menu)] {
             let tip = tool.tooltip_text().expect("tool tooltip");
             assert!(
                 tip.starts_with(&format!("{name}: ")) && tip.len() > name.len() + 20,
@@ -217,11 +210,7 @@ fn the_rail_tools_and_their_popovers_fit_the_window_without_scrolling() {
             widgets.root.set_size_request(width, height);
             wait_for_frame(&fixture.window);
             assert_eq!(widgets.scroller.vadjustment().value(), 0.0);
-            for (name, tool) in [
-                ("Organize", &widgets.management_menu),
-                ("OBS", &widgets.obs_menu),
-                ("Menu", &widgets.help_menu),
-            ] {
+            for (name, tool) in [("OBS", &widgets.obs_menu), ("Menu", &widgets.help_menu)] {
                 let bounds = tool.compute_bounds(&widgets.root).unwrap();
                 assert!(
                     bounds.y() >= 0.0 && bounds.y() + bounds.height() <= height as f32,
@@ -262,7 +251,7 @@ fn the_rail_does_not_move_when_the_content_scrolls() {
         );
         let tracked = |widgets: &MonitorWidgets| {
             [
-                top(&widgets.management_menu, widgets),
+                top(&widgets.obs_menu, widgets),
                 top(&rail_label(widgets, "PROFILES"), widgets),
                 top(&rail_label(widgets, "Base"), widgets),
             ]

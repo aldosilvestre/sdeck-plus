@@ -1,4 +1,6 @@
-//! Organize is a compact command menu; New/Edit profile open dedicated modal dialogs.
+//! New profile (the rail's +) and Edit profile (a row's pencil) open dedicated modal dialogs.
+use super::profile_row_tests::edit_button;
+use super::rail_tests::new_profile_button;
 use super::ui_refresh_tests::{fixture, Fixture};
 use super::*;
 
@@ -52,40 +54,19 @@ fn open_window(fixture: &Fixture, title: &str) -> Option<gtk::Window> {
     open_dialog(&fixture.window, title)
 }
 
-/// Open the Organize menu and activate one of its rows, as a user would.
+/// Activate the rail control for `command`, as a user would: the "+" beside PROFILES for a new
+/// profile, the Base row's pencil for editing.
 fn choose(fixture: &Fixture, command: &str) -> gtk::Window {
-    let panel = fixture.widgets.management_menu.popover().unwrap();
-    panel.set_autohide(false);
-    fixture.widgets.management_menu.popup();
-    named(panel.upcast_ref(), command).emit_clicked();
-    assert!(!panel.is_visible(), "choosing a command closes the menu");
+    press(&fixture.widgets, command);
     open_window(fixture, command).unwrap_or_else(|| panic!("{command} opens its dialog"))
 }
 
-#[test]
-fn organize_menu_lists_only_the_profile_commands() {
-    run_gtk_test(|| {
-        let Some(fixture) = fixture("organize-menu", |_| {}) else {
-            return;
-        };
-        let panel = fixture.widgets.management_menu.popover().unwrap();
-        assert!(panel.has_css_class("command-menu"));
-        let rows = all::<Button>(panel.upcast_ref());
-        let names: Vec<_> = rows.iter().map(caption).collect();
-        assert_eq!(names, ["Edit profile", "New profile", "Delete profile"]);
-        // Compact: no form fields, tabs or help inside the menu, and no invented shortcut hints.
-        assert!(all::<Entry>(panel.upcast_ref()).is_empty());
-        assert!(all::<gtk::Stack>(panel.upcast_ref()).is_empty());
-        assert!(all::<gtk::DropDown>(panel.upcast_ref()).is_empty());
-        assert!(all::<Label>(panel.upcast_ref())
-            .iter()
-            .all(|label| !label.has_css_class("key-hint")));
-        assert!(rows.iter().all(|row| row.has_css_class("command-row")));
-        assert!(
-            open_window(&fixture, "New profile").is_none()
-                && open_window(&fixture, "Edit profile").is_none()
-        );
-    });
+fn press(widgets: &MonitorWidgets, command: &str) {
+    match command {
+        "New profile" => new_profile_button(widgets).emit_clicked(),
+        "Edit profile" => edit_button(widgets, "Base").emit_clicked(),
+        other => panic!("no rail control for {other}"),
+    }
 }
 
 #[test]
@@ -174,7 +155,7 @@ fn edit_profile_opens_its_form_in_a_modal_and_close_changes_nothing() {
     });
 }
 
-/// The profile manager end to end: command rows, both dialogs, validation, Cancel,
+/// The profile manager end to end: rail controls, both dialogs, validation, Cancel,
 /// creation and deletion through the real controls, in both themes and two sizes.
 pub(super) fn assert_compact_profile_manager() {
     let (root, mut store, artwork_store, _) = artwork_fixture("profile-manager");
@@ -205,11 +186,8 @@ pub(super) fn assert_compact_profile_manager() {
     stage.put(&widgets.root, 0.0, 0.0);
     window.set_child(Some(&stage));
     window.present();
-    let panel = widgets.management_menu.popover().unwrap();
-    panel.set_autohide(false);
     let open = |caption: &str| {
-        widgets.management_menu.popup();
-        named(panel.upcast_ref(), caption).emit_clicked();
+        press(&widgets, caption);
         open_dialog(&window, caption).unwrap_or_else(|| panic!("{caption} dialog opens"))
     };
     let save = |dialog: &gtk::Window, name: &str| {
@@ -289,5 +267,5 @@ pub(super) fn assert_compact_profile_manager() {
     settings.set_gtk_application_prefer_dark_theme(original_dark);
     window.destroy();
     std::fs::remove_dir_all(root).unwrap();
-    eprintln!("GTK compact profile manager verified: command menu, modal dialogs, validation, cancel, creation and deletion");
+    eprintln!("GTK compact profile manager verified: rail controls, modal dialogs, validation, cancel, creation and deletion");
 }

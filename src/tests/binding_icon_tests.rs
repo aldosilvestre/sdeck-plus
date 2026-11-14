@@ -469,20 +469,27 @@ fn assert_icon_action_consistency() {
     for (caption, names) in &deletes {
         assert_eq!(names, &["user-trash-symbolic"], "{caption}");
     }
-    let organize = descendants::<gtk::MenuButton>(root)
+    // Profile editing and deleting are the rows' pencil and trash, the same icons as the page bar.
+    let rows = descendants::<Button>(root)
         .into_iter()
-        .find(|button| {
-            button
+        .filter(|button| button.has_css_class("rail-row-action"))
+        .collect::<Vec<_>>();
+    assert!(!rows.is_empty(), "profile rows carry icon actions");
+    for button in rows {
+        let expected = if button.has_css_class("profile-row-edit") {
+            "document-edit-symbolic"
+        } else {
+            "user-trash-symbolic"
+        };
+        assert_eq!(image_names(button.upcast_ref()), [expected]);
+    }
+    assert!(
+        !descendants::<gtk::MenuButton>(root)
+            .into_iter()
+            .any(|button| button
                 .tooltip_text()
-                .is_some_and(|tip| tip.starts_with("Organize: "))
-        })
-        .expect("Organize menu");
-    assert_eq!(
-        image_names(organize.upcast_ref())
-            .first()
-            .map(String::as_str),
-        Some("preferences-system-symbolic"),
-        "profile organization is not a new-folder action"
+                .is_some_and(|tip| tip.starts_with("Organize"))),
+        "there is no Organize menu"
     );
     // Text and image editing moved to each key's right-click menu.
     assert!(

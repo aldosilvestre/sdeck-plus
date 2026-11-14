@@ -126,7 +126,8 @@ fn assert_page_toolbar_hierarchy() {
     }
 
     // Profile tools beside the tabs are secondary to the tabs themselves.
-    for menu in [&widgets.management_menu, &widgets.obs_menu] {
+    {
+        let menu = &widgets.obs_menu;
         assert!(!menu.has_frame(), "profile tools are frameless");
         assert!(menu.tooltip_text().is_some());
     }
