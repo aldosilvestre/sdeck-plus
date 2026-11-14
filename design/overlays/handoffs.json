@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "chosen": "03-compact-command.html",
+  "handoffs": {
+    "03-compact-command.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-13T14:37:03.257Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-13T20:20:05.915Z",
+      "feature": "odd/tasks/audio-input-controls.md",
+      "note": "Compact Organize/Menu command menus, profile modals, delete confirmations (Cancel Esc / red Delete), toast tone glyph, icon+ink banners, microphone icons. Open: page/folder delete bodies without counts; Discard-changes dialog unchanged."
+    }
+  }
+}

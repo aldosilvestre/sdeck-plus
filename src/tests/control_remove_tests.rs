@@ -356,3 +356,36 @@ fn removing_the_touch_strip_keeps_the_sections() {
         )
     });
 }
+
+#[test]
+fn removing_a_binding_offers_undo_in_the_toast_and_using_it_restores_the_binding() {
+    run_gtk_test(|| {
+        catalog_fixture("remove-toast-undo", |widgets, layers, _requests| {
+            let ui = &widgets.binding_ui;
+            {
+                let mut store = layers.borrow_mut();
+                store
+                    .bind("Base", Trigger::EncoderPress(2), media(MediaCommand::Mute))
+                    .unwrap();
+            }
+            select_dial(widgets, layers, 2);
+            click(widgets, "Remove binding");
+            assert!(layers
+                .borrow()
+                .binding("Base", &Trigger::EncoderPress(2))
+                .is_none());
+            // The toast says what happened and carries the same undo as the toolbar button.
+            assert!(widgets.toast.action.is_visible());
+            assert_eq!(widgets.toast.action.label().as_deref(), Some("Undo"));
+            assert!(widgets.toast.label.text().contains("removed"));
+            assert!(ui.undo_remove.is_visible());
+            widgets.toast.action.emit_clicked();
+            assert_eq!(
+                layers.borrow().binding("Base", &Trigger::EncoderPress(2)),
+                Some(media(MediaCommand::Mute))
+            );
+            assert!(!ui.undo_remove.is_visible());
+            assert!(!widgets.toast.root.reveals_child());
+        })
+    });
+}

@@ -1,8 +1,13 @@
 use super::transport::Session;
 use super::{ObsAction, ObsConfig, ObsStatus};
+use crate::desktop_actions::VolumeDirection;
 use serde::{de::IgnoredAny, Deserialize};
 use serde_json::json;
 use std::io;
+
+/// Range of an OBS input volume in decibels (obs-websocket `inputVolumeDb`).
+const MIN_INPUT_VOLUME_DB: f64 = -100.0;
+const MAX_INPUT_VOLUME_DB: f64 = 26.0;
 
 /// A blocking OBS client. New connections are made for each operation.
 #[derive(Debug)]
@@ -54,6 +59,28 @@ impl Client {
             }
             ObsAction::ToggleMute(input) => {
                 session.request::<IgnoredAny>("ToggleInputMute", json!({"inputName":input}))?;
+            }
+            ObsAction::InputVolume {
+                input,
+                direction,
+                db,
+            } => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Level {
+                    input_volume_db: f64,
+                }
+                let level: Level = session.query("GetInputVolume", json!({"inputName":input}))?;
+                let step = f64::from(*db);
+                let target = match direction {
+                    VolumeDirection::Up => level.input_volume_db + step,
+                    VolumeDirection::Down => level.input_volume_db - step,
+                }
+                .clamp(MIN_INPUT_VOLUME_DB, MAX_INPUT_VOLUME_DB);
+                session.request::<IgnoredAny>(
+                    "SetInputVolume",
+                    json!({"inputName":input,"inputVolumeDb":target}),
+                )?;
             }
             ObsAction::SourceVisibility {
                 scene,

@@ -10,6 +10,12 @@ use sdeck_plus::{
     obs::ObsConfig,
     organization::{NavigationAction, Organization},
 };
+
+pub(crate) const RETURN_OPTION_LABEL: &str = "Return to the previous profile when focus leaves";
+/// Rail profile names reserve this many characters and ellipsize past the maximum, so the rail
+/// keeps one width however long a name is.
+const PROFILE_NAME_WIDTH_CHARS: i32 = 13;
+const PROFILE_NAME_MAX_CHARS: i32 = 16;
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
@@ -28,6 +34,7 @@ mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
 mod pages;
+pub(crate) mod plugin_values;
 mod timer_sound;
 mod touchscreen;
 
@@ -290,6 +297,8 @@ pub(crate) struct FeatureRuntime {
     touchscreen_controls: touchscreen::TouchscreenControls,
     organization_management: GtkBox,
     profile_delete: Button,
+    /// The Edit profile dialog the rail rows' Edit icons present (owned by the window).
+    profile_editor: Rc<RefCell<Option<glib::WeakRef<gtk::Window>>>>,
     profile_tabs: gtk::Notebook,
     profile_pages: Rc<RefCell<Vec<(String, GtkBox)>>>,
     profile_content: Rc<RefCell<Option<GtkBox>>>,
@@ -300,6 +309,8 @@ pub(crate) struct FeatureRuntime {
     profile_application: Entry,
     profile_application_apply: Button,
     profile_application_status: Label,
+    profile_returns: gtk::CheckButton,
+    focus_memory: Rc<RefCell<sdeck_plus::focus_profile::FocusMemory>>,
     focused_application: Rc<RefCell<Option<sdeck_plus::app_focus::FocusedApplication>>>,
     focus_received: Rc<Cell<bool>>,
     manual_profile: Rc<Cell<bool>>,
@@ -351,7 +362,9 @@ impl FeatureRuntime {
         let profile_tabs = gtk::Notebook::builder()
             .scrollable(true)
             .show_border(false)
+            .tab_pos(gtk::PositionType::Left)
             .hexpand(true)
+            .vexpand(true)
             .build();
         profile_tabs.add_css_class("profile-tabs");
         let profile_settings_model = gtk::StringList::new(&[]);
@@ -369,6 +382,16 @@ impl FeatureRuntime {
         profile_application_status.set_wrap(true);
         profile_application_status.set_max_width_chars(34);
         profile_application_status.set_xalign(0.0);
+        let profile_returns = gtk::CheckButton::new();
+        let profile_returns_text = Label::new(Some(RETURN_OPTION_LABEL));
+        profile_returns_text.set_wrap(true);
+        profile_returns_text.set_max_width_chars(30);
+        profile_returns_text.set_xalign(0.0);
+        profile_returns.set_child(Some(&profile_returns_text));
+        profile_returns.set_sensitive(false);
+        profile_returns.set_tooltip_text(Some(
+            "Needs an application above. While that application has focus this profile is shown; when focus moves to something that matches no profile, the profile that was shown before comes back instead of Base.",
+        ));
         let profile_delete = crate::ui::button("user-trash-symbolic", "Delete profile");
         profile_delete.add_css_class("destructive-action");
         let obs_panel = gtk::Expander::new(Some("OBS settings"));
@@ -441,6 +464,7 @@ impl FeatureRuntime {
             touchscreen_controls: touchscreen::TouchscreenControls::new(),
             organization_management,
             profile_delete,
+            profile_editor: Rc::new(RefCell::new(None)),
             profile_tabs,
             profile_pages: Rc::new(RefCell::new(Vec::new())),
             profile_content: Rc::new(RefCell::new(None)),
@@ -451,6 +475,8 @@ impl FeatureRuntime {
             profile_application,
             profile_application_apply,
             profile_application_status,
+            profile_returns,
+            focus_memory: Rc::default(),
             focused_application: Rc::new(RefCell::new(None)),
             focus_received: Rc::new(Cell::new(false)),
             manual_profile: Rc::new(Cell::new(false)),
@@ -478,6 +504,7 @@ impl FeatureRuntime {
                     .map(|(name, _)| name.clone());
                 if let Some(profile) = profile {
                     callback.manual_profile.set(true);
+                    callback.focus_memory.borrow_mut().user_chose_a_profile();
                     callback.select_profile(&profile);
                 }
             });
@@ -492,6 +519,13 @@ impl FeatureRuntime {
         crate::ui::field_help(&application_row, "Automatic switching help",
             "Enter a window class or executable, such as kitty or firefox. This profile is selected when that application has focus; it does not launch the application. Leave empty for manual selection. All profile tabs stay visible. Base is always available and cannot have an application rule.");
         runtime.organization_management.append(&application_row);
+        runtime
+            .organization_management
+            .append(&runtime.profile_returns);
+        let callback = runtime.clone();
+        runtime
+            .profile_returns
+            .connect_toggled(move |_| callback.refresh_save_state());
         runtime
             .organization_management
             .append(&runtime.profile_application_status);
@@ -651,12 +685,8 @@ impl FeatureRuntime {
             self.profile_pages.borrow_mut().clear();
             for profile in profiles {
                 let page = GtkBox::new(Orientation::Vertical, 0);
-                let label = Label::new(Some(&profile));
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_max_width_chars(18);
-                label.set_width_chars(profile.chars().count().min(18) as i32);
-                label.set_tooltip_text(Some(&profile));
-                self.profile_tabs.append_page(&page, Some(&label));
+                let row = self.profile_row(&profile);
+                self.profile_tabs.append_page(&page, Some(&row));
                 self.profile_pages.borrow_mut().push((profile, page));
             }
         }
@@ -689,6 +719,74 @@ impl FeatureRuntime {
         }
     }
 
+    /// A tab label: the profile name, then small Edit and Delete icons. The icons are buttons
+    /// inside the tab, so they take their own clicks while the name still selects the tab.
+    fn profile_row(&self, profile: &str) -> GtkBox {
+        let row = GtkBox::new(Orientation::Horizontal, 2);
+        row.add_css_class("profile-row");
+        let label = Label::new(Some(profile));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(PROFILE_NAME_MAX_CHARS);
+        // One width for every rail: long names ellipsize instead of widening it.
+        label.set_width_chars(PROFILE_NAME_WIDTH_CHARS);
+        label.set_tooltip_text(Some(profile));
+        row.append(&label);
+        let action = |icon: &str, class: &str, caption: String| {
+            let button = crate::ui::icon_button(icon, &caption);
+            button.set_has_frame(false);
+            button.add_css_class("rail-row-action");
+            button.add_css_class(class);
+            button.set_valign(gtk::Align::Center);
+            button
+        };
+        let edit = action(
+            "document-edit-symbolic",
+            "profile-row-edit",
+            format!("Edit {profile}"),
+        );
+        let callback = self.clone();
+        let name = profile.to_owned();
+        edit.connect_clicked(move |_| callback.open_profile_editor(&name));
+        row.append(&edit);
+        let delete = action(
+            "user-trash-symbolic",
+            "profile-row-delete",
+            format!("Delete {profile}"),
+        );
+        delete.add_css_class("destructive-action");
+        if profile == sdeck_plus::layers::DEFAULT_LAYER {
+            // Kept (disabled) so every row's icons line up.
+            delete.set_sensitive(false);
+            delete.set_tooltip_text(Some("Base cannot be deleted."));
+        }
+        let callback = self.clone();
+        let name = profile.to_owned();
+        delete.connect_clicked(move |_| callback.confirm_profile_row_removal(&name));
+        row.append(&delete);
+        row
+    }
+
+    /// The window registers its Edit profile dialog once; the rows' Edit icons present it.
+    pub(crate) fn attach_profile_editor(&self, dialog: &gtk::Window) {
+        *self.profile_editor.borrow_mut() = Some(dialog.downgrade());
+    }
+
+    /// Edit a profile's automatic switching without showing it first: the dialog edits the
+    /// profile its picker names, so point the picker at the row's profile.
+    fn open_profile_editor(&self, profile: &str) {
+        self.edit_profile(profile);
+        let dialog = self
+            .profile_editor
+            .borrow()
+            .as_ref()
+            .and_then(glib::WeakRef::upgrade);
+        if let Some(dialog) = dialog {
+            dialog.present();
+        }
+    }
+
     fn refresh_application_editor(&self) {
         let profile = self
             .profile_settings_picker
@@ -708,12 +806,23 @@ impl FeatureRuntime {
             .as_deref()
             .and_then(|profile| organization.as_ref()?.profile_application(profile));
         self.profile_application.set_text(application.unwrap_or(""));
+        self.profile_returns
+            .set_active(profile.as_deref().zip(organization.as_ref()).is_some_and(
+                |(profile, organization)| organization.profile_returns_to_previous(profile),
+            ));
         self.refresh_save_state();
         crate::ui::clear_feedback(&self.profile_application_status);
         self.profile_application_status
             .set_text(match (profile.as_deref(), application) {
                 (Some(sdeck_plus::layers::DEFAULT_LAYER), _) => {
                     "Base: always available, cannot be deleted."
+                }
+                (Some(profile), Some(_))
+                    if organization.as_ref().is_some_and(|organization| {
+                        organization.profile_returns_to_previous(profile)
+                    }) =>
+                {
+                    "Automatic switching enabled; the previous profile returns when focus leaves."
                 }
                 (_, Some(_)) => "Automatic switching enabled.",
                 (_, None) => "Manual selection — no application rule.",
@@ -727,12 +836,20 @@ impl FeatureRuntime {
             .and_then(|item| item.downcast::<gtk::StringObject>().ok())
             .map(|item| item.string().to_string());
         let organization = self.organization.borrow();
+        let text = self.profile_application.text();
+        let has_application = !text.trim().is_empty();
+        // The option only exists next to an application rule.
+        let returns = has_application && self.profile_returns.is_active();
         let dirty = match (profile.as_deref(), organization.as_ref()) {
             (Some(profile), Some(organization)) if profile != sdeck_plus::layers::DEFAULT_LAYER => {
-                self.profile_application.text().trim()
-                    != organization.profile_application(profile).unwrap_or("")
+                self.profile_returns.set_sensitive(has_application);
+                text.trim() != organization.profile_application(profile).unwrap_or("")
+                    || returns != organization.profile_returns_to_previous(profile)
             }
-            _ => false,
+            _ => {
+                self.profile_returns.set_sensitive(false);
+                false
+            }
         };
         self.profile_application_apply.set_sensitive(dirty);
     }
@@ -751,7 +868,15 @@ impl FeatureRuntime {
             let Some(organization) = organization.as_mut() else {
                 return;
             };
-            organization.set_profile_application(&profile, &self.profile_application.text())
+            let text = self.profile_application.text();
+            organization
+                .set_profile_application(&profile, &text)
+                .and_then(|()| {
+                    organization.set_profile_returns_to_previous(
+                        &profile,
+                        !text.trim().is_empty() && self.profile_returns.is_active(),
+                    )
+                })
         };
         match result {
             Ok(()) => {
@@ -799,23 +924,16 @@ impl FeatureRuntime {
             }
             let focus = self.focused_application.borrow();
             let current = organization.profile_for_key(self.layers.borrow().active());
-            if organization.profile_matches(&current, focus.as_ref()) {
-                self.manual_profile.set(false);
-                current
-            } else {
-                match organization
-                    .profiles()
-                    .into_iter()
-                    .find(|profile| organization.profile_matches(profile, focus.as_ref()))
-                {
-                    Some(profile) => {
-                        self.manual_profile.set(false);
-                        profile
-                    }
-                    None if self.manual_profile.get() => current,
-                    None => sdeck_plus::layers::DEFAULT_LAYER.to_owned(),
-                }
-            }
+            let mut manual = self.manual_profile.get();
+            let target = sdeck_plus::focus_profile::profile_for_focus(
+                organization,
+                &current,
+                focus.as_ref(),
+                &mut manual,
+                &mut self.focus_memory.borrow_mut(),
+            );
+            self.manual_profile.set(manual);
+            target
         };
         let current = self
             .organization
@@ -858,6 +976,7 @@ impl FeatureRuntime {
                         .starts_with("Organization writes disabled")
                     {
                         self.status.set_text("");
+                        crate::ui::clear_feedback(&self.status);
                     }
                 }
             }
@@ -928,6 +1047,32 @@ impl FeatureRuntime {
         };
         let (sender, worker) = crate::plugin_runtime::spawn_for_root(root, events.clone())?;
         *self.plugins.borrow_mut() = Some(sender);
+        Ok(Some(worker))
+    }
+
+    /// Starts the worker that asks plugins for the values their displays show, and keeps the
+    /// artwork's list of display actions in step with the installed plugins.
+    pub(crate) fn start_plugin_values(
+        &self,
+        events: &mpsc::Sender<MonitorEvent>,
+    ) -> std::io::Result<Option<crate::plugin_runtime::PluginWorker>> {
+        let Some(root) = self.ui.plugins.root() else {
+            return Ok(None);
+        };
+        let (sender, worker) = crate::plugin_runtime::spawn_queries_for_root(root, events.clone())?;
+        self.artwork.set_plugin_queries(sender);
+        if self
+            .artwork
+            .set_plugin_displays(self.ui.plugins.display_actions())
+        {
+            self.artwork.refresh(true);
+        }
+        let artwork = self.artwork.clone();
+        self.ui.plugins.on_displays(move |displays| {
+            artwork.set_plugin_displays(displays);
+            artwork.refresh(true);
+            true
+        });
         Ok(Some(worker))
     }
 

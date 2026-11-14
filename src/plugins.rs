@@ -17,7 +17,10 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub use host::{InvokeOutcome, MAX_MESSAGE_CHARS, MAX_STDERR_BYTES, MAX_STDOUT_BYTES, MAX_TIMEOUT};
+pub use host::{
+    InvokeOutcome, QueryOutcome, MAX_DETAIL_CHARS, MAX_HEADLINE_CHARS, MAX_MESSAGE_CHARS,
+    MAX_STDERR_BYTES, MAX_STDOUT_BYTES, MAX_TIMEOUT,
+};
 pub use install::{
     install, parse_source, parse_source_in, stage, ActionPreview, CancelToken, InstallError,
     InstallMode, Installed, PluginPreview, PluginSource, RequirementPreview, SettingPreview,
@@ -25,8 +28,8 @@ pub use install::{
 };
 pub use manifest::{
     missing_commands, missing_commands_in, valid_id, PluginAction, PluginControl, PluginManifest,
-    Requirement, RequirementKind, SettingField, Settings, MAX_MANIFEST_BYTES, MAX_SETTINGS_BYTES,
-    PROTOCOL_VERSION,
+    PluginValue, Requirement, RequirementKind, SettingField, Settings, MAX_MANIFEST_BYTES,
+    MAX_SETTINGS_BYTES, PROTOCOL_VERSION,
 };
 
 const STATE_FILE: &str = "plugins.json";
@@ -52,6 +55,11 @@ pub enum PluginError {
         action: String,
     },
     InvalidSettings(String),
+    /// A query was asked of an action that declares no `display` value.
+    NoDisplay {
+        plugin: String,
+        action: String,
+    },
     InvalidRequest(String),
     Spawn(String),
     Timeout,
@@ -79,6 +87,12 @@ impl fmt::Display for PluginError {
                 write!(f, "plugin `{plugin}` has no action `{action}`")
             }
             Self::InvalidSettings(m) => write!(f, "invalid plugin settings: {m}"),
+            Self::NoDisplay { plugin, action } => {
+                write!(
+                    f,
+                    "action `{action}` of plugin `{plugin}` displays no value"
+                )
+            }
             Self::InvalidRequest(m) => write!(f, "invalid plugin request: {m}"),
             Self::Spawn(m) => write!(f, "cannot start plugin: {m}"),
             Self::Timeout => f.write_str("plugin timed out"),
@@ -338,6 +352,40 @@ impl PluginRegistry {
         request.push(b'\n');
         let output = host::run(&executable, &dir, &request, options.timeout)?;
         host::parse_response(output, &options.request_id)
+    }
+
+    /// Asks one action's plugin for the value it displays, in a fresh child process.
+    ///
+    /// Uses the action's `display` as the value id and the binding's validated settings; the
+    /// limits and errors of [`Self::invoke`] apply. Synchronous: call from a worker thread.
+    pub fn query(
+        &self,
+        binding: &PluginBinding,
+        options: &InvokeOptions,
+    ) -> Result<QueryOutcome, PluginError> {
+        options.validate()?;
+        let settings = self.validate_binding(binding)?;
+        let manifest = &self.plugins[&binding.plugin_id];
+        let display = manifest
+            .action(&binding.action_id)
+            .and_then(|action| action.display.as_deref())
+            .ok_or_else(|| PluginError::NoDisplay {
+                plugin: binding.plugin_id.clone(),
+                action: binding.action_id.clone(),
+            })?;
+        let dir = self.root.join(&manifest.id);
+        let executable = resolve_executable(&dir, &manifest.executable)?;
+        let mut request = serde_json::to_vec(&host::QueryRequest {
+            protocol_version: PROTOCOL_VERSION,
+            kind: "query",
+            request_id: &options.request_id,
+            value: display,
+            settings: &settings,
+        })
+        .map_err(|error| PluginError::InvalidRequest(error.to_string()))?;
+        request.push(b'\n');
+        let output = host::run(&executable, &dir, &request, options.timeout)?;
+        host::parse_query_response(output, &options.request_id)
     }
 
     fn discover(&mut self) {

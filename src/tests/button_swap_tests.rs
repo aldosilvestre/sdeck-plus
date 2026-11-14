@@ -241,16 +241,7 @@ fn assert_dragging_keys_swaps_saved_actions_images_and_text() {
     widgets.key_widgets[0].remove_css_class("swap-source");
     target.emit_by_name::<()>("leave", &[]);
     assert!(!widgets.key_widgets[1].has_css_class("swap-target"));
-    let shell = view
-        .child()
-        .unwrap()
-        .downcast::<gtk::Viewport>()
-        .unwrap()
-        .child()
-        .unwrap()
-        // The width clamp wraps the shell.
-        .first_child()
-        .unwrap();
+    let shell = view.first_child().unwrap();
     let completed = Rc::new(Cell::new(false));
     let done = completed.clone();
     let main_loop = glib::MainLoop::new(None, false);

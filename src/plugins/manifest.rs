@@ -20,6 +20,7 @@ const MAX_FIELDS: usize = 16;
 const MAX_TEXT_LENGTH: usize = 1024;
 const DEFAULT_TEXT_LENGTH: usize = 256;
 const MAX_REQUIREMENTS: usize = 16;
+const MAX_VALUES: usize = 16;
 
 /// Physical control kinds an action can be bound to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +181,17 @@ pub struct PluginAction {
     pub controls: Vec<PluginControl>,
     #[serde(default)]
     pub settings: Vec<SettingField>,
+    /// Id of a declared value this action displays; the host asks for it with a `query`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+}
+
+/// A value a plugin can report (brightness, scene...), declared once and shown by actions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginValue {
+    pub id: String,
+    pub label: String,
 }
 
 impl PluginAction {
@@ -350,6 +362,9 @@ pub struct PluginManifest {
     /// Declared dependencies; at most 16, shown in the sidebar and never installed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requirements: Vec<Requirement>,
+    /// Declared display values; at most 16, answered by the `query` request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<PluginValue>,
 }
 
 impl PluginManifest {
@@ -428,6 +443,27 @@ impl PluginManifest {
                     return Err(format!(
                         "duplicate field id `{}` in `{}`",
                         field.id(),
+                        action.id
+                    ));
+                }
+            }
+        }
+        if self.values.len() > MAX_VALUES {
+            return Err(format!("more than {MAX_VALUES} values"));
+        }
+        let mut value_ids = BTreeSet::new();
+        for value in &self.values {
+            valid_id(&value.id)?;
+            valid_label(&value.label)?;
+            if !value_ids.insert(value.id.as_str()) {
+                return Err(format!("duplicate value id `{}`", value.id));
+            }
+        }
+        for action in &self.actions {
+            if let Some(display) = &action.display {
+                if !value_ids.contains(display.as_str()) {
+                    return Err(format!(
+                        "action `{}` displays undeclared value `{display}`",
                         action.id
                     ));
                 }

@@ -975,3 +975,53 @@ fn clipped_soft_shadow_matches_the_whole_canvas_shadow() {
         );
     }
 }
+
+#[test]
+fn microphone_actions_use_microphone_icons_and_outputs_keep_speakers() {
+    use crate::desktop_actions::VolumeDirection;
+    let input_up = desktop(DesktopAction::InputVolumeStep {
+        direction: VolumeDirection::Up,
+        percent: 5,
+    });
+    let input_down = desktop(DesktopAction::InputVolumeStep {
+        direction: VolumeDirection::Down,
+        percent: 5,
+    });
+    let output_up = desktop(DesktopAction::VolumeStep {
+        direction: VolumeDirection::Up,
+        percent: 5,
+    });
+    let output_down = desktop(DesktopAction::VolumeStep {
+        direction: VolumeDirection::Down,
+        percent: 5,
+    });
+    assert_eq!(
+        BindingIcon::for_action(&input_up),
+        BindingIcon::InputVolumeUp
+    );
+    assert_eq!(
+        BindingIcon::for_action(&input_down),
+        BindingIcon::InputVolumeDown
+    );
+    assert_eq!(
+        BindingIcon::for_action(&desktop(DesktopAction::ToggleInputMute)),
+        BindingIcon::InputMute
+    );
+    assert_eq!(BindingIcon::for_action(&output_up), BindingIcon::VolumeUp);
+    assert_eq!(
+        BindingIcon::for_action(&output_down),
+        BindingIcon::VolumeDown
+    );
+    assert_eq!(
+        BindingIcon::for_action(&desktop(DesktopAction::Media(MediaCommand::Mute))),
+        BindingIcon::Mute
+    );
+    for icon in [
+        BindingIcon::InputVolumeUp,
+        BindingIcon::InputVolumeDown,
+        BindingIcon::InputMute,
+    ] {
+        assert!(BindingIcon::ALL.contains(&icon), "{icon:?} is in ALL");
+        assert_eq!(icon.category(), BindingIcon::AudioInput.category());
+    }
+}

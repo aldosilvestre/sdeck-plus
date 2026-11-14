@@ -245,7 +245,7 @@ fn assert_button_text_editor() {
                 widgets.root.set_size_request(width, height);
                 widgets.root.allocate(width, height, -1, None);
                 wait_for_frame(&widgets.root);
-                let scroll = widgets.root.vadjustment();
+                let scroll = widgets.scroller.vadjustment();
                 scroll.set_value(0.0);
                 let texture = rendered_texture(&window, &widgets.root);
                 texture

@@ -2,6 +2,10 @@ use super::*;
 use gtk::glib::translate::IntoGlib;
 use sdeck_plus::{button_text::ButtonText, organization::Organization};
 
+fn hex(text: &str) -> String {
+    text.bytes().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn collect_menu_buttons(widget: &gtk::Widget, buttons: &mut Vec<Button>) {
     if let Some(button) = widget.downcast_ref::<Button>() {
         buttons.push(button.clone());
@@ -87,7 +91,26 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
     window.present();
     wait_for_frame(&window);
     let runtime = &widgets.feature_runtime;
+    // A binding of a kind this build cannot read (a newer build's plugin) must not make the
+    // reload fail, and must stay in layers.conf untouched.
+    let unknown = format!(
+        "binding\t{}\tk:8\tfeature-v1:{}",
+        hex("Base"),
+        hex(r#"{"FutureKind":{"plugin_id":"x","action_id":"y","settings":{}}}"#)
+    );
+    let mut stored = std::fs::read_to_string(root.join("layers.conf")).unwrap();
+    stored.push_str(&unknown);
+    stored.push('\n');
+    std::fs::write(root.join("layers.conf"), stored).unwrap();
     assert!(runtime.complete_configuration_import(&root, Ok(None)));
+    assert!(!layers.borrow().layers()["Base"]
+        .bindings
+        .contains_key(&Trigger::KeyPress(8)));
+    layers.borrow().persist().unwrap();
+    assert!(std::fs::read_to_string(root.join("layers.conf"))
+        .unwrap()
+        .lines()
+        .any(|line| line == unknown));
     let menu = &widgets._configuration_menu;
     let panel = menu.button().popover().unwrap();
     menu.button().popup();
@@ -219,6 +242,20 @@ fn assert_menu_transfers_configuration_and_reloads_without_running_actions() {
 
     menu.select_path_for_test(true, bundle.clone());
     let confirmation = menu.confirmation_for_test().unwrap();
+    // The cancel button shows its keyboard hint.
+    let mut hints = Vec::new();
+    let mut stack = vec![confirmation.clone().upcast::<gtk::Widget>()];
+    while let Some(widget) = stack.pop() {
+        if widget.has_css_class("key-hint") {
+            hints.push(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            stack.push(current.clone());
+            child = current.next_sibling();
+        }
+    }
+    assert_eq!(hints.len(), 1, "the import dialog's Cancel shows Esc");
     capture_themes("import-confirmation", confirmation.upcast_ref());
     confirmation.response(ResponseType::Cancel);
     assert!(completed.try_recv().is_err());

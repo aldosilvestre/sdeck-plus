@@ -31,6 +31,19 @@ pub enum FeatureAction {
 }
 
 impl FeatureAction {
+    /// Serialized variant names, so a stored action of another variant can be
+    /// told apart from a malformed one (see `layers::unknown_action_kind`).
+    pub(crate) const VARIANTS: [&'static str; 8] = [
+        "Desktop",
+        "Navigation",
+        "Touchscreen",
+        "Device",
+        "Obs",
+        "Timer",
+        "CancelTimer",
+        "Plugin",
+    ];
+
     pub fn validate(&self) -> io::Result<()> {
         match self {
             Self::Desktop(action) => action.validate(),
@@ -102,6 +115,48 @@ impl FeatureAction {
 mod tests {
     use super::*;
     use crate::desktop_actions::{MediaCommand, ScrollDirection, VolumeDirection};
+
+    #[test]
+    fn variant_names_list_matches_the_serialized_variants() {
+        let samples = [
+            FeatureAction::Desktop(DesktopAction::Text {
+                value: "a".into(),
+                enter: false,
+            }),
+            FeatureAction::Navigation(NavigationAction::NextPage),
+            FeatureAction::Touchscreen(TouchscreenAction::NextPage),
+            FeatureAction::Device(DeviceAction::Brightness(10)),
+            FeatureAction::Obs(crate::obs::ObsAction::ToggleRecording),
+            FeatureAction::Timer { seconds: 1 },
+            FeatureAction::CancelTimer,
+            FeatureAction::Plugin(crate::plugins::PluginBinding::new(
+                "demo",
+                "run",
+                crate::plugins::Settings::new(),
+            )),
+        ];
+        // Adding a variant must break this match, so the list above and VARIANTS get it too.
+        for action in &samples {
+            match action {
+                FeatureAction::Desktop(_)
+                | FeatureAction::Navigation(_)
+                | FeatureAction::Touchscreen(_)
+                | FeatureAction::Device(_)
+                | FeatureAction::Obs(_)
+                | FeatureAction::Timer { .. }
+                | FeatureAction::CancelTimer
+                | FeatureAction::Plugin(_) => {}
+            }
+        }
+        let names: Vec<String> = samples
+            .iter()
+            .map(|action| match serde_json::to_value(action).unwrap() {
+                serde_json::Value::String(name) => name,
+                value => value.as_object().unwrap().keys().next().unwrap().clone(),
+            })
+            .collect();
+        assert_eq!(names, FeatureAction::VARIANTS);
+    }
 
     #[test]
     fn typed_actions_roundtrip_without_losing_user_fields() {

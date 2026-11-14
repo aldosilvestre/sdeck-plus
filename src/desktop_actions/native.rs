@@ -145,6 +145,18 @@ impl Backend for Native {
         )
     }
 
+    fn set_audio_input(&mut self, name: &str) -> io::Result<()> {
+        super::audio_output::set_input(name, &mut self.process, super::audio_output::dump)
+    }
+
+    fn cycle_audio_input(&mut self) -> io::Result<()> {
+        super::audio_output::cycle_input(
+            &mut self.process,
+            super::audio_output::dump,
+            super::audio_output::default_source,
+        )
+    }
+
     fn poll_errors(&mut self) -> Vec<String> {
         let mut errors: Vec<_> = self.errors_rx.try_iter().collect();
         match self.audio.poll_error() {

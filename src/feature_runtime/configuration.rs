@@ -119,7 +119,9 @@ impl FeatureRuntime {
         // refuse every root but the Stream Deck +.
         let model = self.layers.borrow().model();
         let mut layers = LayerStore::open_at_model(root, model)?;
-        if !layers.diagnostics().is_empty() || !layers.conflicts().is_empty() {
+        if !layers.diagnostics().is_empty()
+            || layers.conflicts().iter().any(|conflict| !conflict.kept)
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "imported bindings contain errors",

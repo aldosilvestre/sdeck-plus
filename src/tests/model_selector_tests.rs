@@ -248,6 +248,57 @@ fn in_selector(pair: &Pair, widget: &gtk::Widget) -> bool {
         || widget.is_ancestor(&selector.root)
 }
 
+/// Failure-only description of where focus is and which windows exist.
+fn focus_report(pair: &Pair) -> String {
+    let describe = |widget: &gtk::Widget| {
+        let mut chain = Vec::new();
+        let mut current = Some(widget.clone());
+        while let Some(item) = current {
+            chain.push(format!(
+                "{}[{}]",
+                item.type_().name(),
+                item.css_classes()
+                    .iter()
+                    .map(|class| class.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            ));
+            current = item.parent();
+        }
+        chain.join(" < ")
+    };
+    let selector = pair.registry.selector();
+    let focus = gtk::prelude::GtkWindowExt::focus(&pair.window);
+    let mut report = format!(
+        "focus: {}\nin_selector: {:?}; selector dropdown focused={} visible={} mapped={}\nwindow: {}x{} visible={} active={}\n",
+        focus.as_ref().map(describe).unwrap_or_else(|| "none".into()),
+        focus.as_ref().map(|focus| in_selector(pair, focus)),
+        selector.dropdown.has_focus(),
+        selector.root.is_visible(),
+        selector.root.is_mapped(),
+        pair.window.width(),
+        pair.window.height(),
+        pair.window.is_visible(),
+        pair.window.is_active(),
+    );
+    for window in gtk::Window::toplevels()
+        .snapshot()
+        .into_iter()
+        .filter_map(|window| window.downcast::<gtk::Window>().ok())
+        .filter(|window| window.is_visible())
+    {
+        report.push_str(&format!(
+            "toplevel: {} title={:?} modal={} transient_for_this={} classes={:?}\n",
+            window.type_().name(),
+            window.title(),
+            window.is_modal(),
+            window.transient_for().as_ref() == Some(pair.window.upcast_ref()),
+            window.css_classes(),
+        ));
+    }
+    report
+}
+
 #[test]
 fn the_selector_is_a_tab_stop_only_while_it_is_visible() {
     run_gtk_test(|| {
@@ -276,9 +327,16 @@ fn the_selector_is_a_tab_stop_only_while_it_is_visible() {
             gtk::DirectionType::TabBackward,
         ] {
             assert!(dropdown.grab_focus());
-            assert!(pair.window.child_focus(direction));
-            assert!(gtk::prelude::GtkWindowExt::focus(&pair.window)
-                .is_some_and(|focus| !in_selector(&pair, &focus)));
+            let moved = pair.window.child_focus(direction);
+            let left_selector = gtk::prelude::GtkWindowExt::focus(&pair.window)
+                .is_some_and(|focus| !in_selector(&pair, &focus));
+            if !(moved && left_selector) {
+                // Evidence only on failure, so a passing run is not slowed or reordered.
+                panic!(
+                    "Tab {direction:?} must leave the selector (moved={moved})\n{}",
+                    focus_report(&pair)
+                );
+            }
         }
         pair.bus.unplug(XL_PATH);
         pair.wait_devices(1);
@@ -644,11 +702,8 @@ fn selector_adds_no_pixels(model: &'static DeviceModel, connected: bool, dark: b
         "{} connected {connected} dark {dark}: the hidden selector changes pixels",
         model.id
     );
-    // Put it back for the registry's own bookkeeping.
-    header.insert_child_after(
-        &selector,
-        header.first_child().and_then(|c| c.next_sibling()).as_ref(),
-    );
+    // Put it back, after the connection detail, for the registry's own bookkeeping.
+    header.insert_child_after(&selector, header.first_child().as_ref());
 }
 
 /// Host-independent: the + window's header has no 'Current' or 'Preview' text
@@ -686,7 +741,11 @@ fn the_plus_window_has_no_selector_text_and_no_selector_in_the_tab_order() {
             "no selector widget is reachable with Tab"
         );
         let mut found = Vec::new();
-        let header = selector.root.parent().expect("the header");
+        let header = selector
+            .root
+            .parent()
+            .and_then(|detail_row| detail_row.parent())
+            .expect("the header");
         texts(&header, &mut found);
         // The caption exists but is not shown; no visible header text says it.
         fn visible_texts(widget: &gtk::Widget, found: &mut Vec<String>) {
@@ -953,5 +1012,249 @@ fn switching_back_and_forth_leaves_every_root_byte_identical_and_asks_nothing() 
         }
         assert_eq!(tree(&plus_root), plus_before);
         assert_eq!(tree(&xl_root), xl_before);
+    });
+}
+
+#[test]
+fn the_rail_badge_mirrors_the_connection_label() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let source = Label::new(None);
+        source.add_css_class("status");
+        let badge = ui::mirror_badge(&source);
+        // The mirror starts as the label is and follows every later change.
+        source.set_text("Not connected");
+        source.add_css_class("status-idle");
+        source.set_tooltip_text(Some("Plug a Stream Deck in"));
+        assert_eq!(badge.text(), "Not connected");
+        assert_eq!(
+            badge.tooltip_text().as_deref(),
+            Some("Plug a Stream Deck in")
+        );
+        assert!(badge.has_css_class("status") && badge.has_css_class("status-idle"));
+        assert!(badge.has_css_class("rail-badge"));
+        // A tone change replaces the old one.
+        source.remove_css_class("status-idle");
+        source.add_css_class("status-online");
+        source.set_text("Connected");
+        assert!(badge.has_css_class("status-online") && !badge.has_css_class("status-idle"));
+        source.set_text("Stream Deck + connected");
+        assert_eq!(badge.text(), "Stream Deck + connected");
+    });
+}
+
+fn descendants_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+    if widget.has_css_class(class) {
+        found.push(widget.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        descendants_with_class(&current, class, found);
+        child = current.next_sibling();
+    }
+}
+
+#[test]
+fn confirm_dialogs_read_left_aligned_and_their_cancel_button_shows_an_escape_hint() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let dialog = gtk::MessageDialog::builder()
+            .message_type(gtk::MessageType::Question)
+            .text("Delete \"Studio\"?")
+            .secondary_text("Its pages and bindings go with it.")
+            .build();
+        ui::style_confirm_dialog(&dialog);
+        let cancel = dialog.add_button("Keep", gtk::ResponseType::Cancel);
+        ui::add_key_hint(&cancel, "Esc");
+        let destroy = dialog.add_button("Delete", gtk::ResponseType::Accept);
+        assert!(dialog.has_css_class("confirm-dialog"));
+        // The title and the explanation start at the left edge, as a dialog reads.
+        let mut labels = Vec::new();
+        let mut child = dialog.message_area().first_child();
+        while let Some(widget) = child {
+            if let Some(label) = widget.downcast_ref::<Label>() {
+                assert_eq!(label.justify(), gtk::Justification::Left);
+                assert_eq!(label.xalign(), 0.0);
+                labels.push(label.text().to_string());
+            }
+            child = widget.next_sibling();
+        }
+        assert_eq!(
+            labels,
+            ["Delete \"Studio\"?", "Its pages and bindings go with it."]
+        );
+        // Only the cancel button has the hint, and its accessible name stays "Keep".
+        let mut hints = Vec::new();
+        descendants_with_class(dialog.upcast_ref(), "key-hint", &mut hints);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].downcast_ref::<Label>().unwrap().text(), "Esc");
+        assert!(cancel.is_ancestor(dialog.upcast_ref::<gtk::Widget>()));
+        assert!(hints[0].is_ancestor(&cancel));
+        assert!(!hints[0].is_ancestor(&destroy));
+        assert_eq!(
+            cancel.downcast_ref::<Button>().unwrap().label().as_deref(),
+            None,
+            "the caption moved into the button's content"
+        );
+        let mut captions = Vec::new();
+        // The button holds one box with the caption and the hint.
+        let mut inside = cancel
+            .first_child()
+            .and_then(|content| content.first_child());
+        while let Some(widget) = inside {
+            captions.push(widget.downcast_ref::<Label>().map(|l| l.text().to_string()));
+            inside = widget.next_sibling();
+        }
+        assert_eq!(
+            captions,
+            [Some("Keep".to_string()), Some("Esc".to_string())]
+        );
+    });
+}
+
+#[test]
+fn a_toast_can_carry_one_action_that_runs_once_and_closes_it() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let toast = ui::Toast::new();
+        assert!(!toast.action.is_visible(), "a plain toast has no action");
+        let runs = Rc::new(Cell::new(0));
+        let counter = runs.clone();
+        toast.show_with_action(
+            "Binding removed.",
+            "Undo",
+            Rc::new(move || counter.set(counter.get() + 1)),
+        );
+        assert!(toast.action.is_visible());
+        assert_eq!(toast.action.label().as_deref(), Some("Undo"));
+        assert_eq!(toast.label.text(), "Binding removed.");
+        assert!(toast.root.reveals_child());
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 1);
+        assert!(
+            !toast.root.reveals_child(),
+            "using the action closes the toast"
+        );
+        // A second click or a later plain message never runs the old action again.
+        toast.show("Saved.", false);
+        assert!(!toast.action.is_visible());
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 1);
+        // A new action replaces the previous one.
+        let counter = runs.clone();
+        toast.show_with_action(
+            "Page removed.",
+            "Undo",
+            Rc::new(move || counter.set(counter.get() + 10)),
+        );
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 11);
+    });
+}
+
+#[test]
+fn every_feedback_message_reads_as_a_banner_except_inside_a_toast() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder()
+            .default_width(400)
+            .default_height(400)
+            .build();
+        install_style(&window);
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let plain = Label::new(Some("Plain"));
+        let error = Label::new(Some("Error"));
+        let warning = Label::new(Some("Warning"));
+        let success = Label::new(Some("Success"));
+        error.add_css_class("feedback-error");
+        warning.add_css_class("feedback-warning");
+        success.add_css_class("feedback-success");
+        let toast_message = Label::new(Some("In a toast"));
+        toast_message.add_css_class("feedback-error");
+        let toast = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        toast.add_css_class("toast");
+        toast.append(&toast_message);
+        let toast_plain = Label::new(Some("In a toast"));
+        toast.append(&toast_plain);
+        for widget in [&plain, &error, &warning, &success] {
+            column.append(widget);
+        }
+        column.append(&toast);
+        window.set_child(Some(&column));
+        window.present();
+        wait_for_frame(&window);
+        // The padding is part of the measured size, not of the allocated content height.
+        let tall = |label: &Label| label.measure(gtk::Orientation::Vertical, -1).0;
+        // A banner adds 6px above and below its text, in any tone.
+        for banner in [&error, &warning, &success] {
+            assert_eq!(tall(banner), tall(&plain) + 12, "{}", banner.text());
+        }
+        // Inside the toast pill the message keeps the pill's own spacing.
+        assert_eq!(tall(&toast_message), tall(&toast_plain));
+        window.close();
+    });
+}
+
+#[test]
+fn the_configuration_menu_lists_left_aligned_borderless_rows() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder().default_width(400).build();
+        install_style(&window);
+        let menu = crate::configuration_menu::ConfigurationMenu::new(
+            &window,
+            &gtk::Box::new(gtk::Orientation::Vertical, 0),
+        );
+        window.set_child(Some(menu.button()));
+        window.present();
+        wait_for_frame(&window);
+        let popover = menu.button().popover().expect("menu popover");
+        let mut rows = Vec::new();
+        let mut stack = vec![popover.upcast::<gtk::Widget>()];
+        while let Some(widget) = stack.pop() {
+            if widget.has_css_class("command-row") {
+                rows.push(widget.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                stack.push(current.clone());
+                child = current.next_sibling();
+            }
+        }
+        let mut captions: Vec<String> = rows
+            .iter()
+            .filter_map(|row| row.downcast_ref::<Button>())
+            .filter_map(button_caption)
+            .map(|caption| caption.to_string())
+            .collect();
+        captions.sort();
+        assert_eq!(
+            captions,
+            [
+                "Export configuration...",
+                "Help",
+                "Import configuration...",
+                "Updates"
+            ]
+        );
+        for row in &rows {
+            let content = row.first_child().expect("row content");
+            assert_eq!(
+                content.halign(),
+                gtk::Align::Start,
+                "rows start at the left"
+            );
+        }
+        window.destroy();
     });
 }

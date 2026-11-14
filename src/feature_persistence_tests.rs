@@ -480,7 +480,7 @@ fn touch_taps_choose_their_section_before_the_whole_strip() {
 }
 
 #[test]
-fn unknown_information_rows_are_removed_as_conflicts() {
+fn unknown_information_rows_are_kept_as_conflicts() {
     let fixture = Fixture::new();
     fs::create_dir_all(&fixture.0).unwrap();
     fs::write(
@@ -497,6 +497,7 @@ fn unknown_information_rows_are_removed_as_conflicts() {
     let store = LayerStore::open_at(&fixture.0).unwrap();
 
     assert_eq!(store.conflicts().len(), 1);
+    assert!(store.conflicts()[0].kept);
     assert_eq!(store.info_source("Base", &Trigger::KeyPress(1)), None);
     assert_eq!(store.layers()["Base"].bindings.len(), 1);
 }
@@ -530,6 +531,52 @@ fn explicit_obs_controls_survive_layer_storage_and_reload() {
             reloaded.layers()["Base"].bindings
                 [&Trigger::KeyPress(u8::try_from(index + 1).unwrap())],
             Action::Feature(FeatureAction::Obs(action))
+        );
+    }
+}
+
+#[test]
+fn audio_input_and_obs_input_volume_actions_survive_layer_storage_and_reload() {
+    use crate::desktop_actions::{DesktopAction, VolumeDirection};
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    let actions = [
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Up,
+            percent: 5,
+        }),
+        FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+            direction: VolumeDirection::Down,
+            percent: 12,
+        }),
+        FeatureAction::Desktop(DesktopAction::ToggleInputMute),
+        FeatureAction::Desktop(DesktopAction::CycleAudioInput),
+        FeatureAction::Desktop(DesktopAction::SetAudioInput {
+            name: "alsa_input.usb-Mic".into(),
+        }),
+        FeatureAction::Obs(ObsAction::InputVolume {
+            input: "Mic/Aux".into(),
+            direction: VolumeDirection::Down,
+            db: 3,
+        }),
+    ];
+    for (index, action) in actions.iter().enumerate() {
+        store
+            .bind(
+                "Base",
+                Trigger::KeyPress(u8::try_from(index + 1).unwrap()),
+                Action::Feature(action.clone()),
+            )
+            .unwrap();
+    }
+    store.persist().unwrap();
+    let reloaded = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(reloaded.diagnostics().is_empty());
+    for (index, action) in actions.into_iter().enumerate() {
+        assert_eq!(
+            reloaded.layers()["Base"].bindings
+                [&Trigger::KeyPress(u8::try_from(index + 1).unwrap())],
+            Action::Feature(action)
         );
     }
 }

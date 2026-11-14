@@ -6,7 +6,7 @@ use super::git::{GitRunner, SystemGit};
 use super::source::{check_outside_root, validate_repository};
 use super::{CancelToken, PluginSource, StageError, StageOptions};
 use crate::plugins::{
-    PluginControl, PluginManifest, PluginRegistry, Requirement, MAX_MANIFEST_BYTES,
+    PluginControl, PluginManifest, PluginRegistry, PluginValue, Requirement, MAX_MANIFEST_BYTES,
 };
 use std::fs;
 use std::io::Read;
@@ -31,6 +31,8 @@ pub struct ActionPreview {
     pub name: String,
     pub controls: Vec<PluginControl>,
     pub settings: Vec<SettingPreview>,
+    /// Id of the declared value this action displays.
+    pub display: Option<String>,
 }
 
 /// A declared requirement; `missing` is only ever true for `command` requirements that no `PATH`
@@ -49,6 +51,8 @@ pub struct PluginPreview {
     pub version: String,
     pub protocol_version: u32,
     pub actions: Vec<ActionPreview>,
+    /// Values the plugin can report for display.
+    pub values: Vec<PluginValue>,
     pub requirements: Vec<RequirementPreview>,
     pub source: PluginSource,
     /// The downloaded commit, for repositories only.
@@ -281,8 +285,10 @@ fn preview(
                         }
                     })
                     .collect(),
+                display: action.display.clone(),
             })
             .collect(),
+        values: manifest.values.clone(),
         requirements: manifest
             .requirements
             .iter()

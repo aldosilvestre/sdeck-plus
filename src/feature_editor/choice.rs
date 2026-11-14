@@ -16,6 +16,10 @@ pub(crate) enum Choice {
     VolumeDown,
     Mute,
     SetAudioOutput,
+    InputVolumeUp,
+    InputVolumeDown,
+    InputMute,
+    SetAudioInput,
     PlayAudio,
     StopAudio,
     NextPage,
@@ -35,6 +39,8 @@ pub(crate) enum Choice {
     Recording,
     Streaming,
     ObsMute,
+    ObsInputVolumeUp,
+    ObsInputVolumeDown,
     Visibility,
     StartRecording,
     StopRecording,
@@ -67,7 +73,9 @@ impl Choice {
     /// A representative action of this choice; only its kind matters.
     fn example(self) -> FeatureAction {
         use sdeck_plus::{
-            desktop_actions::{DesktopAction as D, MediaCommand as M, ScrollDirection},
+            desktop_actions::{
+                DesktopAction as D, MediaCommand as M, ScrollDirection, VolumeDirection,
+            },
             device_control::DeviceAction,
             features::TouchscreenAction,
             obs::ObsAction as O,
@@ -98,6 +106,16 @@ impl Choice {
             Self::VolumeDown => FeatureAction::Desktop(D::Media(M::VolumeDown)),
             Self::Mute => FeatureAction::Desktop(D::Media(M::Mute)),
             Self::SetAudioOutput => FeatureAction::Desktop(D::CycleAudioOutput),
+            Self::InputVolumeUp => FeatureAction::Desktop(D::InputVolumeStep {
+                direction: VolumeDirection::Up,
+                percent: 5,
+            }),
+            Self::InputVolumeDown => FeatureAction::Desktop(D::InputVolumeStep {
+                direction: VolumeDirection::Down,
+                percent: 5,
+            }),
+            Self::InputMute => FeatureAction::Desktop(D::ToggleInputMute),
+            Self::SetAudioInput => FeatureAction::Desktop(D::CycleAudioInput),
             Self::PlayAudio => FeatureAction::Desktop(D::PlayAudio {
                 path: Default::default(),
             }),
@@ -121,6 +139,16 @@ impl Choice {
             Self::Recording => FeatureAction::Obs(O::ToggleRecording),
             Self::Streaming => FeatureAction::Obs(O::ToggleStreaming),
             Self::ObsMute => FeatureAction::Obs(O::ToggleMute(text())),
+            Self::ObsInputVolumeUp => FeatureAction::Obs(O::InputVolume {
+                input: text(),
+                direction: VolumeDirection::Up,
+                db: 2,
+            }),
+            Self::ObsInputVolumeDown => FeatureAction::Obs(O::InputVolume {
+                input: text(),
+                direction: VolumeDirection::Down,
+                db: 2,
+            }),
             Self::Visibility => FeatureAction::Obs(O::SourceVisibility {
                 scene: text(),
                 source: text(),
@@ -151,6 +179,10 @@ impl Choice {
             Self::VolumeDown => "Decrease the system output volume by a step (default 5%).",
             Self::Mute => "Toggle the system output mute state.",
             Self::SetAudioOutput => "Choose a fixed output or Rotate to advance through connected devices on each press. Choosing or saving does not change audio.",
+            Self::InputVolumeUp => "Increase the system input (microphone) volume by a step (default 5%).",
+            Self::InputVolumeDown => "Decrease the system input (microphone) volume by a step (default 5%).",
+            Self::InputMute => "Toggle the mute state of the default microphone.",
+            Self::SetAudioInput => "Choose a fixed input or Rotate to advance through connected microphones on each press. Choosing or saving does not change audio.",
             Self::PlayAudio => "Play WAV, MP3, FLAC, OGG, M4A or another audio format supported by mpv. Choose a local file or enter its absolute path. Choosing or saving does not play it.",
             Self::StopAudio => "Stop audio started by a Play audio file action.",
             Self::NextPage => "Show the next page in the current profile folder.",
@@ -170,6 +202,8 @@ impl Choice {
             Self::Recording => "Start or stop OBS recording when this control is activated.",
             Self::Streaming => "Start or stop OBS streaming when this control is activated.",
             Self::ObsMute => "Toggle mute for an OBS input. Match the input name exactly.",
+            Self::ObsInputVolumeUp => "Raise the volume of an OBS audio input by a step in dB (default 2). Match the input name exactly; OBS tops out at +26 dB.",
+            Self::ObsInputVolumeDown => "Lower the volume of an OBS audio input by a step in dB (default 2). Match the input name exactly; OBS bottoms out at -100 dB.",
             Self::Visibility => "Set a source's visibility in an OBS scene. Match both names exactly; clear Visible to hide it.",
             Self::StartRecording => "Start OBS recording. OBS must have a recording output configured.",
             Self::StopRecording => "Stop OBS recording and save the recording file.",
@@ -180,7 +214,7 @@ impl Choice {
         }
     }
 
-    pub(crate) const ALL: [Self; 40] = [
+    pub(crate) const ALL: [Self; 46] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
@@ -195,6 +229,10 @@ impl Choice {
         Self::VolumeDown,
         Self::Mute,
         Self::SetAudioOutput,
+        Self::InputVolumeUp,
+        Self::InputVolumeDown,
+        Self::InputMute,
+        Self::SetAudioInput,
         Self::PlayAudio,
         Self::StopAudio,
         Self::NextPage,
@@ -214,6 +252,8 @@ impl Choice {
         Self::Recording,
         Self::Streaming,
         Self::ObsMute,
+        Self::ObsInputVolumeUp,
+        Self::ObsInputVolumeDown,
         Self::Visibility,
         Self::StartRecording,
         Self::StopRecording,
@@ -239,6 +279,10 @@ impl Choice {
             | Self::VolumeDown
             | Self::Mute
             | Self::SetAudioOutput
+            | Self::InputVolumeUp
+            | Self::InputVolumeDown
+            | Self::InputMute
+            | Self::SetAudioInput
             | Self::PlayAudio
             | Self::StopAudio => 1,
             Self::NextPage
@@ -258,6 +302,8 @@ impl Choice {
             | Self::Recording
             | Self::Streaming
             | Self::ObsMute
+            | Self::ObsInputVolumeUp
+            | Self::ObsInputVolumeDown
             | Self::Visibility
             | Self::StartRecording
             | Self::StopRecording
@@ -284,6 +330,10 @@ impl Choice {
             Self::VolumeDown => "Volume down",
             Self::Mute => "Mute",
             Self::SetAudioOutput => "Change audio output",
+            Self::InputVolumeUp => "Input volume up",
+            Self::InputVolumeDown => "Input volume down",
+            Self::InputMute => "Mute microphone",
+            Self::SetAudioInput => "Change audio input",
             Self::PlayAudio => "Play audio file",
             Self::StopAudio => "Stop audio file",
             Self::NextPage => "Next page",
@@ -303,6 +353,8 @@ impl Choice {
             Self::Recording => "Toggle recording",
             Self::Streaming => "Toggle streaming",
             Self::ObsMute => "Toggle input mute",
+            Self::ObsInputVolumeUp => "OBS input volume up",
+            Self::ObsInputVolumeDown => "OBS input volume down",
             Self::Visibility => "Set source visibility",
             Self::StartRecording => "Start recording",
             Self::StopRecording => "Stop recording",

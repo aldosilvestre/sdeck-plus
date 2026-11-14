@@ -264,7 +264,8 @@ pub(super) fn header_label(window: &ApplicationWindow, class: &str) -> Label {
             return None;
         }
         if let Some(label) = widget.downcast_ref::<Label>() {
-            if label.has_css_class(class) {
+            // The connection badge is shown in the profile rail; the header keeps a hidden source.
+            if label.has_css_class(class) && label.is_visible() {
                 return Some(label.clone());
             }
         }

@@ -60,8 +60,17 @@ always opens the generic **Plugin action** form (plugin and action drop-downs, t
 a text entry, a bounded spin button or a check box per manifest field, labelled for
 assistive technology) and stays a draft until Save binding; plugins cannot add their
 own widgets. A saved binding whose plugin is missing or changed shows a notice and is
-kept verbatim until another action is chosen. Secondary
-organization and artwork tools use progressive disclosure.
+kept verbatim until another action is chosen. **Plugin values.** An enabled plugin
+action whose manifest declares a `display` shows the value the plugin reports (headline,
+optional detail, optional level bar) on the key, dial zone or touch section it is bound to, in
+the window preview and on the device, drawn like live information; there is no extra control
+in the editor and nothing is stored. Until the first answer the control shows "..."; when the
+plugin fails or times out it shows a greyed "--". An explicit live-information choice on the
+same control wins, and a running timer countdown keeps its key. A disabled or missing plugin,
+or an action without a display, leaves the control as it was (its usual icon). Values are
+asked for when the layer, page or bindings change, when the device connects, when the plugin
+list changes and after any action of the same plugin finishes; they are not polled.
+Secondary organization and artwork tools use progressive disclosure.
 
 **Add plugin dialog.** A modal window transient for the main window, one instance at a
 time (pressing the button again presents it), 660 x 760 by default and resizable (it still
@@ -171,7 +180,7 @@ References consulted:
 - `design/apple.md`: restrained configurator chrome and readable utility text;
   no Apple branding, proprietary fonts or marketing imagery.
 - [StyleGallery sidebar](https://github.com/changeroa/StyleGallery/blob/main/patterns/split-sidebar/sidebar.md):
-  two task regions that stack when available width is insufficient.
+  two task regions (here they stay side by side and scroll instead of stacking).
 - [beui popover source](https://beui.dev/r/popover/raw): anchored disclosure,
   Escape dismissal and focus restoration. GTK supplies the implementation;
   no web component or motion library is copied.
@@ -241,9 +250,30 @@ dial's caption is 10px/600 pale graphite ink; neither carries configuration
 instructions or reaches the physical device.
 Long summaries ellipsize with full tooltips; editable fields preserve the value.
 
+## Overlays and feedback
+
+Popovers, help popovers and tooltips share a 12px radius and the `0 8px 24px` shadow; tooltips are
+8px-radius labels (12px text). Selected popover rows use the selection fill with a 1px violet
+inset edge. The toast is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
+success, red alert for an error), the message in ink, then its optional action. A success hides
+itself after a few seconds and has no Dismiss button; an error stays and shows an icon-only Dismiss.
+Every feedback label sits in a banner row the first time it shows feedback: 8px radius, 6px 10px
+padding, `alpha(tone, 0.16)` fill, a leading tone glyph in the tone colour and the message in ink,
+always with words. The row takes the label's place and follows its visibility.
+Source artboard: `design/overlays/03-compact-command.html`.
+
+The connection badge heads the profile rail as a small pill (11px text). The header keeps the title
+and the detail line.
+
+Confirm dialogs (discard, delete, import) read left-aligned: a 16px bold title, a muted
+explanation, then the buttons; the cancel button carries an `Esc` key hint (monospace 11px chip).
+
+A toast may carry one action (violet, 600 weight) beside its message, as "Undo" after removing a
+binding; using it runs it once and closes the toast, and any later message drops it.
+
 ## 4. Spacing and layout
 
-Default window: 1000x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
+Default window: 1120x700. Shell margins: 16px. Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
@@ -255,7 +285,7 @@ Profile tabs have a 12px gap before page navigation; navigation and the
 device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
-the added return and information options within the default 1000x700 layout.
+the added return and information options within the default 1120x700 layout.
 Event/action selectors (shown for dials and the touch strip only; a key has one
 event and takes its action from the catalog) and Save/Test/Remove controls have
 12px inline gaps. The "Do nothing…" hint is also hidden for an unassigned key, and a key's extended
@@ -291,7 +321,7 @@ their layout cells, and the group disappears for actions that do not use it,
 so unrelated actions never leave an empty layout slot.
 Field labels remain associated with their inputs.
 The inspector-below-preview workspace uses vertical scrolling at the default
-1000x700 size, while retaining the form's compact field groups.
+1120x700 size, while retaining the form's compact field groups.
 
 Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
@@ -335,9 +365,9 @@ drawn because they have no preview control.
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
 is the device card alone (426x414 for the +, 556x456 for the + XL) and
-`main-window-xl.png` is the 1000x700 window content configuring the + XL (no
-selector: one model). `main-window-two-devices.png` (1000x700, scrolled to the
-header) shows the "Current" selector with a simulated + and + XL connected through
+`main-window-xl.png` is the window content configuring the + XL (1088x668: the
++ XL workspace needs 1088px; no selector: one model). `main-window-two-devices.png`
+(968x668, scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
 the real hub. They are written by the documentation screenshot generator, which
 iterates `DeviceModel::supported()` for the per-model images, so a model that
 becomes supported gets its image without editing the generator. The + XL images
@@ -347,31 +377,40 @@ hardware behavior.
 The preview is never scaled for a model: the card is the chassis plus 14px
 (570x470 for the + XL) at exactly 1.0x, never scrolls inside itself, and keeps
 every control at least 24px on both sides (the smallest is the + XL key at
-40px). At the default 1000x700 window the + XL card still sits beside the
-352px action catalog (570 + 16 + 352 = 938 of the 968px of usable width), so
-the settings column stays usable; a narrower window wraps the catalog below
-the workspace exactly as it does for the +, and the page scrolls vertically.
+40px). At the default 1120x700 window the + XL card still sits beside the
+action catalog: the 234px rail leaves 886px, so the catalog gives up part of its natural
+352px (down toward its 250px minimum) and the settings column stays usable. A narrower window never wraps the catalog
+below the workspace, for either model: the catalog shrinks toward its 250px
+minimum and then the content column scrolls horizontally (the rail and header
+stay put), so an action can always be dragged from the catalog onto a key or
+dial that is on screen beside it.
 The + XL chassis is 42px taller than the + (456px against 414px); its card
 (570x470) ends inside the 700px viewport of the default window, so the page
 needs no vertical scroll to reach the dials (a test pins this for both
 models). A shorter window scrolls the page, never the preview. Dial captions are 72px wide on the + XL (86px
 on the +) so neighbours never touch.
 
-The complete configuration shell (header, profile toolbar, page navigation and
+The complete configuration shell (header, profile rail, page navigation and
 body) fills the available width up to 1240px (1272px including margins), then
 centers (`Clamp`, `src/ui/clamp.rs`; GTK 4.8 has no native clamp). These bars
-share the shell's leading/trailing edges. The native FlowBox decides wrapping
-from natural widths, so the preview's natural width stays unscaled; spare
-width reaches the preview/editor workspace and the action catalog through
-horizontal expansion. The preview does not consume spare vertical space so
+share the shell's leading/trailing edges. The body is a plain two-column
+horizontal box (class `configuration-grid`, 16px gap) that never wraps: the
+workspace keeps its natural width, so the preview stays unscaled, and spare
+width goes to the action catalog through horizontal expansion. The preview does not consume spare vertical space so
 its inspector follows immediately underneath. The inspector sits in its own
 vertical scroller (`settings-scroll`) capped at about one window of height
 (window height minus 240px, at least 320px): a tall form scrolls inside that
 region instead of stretching the page, and the outer viewport only scrolls when
 the window is shorter than the preview itself. The action catalog has its own
-bounded scrolling list.
-At narrow widths the shell shrinks to the available width and the same native
-container stacks the regions; only vertical scrolling is needed at 640px.
+bounded scrolling list. Its real minimum is the 250px size request: the Actions /
+Dials / Binding tabs shrink (the theme's button minimum width is cleared and the
+captions may ellipsize) and the live-information check caption wraps.
+At narrow widths the shell shrinks to the available width; the two columns
+stay side by side down to their combined minimum (workspace + 16px + the 250px
+catalog; measured content minimum 706px for the + and 836px for the + XL, which
+with the 234px the rail takes (rail plus its gap) is a window of 940px and 1070px),
+and below that the content column scrolls horizontally, as it
+does at 640px, instead of stacking.
 These two size-only containers are the only custom layout; there is no resize
 polling.
 
@@ -380,14 +419,42 @@ help on hover, or on keyboard focus when navigating with the keyboard, in a ligh
 with the topic as its title; no click is needed, the popover ignores the pointer so it never
 blocks the form, and there is no second native tooltip. A form that opens with the button
 focused does not pop the help open by itself.
-The Organize popover has a header with the menu's icon, the title "Profiles", a one-line
-subtitle and a frameless icon-only Close; its Edit/New tabs use the segmented style of the
-sidebar tabs; the Base note is a callout with a cyan accent edge; the footer has a divider
-and two equal-width buttons (Save changes primary, Delete profile destructive).
-The profile tabs, profile organization menu and OBS menu form a compact toolbar;
-Organize and OBS are frameless (hover shows the surface) so they stay secondary
-to the tabs. The organization popover contains only profile creation, application
-association and profile deletion. The page bar separates navigation from
+There is no Organize menu: profiles are edited and deleted from their own rail rows (below) and
+created with the "+" beside PROFILES. Each of those controls opens its form in its own modal
+dialog, transient for the main window, titled "Edit profile" or "New profile", with a one-line
+subtitle; the Base note is a callout with a cyan accent edge; the Edit footer has a divider and
+two equal-width buttons (Save changes primary, Delete profile destructive). Escape or the footer
+button (Close in Edit, Cancel in New; both show the real Esc hint) hides the dialog without
+saving; Cancel and Esc discard a New draft. Deleting asks for confirmation (below); Base cannot
+be deleted.
+The profile tabs form a vertical rail at the left of the content, identical at every window
+width, full height and never scrolling (artboard 03-profile-rail), top-down: the connection
+badge, the OBS tool, then a "PROFILES" sub-heading (11px, bold, muted) with a compact "+" New
+profile action beside it, then the profile rows. A lone tool needs no "TOOLS" heading, so OBS
+sits above PROFILES without one. The rail is 234px wide (it was 166px): 13 characters of name
+(ellipsized from 16, with the full name in a tooltip) and two small icons per row. "+" alone
+describes a new profile and is the only New profile control; it keeps its tooltip and accessible
+name ("New profile: ..."). Each row is the tab's label: the profile name, then a frameless
+pencil (Edit) and a frameless red trash (Delete), the same icons as the page bar, 18px hit areas
+that fill on hover and show the keyboard focus ring. Their tooltips and accessible names include
+the profile ("Edit Studio", "Delete Studio"). The icons are buttons inside the tab, so they take
+their own clicks and never switch the profile; clicking the name still does. Edit opens the Edit
+profile dialog pointed at that row's profile without switching to it. Delete opens the delete
+confirmation for that profile; Base keeps a disabled Delete ("Base cannot be deleted.") so every
+row's icons line up. Nothing is packed at the rail foot. OBS and "+" have a tooltip that says
+what they do ("OBS: ...", "New profile: ...") and the same text as their accessible description.
+The badge, OBS and PROFILES row are the Notebook's start action widget. Because the rail is
+outside the scrolling region OBS is always visible and its popover opens fully, in a 1120x700
+window and at the smallest window. OBS is frameless (hover shows the surface) so it stays
+secondary to the tabs. Menu is the window's one configuration menu button and lives in the
+header, not the rail: on the title row, completely at the right edge and vertically centred on the
+"SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
+("Menu: ..."), accessible name and description and headerless popover, and the same button serves
+every model shown. The header has two rows: the title row (title, update indicator when shown,
+Menu) and, under it, the connection detail with the Current selector at its right when two models
+are connected, so the selector never overlaps the Menu. Only the content column (page bar, preview,
+editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
+inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
 management: a linked previous/next/parent segmented group leads the
 breadcrumb with a 12px gap, and page-owned folders and New page trail it,
 followed by frameless square pencil and red-trash icons (still named, with
@@ -420,10 +487,12 @@ Delete still confirms and is unavailable while artwork writes are disabled.
 A page without folders shows a dim folder icon and "No folders on this page
 yet". Rows use only `@desk_*` tokens, so light and dark themes match, and
 keyboard focus draws the cyan focus ring. The physical preview and a minimum-300px
-inspector form one vertical workspace, beside the minimum-250px action catalog
-when roomy. The catalog wraps below that workspace at narrow desktop widths.
-The outer `ScrolledWindow` owns primary vertical overflow. A text editor may scroll its own text; native
-popovers contain secondary content. No primary field forces horizontal scroll.
+inspector form one vertical workspace, always beside the minimum-250px action
+catalog (never wrapped below it). The outer `ScrolledWindow` owns primary
+vertical overflow, and scrolls horizontally only when the window is narrower
+than the two columns' combined minimum. A text editor may scroll its own text; native
+popovers contain secondary content. No field forces horizontal scroll while the
+two columns fit.
 
 ## 5. Components and states
 
@@ -433,8 +502,8 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   label, accessible name and tooltip. Save is the editor's only primary action.
   Destructive actions use the native destructive style, and every delete or
   remove (binding, page, folder, touch page, profile) uses the same trash icon;
-  clearing text or artwork keeps the clear icon. Organize uses the manage
-  (tools) icon and button text uses the plain text icon.
+  clearing text or artwork keeps the clear icon. Profile rows use the pencil and
+  trash of the page bar, and button text uses the plain text icon.
 - **Binding icons:** one vocabulary (`src/binding_icons.rs`) maps every
   action to a duotone vector glyph on a 24-unit grid: a soft fill (35% of
   the ink) under a crisp 1.85-unit round stroke (2.2-2.6 for chevrons, bars
@@ -576,27 +645,34 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   unrelated application focus; a matching application can select its profile
   automatically. Save new profile and Save profile use the existing native save
   primitive; completion feedback follows the actual disk result.
-- **Profile manager:** Organize separates Edit profile and New profile in a
-  native StackSwitcher. Only the selected task occupies vertical space.
-  Editing groups the profile selector, optional auto-switch application and
+- **Profile manager:** a profile row's pencil opens Edit profile for that profile and
+  the rail's "+" opens New profile, each a dedicated modal dialog; only one task is shown at a time.
+  Editing groups the profile selector, optional auto-switch application, the
+  "Return to the previous profile when focus leaves" check (wrapped text, enabled
+  only while the application field has text and never for Base) and
   Save changes/Delete profile actions with 12px gaps. New profile has a name
-  and Create profile action. Extended explanations use named question-mark
-  controls with hover tooltips and click/keyboard help popovers, not paragraphs
-  in the form. Existing 16px panel padding and 4px field-label gaps apply.
+  and Create profile action; creating a profile closes that dialog and opens
+  Edit profile on it. Deleting still asks for confirmation. Extended
+  explanations use named question-mark controls with hover tooltips and
+  click/keyboard help popovers, not paragraphs in the form. Dialogs use 16px
+  padding and 4px field-label gaps.
   Create profile is disabled for empty or duplicate names and says why under the
-  field; Save changes is enabled only when the application rule differs from the
-  saved one, and never for Base.
+  field; Save changes is enabled only when the application rule or the return
+  check differs from the saved state, and never for Base.
 - **Popover:** organization, setup help and OBS settings stay anchored to the
   trigger, with a visible close action and native Escape/outside dismissal.
   Never open one automatically at startup.
 - **Artwork disclosure:** independent key/strip/zone artwork editing remains
   reachable in a clearly named expandable section of the selected editor.
   An Appearance group separates text and artwork from the action form.
-  Save binding, Test action and Remove binding are icon-only buttons in a
-  toolbar at the top of the right-hand panel, above its tabs: a floppy disk
-  (violet fill), a play triangle (neutral) and a red X in a circle. Each tooltip
-  has two lines, its name then what it does, and doubles as the accessible name
-  and test caption. The status line and Undo remove sit directly under it. The
+  Save binding, Test action and Remove binding are icon-only buttons that end
+  the editor card's heading row, level with "Configuring: <control> · <event>"
+  (artboard 03-profile-rail): a floppy disk (violet fill), a play triangle
+  (neutral) and a red X in a circle. Each tooltip has two lines, its name then
+  what it does, and doubles as the accessible name and test caption. The status
+  line and Undo remove stay at the top of the right-hand panel, in its toolbar
+  row with the plugin buttons. The heading row is the editor card's fixed top:
+  only the form below it scrolls, so Save, Test and Remove stay visible. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
   The same row ends with **Add plugin…** and **Update plugins**, two icon-only buttons of the
@@ -647,8 +723,15 @@ popovers contain secondary content. No primary field forces horizontal scroll.
   This editing popover is non-modal: opening the native font dialog must not
   dismiss it or discard its draft. Close, the trigger, Save/Remove and a
   key/profile change provide explicit exits.
-- **Profile removal confirmation:** name the exact profile and loss of
-  bindings/artwork, provide Keep/Remove choices, and never default to Remove.
+- **Deletion confirmation:** the title names the item in curly quotes (`Delete “Studio”?`);
+  the body says what goes with it and ends "This cannot be undone." (a profile counts its
+  pages and bindings: "2 pages and 14 bindings go with it."). Buttons are **Cancel**, with an
+  `Esc` key hint and the default, and a red destructive **Delete**; Escape or Cancel changes
+  nothing. Page, folder, touchscreen-page and profile deletion share this dialog; the import
+  confirmation uses the same layout with an **Import** button.
+- **Menu popover:** the header's Menu is a headerless command menu (about 6px padding, no title
+  row and no Close button) of Help, Updates, Import configuration... and Export
+  configuration...; Escape or a click outside dismisses it.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
 - **OBS:** visible endpoint/password labels, masked password, Save settings
@@ -704,7 +787,7 @@ popovers contain secondary content. No primary field forces horizontal scroll.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
-  color alone. The header menu lists Help, Updates, Import configuration... and Export
+  color alone. The Menu lists Help, Updates, Import configuration... and Export
   configuration...; Updates opens a modal dialog (same width, margins and Close
   button as Help) that groups its status, Check for updates button and Check
   for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
@@ -775,7 +858,7 @@ Navigation refreshes selector, bindings, summaries and artwork together.
 ## 7. Depth and surface
 
 Use ink-toned layering, neutral edges and a faint inset top light for
-toolbar/editor surfaces. The profile toolbar has no competing outer outline.
+toolbar/editor surfaces. The profile rail has no competing outer outline.
 Profile tabs use a violet tonal fill and fine inset edge instead of an underline;
 the active tab and keyboard focus remain different states.
 The dimensional chassis, artwork cover/crop and circular encoder material
@@ -816,8 +899,9 @@ chooses and saves an action; a user locates profile and OBS settings without
 backend knowledge. Each retains a clear next step and a way back.
 
 The desktop-first physical preview keeps fixed hardware coordinates. Test
-640x480, 1000x700 and 1280x800 allocations, empty/loaded forms, long labels,
-every action family and all changed popovers in light/dark GTK variants.
+640x480, 1000x700 and 1280x800 allocations (the catalog beside the preview at
+every width; horizontal scrolling only below the side-by-side minimum),
+empty/loaded forms, long labels, every action family and all changed popovers in light/dark GTK variants.
 The GTK owner test is the state/geometry harness; fresh native captures and
 independent reviews establish visual quality. Web-only Lighthouse/React
 tooling does not apply. Manual hardware input is reported only if observed.

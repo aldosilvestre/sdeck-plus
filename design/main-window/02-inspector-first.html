@@ -1,0 +1,56 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Inspector first</title><style>
+:root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--ctl:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--sel:#4e426d;--cyan:#85dce8;--err:#fb7185;--ok:#7de2b3;--warn:#f9cc7a;font-family:system-ui,sans-serif;font-size:14px}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);min-height:100vh;padding:14px;display:flex;flex-direction:column;gap:10px}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--field);border:1px solid var(--ctl);border-radius:8px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-height:34px}
+button:hover{background:var(--hover)}
+button.primary{background:var(--violet);color:var(--bg);border-color:transparent;font-weight:600}
+button.flat{background:transparent;border-color:transparent}
+button[aria-pressed=true],button[aria-selected=true]{background:var(--sel);box-shadow:inset 0 0 0 1px var(--violet);font-weight:600}
+button.icon{width:34px;padding:0;justify-content:center}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.card{background:var(--surface);border:1px solid var(--edge);border-radius:14px;padding:12px;box-shadow:inset 0 1px rgb(255 255 255/.025)}
+.muted{color:var(--muted);font-size:13px}
+.row{display:flex;align-items:center;gap:8px}.sp{flex:1}
+h1{font-size:20px;font-weight:700}h2{font-size:18px;font-weight:700}h3{font-size:14px;font-weight:600}
+.badge{padding:6px 12px;border-radius:8px;font-weight:600;font-size:13px;color:var(--warn);background:rgb(249 204 122/.16);border:1px solid rgb(249 204 122/.55)}
+.seg{display:inline-flex}.seg button{border-radius:0;margin-left:-1px}.seg button:first-child{border-radius:8px 0 0 8px;margin:0}.seg button:last-child{border-radius:0 8px 8px 0}
+.device{background:linear-gradient(#2a313a,#1d232b);border:1px solid var(--edge);border-radius:22px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.key{aspect-ratio:1;border-radius:10px;border:2px solid transparent;display:grid;place-items:center;font-size:12px;text-align:center;background:#2c3440;padding:4px}
+.key.sel{border-color:var(--violet);box-shadow:0 0 0 2px rgb(182 161 239/.35)}
+.strip{height:46px;border-radius:8px;background:#0c0f13;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px}.strip span{background:#2a2540;border-radius:5px;font-size:11px;display:grid;place-items:center;color:var(--muted)}
+.dials{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;justify-items:center}.dial{width:44px;height:44px;border-radius:50%;background:radial-gradient(#4a5563,#2c343e);border:1px solid var(--edge);display:grid;place-items:center;font-size:10px;color:var(--muted)}
+.dial.on{outline:2px solid var(--cyan)}
+input[type=text],input[type=search],.entry{background:var(--field);border:1px solid var(--ctl);border-radius:8px;padding:6px 10px;min-height:34px;width:100%}
+label.f{display:grid;gap:4px;font-size:14px}
+.cat{border-top:1px solid var(--edge);padding:6px 0}
+.cat>.head{display:flex;align-items:center;gap:8px;min-height:38px;font-weight:600}
+.pill{font-size:11px;color:var(--muted);background:var(--field);border-radius:999px;padding:1px 7px;font-weight:400}
+.act{display:flex;align-items:center;gap:10px;min-height:40px;padding:4px 6px;border-radius:8px}
+.act:hover{background:var(--hover)}.act.on{background:var(--sel);box-shadow:inset 0 0 0 1px var(--violet)}
+.ico{width:28px;height:28px;border-radius:7px;background:var(--field);border:1px solid var(--edge);display:grid;place-items:center;font-size:13px}
+.sub{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:8px 6px 2px}
+.new{font-size:10px;color:var(--bg);background:var(--cyan);border-radius:999px;padding:1px 6px;font-weight:700}
+.grip{margin-left:auto;color:var(--muted)}
+.tabs{display:flex;gap:6px}
+.note{border-left:3px solid var(--cyan);background:rgb(25 30 37/.9);border-radius:8px;padding:8px 10px}
+@media (prefers-reduced-motion:no-preference){button{transition:background-color .14s ease-out}}
+</style></head><body>
+<header class='row'><div><h1>SDECK-PLUS</h1><p class='muted'>Stream Deck + not connected — plug it in</p></div><span class='sp'></span><span class='badge'>Not connected</span><button aria-label='Menu'>☰ Menu</button></header>
+<div class='card row' style='padding:6px 10px'><nav class='tabs' aria-label='Profiles'><button aria-pressed='true'>Base</button><button>OBS</button><button>Studio</button></nav><span class='sp'></span><button class='flat'>⚙ Organize</button><button class='flat'>● OBS</button></div>
+<div style='display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:10px;flex:1'>
+<section class='card' style='display:grid;gap:10px;align-content:start'>
+<div class='row'><button class='icon flat' aria-label='Previous page'>‹</button><button class='icon flat' aria-label='Next page'>›</button><span class='muted'>Base / Everyday · Page 1 of 2</span><span class='sp'></span><button class='flat'>📁 3</button><button class='flat'>＋ Page</button></div>
+<div class='device' role='group' aria-label='Stream Deck + preview'><div class='keys'><div class='key sel' style='background:#24456b' role='button' tabindex='0' aria-label='Key 1: Play'>Play</div><div class='key' style='background:#5a2f66' role='button' tabindex='0' aria-label='Key 2: Mute'>Mute</div><div class='key' style='background:#1f5a55' role='button' tabindex='0' aria-label='Key 3: Scene'>Scene</div><div class='key' style='background:#6b4a28' role='button' tabindex='0' aria-label='Key 4: Files'>Files</div><div class='key' style='background:#111' role='button' tabindex='0' aria-label='Key 5: OBS rec'>OBS rec</div><div class='key' style='background:#111' role='button' tabindex='0' aria-label='Key 6: example.com'>example.com</div><div class='key' style='background:#111' role='button' tabindex='0' aria-label='Key 7: Next'>Next</div><div class='key' style='background:#4e426d' role='button' tabindex='0' aria-label='Key 8: Studio'>Studio</div></div>
+<div class='strip' aria-label='Touch strip'><span>Scene: Camera</span><span>Mic 72%</span><span>—</span><span>—</span></div>
+<div class='dials'><div class='dial on' title='Dial 1: input volume'>🎙 72%</div><div class='dial'>2</div><div class='dial'>3</div><div class='dial'>4</div></div></div><p class='note muted'>Dial 1 · turn clockwise is selected. Drag an action from the panel onto any key or dial.</p></section>
+<aside class='card' style='display:flex;flex-direction:column;gap:10px' aria-label='Inspector'>
+<div class='row'><div class='seg' role='tablist'><button role='tab' aria-selected='true'>Binding</button><button role='tab'>Actions</button><button role='tab'>Dials</button></div><span class='sp'></span><button class='primary icon' aria-label='Save binding'>💾</button><button class='icon' aria-label='Test action'>▶</button><button class='icon' aria-label='Remove binding'>✕</button></div>
+<h2>Dial 1 · turn clockwise</h2>
+<div class='row card' style='background:var(--field);padding:8px'><span class='ico'>🎙</span><div><h3>Input volume up</h3><p class='muted'>Microphone volume, +5% per step</p></div><span class='sp'></span><button class='flat'>Change</button></div>
+<label class='f'>Step (percent, 1–100)<input type='text' value='5'></label>
+<label class='row'><input type='checkbox'> Return to a page afterwards</label>
+<label class='row'><input type='checkbox' checked> Show live information on the dial: <strong>Input volume</strong></label>
+<p class='muted'>Presets: <button class='flat'>🎙 Microphone</button><button class='flat'>🔊 Volume</button></p></aside></div></body></html>

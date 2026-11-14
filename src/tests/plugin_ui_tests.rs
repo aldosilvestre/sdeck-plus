@@ -239,11 +239,18 @@ fn the_add_and_rescan_controls_are_icons_at_the_right_end_of_the_binding_toolbar
                 "the old text button is gone"
             );
             let row = rescan.parent().expect("toolbar row");
+            // Save, Test and Remove now share the editor heading row; the plugin controls stay
+            // in the side panel toolbar.
             let save = tool(widgets, "Save binding");
-            assert_eq!(save.parent().as_ref(), Some(&row));
-            assert_eq!(tool(widgets, "Test action").parent().as_ref(), Some(&row));
+            let heading_row = save.parent().expect("editor heading row");
+            assert!(heading_row.has_css_class("editor-heading-row"));
+            assert_ne!(heading_row, row, "the plugin controls are not in that row");
+            assert_eq!(
+                tool(widgets, "Test action").parent().as_ref(),
+                Some(&heading_row)
+            );
             let remove = tool(widgets, "Remove binding");
-            assert_eq!(remove.parent().as_ref(), Some(&row));
+            assert_eq!(remove.parent().as_ref(), Some(&heading_row));
             assert_eq!(row.last_child().as_ref(), Some(rescan.upcast_ref()));
             assert_eq!(rescan.halign(), gtk::Align::End);
             let add = add_plugin(widgets);
@@ -264,17 +271,8 @@ fn the_add_and_rescan_controls_are_icons_at_the_right_end_of_the_binding_toolbar
                 (0.0..=8.5).contains(&gap),
                 "the normal toolbar spacing between add and reload: {gap}"
             );
-            let remove_box_now = bounds(&tool(widgets, "Remove binding")).unwrap();
-            assert!(
-                add_box.x() > remove_box_now.x() + remove_box_now.width() + 8.0,
-                "add is in the right-aligned group, apart from Remove"
-            );
             assert_eq!(add.height(), rescan.height(), "add height");
-            let (rescan_box, remove_box) = (bounds(&rescan).unwrap(), bounds(&remove).unwrap());
-            assert!(
-                rescan_box.x() > remove_box.x() + remove_box.width() + 8.0,
-                "separated from the three: {rescan_box:?} vs {remove_box:?}"
-            );
+            let rescan_box = bounds(&rescan).unwrap();
             for name in ["Save binding", "Test action", "Remove binding"] {
                 let other = tool(widgets, name);
                 assert_eq!(other.height(), rescan.height(), "{name} height");

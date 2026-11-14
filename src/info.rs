@@ -34,10 +34,14 @@ pub enum InfoSource {
     Temperature,
     Obs,
     NowPlaying,
+    /// Default microphone (audio source) volume and mute.
+    InputVolume,
+    /// Default microphone (audio source) device name.
+    InputDevice,
 }
 
 impl InfoSource {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Volume,
         Self::AudioDevice,
         Self::Brightness,
@@ -48,6 +52,8 @@ impl InfoSource {
         Self::Temperature,
         Self::Obs,
         Self::NowPlaying,
+        Self::InputVolume,
+        Self::InputDevice,
     ];
 
     pub fn id(self) -> &'static str {
@@ -62,6 +68,8 @@ impl InfoSource {
             Self::Temperature => "temperature",
             Self::Obs => "obs",
             Self::NowPlaying => "now-playing",
+            Self::InputVolume => "input-volume",
+            Self::InputDevice => "input-device",
         }
     }
 
@@ -81,13 +89,17 @@ impl InfoSource {
             Self::Temperature => "System temperature",
             Self::Obs => "OBS status",
             Self::NowPlaying => "Now playing",
+            Self::InputVolume => "Microphone volume and mute",
+            Self::InputDevice => "Audio input device",
         }
     }
 
     /// Icon used before the first reading and when a reading fails.
     pub fn glyph(self) -> Glyph {
         match self {
-            Self::Volume | Self::AudioDevice => Glyph::Speaker,
+            Self::Volume | Self::AudioDevice | Self::InputVolume | Self::InputDevice => {
+                Glyph::Speaker
+            }
             Self::Brightness => Glyph::Sun,
             Self::Clock => Glyph::None,
             Self::Weather => Glyph::Cloud,
@@ -114,9 +126,9 @@ impl InfoSource {
 
     fn interval(self) -> Duration {
         Duration::from_secs(match self {
-            Self::Volume | Self::NowPlaying => 1,
+            Self::Volume | Self::InputVolume | Self::NowPlaying => 1,
             Self::Cpu => 2,
-            Self::AudioDevice => 3,
+            Self::AudioDevice | Self::InputDevice => 3,
             Self::Clock | Self::Memory | Self::Temperature | Self::Obs => 5,
             Self::Weather => 600,
             Self::Brightness => 3_600,
@@ -130,7 +142,21 @@ impl InfoSource {
 
     /// Cheap local readings that a button press can change right away.
     fn follows_actions(self) -> bool {
-        matches!(self, Self::Volume | Self::AudioDevice)
+        matches!(
+            self,
+            Self::Volume | Self::AudioDevice | Self::InputVolume | Self::InputDevice
+        )
+    }
+
+    /// The `wpctl` subcommand and default node that read this audio source.
+    fn wpctl_args(self) -> Option<[&'static str; 2]> {
+        match self {
+            Self::Volume => Some(["get-volume", "@DEFAULT_AUDIO_SINK@"]),
+            Self::AudioDevice => Some(["inspect", "@DEFAULT_AUDIO_SINK@"]),
+            Self::InputVolume => Some(["get-volume", "@DEFAULT_AUDIO_SOURCE@"]),
+            Self::InputDevice => Some(["inspect", "@DEFAULT_AUDIO_SOURCE@"]),
+            _ => None,
+        }
     }
 }
 
@@ -585,11 +611,11 @@ impl InfoReader {
 
     fn try_read(&mut self, source: InfoSource) -> Option<InfoValue> {
         match source {
-            InfoSource::Volume => {
-                parse_volume(&run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])?)
+            InfoSource::Volume | InfoSource::InputVolume => {
+                parse_volume(&run("wpctl", &source.wpctl_args()?)?)
             }
-            InfoSource::AudioDevice => {
-                parse_audio_device(&run("wpctl", &["inspect", "@DEFAULT_AUDIO_SINK@"])?)
+            InfoSource::AudioDevice | InfoSource::InputDevice => {
+                parse_audio_device(&run("wpctl", &source.wpctl_args()?)?)
             }
             InfoSource::Brightness => None,
             InfoSource::Clock => {
@@ -991,6 +1017,70 @@ mod tests {
         };
         let value = now.value(Ok(vec![long])).unwrap();
         assert_eq!(value.detail, "The Very Long\nNamed\u{2026}");
+    }
+
+    #[test]
+    fn microphone_sources_read_the_default_source_and_follow_actions() {
+        assert_eq!(
+            InfoSource::InputVolume.wpctl_args(),
+            Some(["get-volume", "@DEFAULT_AUDIO_SOURCE@"])
+        );
+        assert_eq!(
+            InfoSource::InputDevice.wpctl_args(),
+            Some(["inspect", "@DEFAULT_AUDIO_SOURCE@"])
+        );
+        assert_eq!(
+            InfoSource::Volume.wpctl_args(),
+            Some(["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        );
+        assert_eq!(
+            InfoSource::AudioDevice.wpctl_args(),
+            Some(["inspect", "@DEFAULT_AUDIO_SINK@"])
+        );
+        assert_eq!(InfoSource::Clock.wpctl_args(), None);
+        assert_eq!(
+            InfoSource::from_id("input-volume"),
+            Some(InfoSource::InputVolume)
+        );
+        assert_eq!(
+            InfoSource::from_id("input-device"),
+            Some(InfoSource::InputDevice)
+        );
+        assert_eq!(
+            InfoSource::InputVolume.label(),
+            "Microphone volume and mute"
+        );
+        assert_eq!(InfoSource::InputDevice.label(), "Audio input device");
+        assert_eq!(InfoSource::InputVolume.glyph(), Glyph::Speaker);
+        for source in [InfoSource::InputVolume, InfoSource::InputDevice] {
+            assert!(source.is_polled() && source.follows_actions());
+        }
+        assert_eq!(InfoSource::InputVolume.interval(), Duration::from_secs(1));
+        assert_eq!(InfoSource::InputDevice.interval(), Duration::from_secs(3));
+        // Existing sources keep their ids, labels and order.
+        assert_eq!(
+            &InfoSource::ALL[..10],
+            &[
+                InfoSource::Volume,
+                InfoSource::AudioDevice,
+                InfoSource::Brightness,
+                InfoSource::Clock,
+                InfoSource::Weather,
+                InfoSource::Cpu,
+                InfoSource::Memory,
+                InfoSource::Temperature,
+                InfoSource::Obs,
+                InfoSource::NowPlaying,
+            ]
+        );
+        // The same parsers read a microphone: muted shows the muted glyph.
+        let muted = parse_volume("Volume: 0.80 [MUTED]").unwrap();
+        assert_eq!(muted.glyph, Glyph::SpeakerMuted);
+        let mic = parse_audio_device(
+            "id 55, type PipeWire:Interface:Node\n  * node.description = \"USB Headset Mic\"\n",
+        )
+        .unwrap();
+        assert_eq!(mic.glyph, Glyph::Headphones);
     }
 
     #[test]

@@ -1,4 +1,56 @@
+use super::ui_refresh_tests::fixture;
 use super::*;
+
+/// The QA-gated page workflow over the production widgets. It runs only when
+/// `STREAMDECK_QA_DIR` names a directory, and writes its captures there.
+#[test]
+fn page_workflow_captures_when_a_qa_directory_is_set() {
+    if std::env::var_os("STREAMDECK_QA_DIR").is_none() {
+        return;
+    }
+    run_gtk_test(|| {
+        let Some(fixture) = fixture("page-workflow", |_| {}) else {
+            return;
+        };
+        // Bundled action icons resolve through the app resource path, as at startup.
+        crate::app_icon::register().unwrap();
+        capture_page_workflow(
+            &fixture.window,
+            &fixture.widgets,
+            (DEFAULT_WIDTH, DEFAULT_HEIGHT),
+        );
+    });
+}
+
+/// Every button below `widget`, in tree order (popover rows included).
+fn buttons_in(widget: &gtk::Widget) -> Vec<Button> {
+    let mut found: Vec<Button> = widget
+        .downcast_ref::<Button>()
+        .cloned()
+        .into_iter()
+        .collect();
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        child = current.next_sibling();
+        found.extend(buttons_in(&current));
+    }
+    found
+}
+
+/// Every label's text below `widget`, joined.
+fn all_text(widget: &gtk::Widget) -> String {
+    let mut text = String::new();
+    if let Some(label) = widget.downcast_ref::<Label>() {
+        text.push_str(&label.text());
+        text.push('\n');
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        child = current.next_sibling();
+        text.push_str(&all_text(&current));
+    }
+    text
+}
 
 pub(super) fn capture_page_workflow(
     window: &ApplicationWindow,
@@ -15,21 +67,6 @@ pub(super) fn capture_page_workflow(
         texture
             .save_to_png(directory.join(format!("{width}x{height}-workflow-{name}.png")))
             .unwrap();
-        if width == 1000 {
-            if let Some(docs) = std::env::var_os("STREAMDECK_QA_DOCS_DIR") {
-                let filename = match name {
-                    "new-page" => Some("new-page-name.png"),
-                    "rename-page" => Some("rename-page.png"),
-                    "owned-folders" => Some("page-folders.png"),
-                    _ => None,
-                };
-                if let Some(filename) = filename {
-                    texture
-                        .save_to_png(std::path::PathBuf::from(docs).join(filename))
-                        .unwrap();
-                }
-            }
-        }
     };
     let mut buttons = Vec::new();
     collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
@@ -93,23 +130,58 @@ pub(super) fn capture_page_workflow(
     save("delete-page", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);
 
-    let profile_panel = widgets.management_menu.popover().unwrap();
+    // New and Edit profile are dedicated modals: the rail's "+" and a row's pencil open them.
+    let open_command = |command: &str| {
+        match command {
+            "New profile" => super::rail_tests::new_profile_button(widgets).emit_clicked(),
+            _ => super::profile_row_tests::edit_button(widgets, "Base").emit_clicked(),
+        }
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+            .find(|candidate| {
+                candidate.is_visible()
+                    && candidate.title().as_deref() == Some(command)
+                    && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+            })
+            .unwrap_or_else(|| panic!("{command} dialog opens"))
+    };
+    let dialog_button = |dialog: &gtk::Window, caption: &str| {
+        buttons_in(&dialog.child().unwrap())
+            .into_iter()
+            .find(|button| button_caption(button).as_deref() == Some(caption))
+            .unwrap_or_else(|| panic!("{caption} button in the {} dialog", dialog.title().unwrap()))
+    };
+    let profile = format!("QA profile {width}");
+    let new_profile = open_command("New profile");
     let mut entries = Vec::new();
-    collect_entries(profile_panel.upcast_ref(), &mut entries);
+    collect_entries(&new_profile.child().unwrap(), &mut entries);
     entries
         .iter()
         .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
-        .unwrap()
-        .set_text(&format!("QA profile {width}"));
-    button("Create profile").emit_clicked();
+        .expect("the New profile name field")
+        .set_text(&profile);
+    save("new-profile", new_profile.upcast_ref());
+    dialog_button(&new_profile, "Create profile").emit_clicked();
+    assert!(
+        !new_profile.is_visible(),
+        "creating closes the New profile dialog"
+    );
     button("New page").emit_clicked();
     let dialog = current_dialog();
     page_dialog_entry(&dialog).set_text("Profile tools");
     dialog.response(ResponseType::Accept);
     name.set_text("QA child");
     button("New folder").emit_clicked();
-    button("Delete profile").emit_clicked();
+    let edit_profile = open_command("Edit profile");
+    save("edit-profile", edit_profile.upcast_ref());
+    dialog_button(&edit_profile, "Delete profile").emit_clicked();
     let dialog = current_dialog();
+    assert!(
+        all_text(dialog.upcast_ref()).contains(&profile),
+        "the confirmation names the profile being deleted"
+    );
     save("delete-profile", dialog.upcast_ref());
     dialog.response(ResponseType::Accept);
     eprintln!("GTK page workflow captured at {width}x{height}: prompts, validation, local folders, links and deletion");

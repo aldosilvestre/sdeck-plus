@@ -117,6 +117,7 @@
         <li><a href="#manifest">manifest.json reference</a></li>
         <li><a href="#settings">Settings and the editor form</a></li>
         <li><a href="#protocol">Protocol v1</a></li>
+        <li><a href="#show-value">Showing a value</a></li>
         <li><a href="#limits">Limits and environment</a></li>
         <li><a href="#security">Security and credentials</a></li>
         <li><a href="#dependencies">Declaring dependencies</a></li>
@@ -271,6 +272,7 @@ cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
                   <tr><th><code>name</code></th><td>string, required</td><td>1-64 printable characters, not blank. The sidebar title.</td></tr>
                   <tr><th><code>executable</code></th><td>string, required</td><td>Plain relative path, at most 128 characters, no <code>..</code>, no absolute path. It must resolve (symlinks included) to an executable regular file inside the plugin folder; this is checked at discovery and again at every run.</td></tr>
                   <tr><th><code>actions</code></th><td>array, required</td><td>1 to 32 actions, unique ids.</td></tr>
+                  <tr><th><code>values</code></th><td>array, optional</td><td>Default none; at most 16 values, each <code>{"id", "label"}</code> (id rule as above, unique; label 1-64 printable characters). See <a href="#show-value">Showing a value</a>.</td></tr>
                   <tr><th><code>requirements</code></th><td>array, optional</td><td>Default none; at most 16. See <a href="#dependencies">Declaring dependencies</a>.</td></tr>
                 </table>
               </div>
@@ -286,6 +288,7 @@ cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
                   <tr><th><code>description</code></th><td>string, optional</td><td>At most 256 characters.</td></tr>
                   <tr><th><code>controls</code></th><td>array, required</td><td>At least one of <code>key</code>, <code>dial_turn</code>, <code>dial_press</code>, <code>touch</code> (the touch strip). The editor only lets the user assign the action to controls listed here.</td></tr>
                   <tr><th><code>settings</code></th><td>array, optional</td><td>Default empty; at most 16 fields, unique ids. See below.</td></tr>
+                  <tr><th><code>display</code></th><td>string, optional</td><td>The id of a declared <code>values</code> entry this action displays. An unknown id rejects the manifest.</td></tr>
                 </table>
               </div>
             </article>
@@ -368,10 +371,44 @@ cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
                   <tr><th><code>MalformedResponse</code></th><td>Stdout is not UTF-8, is empty, has more than one line, is not the JSON shape above, has another <code>protocol_version</code>, or a text over 512 characters</td><td><code>malformed plugin response: &lt;detail&gt;</code></td></tr>
                   <tr><th><code>RequestIdMismatch</code></th><td>The echoed <code>request_id</code> differs</td><td><code>plugin answered a different request</code></td></tr>
                   <tr><th><code>OutputTooLarge</code></th><td>Stdout grows beyond 16 KiB (the process is killed)</td><td><code>plugin output exceeded the size limit</code></td></tr>
+                  <tr><th><code>NoDisplay</code></th><td>A query was asked of an action that declares no <code>display</code> (nothing runs)</td><td><code>action `&lt;action&gt;` of plugin `&lt;id&gt;` displays no value</code></td></tr>
                   <tr><th><code>Timeout</code></th><td>Spawn, exchange and exit take longer than the deadline (the process group is killed)</td><td><code>plugin timed out</code></td></tr>
                 </table>
               </div>
               <p>Before any process starts, the host can also refuse the request: the plugin is not installed (<code>Missing</code>), disabled (<code>Disabled</code>), no longer offers the action (<code>UnknownAction</code>), the settings do not fit (<code>InvalidSettings</code>), the executable is missing, not executable or resolves outside the plugin folder (<code>UnsafeExecutable</code>), or the process cannot start (<code>Spawn</code>). A request is never retried by the host.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="show-value" aria-labelledby="show-value-title">
+        <header>
+          <p class="eyebrow">Contract</p>
+          <h2 id="show-value-title">Showing a value</h2>
+          <p>An action can show something the plugin knows, such as a brightness or a scene. Declare the value, point the action at it with <code>display</code>, and answer a second kind of request, <code>query</code>.</p>
+        </header>
+        <div class="doc-group" style="--c: var(--fam-obs)">
+          <div class="cards">
+            <article class="card wide">
+              <h4>Manifest and query</h4>
+              <div class="code-block">
+<pre><code>"values": [{"id": "brightness", "label": "Brightness"}],
+"actions": [{"id": "show-brightness", "name": "Brightness", "controls": ["key", "touch"], "display": "brightness"}]</code></pre>
+              </div>
+              <p>The host writes one line naming the value (there is no <code>action</code> in a query), with the binding's validated settings:</p>
+              <div class="code-block">
+<pre><code>{"protocol_version":1,"type":"query","request_id":"sdeck-8","value":"brightness","settings":{}}</code></pre>
+              </div>
+              <p>Answer with one line, exit status 0:</p>
+              <div class="code-block">
+<pre><code>{"protocol_version":1,"request_id":"sdeck-8","ok":true,"value":{"headline":"70%","detail":"Brightness","level":70}}</code></pre>
+              </div>
+              <ul>
+                <li><strong><code>headline</code></strong>: required, 1-32 printable characters. <strong><code>detail</code></strong>: optional, at most 64 printable characters. <strong><code>level</code></strong>: optional integer 0-100. Anything else is <code>MalformedResponse</code>; <code>ok:false</code> with an <code>error</code> is <code>Reported</code>.</li>
+                <li>At most 16 values per plugin. An action without <code>display</code> cannot be queried (<code>NoDisplay</code>).</li>
+                <li>Same limits as any request: cleared environment, a 5 s default deadline, process group killed afterwards, stdout 16 KiB.</li>
+                <li><strong>Answer from your own remembered state, quickly, and never block.</strong> Do not contact the device to answer a query when you can report what you last set.</li>
+              </ul>
             </article>
           </div>
         </div>
@@ -399,7 +436,7 @@ cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
                   <tr><th>Request deadline</th><td>Covers spawn, exchange and exit. The host API defaults to 5 s and accepts at most 60 s (the validator's <code>--timeout</code>). <strong>The app always uses a fixed 5 s deadline today.</strong> A manifest cannot yet ask for a longer deadline, so design every action to finish well within 5 s.</td></tr>
                   <tr><th>Queue</th><td>Eight requests wait behind the one running; a ninth is refused with a status message. Requests run one at a time.</td></tr>
                   <tr><th>Shutdown</th><td>Queued requests are dropped; a running one is waited for at most 6 s.</td></tr>
-                  <tr><th>Counts</th><td>64 plugins, 32 actions per plugin, 16 fields per action, 16 requirements; ids up to 48 characters</td></tr>
+                  <tr><th>Counts</th><td>64 plugins, 32 actions per plugin, 16 fields per action, 16 requirements, 16 values; ids up to 48 characters</td></tr>
                 </table>
               </div>
             </article>
@@ -510,6 +547,7 @@ $EDITOR ~/.config/sdeck-plus/plugins/&lt;id&gt;/token   # paste the token only</
 cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt; --invoke &lt;action&gt; \
     [--settings '&lt;json&gt;'] [--timeout &lt;seconds&gt;] [--request-id &lt;id&gt;]</code></pre>
               </div>
+              <p>For an action with a <code>display</code> value, <code>--query &lt;action&gt;</code> (same options, exclusive with <code>--invoke</code>) asks for the value instead and prints <code>PLUGIN_QUERY_OK:</code> with the headline, detail and level, or <code>PLUGIN_QUERY_ERROR:</code>. Like <code>--invoke</code> it RUNS your plugin once, after a warning.</p>
               <ul>
                 <li><strong>Without <code>--invoke</code> nothing is run.</strong> It copies the project's regular files into a temporary plugin root (no symlinks; at most 256 files, 8 MiB per file and 32 MiB in total; <code>.git</code> and <code>__pycache__</code> are skipped), opens it with the real host code and prints <code>PLUGIN_VALIDATE_OK:</code> (id, version, protocol, actions with controls and settings, requirements with a <code>PATH</code> check) or one <code>PLUGIN_VALIDATE_ERROR:</code> line per problem. The directory name need not equal the id. The temporary root is always removed.</li>
                 <li><strong><code>--invoke</code> RUNS your plugin once</strong> with your privileges, after printing a warning. It enables the plugin in the temporary root and calls the real host, so the outcome is what the app would see: <code>PLUGIN_INVOKE_OK:</code> with the message, or <code>PLUGIN_INVOKE_ERROR:</code> with the host error. <code>--timeout</code> defaults to 5 seconds (maximum 60) and <code>--request-id</code> to <code>validate-1</code>. Use it only on a plugin you trust and, if the action has side effects, with settings you accept.</li>

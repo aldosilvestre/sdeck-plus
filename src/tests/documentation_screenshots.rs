@@ -71,14 +71,22 @@ fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
         assert!(widget.is_mapped(), "{name} did not map");
     }
     let window = widget.root().unwrap().downcast::<gtk::Window>().unwrap();
-    wait_for_frame(widget);
-    let snapshot = gtk::Snapshot::new();
-    gtk::WidgetPaintable::new(Some(widget)).snapshot(
-        &snapshot,
-        f64::from(widget.width()),
-        f64::from(widget.height()),
-    );
-    let node = snapshot.to_node().expect("native GTK render node");
+    // A profile switch rebuilds the catalog in an idle step: snapshot only once something is drawn.
+    let mut node = None;
+    for _ in 0..10 {
+        wait_for_frame(widget);
+        let snapshot = gtk::Snapshot::new();
+        gtk::WidgetPaintable::new(Some(widget)).snapshot(
+            &snapshot,
+            f64::from(widget.width()),
+            f64::from(widget.height()),
+        );
+        node = snapshot.to_node();
+        if node.is_some() {
+            break;
+        }
+    }
+    let node = node.expect("native GTK render node");
     let texture = window.renderer().unwrap().render_texture(&node, None);
     assert!(texture.width() > 0 && texture.height() > 0);
     texture
@@ -344,7 +352,18 @@ fn capture_documentation_screenshots() {
     widgets.binding_ui.return_seconds.set_text("10");
     assert!(widgets.binding_ui.return_model.n_items() > 0);
     widgets.binding_ui.return_target.set_selected(0);
-    capture("page-return");
+    // The page-return fields sit at the foot of the editor: scroll the form to show them.
+    wait_for_frame(&widgets.root);
+    let form = widgets
+        .binding_ui
+        .return_seconds
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+        .expect("the editor form scroller");
+    let adjustment = form.vadjustment();
+    adjustment.set_value(adjustment.upper() - adjustment.page_size());
+    save(&directory, widgets.root.upcast_ref(), "page-return");
+    adjustment.set_value(0.0);
     widgets.binding_ui.return_toggle.set_active(false);
     // Keys take their action from the catalog; dials still choose it here.
     widgets.binding_ui.mark_clean();
@@ -353,7 +372,7 @@ fn capture_documentation_screenshots() {
         .downcast::<Button>()
         .unwrap()
         .emit_clicked();
-    assert_reachable(&widgets.binding_ui.action_picker, &widgets.root);
+    assert_reachable(&widgets.binding_ui.action_picker, &widgets.scroller);
     dropdown(
         &directory,
         &widgets.binding_ui.action_picker,
@@ -363,7 +382,7 @@ fn capture_documentation_screenshots() {
     wait_for_frame(&widgets.root);
     let category =
         descendants::<gtk::DropDown>(widgets.binding_ui.feature_editor.root.upcast_ref()).remove(0);
-    assert_reachable(&category, &widgets.root);
+    assert_reachable(&category, &widgets.scroller);
     dropdown(&directory, &category, "more-actions-categories");
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
@@ -372,7 +391,7 @@ fn capture_documentation_screenshots() {
         .populate_action(&Action::Feature(FeatureAction::Obs(ObsAction::Scene(
             "Studio camera".into(),
         ))));
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("more-actions-obs");
     widgets
         .binding_ui
@@ -388,7 +407,7 @@ fn capture_documentation_screenshots() {
         .downcast::<Button>()
         .unwrap()
         .emit_clicked();
-    assert_reachable(&widgets.binding_ui.event_picker, &widgets.root);
+    assert_reachable(&widgets.binding_ui.event_picker, &widgets.scroller);
     dropdown(
         &directory,
         &widgets.binding_ui.event_picker,
@@ -409,14 +428,14 @@ fn capture_documentation_screenshots() {
         .unwrap()
         .emit_clicked();
     widgets.binding_ui.event_picker.set_selected(3);
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("touch-strip");
 
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[0]).emit_clicked();
     let editor = &widgets._text_editor;
     wait_for_frame(&widgets.root);
-    assert_reachable(&widgets.key_widgets[0], &widgets.root);
+    assert_reachable(&widgets.key_widgets[0], &widgets.scroller);
     wait_for_frame(&widgets.root);
     // Show an edited draft: Save enabled, the unsaved hint and a grid choice.
     editor.panel.set_autohide(false);
@@ -433,10 +452,10 @@ fn capture_documentation_screenshots() {
         .emit_clicked();
     widgets.artwork_section.set_expanded(true);
     wait_for_frame(&widgets.root);
-    assert_reachable(&widgets.target_picker, &widgets.root);
+    assert_reachable(&widgets.target_picker, &widgets.scroller);
     dropdown(&directory, &widgets.target_picker, "artwork-touch-zones");
     widgets.artwork_section.set_expanded(false);
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     wait_for_frame(&widgets.root);
 
     // Right-click menu of a key, and the event choice after dropping an action on a dial.
@@ -470,19 +489,51 @@ fn capture_documentation_screenshots() {
     save(&directory, reference.upcast_ref(), "shortcut-reference");
     reference.response(ResponseType::Close);
     widgets.feature_runtime.edit_profile("Studio");
-    menu(
-        &directory,
-        &widgets.management_menu,
-        "organize-profiles-pages",
-    );
-    let panel = widgets.management_menu.popover().unwrap();
-    let tasks = descendants::<gtk::Stack>(panel.upcast_ref()).remove(0);
-    tasks.set_visible_child_name("new");
-    menu(&directory, &widgets.management_menu, "organize-new-profile");
-    tasks.set_visible_child_name("edit");
+    // Studio is the current profile; its row shows Edit and Delete next to the name.
+    widgets
+        .feature_runtime
+        .profile_tabs()
+        .set_current_page(Some(2));
+    wait_for_frame(&widgets.root);
+    // The rail head and every profile row, each with its own Edit and Delete icons.
+    let rail = {
+        let mut child = widgets.feature_runtime.profile_tabs().first_child();
+        loop {
+            let current = child.expect("the tab strip");
+            if current.css_name() == "header" {
+                break current;
+            }
+            child = current.next_sibling();
+        }
+    };
+    // A short window makes the strip hug its rows for the capture; restore the size after.
+    widgets.root.set_size_request(1000, 440);
+    wait_for_frame(&widgets.root);
+    save(&directory, &rail, "profile-rail");
+    widgets.root.set_size_request(1000, 950);
+    wait_for_frame(&widgets.root);
+    // The rail opens each profile dialog: a row's pencil edits that profile, "+" creates one.
+    let open_profile_dialog = |command: &str| {
+        if command == "New profile" {
+            super::rail_tests::new_profile_button(&widgets).emit_clicked();
+        } else {
+            super::profile_row_tests::edit_button(&widgets, "Studio").emit_clicked();
+        }
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+            .find(|candidate| {
+                candidate.is_visible()
+                    && candidate.title().as_deref() == Some(command)
+                    && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+            })
+            .unwrap_or_else(|| panic!("{command} dialog opens"))
+    };
+    let edit = open_profile_dialog("Edit profile");
+    save(&directory, edit.upcast_ref(), "organize-profiles-pages");
     // The information icon reveals its help on hover.
-    widgets.management_menu.popup();
-    let help_icon = descendants::<gtk::MenuButton>(panel.upcast_ref())
+    let help_icon = descendants::<gtk::MenuButton>(edit.upcast_ref())
         .into_iter()
         .find(|button| button.has_css_class("field-help"))
         .expect("help icon");
@@ -501,11 +552,16 @@ fn capture_documentation_screenshots() {
     hover.emit_by_name::<()>("enter", &[&2.0f64, &2.0f64]);
     save(&directory, help_tip.upcast_ref(), "field-help");
     hover.emit_by_name::<()>("leave", &[]);
-    widgets.management_menu.popdown();
+    edit.close();
+    let new = open_profile_dialog("New profile");
+    save(&directory, new.upcast_ref(), "organize-new-profile");
+    new.close();
     settings.set_gtk_theme_name(Some("Adwaita"));
     settings.set_gtk_application_prefer_dark_theme(false);
     wait_for_frame(&widgets.root);
-    menu(&directory, &widgets.management_menu, "organize-light-theme");
+    let edit = open_profile_dialog("Edit profile");
+    save(&directory, edit.upcast_ref(), "organize-light-theme");
+    edit.close();
     settings.set_gtk_theme_name(Some("Adwaita-dark"));
     settings.set_gtk_application_prefer_dark_theme(true);
     widgets
@@ -553,7 +609,7 @@ fn capture_documentation_screenshots() {
     );
 
     key_button(&widgets.key_labels[0]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     set_pressed(&widgets.key_widgets[0], true);
     set_pressed(&widgets.encoder_widgets[1], true);
     // Refresh momentary feedback on the frame update signal, not a timer race.
@@ -704,7 +760,7 @@ fn capture_documentation_screenshots() {
     artwork.refresh(true);
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[7]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     capture("missing-file");
     artwork
         .layers
@@ -735,7 +791,7 @@ fn capture_documentation_screenshots() {
     artwork.refresh(true);
     widgets.binding_ui.mark_clean();
     key_button(&widgets.key_labels[7]).emit_clicked();
-    widgets.root.vadjustment().set_value(0.0);
+    widgets.scroller.vadjustment().set_value(0.0);
     widgets.binding_ui.hold_toggle.set_active(true);
     wait_for_frame(&widgets.root);
     capture("key-hold-action");

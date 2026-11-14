@@ -52,6 +52,10 @@ pub enum BindingIcon {
     VolumeDown,
     Mute,
     AudioOutput,
+    AudioInput,
+    InputVolumeUp,
+    InputVolumeDown,
+    InputMute,
     Scroll,
     Text,
     OpenFile,
@@ -96,7 +100,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 58] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -117,6 +121,10 @@ impl BindingIcon {
         Self::VolumeDown,
         Self::Mute,
         Self::AudioOutput,
+        Self::AudioInput,
+        Self::InputVolumeUp,
+        Self::InputVolumeDown,
+        Self::InputMute,
         Self::Scroll,
         Self::Text,
         Self::OpenFile,
@@ -228,10 +236,18 @@ impl BindingIcon {
                     VolumeDirection::Up => Self::VolumeUp,
                     VolumeDirection::Down => Self::VolumeDown,
                 },
+                DesktopAction::InputVolumeStep { direction, .. } => match direction {
+                    VolumeDirection::Up => Self::InputVolumeUp,
+                    VolumeDirection::Down => Self::InputVolumeDown,
+                },
                 DesktopAction::PlayAudio { .. } => Self::PlaySound,
                 DesktopAction::StopAudio => Self::Stop,
                 DesktopAction::SetAudioOutput { .. } | DesktopAction::CycleAudioOutput => {
                     Self::AudioOutput
+                }
+                DesktopAction::ToggleInputMute => Self::InputMute,
+                DesktopAction::SetAudioInput { .. } | DesktopAction::CycleAudioInput => {
+                    Self::AudioInput
                 }
                 DesktopAction::MouseScroll { .. } => Self::Scroll,
             },
@@ -256,6 +272,10 @@ impl BindingIcon {
                 ObsAction::ToggleStreaming | ObsAction::StartStreaming => Self::Stream,
                 ObsAction::ToggleMute(_) => Self::MicrophoneMute,
                 ObsAction::SourceVisibility { .. } => Self::Visibility,
+                ObsAction::InputVolume { direction, .. } => match direction {
+                    VolumeDirection::Up => Self::VolumeUp,
+                    VolumeDirection::Down => Self::VolumeDown,
+                },
             },
             FeatureAction::Plugin(_) => Self::More,
             FeatureAction::Timer { .. } => Self::Timer,
@@ -310,6 +330,10 @@ impl BindingIcon {
             Self::VolumeDown => "volume-down",
             Self::Mute => "mute",
             Self::AudioOutput => "audio-output",
+            Self::AudioInput => "audio-input",
+            Self::InputVolumeUp => "input-volume-up",
+            Self::InputVolumeDown => "input-volume-down",
+            Self::InputMute => "input-mute",
             Self::Scroll => "scroll",
             Self::Text => "text",
             Self::OpenFile => "open-file",
@@ -422,9 +446,15 @@ impl BindingIcon {
             | Self::PreviousTrack
             | Self::Play
             | Self::MediaIdle => C::Media,
-            Self::VolumeUp | Self::VolumeDown | Self::Mute | Self::AudioOutput | Self::Volume => {
-                C::Audio
-            }
+            Self::VolumeUp
+            | Self::VolumeDown
+            | Self::Mute
+            | Self::AudioOutput
+            | Self::AudioInput
+            | Self::InputVolumeUp
+            | Self::InputVolumeDown
+            | Self::InputMute
+            | Self::Volume => C::Audio,
             Self::ObsScene
             | Self::Record
             | Self::Stream
@@ -1154,6 +1184,17 @@ impl Pen {
 }
 
 /// A speaker body pointing right, its mouth at x = -1.
+/// A microphone body, shifted left so a +/- mark fits on its right.
+fn microphone(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
+    rounded(cairo, -7.0, -10.5, 7.5, 13.5, 3.75);
+    pen.duo(cairo)?;
+    cairo.new_sub_path();
+    cairo.arc(-3.25, -0.5, 7.0, 0.0, PI);
+    polyline(cairo, &[(-3.25, 6.5), (-3.25, 10.5)]);
+    polyline(cairo, &[(-7.0, 10.5), (0.5, 10.5)]);
+    pen.line(cairo)
+}
+
 fn speaker(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     closed(
         cairo,
@@ -1384,6 +1425,30 @@ fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Erro
             rounded(cairo, -11.0, 0.5, 6.0, 10.0, 2.5);
             rounded(cairo, 5.0, 0.5, 6.0, 10.0, 2.5);
             pen.duo(cairo)
+        }
+        BindingIcon::AudioInput => {
+            rounded(cairo, -4.0, -11.0, 8.0, 14.0, 4.0);
+            pen.duo(cairo)?;
+            cairo.arc(0.0, 0.5, 8.0, 0.0, PI);
+            polyline(cairo, &[(0.0, 8.5), (0.0, 11.5)]);
+            polyline(cairo, &[(-4.5, 11.5), (4.5, 11.5)]);
+            pen.line(cairo)
+        }
+        BindingIcon::InputVolumeUp => {
+            microphone(cairo, pen)?;
+            polyline(cairo, &[(5.0, -6.0), (11.0, -6.0)]);
+            polyline(cairo, &[(8.0, -9.0), (8.0, -3.0)]);
+            pen.line(cairo)
+        }
+        BindingIcon::InputVolumeDown => {
+            microphone(cairo, pen)?;
+            polyline(cairo, &[(5.0, -6.0), (11.0, -6.0)]);
+            pen.line(cairo)
+        }
+        BindingIcon::InputMute => {
+            microphone(cairo, pen)?;
+            polyline(cairo, &[(-9.5, -9.5), (9.5, 9.5)]);
+            pen.line(cairo)
         }
         BindingIcon::Scroll => {
             rounded(cairo, -6.5, -10.5, 13.0, 21.0, 6.5);

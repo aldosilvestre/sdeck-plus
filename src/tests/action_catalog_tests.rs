@@ -240,3 +240,212 @@ fn searching_the_catalog_shows_only_matching_actions_and_restores_on_clear() {
         });
     });
 }
+
+fn collect_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+    if widget.has_css_class(class) {
+        found.push(widget.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        collect_with_class(&current, class, found);
+        child = current.next_sibling();
+    }
+}
+
+fn label_text(widget: &gtk::Widget) -> String {
+    widget
+        .downcast_ref::<gtk::Label>()
+        .map(|label| label.text().to_string())
+        .or_else(|| {
+            widget
+                .downcast_ref::<gtk::ToggleButton>()
+                .and_then(|button| button.label())
+                .map(|text| text.to_string())
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn category_chips_filter_the_catalog_to_one_category_and_all_restores_it() {
+    run_gtk_test(|| {
+        catalog_fixture("catalog-chips", |widgets, _layers, _requests| {
+            let mut chips = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "catalog-chip", &mut chips);
+            let names: Vec<_> = chips
+                .iter()
+                .filter(|chip| chip.is_visible())
+                .map(label_text)
+                .collect();
+            assert_eq!(
+                names,
+                [
+                    "All",
+                    "Basic",
+                    "System",
+                    "Multimedia",
+                    "Organization",
+                    "Device",
+                    "OBS"
+                ],
+                "plugins add their own chip only when a plugin is installed"
+            );
+            let chip = |name: &str| {
+                chips
+                    .iter()
+                    .find(|chip| label_text(chip) == name)
+                    .unwrap()
+                    .downcast_ref::<gtk::ToggleButton>()
+                    .unwrap()
+                    .clone()
+            };
+            assert!(chip("All").is_active());
+            let mut buttons = Vec::new();
+            collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
+            let find = |caption: &str| {
+                buttons
+                    .iter()
+                    .find(|b| {
+                        b.tooltip_text().as_deref()
+                            == Some(&format!(
+                                "Drag {caption} onto a key or dial, or click to assign to the selected control."
+                            ))
+                    })
+                    .unwrap()
+                    .clone()
+            };
+            let section = |row: &Button| row.parent().unwrap().parent().unwrap().parent().unwrap();
+            let volume = find("Volume up");
+            let command = find("Run command");
+            chip("Multimedia").set_active(true);
+            assert!(!chip("All").is_active(), "chips behave as one choice");
+            assert!(section(&volume).is_visible() && !section(&command).is_visible());
+            // The chosen category is open so its actions are reachable at once.
+            let revealer = volume.parent().unwrap().parent().unwrap();
+            assert!(revealer
+                .downcast_ref::<gtk::Revealer>()
+                .unwrap()
+                .reveals_child());
+            chip("All").set_active(true);
+            assert!(section(&command).is_visible() && section(&volume).is_visible());
+        });
+    });
+}
+
+#[test]
+fn multimedia_is_grouped_into_media_output_input_and_files_and_search_hides_the_headings() {
+    run_gtk_test(|| {
+        catalog_fixture("catalog-groups", |widgets, _layers, _requests| {
+            let mut headings = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "catalog-group", &mut headings);
+            let names: Vec<_> = headings.iter().map(label_text).collect();
+            assert_eq!(
+                names,
+                [
+                    "Media",
+                    "Output (speakers, headphones)",
+                    "Input (microphone)",
+                    "Files"
+                ]
+            );
+            let search = descendant_search(widgets.root.upcast_ref()).unwrap();
+            set_search_text(&search, "microphone");
+            assert!(
+                headings.iter().all(|heading| !heading.is_visible()),
+                "headings disappear while filtering"
+            );
+            set_search_text(&search, "");
+            assert!(headings.iter().all(|heading| heading.is_visible()));
+        });
+    });
+}
+
+#[test]
+fn the_dial_event_menu_lists_compact_left_aligned_rows() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let window = ApplicationWindow::builder()
+            .default_width(400)
+            .default_height(300)
+            .build();
+        install_style(&window);
+        let anchor = Button::with_label("Dial 1");
+        window.set_child(Some(&anchor));
+        window.present();
+        wait_for_frame(&window);
+        crate::action_catalog::choose_event(anchor.upcast_ref(), |_| {});
+        let mut popovers = Vec::new();
+        let mut child = anchor.first_child();
+        while let Some(widget) = child {
+            if widget.has_css_class("dial-event-choice") {
+                popovers.push(widget.clone());
+            }
+            child = widget.next_sibling();
+        }
+        assert_eq!(popovers.len(), 1);
+        let mut rows = Vec::new();
+        collect_catalog_buttons(&popovers[0], &mut rows);
+        let captions: Vec<_> = rows.iter().filter_map(button_caption).collect();
+        assert_eq!(
+            captions,
+            ["Turn clockwise", "Turn counterclockwise", "Press"]
+        );
+        for row in &rows {
+            let label = row
+                .child()
+                .and_downcast::<gtk::Label>()
+                .expect("row caption");
+            assert_eq!(label.xalign(), 0.0, "{} starts at the left", label.text());
+            assert!(
+                row.measure(gtk::Orientation::Vertical, -1).0 >= 36,
+                "{} is a comfortable target",
+                label.text()
+            );
+        }
+        window.destroy();
+    });
+}
+
+#[test]
+fn the_profile_rail_is_the_same_at_every_width_with_names_and_labeled_tools() {
+    run_gtk_test(|| {
+        catalog_fixture("rail-consistent", |widgets, _layers, _requests| {
+            let tabs = widgets.feature_runtime.profile_tabs();
+            let names: Vec<String> = (0..tabs.n_pages())
+                .filter_map(|index| tabs.nth_page(Some(index)))
+                .filter_map(|page| tabs.tab_label(&page))
+                // A row is the name followed by its Edit and Delete icons.
+                .filter_map(|row| row.first_child()?.downcast::<gtk::Label>().ok())
+                .map(|label| label.text().to_string())
+                .collect();
+            assert!(
+                names.iter().all(|name| name.chars().count() > 1),
+                "profile tabs show names, never initials: {names:?}"
+            );
+            assert!(names.contains(&"Base".to_string()));
+            // The tool keeps its caption beside its icon.
+            {
+                let menu = &widgets.obs_menu;
+                let content = menu.child().expect("menu button content");
+                // The tool starts at the same left edge as the profile names below them.
+                assert_eq!(content.halign(), gtk::Align::Start);
+                let mut caption = None;
+                let mut child = content.first_child();
+                while let Some(widget) = child {
+                    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                        caption = Some(label.is_visible());
+                    }
+                    child = widget.next_sibling();
+                }
+                assert_eq!(caption, Some(true), "the tool shows its caption");
+            }
+            // The connection badge is a labelled pill, not a dot.
+            let mut badges = Vec::new();
+            collect_with_class(widgets.root.upcast_ref(), "rail-badge", &mut badges);
+            assert_eq!(badges.len(), 1);
+            assert!(!badges[0].has_css_class("rail-compact"));
+            assert!(!label_text(&badges[0]).is_empty());
+        })
+    });
+}

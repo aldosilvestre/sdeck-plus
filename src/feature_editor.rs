@@ -7,7 +7,7 @@ use sdeck_plus::{
     },
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
-    obs::ObsAction,
+    obs::{ObsAction, DEFAULT_INPUT_VOLUME_STEP_DB},
     organization::NavigationAction,
 };
 use std::{
@@ -38,7 +38,7 @@ pub(crate) struct EditorWidgets {
     text: TextView,
     number: Entry,
     /// Whether `number` currently holds a volume step rather than another numeric field.
-    volume_mode: Cell<bool>,
+    volume_mode: Cell<Option<u8>>,
     direction: gtk::DropDown,
     flag: CheckButton,
     first_row: GtkBox,
@@ -62,6 +62,7 @@ pub(crate) struct EditorWidgets {
     direct_sound: Cell<bool>,
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
+    audio_input: audio_output::OutputPicker,
 }
 
 impl Deref for FeatureEditor {
@@ -147,7 +148,8 @@ impl FeatureEditor {
         let (number_row, number_label) = field("", &number);
         let (direction_row, _) = field("Direction", &direction);
         let (flag_row, _) = field("Options", &flag);
-        let audio_output = audio_output::OutputPicker::new();
+        let audio_output = audio_output::OutputPicker::new(audio_output::Kind::Output);
+        let audio_input = audio_output::OutputPicker::new(audio_output::Kind::Input);
         for row in [
             &first_row,
             &second_row,
@@ -159,6 +161,7 @@ impl FeatureEditor {
             root.append(row);
         }
         root.append(audio_output.root());
+        root.append(audio_input.root());
         let editor = Self(Rc::new(EditorWidgets {
             root,
             selectors: pickers,
@@ -169,7 +172,7 @@ impl FeatureEditor {
             second,
             text,
             number,
-            volume_mode: Cell::new(false),
+            volume_mode: Cell::new(None),
             direction,
             flag,
             first_row,
@@ -191,6 +194,7 @@ impl FeatureEditor {
             direct_sound: Cell::new(false),
             picker: RefCell::new(None),
             audio_output,
+            audio_input,
         }));
         let weak = Rc::downgrade(&editor.0);
         crate::binding_icon::icon_dropdown(&editor.action, move |position| {
@@ -355,6 +359,9 @@ impl FeatureEditor {
         self.audio_output
             .root()
             .set_visible(choice == Choice::SetAudioOutput);
+        self.audio_input
+            .root()
+            .set_visible(choice == Choice::SetAudioInput);
         self.description.set_text(choice.description());
         crate::binding_icon::set_binding_icon(&self.action_icon, choice.binding_icon());
         self.first.set_placeholder_text(Some(match choice {
@@ -365,7 +372,7 @@ impl FeatureEditor {
             Choice::PlayAudio => "/home/user/Music/track.ogg",
             Choice::OpenFolder => "Studio",
             Choice::Scene | Choice::Visibility => "Main scene",
-            Choice::ObsMute => "Microphone",
+            Choice::ObsMute | Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => "Microphone",
             _ => "",
         }));
         self.second
@@ -380,7 +387,11 @@ impl FeatureEditor {
             Choice::Timer => "90",
             Choice::Brightness => "50",
             Choice::AdjustBrightness => "-5",
-            Choice::VolumeUp | Choice::VolumeDown => "5",
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => "5",
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => "2",
             _ => "",
         }));
         self.browse_file
@@ -394,7 +405,9 @@ impl FeatureEditor {
             Choice::PlayAudio => Some("Audio file path"),
             Choice::OpenFolder => Some("Folder name"),
             Choice::Scene | Choice::Visibility => Some("Scene name"),
-            Choice::ObsMute => Some("Input name"),
+            Choice::ObsMute | Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => {
+                Some("Input name")
+            }
             _ => None,
         };
         if let Some(label) = first {
@@ -425,14 +438,26 @@ impl FeatureEditor {
             Choice::Timer => Some("Duration in seconds (1–86400)"),
             Choice::Brightness => Some("Brightness percent (0–100)"),
             Choice::AdjustBrightness => Some("Adjustment percent (signed)"),
-            Choice::VolumeUp | Choice::VolumeDown => Some("Step (percent, 1–100)"),
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => Some("Step (percent, 1–100)"),
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => Some("Step (dB, 1–20)"),
             _ => None,
         };
-        let volume = matches!(choice, Choice::VolumeUp | Choice::VolumeDown);
-        if volume != self.volume_mode.replace(volume) {
+        let step_default = match choice {
+            Choice::VolumeUp
+            | Choice::VolumeDown
+            | Choice::InputVolumeUp
+            | Choice::InputVolumeDown => Some(DEFAULT_VOLUME_STEP),
+            Choice::ObsInputVolumeUp | Choice::ObsInputVolumeDown => {
+                Some(DEFAULT_INPUT_VOLUME_STEP_DB)
+            }
+            _ => None,
+        };
+        if step_default != self.volume_mode.replace(step_default) {
             // The entry is shared by every numeric action; start from the new action's default.
-            self.number
-                .set_text(&if volume { DEFAULT_VOLUME_STEP } else { 1 }.to_string());
+            self.number.set_text(&step_default.unwrap_or(1).to_string());
         }
         if let Some(label) = numeric {
             self.number_label.set_text(label);
@@ -499,11 +524,12 @@ impl FeatureEditor {
     pub(crate) fn reset(&self) {
         self.invalidate_picker();
         self.audio_output.select(None);
+        self.audio_input.select(None);
         self.first.set_text("");
         self.second.set_text("");
         self.text.buffer().set_text("");
         self.number.set_text("1");
-        self.volume_mode.set(false);
+        self.volume_mode.set(None);
         self.direction.set_selected(0);
         self.flag.set_active(false);
         self.category.set_selected(0);
@@ -590,6 +616,16 @@ impl FeatureEditor {
                 numeric.parse().map_err(|error| invalid_number(&error))?,
             )),
             Choice::Mute => FeatureAction::Desktop(DesktopAction::Media(MediaCommand::Mute)),
+            Choice::InputVolumeUp => FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+                direction: VolumeDirection::Up,
+                percent: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::InputVolumeDown => FeatureAction::Desktop(DesktopAction::InputVolumeStep {
+                direction: VolumeDirection::Down,
+                percent: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::InputMute => FeatureAction::Desktop(DesktopAction::ToggleInputMute),
+            Choice::SetAudioInput => FeatureAction::Desktop(self.audio_input.action()),
             Choice::SetAudioOutput => FeatureAction::Desktop(self.audio_output.action()),
             Choice::NextPage => FeatureAction::Navigation(NavigationAction::NextPage),
             Choice::PreviousPage => FeatureAction::Navigation(NavigationAction::PreviousPage),
@@ -624,6 +660,16 @@ impl FeatureEditor {
             Choice::StartStreaming => FeatureAction::Obs(ObsAction::StartStreaming),
             Choice::StopStreaming => FeatureAction::Obs(ObsAction::StopStreaming),
             Choice::ObsMute => FeatureAction::Obs(ObsAction::ToggleMute(first)),
+            Choice::ObsInputVolumeUp => FeatureAction::Obs(ObsAction::InputVolume {
+                input: first,
+                direction: VolumeDirection::Up,
+                db: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
+            Choice::ObsInputVolumeDown => FeatureAction::Obs(ObsAction::InputVolume {
+                input: first,
+                direction: VolumeDirection::Down,
+                db: numeric.parse().map_err(|error| invalid_number(&error))?,
+            }),
             Choice::Visibility => FeatureAction::Obs(ObsAction::SourceVisibility {
                 scene: first,
                 source: second,
@@ -673,6 +719,22 @@ impl FeatureEditor {
                 DesktopAction::CycleAudioOutput => {
                     self.audio_output.select(None);
                     Choice::SetAudioOutput
+                }
+                DesktopAction::SetAudioInput { name } => {
+                    self.audio_input.select(Some(name));
+                    Choice::SetAudioInput
+                }
+                DesktopAction::CycleAudioInput => {
+                    self.audio_input.select(None);
+                    Choice::SetAudioInput
+                }
+                DesktopAction::ToggleInputMute => Choice::InputMute,
+                DesktopAction::InputVolumeStep { direction, percent } => {
+                    volume_step = Some(*percent);
+                    match direction {
+                        VolumeDirection::Up => Choice::InputVolumeUp,
+                        VolumeDirection::Down => Choice::InputVolumeDown,
+                    }
                 }
                 DesktopAction::Media(command) => match command {
                     MediaCommand::PlayPause => Choice::PlayPause,
@@ -746,6 +808,18 @@ impl FeatureEditor {
                 ObsAction::ToggleMute(input) => {
                     self.first.set_text(input);
                     Choice::ObsMute
+                }
+                ObsAction::InputVolume {
+                    input,
+                    direction,
+                    db,
+                } => {
+                    self.first.set_text(input);
+                    volume_step = Some(*db);
+                    match direction {
+                        VolumeDirection::Up => Choice::ObsInputVolumeUp,
+                        VolumeDirection::Down => Choice::ObsInputVolumeDown,
+                    }
                 }
                 ObsAction::SourceVisibility {
                     scene,

@@ -5,8 +5,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Profile rows with their own Edit and Delete:** the Organize button and its menu are gone. The **+** beside PROFILES is the only New profile control (same dialog, tooltip and accessible name), and each profile row now ends with small pencil and trash icons: the pencil ("Edit Studio") opens the existing Edit profile dialog for that row's profile without switching to it, the trash ("Delete Studio") opens the existing delete confirmation for it. Base keeps a disabled trash ("Base cannot be deleted."). Clicking a name still switches profile; Cancel or Esc leave everything unchanged. OBS, the only tool left, sits above PROFILES without a TOOLS heading. The rail is wider (234px, was 166px) so names keep room beside the icons, which moves the side-by-side minimums of the Actions catalog to about 940px (1070px for the + XL), from 872px and 1002px. Documentation screenshots replace the Organize menu capture with the profile rail.
+- **Menu back in the header:** the Menu button now sits at the far right of the header, level with the SDECK-PLUS title, instead of in the rail's TOOLS group (which now keeps only OBS). Its icon, caption, tooltip and items (Help, Updates, Import, Export) are unchanged, and the Updates entry and update indicator still work. The header now has two rows: the title row (title, update indicator, Menu) and the connection detail with the Current selector (shown with two devices) at its right.
+- **Actions catalog stays beside the preview:** in a narrower window the catalog no longer drops below the hardware preview, so an action can always be dragged onto a key or dial. The two columns stay side by side (the catalog shrinks from its natural width to a 250px minimum; the Actions/Dials/Binding tabs and the live-information caption shrink or wrap to allow it) and, below about 872px (1002px for the + XL), the content area scrolls horizontally instead of stacking. The preview, the editor under it, the fixed rail and drag-and-drop are unchanged.
+- **Fixed profile rail:** the rail spans the window height and never scrolls. Top-down it holds the connection badge, a TOOLS heading with Organize and OBS, then a PROFILES heading with a compact **+** New profile button beside it (the same dialog as Organize > New profile), then the profile names; nothing sits at the foot. Organize, OBS, Menu and New profile each have a tooltip and accessible description saying what they do. Only the content column scrolls. (Superseded in part: Organize and the TOOLS heading were removed; see "Profile rows with their own Edit and Delete".)
+- **Editor toolbar:** Save, Test and Remove stay visible while a tall editor form scrolls (the heading row is fixed above the form).
+- **Editor toolbar:** Save binding, Test action and Remove binding now sit in the editor card's heading row, level with "Configuring: …", as in the approved design; their icons, tooltips, accessible names and behaviour are unchanged. The status line, Undo remove and the plugin buttons stay at the top of the right-hand panel.
+- **Deletion confirmations:** deleting a profile, page, folder or touchscreen page asks `Delete “name”?` with what goes with it (a profile lists its page and binding counts) and ends "This cannot be undone."; the buttons are **Cancel** (Esc) and a red **Delete**. The import confirmation uses the same layout.
+- **Menu popover:** the Menu (in the header) is now a compact headerless list (no title row or Close button); its items and Escape/outside-click dismissal are unchanged.
+- **Organize menu:** a red **Delete profile** row after a divider opens the same confirmation for the shown profile; it is disabled for Base. (Superseded: the Organize menu was removed; see "Profile rows with their own Edit and Delete".)
+- **Organize menu:** the Organize tool is now a compact menu with **Edit profile** and **New profile** rows. Each opens its form in a dedicated modal dialog (Esc closes it); profile creation, editing, validation and deletion work as before. (Superseded: the Organize menu was removed; see "Profile rows with their own Edit and Delete".)
+
+- **Documentation screenshots:** regenerated for the profile rail, the Organize command menu and its
+  Edit/New profile dialogs, headerless menus and banners; the generator now also writes
+  `organize-menu.png`, and every image's width/height matches its PNG.
+- **Feedback:** toasts start with a tone glyph and keep the message in ink; a success toast has no
+  Dismiss button (it hides itself), an error keeps one. Inline status messages are banners with a
+  tone glyph and ink text instead of coloured text.
+- **Microphone icons:** Input volume up/down and Mute microphone now show microphone icons
+  (`input-volume-up`, `input-volume-down`, `input-mute`) instead of speaker icons.
+
 ### Added
 
+- **Microphone (audio input) controls:** **Input volume up** and **Input volume down** (1-100%
+  step, default 5%, raising capped at 100%, always saved with the action), **Mute microphone** and
+  **Change audio input** (rotate through connected `Audio/Source` devices or fix one by its stable
+  name), all on `@DEFAULT_AUDIO_SOURCE@`. Output actions are unchanged. New live information
+  sources **Microphone volume and mute** and **Audio input device**, and a **Microphone** preset in
+  the Dials tab. A `layers.conf` using these actions is not readable by builds older than the one
+  that keeps unknown actions.
+- **OBS input volume:** **OBS input volume up/down** change a named OBS input by 1-20 dB (default
+  2) through `GetInputVolume`/`SetInputVolume`, clamped to OBS's -100..+26 dB.
+- **Plugin values on keys and the touch strip:** a plugin action that declares a `display` now
+  shows the value its plugin reports (headline, optional detail, optional level bar) on the key,
+  dial zone or touch section it is bound to, in the window and on the device, through the
+  live-information drawing path. Nothing is stored and no choice is added to the live-information
+  list: an explicit live-information choice and a running countdown win, a disabled plugin leaves
+  the control as it was, `...` shows until the first answer and `--` when the plugin fails.
+  Queries run on their own plugin worker with its own bounded queue (a refresh burst never makes
+  a key press fail as busy), with the 5 s deadline, when the layer or page changes, the device
+  connects, the plugin list changes, or an action of the same plugin finishes.
+- **Plugin display values (host side):** a plugin manifest may declare `values` (id and label, at
+  most 16) and an action may name the one it shows with `display`. A new `query` request asks the
+  plugin for it and returns a headline (1-32 characters), an optional detail (at most 64) and an
+  optional 0-100 level, under the same limits as an invocation (`PluginRegistry::query`,
+  `QueryOutcome`, `PluginError::NoDisplay`). The Add plugin preview data and `plugin_validate`
+  list the values, and `plugin_validate --query <action>` runs one query. Saved bindings and
+  stores are unchanged; showing the value on keys and the touch strip comes separately.
 - **Agent skill file:** `docs/SKILL.md` lets an AI agent write, test, validate and hand off an
   sdeck-plus plugin (it never enables the plugin); `tests/plugin_sdk.rs` checks it against the code.
 - **External plugins:** separate programs add actions without recompiling the app. Each valid
@@ -41,9 +88,39 @@ All notable changes to this project are documented here. The format follows
   or tag selection, removal from the app or automatic updates. A real HTTPS clone is not exercised
   by the automated tests (a fake git and a local repository only), and keyboard and screen-reader
   behaviour of the dialog was not verified with real input.
+- **Return to the previous profile:** a profile with an auto-switch application has a new
+  **Return to the previous profile when focus leaves** check (off by default; enabled only while
+  the application field has text). When on, the profile that was shown before the application took
+  over comes back once focus matches no profile, instead of Base. A tab you pick yourself is kept,
+  and a previous profile that was deleted or needs another application falls back to Base.
+  `organization.json` gains an optional `return_to_previous` list that is written only when some
+  profile uses it.
 
 ### Changed
 
+- **Profile rail:** profiles move from a horizontal tab strip to a vertical rail at the left. It is
+  the same at every window width: the connection badge, the Organize and OBS tools (kept at the top
+  so their popovers stay reachable in short windows), then the profile names (long names are
+  ellipsized). The default window is now 1120 x 700 (it was 1000 x 700) so the + XL still sits beside
+  the action catalog.
+- **Action catalog chips and groups:** a row of category chips (All, Basic, System, Multimedia,
+  Organization, Device, OBS, and Plugins while one is installed) narrows the catalog to one category,
+  opened at once; it combines with the search and is remembered. Multimedia is grouped into Media,
+  Output, Input and Files, with the headings hidden while searching.
+- **Connection badge in the rail:** the "Not connected" / connected badge moves from the header to
+  the top of the profile rail as a small labelled pill. The header keeps the title, the connection detail line, the model selector, updates and
+  the menu.
+- **Confirm dialogs:** the title and explanation read left-aligned and the cancel button shows its
+  keyboard hint (`Esc`) after its caption, in the discard, delete and import confirmations.
+- **Undo in the toast:** removing a binding now shows "Control configuration removed." with an
+  **Undo** action in the toast (the same undo as the toolbar's **Undo remove**, which stays).
+- **Menus:** the Menu popover (Help, Updates, Import, Export) and the dial event menu list compact,
+  left-aligned, borderless rows that fill on hover and show the focus ring.
+- **Overlay and feedback look ("compact command"):** popovers, tooltips and help popovers use a 12px
+  radius and one shadow, tooltips are small labels, selected popover rows show the violet selection
+  edge, the toast is a pill, and every feedback message (binding status, text editor, profile and
+  OBS forms, plugin notices) reads as a tinted banner for errors, warnings and successes, always with
+  words; inside a toast the message keeps the pill's spacing.
 - The **Plugins** heading of the sidebar is always visible and, with no plugins, shows a hint
   about the toolbar's Add plugin button and the plugins folder.
 - The **Add plugin** dialog has a new look: a header row with a Close button, a **Folder |
@@ -55,11 +132,30 @@ All notable changes to this project are documented here. The format follows
   `sdeck-plugin-mergbw` (no remote repository published yet), each declaring its dependencies.
   Their manifests need a build that knows `requirements`; older builds reject unknown fields.
 
+- Documentation: the OBS section of the documentation now lists every OBS action (explicit
+  start, stop, pause and resume recording, start and stop streaming, input mute, source
+  visibility); the README and the landing page now mention the optional return to the previous
+  profile, plugin values on controls, the two-second key hold and Close application; the
+  development notes list `verify_streamdeck --button-text`.
+
 ### Removed
 
 - The `extensions/` folder and the two demo-plugin integration tests (`discord_extension`,
   `mergbw_extension`) are gone from this repository; their coverage moved to the plugin projects'
   own tests and the validator.
+
+### Fixed
+
+- **Bindings this build cannot read are no longer deleted.** A `layers.conf` row of a kind
+  this build does not know (a `feature-v1` action of an unknown variant, an unknown action
+  prefix, or live information of an unknown source) used to be logged as `removed=` and
+  dropped on the next save. It is now kept unchanged, not executed and not shown, written
+  back byte-identical on every save, and logged once as `kept=` in `button-errors.log`. It is
+  dropped only when that control is bound again (or its information changed) or its layer is
+  deleted. Malformed rows of a known kind are still removed and logged. A `touchscreen.json`
+  with such an action is treated as unreadable: it is left untouched and saving stays
+  disabled, with a message saying why. Configuration bundles carry kept rows through export
+  and import unchanged.
 
 ## [0.2.0] - 2026-11-10
 

@@ -3,7 +3,7 @@ use super::ui_refresh_tests::fixture;
 use super::*;
 
 fn preview_size(widgets: &MonitorWidgets) -> (f32, f32, f64) {
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     let canvas = device_canvas(widgets);
     let bounds = canvas.compute_bounds(&content).unwrap();
     let scale = canvas

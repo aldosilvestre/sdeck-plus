@@ -39,7 +39,6 @@ window, scrolledwindow, viewport, .app-shell {
 .field-label { font-size: 14px; }
 .shortcut-guidance link, .shortcut-guidance link:visited { color: @desk_cyan; }
 .shortcut-guidance link:focus { outline: 2px solid @desk_cyan; outline-offset: 2px; }
-.configuration-grid > flowboxchild { padding: 0; }
 
 .card {
     background-color: @desk_surface;
@@ -97,16 +96,23 @@ popover > contents, tooltip {
     background-color: @desk_surface;
     color: @desk_ink;
     border: 1px solid @desk_edge;
-    border-radius: 14px;
+    border-radius: 12px;
     box-shadow: 0 8px 24px alpha(@desk_bg, 0.55);
 }
+/* Compact command: tooltips are small labels, not panels. */
+tooltip { border-radius: 8px; padding: 0; }
+tooltip label { padding: 5px 8px; font-size: 12px; }
 popover scrolledwindow, popover viewport, popover listview {
     background-color: @desk_surface;
     color: @desk_ink;
 }
 popover modelbutton, popover row { color: @desk_ink; }
-popover modelbutton:hover, popover row:hover,
-popover row:selected { background-color: @desk_hover; }
+popover modelbutton, popover row { border-radius: 8px; }
+popover modelbutton:hover, popover row:hover { background-color: @desk_hover; }
+popover row:selected, popover modelbutton:checked {
+    background-color: @desk_selection;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
 popover arrow { background-color: @desk_surface; border-color: @desk_edge; }
 separator { background-color: @desk_edge; min-height: 1px; }
 checkbutton { color: @desk_ink; }
@@ -269,12 +275,29 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 .toast {
     background-color: @desk_hover;
     border: 1px solid @desk_edge;
-    border-radius: 12px;
-    padding: 12px 16px;
+    border-radius: 999px;
+    padding: 6px 6px 6px 16px;
     box-shadow: 0 4px 16px alpha(#000000, 0.30);
 }
+.toast button { border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0; }
+/* Alerts read as banners: a tinted fill with the tone's text; words always say what happened. */
+label.feedback-error,
+label.feedback-warning,
+label.feedback-success { padding: 6px 10px; border-radius: 8px; }
+label.feedback-error { background-color: alpha(@desk_error, 0.16); }
+label.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
+label.feedback-success { background-color: alpha(@desk_success, 0.16); }
+/* Inside a toast the message keeps the pill's own spacing, tone text only. */
+.toast label.feedback-error,
+.toast label.feedback-warning,
+.toast label.feedback-success { padding: 0; background-color: transparent; }
 .profile-tabs, .profile-tabs > stack { background-color: transparent; }
-.profile-tabs > stack { margin-top: 12px; }
+.profile-tabs > stack { margin-left: 8px; }
+/* Profiles sit in a vertical rail at the left; tools gather at its foot. */
+.profile-tabs > header.left { padding: 6px 3px; }
+/* The connection badge heads the rail as a small labelled pill, at every window width. */
+.rail-badge { margin: 2px 4px 8px 4px; padding: 3px 8px; font-size: 11px; }
+.profile-tabs > header.left tab { padding: 8px 10px; margin: 1px 0; }
 .profile-tabs > header {
     background-color: @desk_surface;
     border: 1px solid transparent;
@@ -482,15 +505,20 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .plugin-error-icon { color: @desk_error; margin-top: 1px; }
 .plugin-error-row:first-child label { font-weight: 600; }
-.binding-toolbar button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
+.binding-toolbar button.icon-only, .editor-heading-row button.icon-only { min-width: 34px; min-height: 34px; padding: 0; }
 button.remove-binding image { color: @desk_error; }
-popover.organize-popover > contents { border-radius: 14px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 14px 34px alpha(black, 0.28); }
+popover.organize-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; padding: 0; box-shadow: 0 8px 24px alpha(black, 0.45); }
 popover.organize-popover .section-label { font-size: 15px; }
 popover.organize-popover .popover-icon { color: @desk_violet; }
 popover.organize-popover .popover-close { min-width: 30px; min-height: 30px; padding: 0; border-color: transparent; background-color: transparent; border-radius: 8px; }
 popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
-.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 10px 28px alpha(black, 0.28); }
+.help-popover > contents { border-radius: 12px; border: 1px solid @desk_edge; box-shadow: 0 8px 24px alpha(black, 0.45); }
 .organize-subtitle { color: @desk_muted; margin-top: -8px; }
+popover.command-menu button.command-row { padding: 8px 12px; border-radius: 8px; min-width: 160px; border: 1px solid transparent; background-color: transparent; box-shadow: none; }
+popover.command-menu button.command-row:hover { background-color: @desk_hover; }
+popover.command-menu separator { margin: 4px 6px; background-color: @desk_edge; min-height: 1px; }
+popover.command-menu button.command-row.destructive { color: @desk_error; }
+popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .profile-note { padding: 8px 10px; border-radius: 8px; background-color: alpha(@desk_field, 0.9); border-left: 3px solid @desk_cyan; }
 .profile-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid alpha(@desk_edge, 0.8); }
 .reference-table { border: 1px solid @desk_edge; border-radius: 10px; background-color: @desk_surface; }
@@ -506,6 +534,7 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
 .dial-event-choice button, .key-context-menu button { padding: 6px 10px; }
 .sidebar-tabs, .popover-tabs { margin-bottom: 6px; }
 .sidebar-tabs > button, .popover-tabs > button { padding: 5px 4px; }
+.sidebar-tabs > button { min-width: 0; }
 .sidebar-tabs > button:checked, .popover-tabs > button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 700; }
 .catalog-grip { color: @desk_muted; opacity: 0.45; }
 .catalog-action:hover .catalog-grip { opacity: 1; }
@@ -529,3 +558,81 @@ popover.organize-popover .popover-close:hover { background-color: @desk_hover; }
     outline: 2px solid @desk_cyan;
     outline-offset: -2px;
 }
+
+/* Category chips and group sub-headings of the action catalog. */
+.catalog-chips { margin: 2px 0 4px; }
+.catalog-chip {
+    min-height: 24px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    border-color: @desk_edge;
+}
+.catalog-chip:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    border-color: @desk_violet;
+    font-weight: 600;
+}
+.catalog-group {
+    color: @desk_muted;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 8px 8px 2px 8px;
+}
+
+/* Keyboard hint after a button caption, as in "Keep editing  Esc". */
+.key-hint {
+    font-family: monospace;
+    font-size: 11px;
+    color: @desk_muted;
+    background-color: @desk_field;
+    border: 1px solid @desk_edge;
+    border-radius: 6px;
+    padding: 0 6px;
+}
+.confirm-dialog button.destructive-action .key-hint { color: inherit; }
+
+/* An action beside a toast message, as in "Binding removed.  Undo". */
+.toast .toast-action { color: @desk_violet; font-weight: 600; border-radius: 999px; padding: 0 10px; min-height: 28px; }
+.toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }
+
+/* The dial event menu: compact rows that fill on hover and keep the keyboard focus ring. */
+popover.dial-event-choice > contents { padding: 6px; }
+.dial-event-choice button.flat { min-height: 36px; padding: 0 12px; border-radius: 8px; border-color: transparent; background-color: transparent; }
+.dial-event-choice button.flat:hover { background-color: @desk_hover; }
+.dial-event-choice button.flat:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+
+
+/* The rail's tools line up with the profile names: same inner gap, frameless until hovered. */
+.profile-tabs > header.left menubutton.icon-action > button { padding: 6px 10px; }
+
+/* Toast and banner tone glyphs: the glyph carries the tone, the message stays in ink. */
+.toast-tone.feedback-success, .banner.feedback-success .banner-tone { color: @desk_success; }
+.toast-tone.feedback-error, .banner.feedback-error .banner-tone { color: @desk_error; }
+.banner.feedback-warning .banner-tone { color: @desk_warning; }
+.toast label, .toast label.feedback-error, .toast label.feedback-success { color: @desk_ink; }
+.banner { padding: 6px 10px; border-radius: 8px; }
+.banner.feedback-error { background-color: alpha(@desk_error, 0.16); }
+.banner.feedback-warning { background-color: alpha(@desk_warning, 0.16); }
+.banner.feedback-success { background-color: alpha(@desk_success, 0.16); }
+.banner label.feedback-error,
+.banner label.feedback-warning,
+.banner label.feedback-success { color: @desk_ink; padding: 0; background-color: transparent; }
+
+/* Rail sub-headings (TOOLS, PROFILES) and the compact New profile action beside PROFILES. */
+.rail-heading { margin: 12px 10px 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: @desk_muted; }
+.profile-tabs > header.left button.rail-new-profile { min-height: 20px; padding: 4px 6px; margin: 8px 4px 0 0; }
+/* The scrolling form shares the editor card's surface (the heading row above it is fixed). */
+scrolledwindow.settings-scroll, scrolledwindow.settings-scroll > viewport { background-color: transparent; }
+button.rail-new-profile.flat { border-color: transparent; background-color: transparent; }
+button.rail-new-profile.flat:hover { background-color: @desk_hover; }
+
+/* Each profile row: the name, then small frameless Edit and Delete icons that fill on hover. */
+.profile-tabs > header.left tab { padding: 6px 6px 6px 10px; }
+.profile-row button.rail-row-action { min-width: 18px; min-height: 18px; padding: 3px; margin: 0; border-radius: 6px; border-color: transparent; background-color: transparent; }
+.profile-row button.rail-row-action:hover { background-color: @desk_hover; }
+.profile-row button.rail-row-action.destructive-action:hover:not(:disabled) { background-color: alpha(@desk_error, 0.12); }
+.profile-row button.rail-row-action:focus-visible { outline: 2px solid @desk_cyan; outline-offset: -2px; }
+.profile-row button.rail-row-action.destructive-action:disabled { background-color: transparent; border-color: transparent; }
+.profile-row button.rail-row-action:disabled image { background-color: transparent; }

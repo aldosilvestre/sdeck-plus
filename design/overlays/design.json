@@ -1,0 +1,28 @@
+{
+  "title": "Overlays and feedback",
+  "brief": "Redesign sdeck-plus popovers, modal dialogs, hover and tooltip states, inline alerts, toasts and help popovers on the existing charcoal/violet/cyan system.",
+  "feature": "odd/tasks/audio-input-controls.md",
+  "artboards": [
+    {
+      "file": "01-quiet-surfaces.html",
+      "title": "Quiet surfaces",
+      "tradeoff": "Headed popovers with footers, calm modal on a scrim, tone-coloured alert panels and a plain toast with Undo. Closest to today's look; least new vocabulary.",
+      "width": 1000,
+      "height": 900
+    },
+    {
+      "file": "02-tonal-feedback.html",
+      "title": "Tonal feedback",
+      "tradeoff": "Icon chips, a tone rail on alerts and a timer bar on toasts make state readable at a glance; the modal leads with a destructive icon. Slightly heavier, more components to maintain.",
+      "width": 1000,
+      "height": 900
+    },
+    {
+      "file": "03-compact-command.html",
+      "title": "Compact command",
+      "tradeoff": "Menu-style popovers with keyboard hints, banner alerts and a pill toast. Densest and fastest for experts; weaker explanation for infrequent, consequential actions.",
+      "width": 1000,
+      "height": 900
+    }
+  ]
+}

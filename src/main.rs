@@ -10,6 +10,7 @@ use sdeck_plus::{
     protocol,
 };
 
+use feature_runtime::plugin_values::Shown;
 use gtk::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry,
     FileChooserAction, FileChooserNative, Label, Orientation, Picture, ResponseType, TextView,
@@ -55,10 +56,12 @@ mod clamp;
 mod preview;
 #[path = "ui/scaled_bin.rs"]
 mod scaled_bin;
+#[path = "ui/stable_width.rs"]
+mod stable_width;
 
 const APP_ID: &str = "dev.streamdeck.EventMonitor";
 const APP_NAME: &str = "sdeck-plus";
-const DEFAULT_WIDTH: i32 = 1000;
+const DEFAULT_WIDTH: i32 = 1120;
 const DEFAULT_HEIGHT: i32 = 700;
 /// The hardware preview is always shown at its natural size, so it never
 /// changes with the window or the configuration beside it.
@@ -428,6 +431,7 @@ fn build_ui_in(
     let stack = gtk::Stack::builder()
         .hhomogeneous(false)
         .vhomogeneous(false)
+        .vexpand(true)
         .css_classes(["session-stack"])
         .build();
     let shell = shell_box();
@@ -438,22 +442,18 @@ fn build_ui_in(
         let window = window.clone();
         let lifecycle = Rc::downgrade(&lifecycle);
         let toast = toast.clone();
-        let viewport = viewport.downgrade();
         let shell = shell.downgrade();
         let labels = (header.status.clone(), header.connection_detail.clone());
         move |model, opened, send_initial| {
-            let (lifecycle, viewport, shell) = lifecycle
+            let (lifecycle, shell) = lifecycle
                 .upgrade()
-                .zip(viewport.upgrade())
                 .zip(shell.upgrade())
-                .map(|((lifecycle, viewport), shell)| (lifecycle, viewport, shell))
                 .ok_or("the window is closing")?;
             build_session(
                 &SessionHost {
                     window: &window,
                     lifecycle: &lifecycle,
                     toast: &toast,
-                    viewport: &viewport,
                     shell: &shell,
                     labels: (&labels.0, &labels.1),
                 },
@@ -531,7 +531,6 @@ struct SessionHost<'a> {
     window: &'a ApplicationWindow,
     lifecycle: &'a Rc<RefCell<DeviceLifecycle>>,
     toast: &'a ui::Toast,
-    viewport: &'a gtk::ScrolledWindow,
     /// What a key swap in progress makes insensitive.
     shell: &'a GtkBox,
     /// The window's connection status and detail labels.
@@ -600,16 +599,24 @@ fn build_session(
         layers,
         artwork.clone(),
         layer_sender,
-        host.toast.clone(),
-        host.shell,
+        BodyHost {
+            toast: host.toast.clone(),
+            shell: host.shell,
+            connection_badge: host.labels.0,
+        },
         send_initial,
     );
     // Editing is switched off on the body alone: the header stays usable.
-    body.attach(host.viewport, body.root.upcast_ref());
+    body.attach(body.root.upcast_ref());
     match body.feature_runtime.start_plugins(&events) {
         Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
         Ok(None) => {}
         Err(error) => eprintln!("Could not start the plugin worker: {error}"),
+    }
+    match body.feature_runtime.start_plugin_values(&events) {
+        Ok(Some(worker)) => host.lifecycle.borrow_mut().plugin_workers.push(worker),
+        Ok(None) => {}
+        Err(error) => eprintln!("Could not start the plugin value worker: {error}"),
     }
     body.feature_runtime
         .configure(organization, obs, device_sender, events);
@@ -684,7 +691,9 @@ impl ModelSelector {
 // action workers, disk reads or presentation.
 #[cfg(test)]
 struct MonitorWidgets {
-    root: gtk::ScrolledWindow,
+    root: clamp::Clamp,
+    /// The content column's scroller; the header and the profile rail never scroll.
+    scroller: gtk::ScrolledWindow,
     toast: ui::Toast,
     binding_status: Label,
     status: Label,
@@ -697,8 +706,6 @@ struct MonitorWidgets {
     obs_menu: gtk::MenuButton,
     #[cfg(test)]
     help_menu: gtk::MenuButton,
-    #[cfg(test)]
-    management_menu: gtk::MenuButton,
     #[cfg(test)]
     artwork_section: gtk::Expander,
     #[cfg(test)]
@@ -738,20 +745,27 @@ struct Header {
 }
 
 fn build_header(window: &ApplicationWindow) -> Header {
-    let header = GtkBox::new(Orientation::Horizontal, 12);
-    let heading = GtkBox::new(Orientation::Vertical, 4);
+    // Two rows. The title row: the title, the update indicator and the Menu button, which sits
+    // at the far right and is centred on the title line. The detail row under it: the
+    // connection detail and, with two devices connected, the 'Current' selector at its right.
+    let header = GtkBox::new(Orientation::Vertical, 4);
+    let title_row = GtkBox::new(Orientation::Horizontal, 12);
+    let detail_row = GtkBox::new(Orientation::Horizontal, 12);
+    header.append(&title_row);
+    header.append(&detail_row);
     let title = Label::new(Some("SDECK-PLUS"));
     title.add_css_class("title");
     title.set_xalign(0.0);
-    heading.append(&title);
-    header.append(&heading);
+    title.set_hexpand(true);
+    title.set_valign(gtk::Align::Center);
+    title_row.append(&title);
+    // The badge itself lives in the profile rail (see `build_body`); this label stays the
+    // source of truth the connection code writes to, so it is kept but not shown.
     let status = Label::new(None);
     status.add_css_class("status");
-    status.set_hexpand(true);
-    status.set_halign(gtk::Align::End);
-    header.append(&status);
+    status.set_visible(false);
+    title_row.append(&status);
     let selector = ModelSelector::new();
-    header.append(&selector.root);
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     for (icon, title, explanation) in [
         ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
@@ -767,9 +781,13 @@ fn build_header(window: &ApplicationWindow) -> Header {
     let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
-    header.append(&update_panel.indicator);
+    update_panel.indicator.set_valign(gtk::Align::Center);
+    title_row.append(&update_panel.indicator);
+    // The one Menu button stays here for every model shown: far right, level with the title.
     let help_menu = configuration_menu.button().clone();
-    header.append(&help_menu);
+    help_menu.set_halign(gtk::Align::End);
+    help_menu.set_valign(gtk::Align::Center);
+    title_row.append(&help_menu);
 
     let connection_detail = Label::new(None);
     show_connection_state(
@@ -782,7 +800,9 @@ fn build_header(window: &ApplicationWindow) -> Header {
     connection_detail.set_xalign(0.0);
     connection_detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
     connection_detail.set_max_width_chars(70);
-    heading.append(&connection_detail);
+    connection_detail.set_hexpand(true);
+    detail_row.append(&connection_detail);
+    detail_row.append(&selector.root);
     Header {
         root: header,
         status,
@@ -809,14 +829,10 @@ fn shell_box() -> GtkBox {
     root
 }
 
-/// A two-axis viewport is the fallback for unusually small allocations or fonts.
-/// Normal desktop sizes fit the compact horizontal canvas without horizontal scrolling.
-fn shell_viewport(shell: &GtkBox) -> gtk::ScrolledWindow {
-    gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&clamp::Clamp::new(shell, SHELL_MAX_WIDTH))
-        .build()
+/// The window's fixed frame: header and profile rail never scroll, only the content column
+/// of each body does (see `build_body`). It fills the window up to SHELL_MAX_WIDTH.
+fn shell_viewport(shell: &GtkBox) -> clamp::Clamp {
+    clamp::Clamp::new(shell, SHELL_MAX_WIDTH)
 }
 
 /// One model's complete editor: everything below the header.
@@ -828,6 +844,8 @@ struct Body {
     feature_runtime: feature_runtime::FeatureRuntime,
     organization_writes: Vec<Button>,
     settings_scroll: gtk::ScrolledWindow,
+    /// The content column's scroller: the only scrolling region of the window.
+    content_scroll: gtk::ScrolledWindow,
     // Keep the weakly referenced editor callbacks alive with the body.
     _text_editor: Rc<button_text_editor::ButtonTextEditor>,
     #[cfg(test)]
@@ -837,22 +855,20 @@ struct Body {
     #[cfg(test)]
     obs_menu: gtk::MenuButton,
     #[cfg(test)]
-    management_menu: gtk::MenuButton,
-    #[cfg(test)]
     artwork_section: gtk::Expander,
     #[cfg(test)]
     target_picker: gtk::DropDown,
 }
 
 impl Body {
-    /// Tie the body to the viewport that scrolls it: the form keeps within
-    /// about one window of height, and `configuration_root` is what editing
+    /// Tie the body to its content column, the only part that scrolls: the form keeps
+    /// within about one window of height, and `configuration_root` is what editing
     /// being switched off makes insensitive.
-    fn attach(&self, viewport: &gtk::ScrolledWindow, configuration_root: &gtk::Widget) {
+    fn attach(&self, configuration_root: &gtk::Widget) {
         self.feature_runtime
             .attach_configuration_root(configuration_root);
         let scroll = self.settings_scroll.downgrade();
-        viewport
+        self.content_scroll
             .vadjustment()
             .connect_page_size_notify(move |adjustment| {
                 if let Some(scroll) = scroll.upgrade() {
@@ -877,16 +893,20 @@ fn build_widgets(
         layers,
         artwork,
         layer_sender,
-        toast.clone(),
-        &shell,
+        BodyHost {
+            toast: toast.clone(),
+            shell: &shell,
+            connection_badge: &header.status,
+        },
         true,
     );
     header.configuration_menu.bind(body.feature_runtime.clone());
     shell.append(&header.root);
     shell.append(&body.root);
     let viewport = shell_viewport(&shell);
-    body.attach(&viewport, viewport.upcast_ref());
+    body.attach(viewport.upcast_ref());
     let Body {
+        content_scroll,
         binding_status,
         preview,
         touch_status,
@@ -900,8 +920,6 @@ fn build_widgets(
         #[cfg(test)]
         obs_menu,
         #[cfg(test)]
-        management_menu,
-        #[cfg(test)]
         artwork_section,
         #[cfg(test)]
         target_picker,
@@ -909,6 +927,7 @@ fn build_widgets(
     } = body;
     MonitorWidgets {
         root: viewport,
+        scroller: content_scroll,
         toast,
         binding_status,
         status: header.status,
@@ -921,8 +940,6 @@ fn build_widgets(
         obs_menu,
         #[cfg(test)]
         help_menu: header.help_menu,
-        #[cfg(test)]
-        management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
@@ -946,24 +963,46 @@ fn build_widgets(
     }
 }
 
+/// The shared window parts a body is built into.
+struct BodyHost<'a> {
+    toast: ui::Toast,
+    shell: &'a GtkBox,
+    /// The header's connection label, which the rail's badge mirrors.
+    connection_badge: &'a Label,
+}
+
 fn build_body(
     window: ApplicationWindow,
     layers: Rc<RefCell<LayerStore>>,
     artwork: ArtworkUi,
     layer_sender: mpsc::Sender<LayerCommand>,
-    toast: ui::Toast,
-    shell: &GtkBox,
+    host: BodyHost<'_>,
     send_initial: bool,
 ) -> Body {
+    let BodyHost {
+        toast,
+        shell,
+        connection_badge,
+    } = host;
     let updating_layers = Rc::new(Cell::new(false));
-    let conflicts = layers.borrow().conflicts().len();
-    if conflicts > 0 {
+    let conflicts = layers.borrow().conflicts().to_vec();
+    let kept = conflicts.iter().filter(|conflict| conflict.kept).count();
+    let removed = conflicts.len() - kept;
+    if removed > 0 {
         toast.show(
             &format!(
-                "Configuration conflicts: {conflicts} button setting(s) were removed. Details are in {} in the configuration folder.",
+                "Configuration conflicts: {removed} button setting(s) were removed. Details are in {} in the configuration folder.",
                 sdeck_plus::layers::CONFLICT_LOG
             ),
             true,
+        );
+    } else if kept > 0 {
+        toast.show(
+            &format!(
+                "{kept} button setting(s) were written by a newer version and are kept unchanged. Details are in {} in the configuration folder.",
+                sdeck_plus::layers::CONFLICT_LOG
+            ),
+            false,
         );
     }
     let root = GtkBox::new(Orientation::Vertical, 16);
@@ -971,7 +1010,8 @@ fn build_body(
     let layer_card = card();
     layer_card.add_css_class("navigation-card");
     layer_card.set_spacing(8);
-    let layer_row = GtkBox::new(Orientation::Horizontal, 8);
+    let layer_row = GtkBox::new(Orientation::Vertical, 4);
+    layer_row.set_valign(gtk::Align::Start);
     let layer_model = gtk::StringList::new(&[]);
     for name in layers.borrow().names() {
         layer_model.append(&name);
@@ -994,7 +1034,6 @@ fn build_body(
         .build();
     let create_layer = ui::button("list-add-symbolic", "Create profile");
     create_layer.add_css_class("suggested-action");
-    let management = GtkBox::new(Orientation::Vertical, 16);
     let creation = GtkBox::new(Orientation::Vertical, 12);
     let name_row = labeled("Profile name", &layer_name);
     ui::field_help(&name_row, "New profile help",
@@ -1004,6 +1043,7 @@ fn build_body(
     let creation_error = ui::helper("");
     creation_error.set_visible(false);
     creation.append(&creation_error);
+    let creation_error_view = creation_error.clone();
     let error = creation_error.downgrade();
     let known = layers.clone();
     let create = create_layer.downgrade();
@@ -1144,44 +1184,86 @@ fn build_body(
         layer_sender.clone(),
         updating_layers.clone(),
     );
-    let profile_tasks = gtk::Stack::builder()
-        .vhomogeneous(false)
-        .hhomogeneous(true)
-        .build();
-    profile_tasks.add_titled(feature_runtime.management(), Some("edit"), "Edit profile");
-    profile_tasks.add_titled(&creation, Some("new"), "New profile");
-    let task_picker = gtk::StackSwitcher::builder().stack(&profile_tasks).build();
-    task_picker.add_css_class("popover-tabs");
-    task_picker.set_halign(gtk::Align::Fill);
-    management.append(&task_picker);
-    management.append(&profile_tasks);
-    let management_scroll = ui::panel_body(&management);
-    // The header, subtitle and footer divider take room; keep the forms scroll-free.
-    management_scroll.set_max_content_height(344);
-    let management_popover = ui::popover("Profiles", &management_scroll);
-    management_popover.add_css_class("organize-popover");
-    ui::refine_popover_header(
-        &management_popover,
-        "preferences-system-symbolic",
-        "Choose a profile to edit, or create a new one.",
+    // Each profile form lives in its own modal dialog; the rail opens them.
+    let edit_dialog = ui::profile_dialog(
+        &window,
+        "Edit profile",
+        "Choose a profile to edit its automatic switching or delete it.",
+        feature_runtime.management(),
+        "Close",
     );
-    let management_menu = ui::menu_button(
-        "preferences-system-symbolic",
-        "Organize",
-        &management_popover,
+    feature_runtime.attach_profile_editor(&edit_dialog);
+    let new_dialog = ui::profile_dialog(
+        &window,
+        "New profile",
+        "Create a separate, empty set of bindings and artwork.",
+        &creation,
+        "Cancel",
     );
-    // Profile tools stay secondary to the profile tabs they sit beside.
-    management_menu.set_has_frame(false);
-    layer_row.append(&management_menu);
+    {
+        // A closed (cancelled or dismissed) draft never lingers into the next opening.
+        let name = layer_name.clone();
+        let error = creation_error_view.clone();
+        new_dialog.connect_hide(move |_| {
+            name.set_text("");
+            error.set_visible(false);
+        });
+    }
     // Integration settings are global, not part of every action's form.
     let obs_popover = ui::popover("OBS Studio", &ui::panel_body(&feature_runtime.obs_panel));
     feature_runtime.obs_panel.set_expanded(true);
     let obs_menu = ui::menu_button("camera-video-symbolic", "OBS", &obs_popover);
     obs_menu.set_has_frame(false);
     layer_row.append(&obs_menu);
+    // The rail never scrolls. Its head, top-down: the connection badge (a mirror of the header's
+    // label), the OBS tool (a lone tool needs no TOOLS heading), then the PROFILES heading with
+    // a compact New profile action beside it. The profile tabs follow, each row carrying its own
+    // Edit and Delete icons; nothing sits at the foot.
+    let rail_status = ui::mirror_badge(connection_badge);
+    // The tool starts at the left edge, like the profile names below it.
+    {
+        let what =
+            "OBS: set the address and password used to connect to OBS Studio for OBS actions.";
+        if let Some(content) = obs_menu.child() {
+            content.set_halign(gtk::Align::Start);
+        }
+        obs_menu.set_tooltip_text(Some(what));
+        obs_menu.update_property(&[gtk::accessible::Property::Description(what)]);
+    }
+    let new_profile = ui::icon_button("list-add-symbolic", "New profile");
+    new_profile.set_has_frame(false);
+    new_profile.add_css_class("rail-new-profile");
+    new_profile.add_css_class("flat");
+    new_profile.set_halign(gtk::Align::End);
+    new_profile.set_valign(gtk::Align::Center);
+    {
+        let what = "New profile: add a profile with its own keys, dials, pages and touch strip.";
+        new_profile.set_tooltip_text(Some(what));
+        new_profile.update_property(&[gtk::accessible::Property::Description(what)]);
+    }
+    {
+        // The only New profile control.
+        let dialog = new_dialog.downgrade();
+        new_profile.connect_clicked(move |_| {
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.present();
+            }
+        });
+    }
+    let profiles_heading = ui::rail_heading("PROFILES");
+    profiles_heading.set_hexpand(true);
+    profiles_heading.set_valign(gtk::Align::Center);
+    let profiles_row = GtkBox::new(Orientation::Horizontal, 0);
+    profiles_row.add_css_class("rail-profiles-row");
+    profiles_row.append(&profiles_heading);
+    profiles_row.append(&new_profile);
+    let rail_head = GtkBox::new(Orientation::Vertical, 2);
+    rail_head.append(&rail_status);
+    rail_head.append(&layer_row);
+    rail_head.append(&profiles_row);
     feature_runtime
         .profile_tabs()
-        .set_action_widget(&layer_row, gtk::PackType::End);
+        .set_action_widget(&rail_head, gtk::PackType::Start);
     // Navigation (linked arrows + breadcrumb) leads; page management trails.
     let navigation_row = GtkBox::new(Orientation::Horizontal, 12);
     feature_runtime.indicator.set_hexpand(true);
@@ -1204,8 +1286,18 @@ fn build_body(
     settings_heading.add_css_class("section-label");
     settings_heading.add_css_class("control-heading");
     settings_heading.set_xalign(0.0);
-    settings_card.append(&settings_heading);
-    settings_card.append(feature_runtime.touchscreen_controls());
+    settings_heading.set_hexpand(true);
+    settings_heading.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    // Save, Test and Remove join the heading in this row once they are built below.
+    let heading_row = GtkBox::new(Orientation::Horizontal, 8);
+    heading_row.add_css_class("editor-heading-row");
+    heading_row.append(&settings_heading);
+    // The heading row is the card's fixed top: only the form below it scrolls (S11), so
+    // Save, Test and Remove stay visible however tall the form is.
+    settings_card.append(&heading_row);
+    let form = GtkBox::new(Orientation::Vertical, 6);
+    form.set_hexpand(true);
+    form.append(feature_runtime.touchscreen_controls());
     // Keep a usable form width without padding short actions to the chassis height.
     settings_card.set_size_request(300, -1);
     settings_card.set_spacing(6);
@@ -1217,10 +1309,10 @@ fn build_body(
     // A key has one event and takes its action from the catalog, so only
     // dials and the touch strip show these selectors.
     selector_row.set_visible(false);
-    settings_card.append(&selector_row);
-    settings_card.append(&binding_ui.hold_toggle);
-    settings_card.append(&binding_ui.action_guidance);
-    settings_card.append(&binding_ui.layer_target_row);
+    form.append(&selector_row);
+    form.append(&binding_ui.hold_toggle);
+    form.append(&binding_ui.action_guidance);
+    form.append(&binding_ui.layer_target_row);
     let action_fields = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .focusable(false)
@@ -1265,32 +1357,33 @@ fn build_body(
                 fields.set_visible(matches!(picker.selected(), 1..=4));
             }
         });
-    settings_card.append(&action_fields);
-    settings_card.append(&binding_ui.feature_editor.root);
-    settings_card.append(&*binding_ui.plugin_editor);
+    form.append(&action_fields);
+    form.append(&binding_ui.feature_editor.root);
+    form.append(&*binding_ui.plugin_editor);
     let options_heading = inspector_heading("Options");
     binding_ui
         .return_toggle
         .bind_property("visible", &options_heading, "visible")
         .sync_create()
         .build();
-    settings_card.append(&options_heading);
-    settings_card.append(&binding_ui.return_toggle);
-    settings_card.append(&binding_ui.return_row);
+    form.append(&options_heading);
+    form.append(&binding_ui.return_toggle);
+    form.append(&binding_ui.return_row);
     let binding_buttons = GtkBox::new(Orientation::Horizontal, 8);
     let test_action = binding_tool(
         "media-playback-start-symbolic",
         "Test action",
         "Runs this action now. Saving a binding never runs it.",
     );
-    binding_buttons.append(&save_binding);
-    binding_buttons.append(&test_action);
-    binding_buttons.append(&remove_binding);
-    // Adding and rescanning plugins are not binding actions: they sit apart at the right end.
+    // The binding actions end the editor's heading row, as in the approved artboard.
+    heading_row.append(&save_binding);
+    heading_row.append(&test_action);
+    heading_row.append(&remove_binding);
+    // Adding and rescanning plugins are not binding actions: they stay in the side panel's
+    // toolbar, at its right end.
     let toolbar_gap = GtkBox::new(Orientation::Horizontal, 0);
     toolbar_gap.set_hexpand(true);
     binding_buttons.append(&toolbar_gap);
-    binding_buttons.append(&gtk::Separator::new(Orientation::Vertical));
     let plugin_installed: plugin_add_ui::Notify = {
         let ui = binding_ui.clone();
         Rc::new(move |message, failed| {
@@ -1303,8 +1396,8 @@ fn build_body(
         plugin_installed,
     ));
     binding_buttons.append(&plugin_ui::rescan_button(&binding_ui.plugins));
-    // The status line sits right under Save/Test/Remove so results stay visible.
-    // The toolbar tops the right-hand panel, above its tabs.
+    // The status line and Undo remove top the right-hand panel, above its tabs, beside the
+    // plugin buttons; Save/Test/Remove sit in the editor card's heading row.
     let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
     binding_feedback.add_css_class("binding-toolbar");
     binding_feedback.append(&binding_buttons);
@@ -1351,7 +1444,7 @@ fn build_body(
     let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
     artwork_section.set_child(Some(&artwork_content));
     appearance.append(&artwork_section);
-    settings_card.append(&appearance);
+    form.append(&appearance);
     let layer_hint = Label::new(Some(
         "Touchscreen pages belong to the profile, independently of keypad pages and folders.",
     ));
@@ -1407,7 +1500,7 @@ fn build_body(
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
         let updating_layers = updating_layers.clone();
-        let tasks = profile_tasks.downgrade();
+        let dialogs = [new_dialog.downgrade(), edit_dialog.downgrade()];
         create_layer.connect_clicked(move |_| {
             let value = name.text().to_string();
             let trimmed = value.trim().to_owned();
@@ -1444,8 +1537,10 @@ fn build_body(
                 ui.refresh_summaries(&layers);
                 artwork.refresh(false);
                 name.set_text("");
-                if let Some(tasks) = tasks.upgrade() {
-                    tasks.set_visible_child_name("edit");
+                // Creation returns to editing the new profile.
+                if let [Some(new), Some(edit)] = dialogs.each_ref().map(|dialog| dialog.upgrade()) {
+                    new.close();
+                    edit.present();
                 }
             }
         });
@@ -1559,6 +1654,7 @@ fn build_body(
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
         let artwork = artwork.clone();
+        let toast = toast.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_control(&layers) {
             Ok((layer, control, number)) => {
                 // The whole control goes, whichever of its events is selected.
@@ -1579,6 +1675,13 @@ fn build_body(
                         ui::feedback(&ui.status, false);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
+                        // The same undo, offered where the eye already is.
+                        let undo = ui.undo_remove.clone();
+                        toast.show_with_action(
+                            "Control configuration removed.",
+                            "Undo",
+                            Rc::new(move || undo.emit_clicked()),
+                        );
                     }
                     Ok(_) => ui.status.set_text("No binding exists for that control."),
                     Err(error) => ui.error(&format!("Could not remove binding: {error}")),
@@ -1647,15 +1750,11 @@ fn build_body(
         });
     }
 
-    let body = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .min_children_per_line(1)
-        .max_children_per_line(2)
-        .column_spacing(16)
-        .row_spacing(16)
-        .build();
-    // The preview and its inspector stay together; the action catalog wraps
-    // beneath them on narrow desktops.
+    // Two columns that never wrap: the preview and its inspector keep their
+    // natural width and the action catalog takes the rest, shrinking down to
+    // its minimum. Narrower than that the content column scrolls sideways, so
+    // the catalog stays beside the keys it is dragged onto.
+    let body = GtkBox::new(Orientation::Horizontal, 16);
     body.set_vexpand(true);
     body.add_css_class("configuration-grid");
     let sidebar = GtkBox::new(Orientation::Vertical, 6);
@@ -1673,7 +1772,7 @@ fn build_body(
     );
     feature_runtime.attach_preview(&preview);
     let workspace = GtkBox::new(Orientation::Vertical, 12);
-    workspace.set_hexpand(true);
+    workspace.set_hexpand(false);
     workspace.append(preview.widget());
     // A tall form scrolls here, within its own region, instead of stretching the page.
     let settings_scroll = gtk::ScrolledWindow::builder()
@@ -1683,11 +1782,12 @@ fn build_body(
         .max_content_height(480)
         .hexpand(true)
         .valign(gtk::Align::Start)
-        .child(&settings_card)
+        .child(&form)
         .build();
     settings_scroll.add_css_class("settings-scroll");
-    workspace.append(&settings_scroll);
-    body.insert(&workspace, -1);
+    settings_card.append(&settings_scroll);
+    workspace.append(&settings_card);
+    body.append(&workspace);
     // The right-hand panel: draggable actions, dial presets and per-binding options.
     let side_panel = card();
     side_panel.add_css_class("action-catalog");
@@ -1737,15 +1837,38 @@ fn build_body(
     tabs.add_titled(&binding_page, Some("binding"), "Binding");
     let switcher = gtk::StackSwitcher::builder().stack(&tabs).build();
     switcher.add_css_class("sidebar-tabs");
+    // The tab captions may ellipsize, so the catalog can shrink to its 250px minimum.
+    let mut tab = switcher.first_child();
+    while let Some(button) = tab {
+        if let Some(label) = descendant_label(&button) {
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        }
+        tab = button.next_sibling();
+    }
     side_panel.append(&binding_feedback);
     side_panel.append(&switcher);
     side_panel.append(&tabs);
-    sidebar.append(&side_panel);
-    body.insert(&sidebar, -1);
+    // The catalog's width must not depend on the height the grid allocates it (see stable_width).
+    sidebar.append(&stable_width::StableWidth::new(&side_panel));
+    body.append(&sidebar);
     let profile_content = GtkBox::new(Orientation::Vertical, 16);
     profile_content.append(&layer_card);
     profile_content.append(&body);
-    feature_runtime.attach_profile_content(&profile_content);
+    // Only this column scrolls: the header and the profile rail stay put.
+    let content_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .hexpand(true)
+        .vexpand(true)
+        .child(&profile_content)
+        .build();
+    content_scroll.add_css_class("content-scroll");
+    let content_column = GtkBox::new(Orientation::Vertical, 0);
+    content_column.set_hexpand(true);
+    content_column.set_vexpand(true);
+    content_column.append(&content_scroll);
+    feature_runtime.attach_profile_content(&content_column);
+    root.set_vexpand(true);
     root.append(feature_runtime.profile_tabs());
 
     // All thirteen pictures are registered independently of the shared editor.
@@ -1759,6 +1882,7 @@ fn build_body(
         feature_runtime,
         organization_writes: vec![create_layer],
         settings_scroll,
+        content_scroll,
         _text_editor: text_editor,
         #[cfg(test)]
         layer_picker,
@@ -1766,8 +1890,6 @@ fn build_body(
         binding_ui,
         #[cfg(test)]
         obs_menu,
-        #[cfg(test)]
-        management_menu,
         #[cfg(test)]
         artwork_section,
         #[cfg(test)]
@@ -1978,6 +2100,13 @@ impl EventSurface {
             },
             MonitorEvent::AppEvent { name } => feature_runtime.report(&name, false),
             MonitorEvent::Info { source, value } => artwork.update_info(source, value),
+            MonitorEvent::PluginValue {
+                layer,
+                target,
+                binding,
+                result,
+            } => artwork.update_plugin_value(layer, target, binding, result),
+            MonitorEvent::PluginFinished { plugin_id } => artwork.plugin_finished(&plugin_id),
             MonitorEvent::BindingSaveResult(result) => {
                 let (message, failed) = match result {
                     Ok(()) => ("Binding saved successfully.".to_owned(), false),
@@ -2172,6 +2301,11 @@ impl BindingUi {
         let row = return_row.clone();
         return_toggle.connect_toggled(move |toggle| row.set_visible(toggle.is_active()));
         let info_toggle = CheckButton::with_label("Show live information on the key");
+        // The caption wraps so the narrow catalog column is not pinned by its width.
+        if let Some(label) = descendant_label(info_toggle.upcast_ref()) {
+            label.set_wrap(true);
+            label.set_xalign(0.0);
+        }
         info_toggle.set_tooltip_text(Some(
             "Replaces the image with a live picture, such as the volume or the time. Dials, and a tap or hold on a touch section, draw it on that section.",
         ));
@@ -3297,17 +3431,11 @@ fn confirm_discard_in(
         .text("Discard unsaved changes?")
         .secondary_text(explanation)
         .build();
-    dialog.add_css_class("confirm-dialog");
-    let mut child = dialog.message_area().first_child();
-    while let Some(widget) = child {
-        if let Some(label) = widget.downcast_ref::<Label>() {
-            label.set_justify(gtk::Justification::Center);
-        }
-        child = widget.next_sibling();
-    }
-    dialog.set_resizable(false);
-    dialog.set_default_size(360, -1);
-    dialog.add_button("Keep editing", gtk::ResponseType::Cancel);
+    ui::style_confirm_dialog(&dialog);
+    ui::add_key_hint(
+        &dialog.add_button("Keep editing", gtk::ResponseType::Cancel),
+        "Esc",
+    );
     dialog
         .add_button("Discard changes", gtk::ResponseType::Accept)
         .add_css_class("destructive-action");
@@ -3472,6 +3600,7 @@ struct InfoState {
     values: std::collections::BTreeMap<sdeck_plus::info::InfoSource, sdeck_plus::info::InfoValue>,
     marquee: PreviewMarquee,
     countdown: Option<timer_artwork::CountdownArtwork>,
+    plugin: feature_runtime::plugin_values::PluginValues,
 }
 
 impl std::ops::Deref for InfoState {
@@ -3562,12 +3691,13 @@ impl ArtworkUi {
 
     fn touchscreen_zone_command(&self, layer: &str, zone: u8) -> ArtworkCommand {
         let (previous, next) = self.layers.borrow().touchscreen_navigation(layer);
-        let source = self.layers.borrow().zone_info_source(layer, zone);
+        let shown = self.zone_shown(layer, zone);
         ArtworkCommand::ComposeTouchscreenZone {
             zone,
             path: self.info_background(layer, ArtworkTarget::EncoderZone(zone)),
             strip_path: self.info_background(layer, ArtworkTarget::TouchStripBackground),
-            value: source.map(|source| self.info_value(source)),
+            value: shown
+                .map(|shown| self.shown_value(layer, ArtworkTarget::EncoderZone(zone), &shown)),
             previous,
             next,
         }
@@ -3579,12 +3709,16 @@ impl ArtworkUi {
         target: ArtworkTarget,
         source: sdeck_plus::info::InfoSource,
     ) -> ArtworkCommand {
+        self.shown_command(layer, target, &Shown::Info(source))
+    }
+
+    fn shown_command(&self, layer: &str, target: ArtworkTarget, shown: &Shown) -> ArtworkCommand {
         if let ArtworkTarget::EncoderZone(zone) = target {
             if self.indicated_zone(layer, zone) {
                 return self.touchscreen_zone_command(layer, zone);
             }
         }
-        self.info_value_command(layer, target, self.info_value(source))
+        self.info_value_command(layer, target, self.shown_value(layer, target, shown))
     }
 
     fn info_value_command(
@@ -3608,13 +3742,13 @@ impl ArtworkUi {
     /// Redraw keys and touch sections that show information over their own
     /// artwork; the sections go last so they draw over the strip background.
     fn with_info(&self, layer: &str, commands: Vec<ArtworkCommand>) -> Vec<ArtworkCommand> {
-        let targets = self.info_targets(layer);
+        let targets = self.shown_targets(layer);
         let shown = |target: &ArtworkTarget| targets.iter().any(|(shown, _)| shown == target);
         let info = |wanted: fn(&ArtworkTarget) -> bool| -> Vec<ArtworkCommand> {
             targets
                 .iter()
                 .filter(|(target, _)| wanted(target))
-                .map(|(target, source)| self.info_command(layer, *target, *source))
+                .map(|(target, shown)| self.shown_command(layer, *target, shown))
                 .collect()
         };
         let mut other = Vec::new();
@@ -3822,7 +3956,7 @@ impl ArtworkUi {
     /// stops once no title scrolls or their window is gone.
     fn tick_preview_marquee(&self, now: std::time::Instant) -> glib::ControlFlow {
         let layer = self.layers.borrow().active().to_owned();
-        let shown = self.info_targets(&layer);
+        let shown = self.shown_targets(&layer);
         let running: Vec<_> = self
             .info
             .borrow()
@@ -3840,7 +3974,7 @@ impl ArtworkUi {
             let source = shown
                 .iter()
                 .find(|(shown, _)| *shown == target)
-                .map(|(_, source)| *source);
+                .map(|(_, source)| source);
             match source.filter(|_| alive && !self.countdown_shows(&layer, target)) {
                 Some(source) => {
                     let elapsed = now.saturating_duration_since(started);
@@ -3854,7 +3988,11 @@ impl ArtworkUi {
                         .iter()
                         .any(|(shown, picture)| *shown == target && picture.is_mapped());
                     if visible && moved != offset {
-                        self.paint_info_preview_at(target, &self.info_value(source), now);
+                        self.paint_info_preview_at(
+                            target,
+                            &self.shown_value(&layer, target, source),
+                            now,
+                        );
                     }
                 }
                 None => {
@@ -3918,18 +4056,16 @@ impl ArtworkUi {
     fn paint_navigation_previews(&self, layer: &str) {
         for zone in self.indicator_zones() {
             // Information previews already paint their indicators with their value.
-            if self.indicated_zone(layer, zone)
-                && self.layers.borrow().zone_info_source(layer, zone).is_none()
-            {
+            if self.indicated_zone(layer, zone) && self.zone_shown(layer, zone).is_none() {
                 self.paint_touchscreen_zone(layer, zone, None, Duration::ZERO);
             }
         }
     }
 
     fn paint_info_previews(&self, layer: &str) {
-        for (target, source) in self.info_targets(layer) {
+        for (target, shown) in self.shown_targets(layer) {
             if !self.countdown_shows(layer, target) {
-                self.paint_info_preview(target, &self.info_value(source));
+                self.paint_info_preview(target, &self.shown_value(layer, target, &shown));
             }
         }
         self.paint_countdown_preview(layer);
@@ -4055,6 +4191,7 @@ impl ArtworkUi {
             let _ = self.output.send(ArtworkCommand::Replace(commands));
         }
         *self.last_layer.borrow_mut() = Some(cache_key);
+        self.request_plugin_values(&layer, None);
         if let Some(editor) = self.text_editor.borrow().upgrade() {
             editor.load_context(false);
             editor.refresh_preview();
@@ -4130,19 +4267,19 @@ impl ArtworkUi {
 
     /// Whether `target` shows live information on `layer`.
     fn shows_info(&self, layer: &str, target: ArtworkTarget) -> bool {
-        self.info_targets(layer)
+        self.shown_targets(layer)
             .iter()
             .any(|(shown, _)| *shown == target)
     }
 
     fn restore_button_preview(&self, target: &ArtworkTarget) {
         let layer = self.layers.borrow().active().to_owned();
-        if let Some((_, source)) = self
-            .info_targets(&layer)
+        if let Some((_, shown)) = self
+            .shown_targets(&layer)
             .into_iter()
             .find(|(shown, _)| shown == target)
         {
-            self.paint_info_preview(*target, &self.info_value(source));
+            self.paint_info_preview(*target, &self.shown_value(&layer, *target, &shown));
             return;
         }
         let (path, text) = {
@@ -4983,6 +5120,21 @@ fn card() -> GtkBox {
     panel
 }
 
+/// The caption label inside a stack-switcher button.
+fn descendant_label(widget: &gtk::Widget) -> Option<Label> {
+    if let Ok(label) = widget.clone().downcast::<Label>() {
+        return Some(label);
+    }
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        if let Some(found) = descendant_label(&next) {
+            return Some(found);
+        }
+        child = next.next_sibling();
+    }
+    None
+}
+
 fn install_style(window: &ApplicationWindow) {
     let provider = gtk::CssProvider::new();
     provider.connect_parsing_error(|_, section, error| {
@@ -5045,14 +5197,17 @@ mod tests {
     mod binding_toolbar_tests;
     mod button_swap_tests;
     mod button_text_popup_tests;
+    mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
     mod configuration_transfer_tests;
+    mod confirm_menu_tests;
     mod control_feedback_tests;
     mod control_remove_tests;
     mod device_roots_tests;
     mod dial_action_tests;
     mod dial_preset_tests;
     mod documentation_screenshots;
+    mod feedback_banner_tests;
     mod folder_panel_tests;
     mod hover_help_tests;
     mod key_hold_integration_tests;
@@ -5066,10 +5221,14 @@ mod tests {
     mod page_ui_tests;
     mod plugin_add_ui_tests;
     mod plugin_ui_tests;
+    mod plugin_value_tests;
     mod preview_layout_tests;
     mod preview_model_tests;
     #[path = "profile_manager_tests.rs"]
     mod profile_manager_tests;
+    mod profile_organize_dialog_tests;
+    mod profile_row_tests;
+    mod rail_tests;
     #[path = "shortcut_reference_tests.rs"]
     mod shortcut_reference_tests;
     mod shortcut_table_tests;
@@ -5457,9 +5616,10 @@ mod tests {
 
         assert_physical_shortcut_widgets(&ui);
         shortcut_reference_tests::assert_reference_dialog();
-        profile_manager_tests::assert_compact_profile_manager();
+        profile_organize_dialog_tests::assert_compact_profile_manager();
         control_feedback_tests::assert_control_feedback();
         assert_profile_tabs_and_focus();
+        assert_return_to_previous_profile();
         assert_binding_save_toasts();
         assert_select_control_validates_ranges_and_preserves_valid_events();
         assert_direct_button_click_selects_button_8_and_loads_existing_assignment();
@@ -5478,6 +5638,230 @@ mod tests {
         eprintln!("GTK assertions executed: selection, styles, summaries and refresh paths");
         assert!(ui.summaries[0].text().contains("Unassigned"));
         assert_production_layout_fits();
+    }
+
+    fn collect_check_buttons(widget: &gtk::Widget, found: &mut Vec<gtk::CheckButton>) {
+        if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
+            found.push(check.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            child = current.next_sibling();
+            collect_check_buttons(&current, found);
+        }
+    }
+
+    fn profile_picker(manager: &GtkBox) -> gtk::DropDown {
+        let mut child = manager.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = widget.downcast_ref::<GtkBox>() {
+                if row
+                    .first_child()
+                    .and_then(|child| child.downcast::<Label>().ok())
+                    .is_some_and(|label| label.text() == "Profile to edit")
+                {
+                    return row
+                        .last_child()
+                        .and_then(|child| child.downcast::<gtk::DropDown>().ok())
+                        .unwrap();
+                }
+            }
+            child = widget.next_sibling();
+        }
+        panic!("the profile picker is part of the Edit profile panel");
+    }
+
+    fn profile_names(picker: &gtk::DropDown) -> Vec<String> {
+        let model = picker.model().unwrap();
+        (0..model.n_items())
+            .map(|index| {
+                model
+                    .item(index)
+                    .unwrap()
+                    .downcast::<gtk::StringObject>()
+                    .unwrap()
+                    .string()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn assert_return_to_previous_profile() {
+        let (root, mut store, artwork_store, _) = artwork_fixture("profile-return");
+        for name in ["Studio", "Music"] {
+            if !store.layers().contains_key(name) {
+                store.create(name).unwrap();
+            }
+        }
+        store.select("Base");
+        let layers = Rc::new(RefCell::new(store));
+        let window = ApplicationWindow::builder()
+            .default_width(DEFAULT_WIDTH)
+            .default_height(DEFAULT_HEIGHT)
+            .build();
+        install_style(&window);
+        let (output, _device) = mpsc::channel();
+        let artwork = ArtworkUi {
+            store: Rc::new(RefCell::new(Some(artwork_store))),
+            layers: layers.clone(),
+            pictures: Rc::new(RefCell::new(Vec::new())),
+            output,
+            last_layer: Rc::new(RefCell::new(None)),
+            chooser_owners: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
+            selected_target: Rc::new(Cell::new(ArtworkTarget::Keypad(1))),
+            text_editor: Rc::new(RefCell::new(std::rc::Weak::new())),
+            info: Rc::default(),
+        };
+        let (requests, commands) = mpsc::channel();
+        let widgets = build_widgets(window.clone(), layers.clone(), artwork, requests);
+        window.set_child(Some(&widgets.root));
+        window.present();
+        let runtime = &widgets.feature_runtime;
+        let tabs = runtime.profile_tabs();
+        let picker = profile_picker(runtime.management());
+        assert_eq!(profile_names(&picker), ["Base", "Music", "Studio"]);
+        let mut buttons = Vec::new();
+        collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
+        let save = buttons
+            .iter()
+            .find(|button| button_caption(button).as_deref() == Some("Save changes"))
+            .unwrap();
+        let mut entries = Vec::new();
+        collect_entries(widgets.root.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
+        let application = entries
+            .iter()
+            .find(|entry| entry.placeholder_text().as_deref() == Some("Window class or executable"))
+            .unwrap();
+        let mut checks = Vec::new();
+        collect_check_buttons(widgets.root.upcast_ref(), &mut checks);
+        for body in profile_dialog_bodies(&window) {
+            collect_check_buttons(&body, &mut checks);
+        }
+        let check = checks
+            .iter()
+            .find(|check| {
+                check
+                    .child()
+                    .and_then(|child| child.downcast::<Label>().ok())
+                    .is_some_and(|label| label.text() == feature_runtime::RETURN_OPTION_LABEL)
+            })
+            .expect("the return option sits in the Edit profile panel");
+        let saved_organization = || {
+            let mut saved = None;
+            while let Ok(command) = commands.try_recv() {
+                if let LayerCommand::SaveProfile(_, Some(organization)) = command {
+                    saved = Some(organization);
+                }
+            }
+            saved.expect("Save changes persists the organization")
+        };
+
+        // Base can never have the option; a profile needs text in the application field first.
+        picker.set_selected(0);
+        assert!(!check.is_sensitive(), "Base has no application rule");
+        picker.set_selected(2);
+        assert_eq!(application.text(), "");
+        assert!(!check.is_sensitive(), "no application, no option");
+        assert!(!save.is_sensitive());
+        application.set_text("ui_showcase");
+        assert!(check.is_sensitive(), "text in the application enables it");
+        assert!(save.is_sensitive());
+        application.set_text("   ");
+        assert!(!check.is_sensitive(), "blank text does not count");
+        application.set_text("ui_showcase");
+        check.set_active(true);
+        save.emit_clicked();
+        assert!(saved_organization().profile_returns_to_previous("Studio"));
+        assert!(!save.is_sensitive(), "saved: nothing left to save");
+        check.set_active(false);
+        assert!(save.is_sensitive(), "the option alone is a change");
+        check.set_active(true);
+        assert!(!save.is_sensitive(), "back to the saved state");
+        picker.set_selected(1);
+        assert!(
+            !check.is_active() && !check.is_sensitive(),
+            "Music has no rule"
+        );
+        picker.set_selected(2);
+        assert!(check.is_active() && check.is_sensitive(), "Studio keeps it");
+
+        // From Music, the application shows Studio; leaving it brings Music back, not Base.
+        let ui_showcase = sdeck_plus::app_focus::FocusedApplication {
+            window_class: "dev.streamdeck.UiShowcase".into(),
+            executable: Some("ui_showcase".into()),
+        };
+        let other = sdeck_plus::app_focus::FocusedApplication {
+            window_class: "other-app".into(),
+            executable: None,
+        };
+        let active_profile = || {
+            let layers = layers.borrow();
+            let active = layers.active().to_owned();
+            active
+        };
+        tabs.set_current_page(Some(1));
+        assert_eq!(active_profile(), "Music");
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "back to where the user was");
+        runtime.focus_changed(Ok(Some(sdeck_plus::app_focus::FocusedApplication {
+            window_class: "another".into(),
+            executable: None,
+        })));
+        assert_eq!(active_profile(), "Music", "and it stays there");
+        // Without a previous profile (started on Base) it is Base again.
+        tabs.set_current_page(Some(0));
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Err("test unavailable".into()));
+        assert_eq!(active_profile(), "Base");
+        // A tab the user clicks while the application is focused is kept.
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        tabs.set_current_page(Some(0));
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Base");
+        // A tab picked by hand while the application is shown is where the user is after leaving,
+        // and the next visit remembers that tab, not the profile of an earlier visit.
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "the user's own tab stays");
+        runtime.focus_changed(Ok(Some(ui_showcase.clone())));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other.clone())));
+        assert_eq!(active_profile(), "Music", "remembered from this visit");
+        tabs.set_current_page(Some(0));
+
+        // Turned off, leaving goes to Base as it always did.
+        picker.set_selected(2);
+        check.set_active(false);
+        save.emit_clicked();
+        assert!(!saved_organization().profile_returns_to_previous("Studio"));
+        tabs.set_current_page(Some(1));
+        runtime.focus_changed(Ok(Some(ui_showcase)));
+        assert_eq!(active_profile(), "Studio");
+        runtime.focus_changed(Ok(Some(other)));
+        assert_eq!(active_profile(), "Base");
+
+        // Clearing the application removes the option with it.
+        check.set_active(true);
+        application.set_text("");
+        assert!(!check.is_sensitive());
+        save.emit_clicked();
+        assert!(!saved_organization().profile_returns_to_previous("Studio"));
+        window.destroy();
+        std::fs::remove_dir_all(root).unwrap();
+        eprintln!("GTK return-to-previous option executed: enablement, saving and focus behaviour");
     }
 
     fn assert_profile_tabs_and_focus() {
@@ -5515,6 +5899,9 @@ mod tests {
         assert_eq!(layers.borrow().active(), "Studio");
         let mut buttons = Vec::new();
         collect_layout_buttons(widgets.root.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
         let button = |caption: &str| {
             buttons
                 .iter()
@@ -5693,6 +6080,9 @@ mod tests {
         assert_eq!(tabs.n_pages(), 2);
         let mut entries = Vec::new();
         collect_entries(widgets.root.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
         let name = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
@@ -5749,7 +6139,7 @@ mod tests {
         let ui = widgets.binding_ui.clone();
         let toast = widgets.toast.clone();
         let viewport = widgets.root.clone();
-        let management_menu = widgets.management_menu.clone();
+        let tabs = widgets.feature_runtime.profile_tabs().clone();
         let surface = toast.wrap(&viewport);
         let stage = gtk::Fixed::new();
         stage.put(&surface, 0.0, 0.0);
@@ -5770,6 +6160,9 @@ mod tests {
         ui.text_entry.set_text("toast-test");
         let mut buttons = Vec::new();
         collect_layout_buttons(viewport.upcast_ref(), &mut buttons);
+        for body in profile_dialog_bodies(&window) {
+            collect_layout_buttons(&body, &mut buttons);
+        }
         let save = buttons
             .iter()
             .find(|button| button_caption(button).as_deref() == Some("Save binding"))
@@ -5784,6 +6177,9 @@ mod tests {
             .unwrap();
         let mut entries = Vec::new();
         collect_entries(viewport.upcast_ref(), &mut entries);
+        for body in profile_dialog_bodies(&window) {
+            collect_entries(&body, &mut entries);
+        }
         let profile_name = entries
             .iter()
             .find(|entry| entry.placeholder_text().as_deref() == Some("New profile name"))
@@ -5862,7 +6258,7 @@ mod tests {
                 timeout.remove();
             }
             assert!(arrived.get(), "save result did not reach the toast");
-            assert_eq!(toast.label.has_css_class("feedback-error"), failed);
+            assert_eq!(toast.tone.has_css_class("feedback-error"), failed);
             if failed {
                 assert_eq!(std::fs::read(path.join("sentinel")).unwrap(), b"keep");
                 assert_eq!(std::fs::read(&metadata_path).ok(), metadata_before);
@@ -5911,68 +6307,32 @@ mod tests {
                         .unwrap();
                 }
                 if scenario == 3 {
-                    let panel = management_menu.popover().unwrap();
-                    let autohide = panel.is_autohide();
-                    // The user's desktop focus must not dismiss an owned capture.
-                    panel.set_autohide(false);
-                    management_menu.popup();
-                    let panel_content = panel.child().unwrap();
-                    wait_for_frame(&panel);
-                    assert!(panel.is_visible() && panel.is_mapped());
-                    assert!(panel_content.is_drawable());
-                    // Native popup surfaces do not expose a render node reliably.
-                    // Render the same widgets in a fixed component host instead.
-                    let panel_size = (panel_content.width(), panel_content.height());
-                    assert!(panel_size.0 > 0 && panel_size.1 > 0);
-                    panel.set_child(gtk::Widget::NONE);
-                    let capture_stage = gtk::Fixed::new();
-                    panel_content.set_size_request(panel_size.0, panel_size.1);
-                    capture_stage.put(&panel_content, 0.0, 0.0);
-                    let capture_window = ApplicationWindow::builder().child(&capture_stage).build();
-                    capture_window.present();
-                    wait_for_frame(&panel_content);
-                    let scroller = save_profile
-                        .ancestor(gtk::ScrolledWindow::static_type())
-                        .unwrap()
-                        .downcast::<gtk::ScrolledWindow>()
-                        .unwrap();
-                    let scroll_to = |button: &Button| {
-                        let bounds = button.compute_bounds(&scroller).unwrap();
-                        if bounds.y() < 0.0
-                            || bounds.y() + bounds.height() > scroller.height() as f32
-                        {
-                            let adjustment = scroller.vadjustment();
-                            adjustment.set_value(adjustment.value() + f64::from(bounds.y()));
-                            wait_for_frame(&scroller);
+                    // The rail opens the profile forms in modal dialogs: each shows its primary
+                    // button completely, with no scrolling.
+                    for (command, button, file) in [
+                        ("New profile", create_profile, "profile-create-panel"),
+                        ("Edit profile", save_profile, "profile-save-panel"),
+                    ] {
+                        if command == "New profile" {
+                            rail_tests::new_profile_button_in(&tabs).emit_clicked();
+                        } else {
+                            profile_row_tests::edit_button_in(&tabs, "Saved profile")
+                                .emit_clicked();
                         }
-                        let bounds = button.compute_bounds(&scroller).unwrap();
-                        assert!(bounds.y() >= -1.0);
-                        assert!(bounds.y() + bounds.height() <= scroller.height() as f32 + 1.0);
-                    };
-                    scroll_to(create_profile);
-                    assert!(panel_content.is_drawable());
-                    if let Some(directory) = &directory {
-                        rendered_texture(&capture_window, &panel_content)
-                            .save_to_png(
-                                directory
-                                    .join(format!("profile-create-panel-{width}x{height}.png")),
-                            )
-                            .unwrap();
+                        let dialog = button.root().and_downcast::<gtk::Window>().unwrap();
+                        assert!(dialog.is_visible() && dialog.is_modal());
+                        wait_for_frame(&dialog);
+                        let content = dialog.child().unwrap();
+                        let bounds = button.compute_bounds(&content).unwrap();
+                        assert!(bounds.y() >= 0.0);
+                        assert!(bounds.y() + bounds.height() <= content.height() as f32 + 1.0);
+                        if let Some(directory) = &directory {
+                            rendered_texture(&dialog, &content)
+                                .save_to_png(directory.join(format!("{file}-{width}x{height}.png")))
+                                .unwrap();
+                        }
+                        dialog.close();
                     }
-                    scroll_to(save_profile);
-                    if let Some(directory) = &directory {
-                        rendered_texture(&capture_window, &panel_content)
-                            .save_to_png(
-                                directory.join(format!("profile-save-panel-{width}x{height}.png")),
-                            )
-                            .unwrap();
-                    }
-                    capture_stage.remove(&panel_content);
-                    panel_content.set_size_request(-1, -1);
-                    panel.set_child(Some(&panel_content));
-                    capture_window.destroy();
-                    management_menu.popdown();
-                    panel.set_autohide(autohide);
                 }
             }
         }
@@ -5982,14 +6342,14 @@ mod tests {
         ui.text_entry.set_text("");
         save.emit_clicked();
         assert!(toast.root.reveals_child());
-        assert!(toast.label.has_css_class("feedback-error"));
+        assert!(toast.tone.has_css_class("feedback-error"));
         assert_eq!(std::fs::read(&path).unwrap(), saved);
         commands.send(LayerCommand::Shutdown).unwrap();
         worker.join().unwrap();
         ui.text_entry.set_text("toast-test");
         save.emit_clicked();
         assert!(toast.root.reveals_child());
-        assert!(toast.label.has_css_class("feedback-error"));
+        assert!(toast.tone.has_css_class("feedback-error"));
         assert_eq!(std::fs::read(&path).unwrap(), saved);
         ui::assert_toast_lifecycle(&toast);
         polling.remove();
@@ -6458,17 +6818,7 @@ mod tests {
         };
         let (sender, commands) = mpsc::channel();
         let widgets = build_widgets(window.clone(), layers.clone(), artwork.clone(), sender);
-        let shell = widgets
-            .root
-            .child()
-            .unwrap()
-            .downcast::<gtk::Viewport>()
-            .unwrap()
-            .child()
-            .unwrap()
-            // The width clamp wraps the shell.
-            .first_child()
-            .unwrap();
+        let shell = widgets.root.first_child().unwrap();
         let motion = shell.settings();
         let animations = motion.is_gtk_enable_animations();
         motion.set_gtk_enable_animations(false);
@@ -6541,17 +6891,7 @@ mod tests {
             (DEFAULT_WIDTH, DEFAULT_HEIGHT)
         );
         eprintln!("GTK actual test client allocation 1000x700 executed");
-        let content = widgets
-            .root
-            .child()
-            .unwrap()
-            .downcast::<gtk::Viewport>()
-            .unwrap()
-            .child()
-            .unwrap()
-            // The width clamp wraps the shell.
-            .first_child()
-            .unwrap();
+        let content = widgets.root.first_child().unwrap();
         if std::env::var_os("STREAMDECK_QA_DIR").is_some() {
             widgets.artwork_section.set_expanded(false);
             let _ = rendered_pixels(&window, &widgets.root);
@@ -6655,14 +6995,12 @@ mod tests {
             assert_eq!(artwork.pictures.borrow().len(), 13);
             assert_artwork_geometry(&artwork, &content, true);
             assert_sidebar_geometry(&widgets, &content);
-            let horizontal = widgets.root.hadjustment();
-            let vertical = widgets.root.vadjustment();
+            let horizontal = widgets.scroller.hadjustment();
+            let vertical = widgets.scroller.vadjustment();
             eprintln!("GTK production allocation {width}x{height}: content {}x{}, horizontal upper/page={}/{}, vertical upper/page={}/{}",
                 content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
-            assert!(
-                horizontal.upper() <= horizontal.page_size(),
-                "responsive configuration must not require horizontal scrolling"
-            );
+            assert_horizontal_overflow_is_layout_minimum(&widgets, width);
+            assert_catalog_beside_preview(&widgets, &content, width);
             assert!(ui.action_picker.compute_bounds(&content).is_some());
             assert!(widgets
                 .feature_runtime
@@ -6720,10 +7058,9 @@ mod tests {
                 );
                 eprintln!("GTK production image-backed action {action} at {width}x{height}: content {}x{}, minimum {action_minimum}, horizontal upper/page={}/{}, vertical upper/page={}/{}",
                     content.width(), content.height(), horizontal.upper(), horizontal.page_size(), vertical.upper(), vertical.page_size());
-                if width >= 960 {
-                    assert!(horizontal.upper() <= horizontal.page_size());
-                }
-                assert_reachable(&ui.action_picker, &widgets.root);
+                assert_horizontal_overflow_is_layout_minimum(&widgets, width);
+                assert_catalog_beside_preview(&widgets, &content, width);
+                assert_reachable(&ui.action_picker, &widgets.scroller);
                 for row in [
                     &ui.layer_target_row,
                     &ui.text_row,
@@ -6732,17 +7069,17 @@ mod tests {
                     &ui.modifier_row,
                 ] {
                     if row.is_visible() {
-                        assert_reachable(row, &widgets.root);
+                        assert_reachable(row, &widgets.scroller);
                     }
                 }
                 let mut buttons = Vec::new();
                 collect_layout_buttons(&content, &mut buttons);
                 for button in buttons {
-                    assert_reachable(&button, &widgets.root);
+                    assert_reachable(&button, &widgets.scroller);
                 }
                 eprintln!("GTK production image-backed action {action} editor/button reachability assertions executed at {width}x{height}");
             }
-            assert_reachable(&widgets.layer_picker, &widgets.root);
+            assert_reachable(&widgets.layer_picker, &widgets.scroller);
             let mut buttons = Vec::new();
             collect_layout_buttons(&content, &mut buttons);
             assert_eq!(
@@ -6753,7 +7090,7 @@ mod tests {
                 1
             );
             for button in buttons {
-                assert_reachable(&button, &widgets.root);
+                assert_reachable(&button, &widgets.scroller);
             }
             vertical.set_value(0.0);
             eprintln!("GTK production layer/editor/artwork reachability assertions executed at {width}x{height}");
@@ -6900,16 +7237,14 @@ mod tests {
         for (width, height) in [(640, 480), (1000, 700), (1280, 800), (1840, 980)] {
             widgets.root.set_size_request(width, height);
             let capture = |name: &str| {
-                widgets.root.vadjustment().set_value(0.0);
+                widgets.scroller.vadjustment().set_value(0.0);
                 let texture = rendered_texture(window, &widgets.root);
                 assert_eq!((texture.width(), texture.height()), (width, height));
-                assert!(
-                    widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size()
-                );
+                assert_horizontal_overflow_is_layout_minimum(widgets, width);
                 texture
                     .save_to_png(directory.join(format!("{width}x{height}-{name}-top.png")))
                     .unwrap();
-                let adjustment = widgets.root.vadjustment();
+                let adjustment = widgets.scroller.vadjustment();
                 if adjustment.upper() > adjustment.page_size() {
                     adjustment.set_value(adjustment.upper() - adjustment.page_size());
                     rendered_texture(window, &widgets.root)
@@ -6953,7 +7288,9 @@ mod tests {
                 ),
             ] {
                 button.emit_clicked();
-                let heading = sidebar_settings(widgets)
+                let heading = settings_region(widgets)
+                    .first_child()
+                    .unwrap()
                     .first_child()
                     .unwrap()
                     .downcast::<Label>()
@@ -6993,11 +7330,10 @@ mod tests {
         widgets.binding_ui.update_action_visibility();
         for (width, height) in [(640, 480), (1000, 700), (1280, 800), (1840, 980)] {
             widgets.root.set_size_request(width, height);
-            widgets.root.vadjustment().set_value(0.0);
+            widgets.scroller.vadjustment().set_value(0.0);
             wait_for_frame(&widgets.root);
             for (name, menu) in [
                 ("help", &widgets.help_menu),
-                ("organization", &widgets.management_menu),
                 ("folders", widgets.feature_runtime.folder_menu()),
                 ("obs", &widgets.obs_menu),
             ] {
@@ -7445,6 +7781,20 @@ mod tests {
             .unwrap_or_else(|| panic!("folder action {caption:?} is listed"))
     }
 
+    /// The forms of the New/Edit profile dialogs of `window`, shown or not.
+    fn profile_dialog_bodies(window: &ApplicationWindow) -> Vec<gtk::Widget> {
+        gtk::Window::toplevels()
+            .snapshot()
+            .into_iter()
+            .filter_map(|candidate| candidate.downcast::<gtk::Window>().ok())
+            .filter(|candidate| {
+                candidate.has_css_class("profile-dialog")
+                    && candidate.transient_for().as_ref() == Some(window.upcast_ref())
+            })
+            .filter_map(|candidate| candidate.child())
+            .collect()
+    }
+
     fn collect_entries(widget: &gtk::Widget, entries: &mut Vec<Entry>) {
         if let Some(entry) = widget.downcast_ref::<Entry>() {
             entries.push(entry.clone());
@@ -7679,7 +8029,9 @@ mod tests {
                     assert_eq!(widgets.binding_ui.control_picker.selected(), 2);
                     assert_eq!(widgets.binding_ui.control_number(), Some(*zone));
                     assert_eq!(widgets.binding_ui.event_model.n_items(), 7);
-                    let heading = sidebar_settings(widgets)
+                    let heading = settings_region(widgets)
+                        .first_child()
+                        .unwrap()
                         .first_child()
                         .unwrap()
                         .downcast::<Label>()
@@ -7724,8 +8076,8 @@ mod tests {
                 .root
                 .allocate(DEFAULT_WIDTH, DEFAULT_HEIGHT, -1, None);
             let minimum = content.measure(Orientation::Vertical, DEFAULT_WIDTH - 48).0;
-            let horizontal = widgets.root.hadjustment();
-            let vertical = widgets.root.vadjustment();
+            let horizontal = widgets.scroller.hadjustment();
+            let vertical = widgets.scroller.vadjustment();
             // Editing below the fold may have scrolled to the focused field.
             // Reset the viewport for the geometry matrix, not application state.
             vertical.set_value(0.0);
@@ -7834,12 +8186,18 @@ mod tests {
                 bounds.y() <= 16.0,
                 "scrolling may move the shell above its top margin"
             );
+            let scrolling = widgets.scroller.vadjustment();
             assert!(
-                bounds.height() > 668.0,
-                "inspector is reachable through vertical scrolling"
+                scrolling.upper() > scrolling.page_size(),
+                "inspector is reachable through the content column's vertical scrolling"
             );
-            assert_eq!(bounds.width(), 968.0, "shell uses the full window width");
-            assert!((bounds.x() + bounds.width() / 2.0 - 500.0).abs() <= 1.0);
+            let window_width = DEFAULT_WIDTH as f32;
+            assert_eq!(
+                bounds.width(),
+                window_width - 32.0,
+                "shell uses the full window width"
+            );
+            assert!((bounds.x() + bounds.width() / 2.0 - window_width / 2.0).abs() <= 1.0);
             let mut buttons = Vec::new();
             collect_layout_buttons(content, &mut buttons);
             for caption in ["Image…", "Clear"] {
@@ -7866,7 +8224,7 @@ mod tests {
         widgets.artwork_section.set_expanded(true);
     }
 
-    fn assert_visible_bounds(widget: &gtk::Widget, root: &gtk::ScrolledWindow) {
+    fn assert_visible_bounds(widget: &gtk::Widget, root: &impl IsA<gtk::Widget>) {
         // Overlay scrollbars belong to their scroller, not to the content measure.
         if !widget.is_visible() || widget.is::<gtk::Scrollbar>() {
             return;
@@ -8038,16 +8396,13 @@ mod tests {
             let offset = (y * widget.width() as usize + x) * 4;
             pixels[offset..offset + 4].to_vec()
         };
-        let expected = background(widgets.root.upcast_ref(), 5, 5);
+        let expected = background(window.upcast_ref(), 5, 5);
         assert_eq!(expected[3], 255);
-        assert_eq!(background(window.upcast_ref(), 5, 5), expected);
-        let viewport = widgets.root.child().unwrap();
-        assert_eq!(background(&viewport, 5, 5), expected);
         assert_eq!(
             background(content, 2, content.height() as usize - 2),
             expected
         );
-        let settings = sidebar_settings(widgets);
+        let settings = settings_region(widgets);
         let device = device_canvas(widgets);
         let elevated = background(&settings, 3, settings.height() as usize / 2);
         assert_eq!(elevated[3], 255);
@@ -8181,9 +8536,11 @@ mod tests {
     /// The configuration region: the form's own scroller, which stays put while
     /// the form scrolls inside it.
     fn settings_region(widgets: &MonitorWidgets) -> gtk::Widget {
+        // The editor card: its fixed heading row above the scrolling form region.
         sidebar_settings(widgets)
             .ancestor(gtk::ScrolledWindow::static_type())
-            .expect("configuration region scroller")
+            .and_then(|scroller| scroller.parent())
+            .expect("configuration region card")
     }
 
     fn sidebar_settings(widgets: &MonitorWidgets) -> gtk::Widget {
@@ -8196,6 +8553,56 @@ mod tests {
             .unwrap()
             .parent()
             .unwrap()
+    }
+
+    /// The content column scrolls sideways only when the two-column layout
+    /// cannot fit; it never wraps the catalog under the preview instead.
+    fn assert_horizontal_overflow_is_layout_minimum(widgets: &MonitorWidgets, width: i32) {
+        let content = widgets.scroller.child().unwrap();
+        let minimum = f64::from(content.measure(Orientation::Horizontal, -1).0);
+        let horizontal = widgets.scroller.hadjustment();
+        if minimum <= horizontal.page_size() {
+            assert!(
+                horizontal.upper() <= horizontal.page_size(),
+                "no horizontal scrolling while the side-by-side layout fits at {width}"
+            );
+        } else {
+            assert!(
+                horizontal.upper() >= minimum - 1.0,
+                "below the side-by-side minimum the column scrolls horizontally at {width}"
+            );
+        }
+    }
+
+    /// The catalog sits right of the preview card, on the same top row.
+    fn assert_catalog_beside_preview(widgets: &MonitorWidgets, content: &gtk::Widget, width: i32) {
+        let card = device_canvas(widgets).compute_bounds(content).unwrap();
+        let side = descendant_with_class(widgets.root.upcast_ref(), "settings-sidebar")
+            .expect("the catalog sidebar")
+            .compute_bounds(content)
+            .unwrap();
+        assert!(
+            side.x() >= card.x() + card.width(),
+            "the catalog never wraps under the preview at {width}: {side:?} vs {card:?}"
+        );
+        assert!(
+            (side.y() - card.y()).abs() <= 8.0,
+            "the catalog stays on the preview's top row at {width}: {side:?} vs {card:?}"
+        );
+    }
+
+    fn descendant_with_class(root: &gtk::Widget, class: &str) -> Option<gtk::Widget> {
+        if root.has_css_class(class) {
+            return Some(root.clone());
+        }
+        let mut child = root.first_child();
+        while let Some(next) = child {
+            if let Some(found) = descendant_with_class(&next, class) {
+                return Some(found);
+            }
+            child = next.next_sibling();
+        }
+        None
     }
 
     fn assert_compact_responsive_regions(widgets: &MonitorWidgets, content: &gtk::Widget) {
@@ -8227,13 +8634,28 @@ mod tests {
                 .unwrap()
                 .compute_bounds(content)
                 .unwrap();
-            for bar in [header, tab_header, pagebar] {
-                assert!((bar.x()).abs() <= 1.0);
-                assert!(
-                    (bar.width() - shell.width()).abs() <= 1.0,
-                    "configuration chrome must share the shell measure"
-                );
-            }
+            assert!((header.x()).abs() <= 1.0);
+            assert!(
+                (header.width() - shell.width()).abs() <= 1.0,
+                "configuration chrome must share the shell measure"
+            );
+            // The profile rail hugs the left edge; the page bar fills the rest of the measure.
+            assert!((tab_header.x()).abs() <= 1.0);
+            assert!(
+                tab_header.width() < 260.0 && tab_header.width() < shell.width() / 2.0,
+                "the profile rail stays narrow: {}px",
+                tab_header.width()
+            );
+            assert!(pagebar.x() >= tab_header.x() + tab_header.width() - 1.0);
+            // The content column scrolls horizontally when its minimum width exceeds the
+            // space beside the rail; the page bar then overhangs by exactly that much.
+            let overhang = (widgets.scroller.hadjustment().upper()
+                - widgets.scroller.hadjustment().page_size())
+            .max(0.0) as f32;
+            assert!(
+                (pagebar.x() + pagebar.width() - shell.width() - overhang).abs() <= 1.0,
+                "the page bar reaches the right edge of the shell measure at {width}x{height}"
+            );
             if width == 1840 {
                 assert_eq!(
                     shell.width(),
@@ -8266,7 +8688,8 @@ mod tests {
                 "below-preview editor needs a bounded reading measure: {editor:?}"
             );
             assert!((editor.y() - device.y() - device.height() - 12.0).abs() <= 1.0);
-            assert!(widgets.root.hadjustment().upper() <= widgets.root.hadjustment().page_size());
+            assert_horizontal_overflow_is_layout_minimum(widgets, width);
+            assert_catalog_beside_preview(widgets, content, width);
         }
         let previous = widgets.binding_ui.action_picker.selected();
         widgets.binding_ui.action_picker.set_selected(7);
@@ -8301,35 +8724,27 @@ mod tests {
     fn assert_sidebar_hierarchy(widgets: &MonitorWidgets, content: &gtk::Widget) {
         let settings = sidebar_settings(widgets);
         assert!(settings.next_sibling().is_none(), "no event card");
-        // The card sits in its own vertical scroller inside the workspace column.
-        let sidebar = settings
-            .ancestor(gtk::ScrolledWindow::static_type())
-            .unwrap()
-            .parent()
-            .unwrap()
-            .downcast::<GtkBox>()
-            .unwrap();
+        // The form sits in its own vertical scroller under the editor card's fixed heading
+        // row, and the card sits in the workspace column.
+        let editor_card = settings_region(widgets);
+        assert_eq!(
+            settings
+                .ancestor(gtk::ScrolledWindow::static_type())
+                .unwrap()
+                .parent(),
+            Some(editor_card.clone())
+        );
+        let sidebar = editor_card.parent().unwrap().downcast::<GtkBox>().unwrap();
         assert_eq!(sidebar.orientation(), Orientation::Vertical);
         assert_eq!(sidebar.spacing(), 12);
-        let body = sidebar
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .downcast::<gtk::FlowBox>()
-            .unwrap();
-        assert_eq!(body.min_children_per_line(), 1);
-        assert_eq!(body.max_children_per_line(), 2);
-        assert_eq!(body.column_spacing(), 16);
-        assert_eq!(body.row_spacing(), 16);
-        assert_eq!(
-            body.first_child()
-                .unwrap()
-                .downcast::<gtk::FlowBoxChild>()
-                .unwrap()
-                .child(),
-            Some(sidebar.upcast())
-        );
+        // Two columns in a plain horizontal box: nothing wraps, the catalog is
+        // the second column.
+        let body = sidebar.parent().unwrap().downcast::<GtkBox>().unwrap();
+        assert_eq!(body.orientation(), Orientation::Horizontal);
+        assert_eq!(body.spacing(), 16);
+        assert!(body.has_css_class("configuration-grid"));
+        assert_eq!(body.first_child(), Some(sidebar.upcast()));
+        assert!(body.last_child().unwrap().has_css_class("settings-sidebar"));
         let shell = content.clone().downcast::<GtkBox>().unwrap();
         assert_eq!(shell.spacing(), 16);
         assert_eq!(
@@ -8341,7 +8756,7 @@ mod tests {
             ),
             (16, 16, 16, 16)
         );
-        for panel in [device_canvas(widgets), settings] {
+        for panel in [device_canvas(widgets), editor_card] {
             let panel = panel.downcast::<GtkBox>().unwrap();
             assert!(panel.has_css_class("card"));
             assert_eq!(
@@ -8362,29 +8777,24 @@ mod tests {
                 (0, 0, 0, 0)
             );
         }
-        assert_eq!(widgets.root.hscrollbar_policy(), gtk::PolicyType::Automatic);
-        assert_eq!(widgets.root.vscrollbar_policy(), gtk::PolicyType::Automatic);
+        assert_eq!(
+            widgets.scroller.hscrollbar_policy(),
+            gtk::PolicyType::Automatic
+        );
+        assert_eq!(
+            widgets.scroller.vscrollbar_policy(),
+            gtk::PolicyType::Automatic
+        );
         eprintln!("GTK sidebar hierarchy and spacing assertions executed");
     }
 
     fn assert_sidebar_geometry(widgets: &MonitorWidgets, content: &gtk::Widget) {
-        let settings = sidebar_settings(widgets);
+        // The editor card: fixed heading row, then the scrolling form.
+        let settings = settings_region(widgets);
         let device = device_canvas(widgets);
-        // Viewport and scroller of the configuration region, then the workspace column.
-        let profile_content = settings
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap();
-        let navigation = profile_content.first_child().unwrap();
+        // The page navigation card heads the profile content above the two columns.
+        let navigation = descendant_with_class(widgets.root.upcast_ref(), "navigation-card")
+            .expect("page navigation card");
         let navigation_bounds = navigation.compute_bounds(content).unwrap();
         let header = widgets
             .feature_runtime
@@ -8392,9 +8802,12 @@ mod tests {
             .first_child()
             .unwrap();
         let header_bounds = header.compute_bounds(content).unwrap();
+        // A narrow window may be scrolled sideways (a focused field scrolls into view);
+        // the rail does not move with the column, so add the scroll offset back.
+        let scrolled = widgets.scroller.hadjustment().value() as f32;
         assert!(
-            navigation_bounds.y() - header_bounds.y() - header_bounds.height() >= 11.0,
-            "profile tabs and page navigation need a visible gap"
+            navigation_bounds.x() + scrolled - header_bounds.x() - header_bounds.width() >= 7.0,
+            "the profile rail and page navigation need a visible gap"
         );
         let region = device.parent().unwrap().parent().unwrap();
         let region_bounds = region.compute_bounds(content).unwrap();
@@ -8437,26 +8850,14 @@ mod tests {
             );
         }
         let cell = device.parent().unwrap().compute_bounds(content).unwrap();
-        // The region (its scroller) stays put while the form scrolls inside it.
-        let settings = settings
-            .ancestor(gtk::ScrolledWindow::static_type())
-            .unwrap()
-            .compute_bounds(content)
-            .unwrap();
+        // The card stays put while the form scrolls inside it.
+        let settings = settings.compute_bounds(content).unwrap();
         let device = device.compute_bounds(content).unwrap();
-        if (settings.y() - device.y()).abs() <= 0.5 {
-            // A height-limited preview is centered in its column.
-            let slack = (cell.width() - device.width()) / 2.0;
-            assert!(
-                (settings.x() - device.x() - device.width() - slack - 16.0).abs() <= 1.0,
-                "column gap: {settings:?}, {device:?}, {cell:?}"
-            );
-        } else {
-            assert!(
-                (settings.y() - device.y() - device.height() - 12.0).abs() <= 1.0,
-                "preview and inspector keep a 12px gap: {settings:?}, {device:?}"
-            );
-        }
+        // The editor card always sits under the preview, whatever the width.
+        assert!(
+            (settings.y() - device.y() - device.height() - 12.0).abs() <= 1.0,
+            "preview and inspector keep a 12px gap: {settings:?}, {device:?}, {cell:?}"
+        );
         eprintln!("GTK sidebar geometry assertions executed");
     }
 

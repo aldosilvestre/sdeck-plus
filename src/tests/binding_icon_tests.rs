@@ -189,7 +189,7 @@ fn assert_dial_icons() {
     assert!(!icons[3].is_visible(), "None shows no icon");
     assert_eq!(icons[1].widget_name(), "volume-up");
     assert_eq!(icons[2].widget_name(), "shortcut");
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     for index in [1, 2] {
         let icon = &icons[index];
         assert!(icon.is_visible() && icon.has_css_class("binding-icon"));
@@ -433,7 +433,13 @@ fn assert_icon_action_consistency() {
     folder_name.set_text("Icons");
     folder_name.emit_activate();
     let mut deletes = Vec::new();
-    for button in descendants::<Button>(root) {
+    // The profile forms live in hidden modal dialogs, not under the root.
+    let scanned = descendants::<Button>(root).into_iter().chain(
+        profile_dialog_bodies(&fixture.window)
+            .into_iter()
+            .flat_map(|body| descendants::<Button>(&body)),
+    );
+    for button in scanned {
         if !button.has_css_class("icon-action") {
             continue;
         }
@@ -463,16 +469,27 @@ fn assert_icon_action_consistency() {
     for (caption, names) in &deletes {
         assert_eq!(names, &["user-trash-symbolic"], "{caption}");
     }
-    let organize = descendants::<gtk::MenuButton>(root)
+    // Profile editing and deleting are the rows' pencil and trash, the same icons as the page bar.
+    let rows = descendants::<Button>(root)
         .into_iter()
-        .find(|button| button.tooltip_text().as_deref() == Some("Organize"))
-        .expect("Organize menu");
-    assert_eq!(
-        image_names(organize.upcast_ref())
-            .first()
-            .map(String::as_str),
-        Some("preferences-system-symbolic"),
-        "profile organization is not a new-folder action"
+        .filter(|button| button.has_css_class("rail-row-action"))
+        .collect::<Vec<_>>();
+    assert!(!rows.is_empty(), "profile rows carry icon actions");
+    for button in rows {
+        let expected = if button.has_css_class("profile-row-edit") {
+            "document-edit-symbolic"
+        } else {
+            "user-trash-symbolic"
+        };
+        assert_eq!(image_names(button.upcast_ref()), [expected]);
+    }
+    assert!(
+        !descendants::<gtk::MenuButton>(root)
+            .into_iter()
+            .any(|button| button
+                .tooltip_text()
+                .is_some_and(|tip| tip.starts_with("Organize"))),
+        "there is no Organize menu"
     );
     // Text and image editing moved to each key's right-click menu.
     assert!(
@@ -660,7 +677,7 @@ fn assert_gesture_badges() {
     );
     // The badges share the strip header line and stay above the sections.
     assert_eq!(row.parent(), widgets.touch_status.parent());
-    let content = widgets.root.child().unwrap();
+    let content = widgets.scroller.child().unwrap();
     let header = row.compute_bounds(&content).unwrap();
     for zone in &widgets.zone_widgets {
         let zone = zone.compute_bounds(&content).unwrap();
@@ -718,7 +735,7 @@ fn assert_more_action_icons() {
     assert_eq!(category.selected(), 2);
     // The inspector now follows the preview, so scroll its selectors into view.
     let bounds = category.compute_bounds(&fixture.widgets.root).unwrap();
-    let adjustment = fixture.widgets.root.vadjustment();
+    let adjustment = fixture.widgets.scroller.vadjustment();
     adjustment.set_value(adjustment.value() + f64::from(bounds.y()) - 40.0);
     wait_for_frame(&fixture.window);
     assert_eq!(
