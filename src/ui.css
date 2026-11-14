@@ -57,8 +57,13 @@ button, dropdown > button, spinbutton, entry, textview, textview text {
     border-color: @desk_control_edge;
     caret-color: @desk_cyan;
 }
+/* Artboard button: field fill, 1px control edge, radius 8, 6px 12px, 34px high (GTK min-height
+   excludes padding and edge), 6px icon-label gap. */
 button {
     border-radius: 8px;
+    padding: 6px 12px;
+    min-height: 20px; /* + 2 x 6px padding + the 1px edge = the artboard's 34px */
+    border-spacing: 6px;
     box-shadow: none;
     text-shadow: none;
     transition: background-color 0ms, color 0ms;
@@ -68,16 +73,25 @@ button {
 }
 button:hover { background-color: @desk_hover; }
 button:active { background-color: mix(@desk_hover, @desk_violet, 0.18); }
-button:checked { background-color: alpha(@desk_violet, 0.20); color: @desk_ink; }
+/* Pressed / selected: selection fill and a 1px inset violet edge. */
+button:checked {
+    background-color: @desk_selection;
+    color: @desk_ink;
+    box-shadow: inset 0 0 0 1px @desk_violet;
+}
+spinbutton > button { min-height: 0; padding: 4px 8px; }
 stackswitcher button { background-color: transparent; color: @desk_muted; }
 stackswitcher button:checked { background-color: @desk_selection; color: @desk_ink; font-weight: 600; }
-button.flat { background-color: transparent; }
+/* Flat: transparent fill AND transparent border until hovered or pressed. */
+button.flat { background-color: transparent; border-color: transparent; }
 button.flat:hover { background-color: @desk_hover; }
+button.flat:checked { background-color: @desk_selection; }
+button.flat:disabled { background-color: transparent; border-color: transparent; }
 button:disabled, button:disabled label, button:disabled image,
 entry:disabled, dropdown:disabled {
     color: @desk_muted;
-    background-color: @desk_field;
 }
+button:disabled, entry:disabled, dropdown:disabled { background-color: @desk_field; }
 textview text {
     box-shadow: inset 0 0 0 1px @desk_control_edge;
 }
@@ -136,18 +150,22 @@ scrollbar slider {
 }
 scrollbar slider:hover { background-color: @desk_muted; }
 scrollbar slider:active { background-color: @desk_cyan; }
-button.icon-action, menubutton.icon-action > button { min-height: 20px; padding: 6px 10px; }
-button.icon-only { min-width: 20px; padding: 6px; }
+button.icon-action { min-height: 20px; padding: 6px 12px; }
+menubutton.icon-action > button { min-height: 20px; padding: 6px 12px; }
+/* Icon-only buttons are 34px squares. */
+button.icon-only { min-width: 32px; min-height: 32px; padding: 0; }
 /* Style the MenuButton's real hit surface, not its outer widget: otherwise
    host-theme button padding and arrow material create a second inset frame. */
 menubutton.icon-action { padding: 0; }
 menubutton.icon-action > button > box { border-spacing: 0; }
 .page-folder-menu { padding: 0; }
-/* Page navigation reads as one segmented control ahead of the breadcrumb. */
+/* Linked groups (modifier toggles, source selector) read as one segmented control. */
 .linked > button { border-radius: 0; }
 .linked > button:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
 .linked > button:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
 .linked > button:not(:first-child) { border-left-width: 0; }
+/* Page navigation: flat icon buttons ahead of the breadcrumb, not a linked group. */
+.page-navigation { border-spacing: 4px; }
 /* Secondary page edits and profile tools: frameless until hovered. */
 .page-edits button.flat, menubutton.icon-action > button.flat {
     border-color: transparent;
@@ -265,6 +283,26 @@ menubutton.icon-action > button.flat:checked { background-color: @desk_hover; }
 }
 .feedback-error { color: @desk_error; }
 .destructive-action:not(:disabled) { color: @desk_error; }
+/* Danger button: error text, tinted fill, half-strength error edge. */
+button.destructive-action {
+    background-image: none;
+    background-color: alpha(@desk_error, 0.14);
+    border-color: alpha(@desk_error, 0.5);
+    font-weight: 600;
+}
+button.destructive-action:hover { background-color: alpha(@desk_error, 0.24); }
+button.destructive-action:disabled { background-color: @desk_field; border-color: @desk_control_edge; font-weight: 400; }
+/* Flat destructive icons stay frameless: danger colour, tint on hover only. */
+button.destructive-action.flat { background-color: transparent; border-color: transparent; font-weight: inherit; }
+button.destructive-action.flat:hover:not(:disabled) { background-color: alpha(@desk_error, 0.12); }
+button.destructive-action.flat:disabled { background-color: transparent; border-color: transparent; }
+/* The editor heading row keeps its neutral icon toolbar; only the glyph is red. */
+.editor-heading-row button.destructive-action, .editor-heading-row button.destructive-action:hover {
+    background-color: @desk_field;
+    border-color: @desk_control_edge;
+    font-weight: 400;
+}
+.editor-heading-row button.destructive-action:hover { background-color: @desk_hover; }
 .icon-action.destructive-action.flat {
     background-image: none;
     background-color: transparent;
@@ -562,18 +600,12 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 /* Category chips and group sub-headings of the action catalog. */
 .catalog-chips { margin: 2px 0 4px; }
 .catalog-chip {
-    min-height: 24px;
-    padding: 2px 8px;
-    border-radius: 999px;
+    min-height: 20px;
+    padding: 6px 8px;
+    border-radius: 8px;
     font-size: 12px;
-    border-color: @desk_edge;
 }
-.catalog-chip:checked {
-    background-color: @desk_selection;
-    color: @desk_ink;
-    border-color: @desk_violet;
-    font-weight: 600;
-}
+.catalog-chip:checked { font-weight: 600; }
 .catalog-group {
     color: @desk_muted;
     font-size: 11px;

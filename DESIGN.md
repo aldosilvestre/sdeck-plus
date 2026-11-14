@@ -455,8 +455,8 @@ Menu) and, under it, the connection detail with the Current selector at its righ
 are connected, so the selector never overlaps the Menu. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
 inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
-management: a linked previous/next/parent segmented group leads the
-breadcrumb with a 12px gap, and page-owned folders and New page trail it,
+management: separate flat previous/next/parent icon buttons lead the
+breadcrumb with a 12px gap, and page-owned folders and New page (flat) trail it,
 followed by frameless square pencil and red-trash icons (still named, with
 tooltips; deletion still confirms).
 The folder menu has no outer padding, preserving the page bar's 34px controls.
@@ -498,6 +498,26 @@ two columns fit.
 
 - **Card:** neutral tonal separation, readable heading and inline feedback;
   subtle inset top light, no colored accent border.
+- **Buttons** (`src/ui.css`, both themes; artboards `design/overlays/03-compact-command.html`
+  and `design/main-window/03-profile-rail.html`):
+  - *Default:* `desk_field` fill, 1px `desk_control_edge`, radius 8, padding 6px 12px, 34px high,
+    6px icon-label gap; hover fills `desk_hover`.
+  - *Primary* (`suggested-action`): `desk_violet` fill, weight 600, no border.
+  - *Danger* (`destructive-action`): `desk_error` text, `alpha(desk_error, .14)` fill,
+    `alpha(desk_error, .5)` border, weight 600. Flat destructive icons (page, folder, profile-row
+    delete) stay frameless: error-coloured glyph, tint on hover. The editor heading row keeps its
+    neutral toolbar with a red glyph.
+  - *Flat* (`flat` / `has_frame(false)`): transparent fill and transparent border until hovered.
+  - *Icon-only* (`icon-only`): 34px square; per-profile-row Edit/Delete and the rail's + stay
+    compact (18-20px) by design.
+  - *Pressed / selected* (`:checked`, toggles): `desk_selection` fill with an inset 1px
+    `desk_violet` edge. *Focus:* 2px `desk_cyan` outline, offset -2.
+  - *Catalog filter chips:* radius-8, 34px high toggle buttons with the pressed style (still four
+    to a line, wrapping).
+  - *Page bar:* Previous, Next and Parent are separate flat 34px icon buttons (no linked
+    segment); Folders and New page are flat captioned buttons; rename and delete are flat icons.
+  - Compact inspector groups (modifier toggles, artwork and button-text choices, the position grid,
+    plugin source selector) keep their smaller sizes.
 - **Icon action:** one GTK symbolic icon family at 16px, visible outcome
   label, accessible name and tooltip. Save is the editor's only primary action.
   Destructive actions use the native destructive style, and every delete or

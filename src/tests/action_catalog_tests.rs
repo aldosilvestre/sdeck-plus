@@ -241,7 +241,7 @@ fn searching_the_catalog_shows_only_matching_actions_and_restores_on_clear() {
     });
 }
 
-fn collect_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
+pub(super) fn collect_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Widget>) {
     if widget.has_css_class(class) {
         found.push(widget.clone());
     }
@@ -252,7 +252,7 @@ fn collect_with_class(widget: &gtk::Widget, class: &str, found: &mut Vec<gtk::Wi
     }
 }
 
-fn label_text(widget: &gtk::Widget) -> String {
+pub(super) fn label_text(widget: &gtk::Widget) -> String {
     widget
         .downcast_ref::<gtk::Label>()
         .map(|label| label.text().to_string())

@@ -5196,6 +5196,7 @@ mod tests {
     mod binding_icon_tests;
     mod binding_toolbar_tests;
     mod button_swap_tests;
+    mod button_system_tests;
     mod button_text_popup_tests;
     mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
@@ -8703,6 +8704,8 @@ mod tests {
         let button = ui::icon_button("go-previous-symbolic", "Previous page");
         let caption = ui::button("document-new-symbolic", "New page");
         let row = GtkBox::new(Orientation::Horizontal, 8);
+        // The window may be taller than the row; measure natural button sizes.
+        row.set_valign(gtk::Align::Start);
         row.append(&button);
         row.append(&caption);
         let window = gtk::Window::new();
@@ -8714,7 +8717,9 @@ mod tests {
             button.height(),
             "icon-only hit area must be square"
         );
-        assert_eq!(button.height(), caption.height());
+        // GTK sizes report the content box; compare the full 34px outer heights.
+        let outer_height = |widget: &Button| widget.measure(Orientation::Vertical, -1).0;
+        assert_eq!(outer_height(&button), outer_height(&caption));
         let icon = button.child().unwrap();
         let bounds = icon.compute_bounds(&button).unwrap();
         assert!((bounds.x() + bounds.width() / 2.0 - button.width() as f32 / 2.0).abs() <= 1.0);

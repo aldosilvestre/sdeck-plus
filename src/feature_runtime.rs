@@ -578,7 +578,7 @@ impl FeatureRuntime {
         &self.page_controls.root
     }
 
-    /// Linked previous/next/parent buttons that lead the page breadcrumb.
+    /// Flat previous/next/parent buttons that lead the page breadcrumb.
     pub(crate) fn page_navigation(&self) -> &GtkBox {
         &self.page_controls.navigation_group
     }

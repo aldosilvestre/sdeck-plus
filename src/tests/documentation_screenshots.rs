@@ -51,7 +51,7 @@ fn click(widgets: &MonitorWidgets, caption: &str) {
         .emit_clicked();
 }
 
-fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
+pub(super) fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
     if !widget.is_mapped() {
         let main_loop = glib::MainLoop::new(None, false);
         let done = main_loop.clone();
@@ -99,7 +99,7 @@ fn save(directory: &std::path::Path, widget: &gtk::Widget, name: &str) {
     );
 }
 
-fn menu(directory: &std::path::Path, button: &gtk::MenuButton, name: &str) {
+pub(super) fn menu(directory: &std::path::Path, button: &gtk::MenuButton, name: &str) {
     let panel = button.popover().unwrap();
     if name == "page-folders" {
         for scroller in descendants::<gtk::ScrolledWindow>(panel.upcast_ref()) {

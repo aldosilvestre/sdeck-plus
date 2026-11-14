@@ -12,7 +12,7 @@ use std::{cell::RefCell, rc::Rc};
 pub(super) struct PageControls {
     /// Page management (folders, create, rename, delete), trailing the breadcrumb.
     pub(super) root: GtkBox,
-    /// Linked previous/next/parent group, leading the breadcrumb.
+    /// Flat previous/next/parent icon buttons, leading the breadcrumb.
     pub(super) navigation_group: GtkBox,
     navigation: [(Button, NavigationAction); 3],
     create: Button,
@@ -28,9 +28,9 @@ pub(super) struct PageControls {
 impl PageControls {
     pub(super) fn new() -> Self {
         let root = GtkBox::new(Orientation::Horizontal, 8);
-        let navigation_group = GtkBox::new(Orientation::Horizontal, 0);
-        navigation_group.add_css_class("linked");
+        let navigation_group = GtkBox::new(Orientation::Horizontal, 4);
         navigation_group.add_css_class("page-navigation");
+        navigation_group.set_valign(gtk::Align::Center);
         let navigation = [
             (
                 ui::icon_button("go-previous-symbolic", "Previous"),
@@ -46,6 +46,8 @@ impl PageControls {
             ),
         ];
         for (button, _) in &navigation {
+            button.add_css_class("flat");
+            button.set_valign(gtk::Align::Center);
             navigation_group.append(button);
         }
         let folder_panel = FolderPanel::new();
@@ -61,11 +63,13 @@ impl PageControls {
             .tooltip_text("Page folders")
             .popover(&panel)
             .build();
+        folder_menu.set_has_frame(false);
         folder_menu.add_css_class("icon-action");
         folder_menu.add_css_class("page-folder-menu");
         folder_menu.update_property(&[gtk::accessible::Property::Label("Page folders")]);
         root.append(&folder_menu);
         let create = ui::button("document-new-symbolic", "New page");
+        create.add_css_class("flat");
         root.append(&create);
         // Rename/delete are less frequent: lighter frameless icons, still named,
         // and deletion still asks for confirmation.
@@ -79,6 +83,13 @@ impl PageControls {
             page_edits.append(button);
         }
         root.append(&page_edits);
+        for child in [
+            folder_menu.upcast_ref::<gtk::Widget>(),
+            create.upcast_ref(),
+            page_edits.upcast_ref(),
+        ] {
+            child.set_valign(gtk::Align::Center);
+        }
         Self {
             root,
             navigation_group,
