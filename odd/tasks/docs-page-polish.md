@@ -10,10 +10,10 @@ items left open by PR #9. Branch `feat/popups-buttons-design` (PR #9).
 
 ## Tasks
 
-- [x] T1 (S2) update_check tests follow Cargo.toml version; inline; update_check 12/12; commit: pending
-- [x] T2 (S2) diagnose remaining pre-existing GTK failures; worker (src) + parent (modifier padding); full off-screen suite 1234 passed, 0 failed, 2 ignored; commit: pending
-- [x] T3 (S1) docs page defects (copy overlap, contrast, headings, titles, commands, padding); worker (docs); commit: pending
-- [x] T4 (S1) remove eyebrow/gradient on the docs page, re-render, detector, plugin_sdk tests; same docs worker; commit: pending
+- [x] T1 (S2) update_check tests follow Cargo.toml version; inline; update_check 12/12; commit: fc0b860
+- [x] T2 (S2) diagnose remaining pre-existing GTK failures; worker (src) + parent (modifier padding); full off-screen suite 1234 passed, 0 failed, 2 ignored; commit: fc0b860
+- [x] T3 (S1) docs page defects (copy overlap, contrast, headings, titles, commands, padding); worker (docs); commit: fc0b860
+- [x] T4 (S1) remove eyebrow/gradient on the docs page, re-render, detector, plugin_sdk tests; same docs worker; commit: fc0b860
 
 ## Log
 
@@ -24,3 +24,4 @@ items left open by PR #9. Branch `feat/popups-buttons-design` (PR #9).
 - L5: Parent check of T3/T4: after-docs-1440-top.png shows Copy in its own row (no overlap, Uninstall included); the composed preview command names an existing test (src/tests/preview_model_tests.rs:560). Open for the user: + XL omissions at docs.html:405 (800x100 vs 1200x100), :463 (four dials vs six), :711 (four touch zones vs six).
 - L6: T2 worker proved binding_editor_hides_labeled_rows_for_inactive_controls_and_actions is a regression of 61f8965, not test order: the form margin-end 16 (S9 of impeccable-audit-fixes) cut the action-fields FlowBox from 406 to 390 px, below the 2x195+16 the Modifiers row needs, so Shortcut and Modifiers stacked (DESIGN.md two-column rule). Fix (option A, parent): .modifier-toggles > button padding 4px 10px -> 4px 8px (src/ui.css:387, DESIGN.md:342). Observed: that test passes alone; audit_layout_tests 2/2.
 - L7: T2 worker: preview golden was renderer-dependent and stale since 6cca278 (520->440 card); now rendered with gsk::CairoRenderer, new golden stable across default/gl/cairo, pixel-identical to ee5cdb3's centre 440 columns, and a one-level chassis colour change still fails it. plugin_add timeouts: Xvfb draws a 5px solid-csd frame so width() never equals the requested size; tests wait for the outer width. Toolbar test: failed tests leaked open windows; shared ClosesWindow guard. Full suite 1234 passed / 0 failed; fmt and clippy clean.
+- L8: Commit fc0b860 pushed to feat/popups-buttons-design; PR #9 body updated (suite green, new commit row, kept the already-checked manual device/Hyprland item).
