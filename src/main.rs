@@ -333,6 +333,8 @@ struct AppEnvironment {
     update_preference: std::io::Result<std::path::PathBuf>,
     /// Follow the focused application in the compositor.
     observe_focus: bool,
+    /// Ask Hyprland to float the window each time it is mapped.
+    float_window: bool,
 }
 
 impl AppEnvironment {
@@ -342,6 +344,7 @@ impl AppEnvironment {
             start_monitor: Box::new(event_api::start_hid_monitor),
             update_preference: update_preference::path(),
             observe_focus: true,
+            float_window: true,
         }
     }
 }
@@ -369,6 +372,7 @@ fn build_ui_in(
         start_monitor,
         update_preference,
         observe_focus,
+        float_window,
     } = environment();
     let window = ApplicationWindow::builder()
         .application(app)
@@ -378,6 +382,13 @@ fn build_ui_in(
         .default_height(DEFAULT_HEIGHT)
         .build();
     configure_window_close(&window, app);
+    if float_window {
+        // Once per map: first show and every show again from the tray; never
+        // on resize. The worker does the IPC, so the callback returns at once.
+        window.connect_map(|_| {
+            sdeck_plus::window_float::spawn(APP_ID, APP_NAME, (DEFAULT_WIDTH, DEFAULT_HEIGHT));
+        });
+    }
     let unavailable = |error: &dyn std::fmt::Display| {
         window.set_child(Some(&Label::new(Some(
             "Configuration unavailable. Writes are disabled.",

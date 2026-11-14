@@ -139,6 +139,7 @@ pub(super) fn start_pair_with(tag: &str, prepare: impl FnOnce(&SessionRoots)) ->
         }),
         update_preference: Ok(updates),
         observe_focus: false,
+        float_window: false,
     };
     let registry = build_ui_in(&app, true, || environment).expect("the window opens");
     let events = slot.borrow_mut().take().unwrap();

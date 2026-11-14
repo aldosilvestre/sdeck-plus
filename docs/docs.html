@@ -787,6 +787,10 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                  save and logged once as <code>kept=</code>; it is dropped only when you set that control again or delete its layer. A <code>touchscreen.json</code> holding such an action is left untouched and saving stays disabled until it is readable.</p>
             </article>
             <article class="card">
+              <h4>Window under Hyprland</h4>
+              <p>Under Hyprland the window opens floating at 1120&times;700, centered (smaller if the monitor's usable area is), so the content never needs a horizontal scroll. The app asks Hyprland for this through its command socket each time the window is shown, including again from the tray, and only while the window is tiled; later manual resizing is left alone. Outside Hyprland nothing happens and no Hyprland configuration is edited. To choose otherwise, add a window rule for class <code>dev.streamdeck.EventMonitor</code> (for example <code>windowrulev2 = float, class:^(dev\.streamdeck\.EventMonitor)$</code> with your own <code>size</code> and <code>center</code>, or <code>tile</code> to keep it tiled): a window that is already floating is not touched.</p>
+            </article>
+            <article class="card">
               <h4>Backup and restore</h4>
               <p><strong>Menu &gt; Export configuration...</strong> writes one owner-only <code>.sdeck-plus.json</code> with profiles, folders, pages, bindings, image references, button text,
                  live information, page returns and OBS settings, including credentials. Format version 5 records the device model and stores configuration as readable UTF-8 text inside JSON, without base64. It never includes image, sound or other file contents.</p>

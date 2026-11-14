@@ -281,6 +281,15 @@ Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
 section identity. Popover padding and header/body separation are 16px; text measure is at most 38
 characters.
 
+Under Hyprland the window floats: each time the main window maps (first show and
+every show from the tray) an owned worker thread finds the app's own client in
+`j/clients` (pid, class `dev.streamdeck.EventMonitor`, title) and, only if it is
+tiled, sends one `[[BATCH]]` over the command socket: `setfloating`,
+`resizewindowpixel exact 1120 700` (clamped to the monitor's usable area) and
+`movewindowpixel` to center it, all with `address:0x...`. Floating windows,
+manual resizes, other compositors and any IPC error are left untouched. Code:
+`src/window_float.rs`.
+
 Profile tabs have a 12px gap before page navigation; navigation and the
 device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
