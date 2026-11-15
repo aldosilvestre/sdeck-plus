@@ -290,7 +290,7 @@ binding; using it runs it once and closes the toast, and any later message drops
 
 ## 4. Spacing and layout
 
-Default window: 1120x884. Shell margins: 16px (set on the root widget, so window-content screenshots crop them). Tokens: 4px label stacks, 8px
+Default window: 1120x884. Shell margins: 16px (`SHELL_MARGIN`, on the shell box; the documentation screenshots of the whole window paint them too). Tokens: 4px label stacks, 8px
 compact controls, 12px action/tool gaps, 16px editor padding and
 16px primary region gaps. The compact page-navigation card retains 12px padding.
 Control radius: 8px; editor/toolbar radius: 14px. Device canvas padding remains
