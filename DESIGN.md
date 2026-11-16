@@ -478,8 +478,8 @@ header, not the rail: on the title row, completely at the right edge and vertica
 "SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
 ("Menu: ..."), accessible name and description and headerless popover, and the same button serves
 every model shown. The header has two rows: the title row (title, update indicator when shown,
-Menu) and, under it, the connection detail with the Current selector at its right when two models
-are connected, so the selector never overlaps the Menu. Only the content column (page bar, preview,
+Current selector when two models are connected, Menu) and, under it, the connection detail.
+The Current selector sits immediately to the left of Menu on the same line. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
 inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
 management: separate flat previous/next/parent icon buttons lead the
@@ -811,7 +811,7 @@ two columns fit.
   are named in the order Stream Deck +, Stream Deck + XL whichever plugged in
   first, and with several devices the tooltip of the line starts with the whole
   sentence (the line itself may be ellipsized), then the USB ids.
-  The **Current selector** sits beside the connection badge: the caption
+  The **Current selector** sits on the title row, immediately left of Menu: the caption
   "Current" (muted, 12px) and a drop-down named "Current device" with the
   tooltip "Choose the Stream Deck to configure". It is visible only while two
   or more distinct models are connected; with none, one, or several units of

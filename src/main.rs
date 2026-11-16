@@ -756,9 +756,9 @@ struct Header {
 }
 
 fn build_header(window: &ApplicationWindow) -> Header {
-    // Two rows. The title row: the title, the update indicator and the Menu button, which sits
-    // at the far right and is centred on the title line. The detail row under it: the
-    // connection detail and, with two devices connected, the 'Current' selector at its right.
+    // Two rows. The title row: the title, the update indicator, the 'Current' selector (with two
+    // devices connected) and the Menu button, which sits at the far right and is centred on the
+    // title line, the selector immediately to its left. The detail row under it: the connection detail.
     let header = GtkBox::new(Orientation::Vertical, 4);
     let title_row = GtkBox::new(Orientation::Horizontal, 12);
     let detail_row = GtkBox::new(Orientation::Horizontal, 12);
@@ -794,6 +794,8 @@ fn build_header(window: &ApplicationWindow) -> Header {
     configuration_menu.add_updates(&update_panel.body);
     update_panel.indicator.set_valign(gtk::Align::Center);
     title_row.append(&update_panel.indicator);
+    selector.root.set_valign(gtk::Align::Center);
+    title_row.append(&selector.root);
     // The one Menu button stays here for every model shown: far right, level with the title.
     let help_menu = configuration_menu.button().clone();
     help_menu.set_halign(gtk::Align::End);
@@ -813,7 +815,6 @@ fn build_header(window: &ApplicationWindow) -> Header {
     connection_detail.set_max_width_chars(70);
     connection_detail.set_hexpand(true);
     detail_row.append(&connection_detail);
-    detail_row.append(&selector.root);
     Header {
         root: header,
         status,

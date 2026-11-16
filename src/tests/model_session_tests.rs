@@ -264,6 +264,10 @@ pub(super) fn header_label(window: &ApplicationWindow, class: &str) -> Label {
         if super::preview_model_tests::is_hidden_session(widget) {
             return None;
         }
+        // The 'Current' selector's muted caption is not a header status line.
+        if widget.has_css_class("model-selector") {
+            return None;
+        }
         if let Some(label) = widget.downcast_ref::<Label>() {
             // The connection badge is shown in the profile rail; the header keeps a hidden source.
             if label.has_css_class(class) && label.is_visible() {
