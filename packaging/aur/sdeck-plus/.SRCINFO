@@ -1,6 +1,6 @@
 pkgbase = sdeck-plus
 	pkgdesc = GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux
-	pkgver = 0.2.0
+	pkgver = 1.0.0
 	pkgrel = 1
 	url = https://aldosilvestre.github.io/sdeck-plus/
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = sdeck-plus
 	optdepends = xdg-utils: opening files and websites (xdg-open)
 	optdepends = curl: weather information
 	options = !lto
-	source = sdeck-plus-0.2.0.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v0.2.0.tar.gz
+	source = sdeck-plus-1.0.0.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.0.0.tar.gz
 	sha256sums = de3592b873965e2f505a60745a76b8a4df0547f51bf343f11a36a1057ae519e6
 
 pkgname = sdeck-plus

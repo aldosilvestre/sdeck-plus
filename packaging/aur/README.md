@@ -24,7 +24,7 @@ makepkg builds C code with `-flto`. The bundled hidapi object then cannot be lin
 ## Before publishing (human steps)
 
 1. Both PKGBUILDs already name the maintainer on their first line; change it there if the maintainer changes.
-2. Release `v0.2.0` is published and the stable PKGBUILD already carries its checksum. For a later
+2. Release `v1.0.0` is published and the stable PKGBUILD already carries its checksum. For a later
    release, set `pkgver`, reset `pkgrel=1` and run `updpkgsums` in `sdeck-plus/`.
 3. Check the pinned source: `makepkg --verifysource` in `sdeck-plus/` (downloads the tag's tarball and
    compares it with `sha256sums`).
