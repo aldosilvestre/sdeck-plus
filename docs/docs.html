@@ -226,7 +226,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p>The installer also accepts <code>--tag=vX.Y.Z</code>. This skips the latest-release lookup and downloads exactly that tag's archive with the same safety limits and cleanup.
                  Invalid, missing or repeated tags exit with a usage error before downloading or creating files. The option is rejected in checkout mode.</p>
               <p><strong>Prebuilt binary.</strong> From v1.0.0 each GitHub release also carries <code>sdeck-plus-X.Y.Z-x86_64-linux.tar.gz</code> and its <code>.sha256</code>:
-                 the <code>sdeck-plus</code> binary, the launcher, the icon, the udev rule, the license and the README. It is built on Arch Linux and links GTK 4 dynamically, so it runs only on x86_64 with glibc 2.39 or newer and GTK 4.8 or newer.
+                 the <code>sdeck-plus</code> binary, the launcher, the icon, the udev rule, the license, the README and an <code>INSTALL.md</code> with the install steps. On Arch Linux the release also carries <code>sdeck-plus-X.Y.Z-1-x86_64.pkg.tar.zst</code>, which installs with <code>sudo pacman -U</code>; the tarball is not a pacman package. It is built on Arch Linux and links GTK 4 dynamically, so it runs only on x86_64 with glibc 2.39 or newer and GTK 4.8 or newer.
                  Check it with <code>sha256sum -c</code>, then copy the binary to a directory on your <code>PATH</code>; on other systems use the installer, which builds from source.</p>
               <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">

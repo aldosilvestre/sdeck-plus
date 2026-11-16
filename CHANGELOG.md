@@ -10,8 +10,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Prebuilt Linux binary on the release:** the GitHub release now carries
-  `sdeck-plus-1.0.0-x86_64-linux.tar.gz` (the binary, launcher, icon, udev rule, license and README)
-  and its `.sha256`. It is built on Arch Linux and links GTK 4 dynamically, so it needs x86_64,
+  `sdeck-plus-1.0.0-x86_64-linux.tar.gz` (the binary, launcher, icon, udev rule, license, README and
+  an `INSTALL.md` with the manual install steps) and its `.sha256`, plus an Arch Linux package
+  `sdeck-plus-1.0.0-1-x86_64.pkg.tar.zst` for `sudo pacman -U` (the tarball is not a pacman package). It is built on Arch Linux and links GTK 4 dynamically, so it needs x86_64,
   glibc 2.39 or newer and GTK 4.8 or newer; elsewhere build from source with the installer.
 
 ### Changed
