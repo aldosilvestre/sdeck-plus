@@ -192,6 +192,32 @@ fn the_selector_appears_with_two_models_and_says_current() {
 }
 
 #[test]
+fn the_device_selector_is_immediately_left_of_menu_on_the_title_row() {
+    run_gtk_test(|| {
+        let Some(pair) = start_pair("selector-title-row") else {
+            return;
+        };
+        let (_plus, _xl) = pair.plug_both();
+        let selector = &pair.registry.selector().root;
+        let menu = pair.registry.menu().button();
+        assert!(selector.is_visible());
+        assert_eq!(selector.parent(), menu.parent(), "same header row");
+        assert_eq!(selector.next_sibling().as_ref(), Some(menu.upcast_ref()));
+        let row = selector.parent().unwrap().downcast::<GtkBox>().unwrap();
+        assert_eq!(row.orientation(), Orientation::Horizontal);
+        assert_eq!(
+            row.first_child()
+                .unwrap()
+                .downcast::<Label>()
+                .unwrap()
+                .text(),
+            "SDECK-PLUS"
+        );
+        assert_eq!(selector.valign(), gtk::Align::Center);
+    });
+}
+
+#[test]
 fn the_two_model_status_follows_the_supported_order_not_the_plug_order() {
     run_gtk_test(|| {
         let Some(pair) = start_pair("selector-order") else {
