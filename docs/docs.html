@@ -459,6 +459,7 @@ sudo udevadm control --reload-rules</code></pre>
                  named events, the categorized <strong>More actions</strong>, <strong>Play sound</strong> and <strong>None</strong>.
                  Untouched buttons, including those on new profiles and pages, start with <strong>None</strong>: it keeps a saved binding that does nothing,
                  can still show artwork, text or live information, and never schedules a page return.</p>
+              <p>A key can also run several actions in order with <strong>More actions &gt; System &gt; Multi action</strong> (see <a href="#multi-action">Multi action</a>).</p>
               <p><strong>Test action</strong> runs the selected action immediately and can affect the desktop, the device or OBS; test only what you intend to perform.</p>
             </article>
             <article class="card">
@@ -551,6 +552,32 @@ sudo udevadm control --reload-rules</code></pre>
               <p>A non-None binding can return to a page after a delay: tick <strong>Return to a page afterwards</strong>, pick the destination
                  (listed with its profile and folder, such as <code>Base</code> or <code>Studio / Page 2</code>) and a delay of 1–86400 seconds.
                  Pressing the key again restarts the wait and <strong>Device &gt; Cancel timer</strong> cancels it. Saving never starts the wait.</p>
+            </article>
+            <article class="card wide" id="multi-action">
+              <h4>Multi action</h4>
+              <p><strong>Multi action</strong>, in the System category of the Actions catalog, runs several actions from one key in a fixed order, for example a shortcut, a short wait, a command and then a page change.
+                 It is available only for a key press and for a key's <strong>Hold 2 seconds</strong> action; the catalog dims it while a dial or the touch strip is selected, and dropping it on a dial is refused with a message such as "Multi action cannot be assigned to a dial press."</p>
+              <p><strong>Editing the steps.</strong> Choosing it replaces the action's fields with a numbered <strong>Steps</strong> list, empty for a new multi action. <strong>Add step</strong> opens a dialog with the editor's Action menu and fields (None is not offered);
+                 <strong>Add wait</strong> asks how long to pause, in milliseconds or seconds, from 10 ms to 60 s (seconds may have decimals). Each row shows the step's number, icon and summary, such as <em>Wait 500 ms</em>, and four buttons:
+                 <strong>Move up</strong>, <strong>Move down</strong>, <strong>Edit step</strong> (pencil) and <strong>Remove step</strong> (trash). A multi action holds 1 to 16 steps, at least one of them an action; Add step and Add wait are disabled at 16.
+                 Changing the steps is an unsaved edit like any other field: <strong>Save binding</strong> stores the whole list, and editing or saving never runs a step. <strong>Test action</strong> runs the whole sequence.</p>
+              <p><strong>What a step can be.</strong> Any action except None, another Multi action, <strong>Start timer</strong>, <strong>Cancel timer</strong> and the touchscreen page actions. <strong>Go to profile or page</strong> and the Organization page and folder actions may only be the last step.
+                 Save refuses a list that breaks a rule with a sentence in the toast, such as "Step 1: Go to profile or page can only be the last step" or "A multi action needs at least one action step", and stores nothing.
+                 The whole multi action, every step included, must fit the 4096-byte storage limit of one action; a longer one is refused with "Multi action is too large to store".</p>
+              <p><strong>Strict order.</strong> Each step starts only after the previous one finished: a command when its process exits, an application as soon as it is launched (not when it closes), a plugin action when the plugin answers,
+                 shortcuts, desktop and OBS actions once they are done, and device actions (brightness, sleep) once they are queued for the Stream Deck. A wait pauses only its own sequence: the window and the other keys keep working.
+                 The status line reads "Multi action started." and, after the last step, "Multi action finished."; a <strong>Return to a page afterwards</strong> set on the binding starts only then.
+                 Pressing the key again while its sequence runs is ignored: it neither restarts it nor starts a second one.</p>
+              <p><strong>When a step fails.</strong> The first step that fails stops the sequence; the remaining steps do not run, and an error toast names the step, for example "Multi action stopped at step 2: process exited with exit status: 1".
+                 A command fails when it exits with an error. An error reported after its step already counted as finished, such as an application that fails after it was launched, does not stop the sequence.</p>
+              <p><strong>Limits.</strong> A step has no time limit of its own: a command that never ends keeps the key's sequence waiting, and further presses ignored, until it ends. As with a single <strong>Command</strong> action, it also holds the action worker,
+                 so the commands, shortcuts, desktop and OBS actions of other keys wait behind it. Importing a configuration ends running sequences without running their remaining steps.
+                 Sounds, files and applications named by steps are handled like those of a single action (app-owned links, export references, the missing-file cross); deleting a profile, page or folder removes only the steps that go to it, or the whole binding when no action step is left,
+                 and renaming a folder updates its steps. Older versions of sdeck-plus keep a saved multi action unchanged but neither show nor run it.</p>
+              <figure>
+                <a href="screenshots/multi-action-editor.png"><img width="406" height="456" src="screenshots/multi-action-editor.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 configured with a four-step multi action: Shortcut CTRL+S, Wait 500 ms, Run notify-send Saved and Go to Studio, each row with Move up, Move down, Edit step and Remove step buttons, then Add step and Add wait."></a>
+                <figcaption>A four-step multi action: a shortcut, a 500 ms wait, a command and, as the last step, Go to profile or page.</figcaption>
+              </figure>
             </article>
             <article class="card wide">
               <h4>Physical keyboard actions and <code>/dev/uinput</code></h4>
@@ -971,6 +998,7 @@ cargo test --offline --test plugin_sdk</code></pre>
                 <table class="ref-table key-table">
                   <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
                   <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
+                  <tr><th><code>src/features.rs</code>, <code>src/feature_runtime/multi.rs</code>, <code>src/multi_editor.rs</code>, <code>src/action_form.rs</code></th><td>Multi action: model and validation, the step sequencer, the step list and dialog, and the action form shared by the editor and the step dialog</td></tr>
                   <tr><th><code>src/device_model.rs</code>, <code>src/device_roots.rs</code></th><td>Model registry (<a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>) and each model's data folder</td></tr>
                   <tr><th><code>src/preview_layout.rs</code></th><td>Preview geometry for any registry model</td></tr>
                   <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>
