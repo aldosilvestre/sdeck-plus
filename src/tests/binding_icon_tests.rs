@@ -313,6 +313,75 @@ fn bright_pixels(picture: &Picture, rows: std::ops::Range<usize>) -> usize {
         .count()
 }
 
+/// A key picture's texture as straight RGB triples, row by row.
+fn texture_rgb(picture: &Picture) -> Vec<[u8; 3]> {
+    let texture = picture
+        .paintable()
+        .and_downcast::<gtk::gdk::Texture>()
+        .expect("a texture");
+    let (width, height) = (texture.width() as usize, texture.height() as usize);
+    let mut pixels = vec![0; width * height * 4];
+    texture.download(&mut pixels, width * 4);
+    // Memory format is native-endian B8G8R8A8; key pictures are opaque.
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|[blue, green, red, _]| [*red, *green, *blue])
+        .collect()
+}
+
+/// A decoded key image as straight RGB triples, row by row.
+fn pixbuf_rgb(image: &gtk::gdk_pixbuf::Pixbuf) -> Vec<[u8; 3]> {
+    let bytes = image.read_pixel_bytes();
+    let (stride, channels) = (image.rowstride() as usize, image.n_channels() as usize);
+    (0..image.height() as usize)
+        .flat_map(|y| (0..image.width() as usize).map(move |x| y * stride + x * channels))
+        .map(|at| [bytes[at], bytes[at + 1], bytes[at + 2]])
+        .collect()
+}
+
+/// How many pixels show the timer icon's amber accent and how many show the
+/// fixture artwork's blue (`#4488ff`).
+fn timer_and_artwork_pixels(pixels: &[[u8; 3]]) -> (usize, usize) {
+    let amber = pixels
+        .iter()
+        .filter(|[red, green, blue]| *red > 200 && *green > 150 && *blue < 170)
+        .count();
+    let artwork = pixels
+        .iter()
+        .filter(|[red, green, blue]| *red < 110 && (100..=175).contains(green) && *blue > 215)
+        .count();
+    (amber, artwork)
+}
+
+fn timer_key_with_artwork(tag: &str) -> Option<IconFixture> {
+    icon_fixture(tag, |store, images, source| {
+        store
+            .bind(
+                "Base",
+                Trigger::KeyPress(1),
+                Action::Feature(sdeck_plus::features::FeatureAction::Timer { seconds: 300 }),
+            )
+            .unwrap();
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(1), source)
+            .unwrap();
+    })
+}
+
+fn latest_snapshot(fixture: &IconFixture) -> Vec<ArtworkCommand> {
+    fixture
+        .hardware
+        .try_iter()
+        .filter_map(|command| match command {
+            ArtworkCommand::Replace(commands) => Some(commands),
+            _ => None,
+        })
+        .last()
+        .expect("a device snapshot")
+}
+
 fn tree_snapshot(root: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
     let mut files = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -406,6 +475,148 @@ fn assert_preview_icons() {
         }
     )));
     eprintln!("GTK preview binding icon assertions executed");
+}
+
+#[test]
+fn an_idle_timer_key_shows_its_icon_over_its_own_artwork_in_the_preview() {
+    run_gtk_test(assert_timer_icon_over_artwork_preview);
+}
+
+fn assert_timer_icon_over_artwork_preview() {
+    let Some(fixture) = timer_key_with_artwork("timer-icon-art-preview") else {
+        return;
+    };
+    let pixels = texture_rgb(&picture(&fixture, ArtworkTarget::Keypad(1)));
+    let (amber, artwork) = timer_and_artwork_pixels(&pixels);
+    assert!(
+        amber > 100,
+        "the timer icon shows over the artwork: {amber} amber pixels"
+    );
+    assert!(
+        artwork > 5000,
+        "the artwork stays visible around the icon: {artwork} artwork pixels"
+    );
+}
+
+#[test]
+fn the_text_editor_preview_of_an_idle_timer_key_keeps_its_icon_over_its_artwork() {
+    run_gtk_test(assert_timer_icon_over_artwork_text_preview);
+}
+
+fn assert_timer_icon_over_artwork_text_preview() {
+    use sdeck_plus::button_text::{ButtonText, VerticalAlignment};
+    let Some(fixture) = timer_key_with_artwork("timer-icon-art-text") else {
+        return;
+    };
+    // Top text leaves the band below it for the icon.
+    let text = ButtonText {
+        text: "Tea".into(),
+        vertical_alignment: VerticalAlignment::Top,
+        ..Default::default()
+    };
+    let (image, shown) = fixture
+        .artwork
+        .key_text_image("Base", ArtworkTarget::Keypad(1), &text)
+        .unwrap();
+    let (amber, artwork) = timer_and_artwork_pixels(&pixbuf_rgb(&image));
+    assert!(shown, "the key shows a picture");
+    assert!(
+        amber > 60,
+        "the timer icon shows over the artwork: {amber} amber pixels"
+    );
+    assert!(
+        artwork > 5000,
+        "the artwork stays visible around the icon: {artwork} artwork pixels"
+    );
+}
+
+#[test]
+fn an_idle_timer_key_shows_the_preview_picture_on_the_device() {
+    run_gtk_test(assert_timer_icon_over_artwork_device);
+}
+
+fn assert_timer_icon_over_artwork_device() {
+    use sdeck_plus::device_model::PLUS;
+    use sdeck_plus::event_api::test_support::{start_hub, SimBus, SimDevice};
+    let Some(fixture) = timer_key_with_artwork("timer-icon-art-device") else {
+        return;
+    };
+    let snapshot = latest_snapshot(&fixture);
+    // The real HID worker pipeline over a simulated Stream Deck +.
+    let bus = SimBus::default();
+    let device = SimDevice::new(&PLUS);
+    bus.plug("/dev/hidraw-timer-icon", &device);
+    let (events, _monitor) = mpsc::channel();
+    let hub = start_hub(&bus, events);
+    hub.send_artwork(&PLUS, ArtworkCommand::Replace(snapshot))
+        .unwrap();
+    device.wait_until(|device| device.last_key_jpeg(0).is_some());
+    let jpeg = device.last_key_jpeg(0).unwrap();
+    drop(hub);
+    let shown =
+        pixbuf_rgb(&gtk::gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap());
+    let (amber, artwork) = timer_and_artwork_pixels(&shown);
+    assert!(
+        amber > 100,
+        "the device shows the timer icon over the artwork: {amber} amber pixels"
+    );
+    assert!(
+        artwork > 5000,
+        "the device keeps the artwork around the icon: {artwork} artwork pixels"
+    );
+    let preview = texture_rgb(&picture(&fixture, ArtworkTarget::Keypad(1)));
+    assert_eq!(preview.len(), shown.len(), "preview and device key sizes");
+    let difference = preview
+        .iter()
+        .zip(&shown)
+        .flat_map(|(left, right)| (0..3).map(move |channel| left[channel].abs_diff(right[channel])))
+        .map(u64::from)
+        .sum::<u64>()
+        / (preview.len() as u64 * 3);
+    assert!(
+        difference <= 6,
+        "preview and device show the same picture: mean channel difference {difference}"
+    );
+}
+
+#[test]
+fn custom_artwork_still_hides_the_cancel_timer_icon() {
+    run_gtk_test(assert_cancel_timer_artwork_unchanged);
+}
+
+fn assert_cancel_timer_artwork_unchanged() {
+    let Some(fixture) = icon_fixture("cancel-timer-art", |store, images, source| {
+        store
+            .bind(
+                "Base",
+                Trigger::KeyPress(3),
+                Action::Feature(sdeck_plus::features::FeatureAction::CancelTimer),
+            )
+            .unwrap();
+        images
+            .assign_in_layer("Base", ArtworkTarget::Keypad(3), source)
+            .unwrap();
+    }) else {
+        return;
+    };
+    let snapshot = latest_snapshot(&fixture);
+    let shown: Vec<&ArtworkCommand> = snapshot
+        .iter()
+        .filter(|command| match command {
+            ArtworkCommand::Assign { target, .. } | ArtworkCommand::ComposeIcon { target, .. } => {
+                *target == ArtworkTarget::Keypad(3)
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        matches!(shown[..], [ArtworkCommand::Assign { .. }]),
+        "the device shows only the key's artwork: {shown:?}"
+    );
+    assert!(
+        picture(&fixture, ArtworkTarget::Keypad(3)).file().is_some(),
+        "the preview shows the user artwork as before"
+    );
 }
 
 #[test]
@@ -590,11 +801,13 @@ fn assert_device_icons() {
             icon,
             caption,
             text,
+            path,
             strip_path,
             previous,
             next,
         } = command
         {
+            assert_eq!(path, None, "{target:?}: only timer keys draw over artwork");
             let jpeg = sdeck_plus::image_output::prepare_icon_jpeg(
                 target,
                 icon,

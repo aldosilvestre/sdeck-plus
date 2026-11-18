@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Undo a removal from its toast only:** Remove binding no longer leaves an **Undo remove**
+  button or a "Control configuration removed." status line; the toast alone says it, and its
+  **Undo** stays usable for 10 seconds (plain success toasts still close after 5). Selecting another
+  control keeps it; a later Remove or message replaces it, and an expired Undo can no longer run.
+- **Messages in a top-center toast only:** binding and plugin-install results and errors no longer
+  show as a line below the Add plugin and Update plugins buttons, so the tabs sit right under
+  them; they appear in the toast, which now opens at the top center of the window.
+
 ## [1.0.0] - 2026-11-15
 
 ### Added

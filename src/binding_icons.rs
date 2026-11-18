@@ -821,6 +821,22 @@ pub fn compose_key_image_for(
     caption: &str,
     text: Option<&ButtonText>,
 ) -> Result<Option<Pixbuf>, String> {
+    compose_key_image_over_for(model, icon, caption, text, None)
+}
+
+/// [`compose_key_image_for`] drawn over `background`, the key's own artwork
+/// (cropped to cover the key like any artwork), instead of black. The cross
+/// of a missing file always keeps its black key.
+///
+/// # Errors
+/// Returns image decoding, text validation, cairo or allocation failures.
+pub fn compose_key_image_over_for(
+    model: &DeviceModel,
+    icon: BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+    background: Option<&std::path::Path>,
+) -> Result<Option<Pixbuf>, String> {
     // A missing file is an error the key must show: the cross sits behind the
     // user's text wherever it is placed.
     if icon == BindingIcon::MissingFile {
@@ -842,7 +858,7 @@ pub fn compose_key_image_for(
     };
     let default = ButtonText::default();
     let base =
-        crate::image_output::compose_button_image_for(model, None, text.unwrap_or(&default))?;
+        crate::image_output::compose_button_image_for(model, background, text.unwrap_or(&default))?;
     let side = base.width();
     let scale = f64::from(side) / f64::from(KEY);
     let mut surface = rgb_surface(&base)?;

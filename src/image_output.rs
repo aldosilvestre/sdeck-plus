@@ -671,15 +671,43 @@ pub fn prepare_icon_jpeg_for(
     strip_background: Option<&Path>,
     (previous, next): (bool, bool),
 ) -> Result<Vec<u8>, String> {
+    prepare_icon_jpeg_over_for(
+        model,
+        target,
+        icon,
+        caption,
+        text,
+        (None, strip_background),
+        (previous, next),
+    )
+}
+
+/// [`prepare_icon_jpeg_for`] with a key drawn over `background`, its own
+/// artwork, instead of black (see
+/// [`crate::binding_icons::compose_key_image_over_for`]). Touch sections take
+/// no artwork of their own here: they draw over their strip crop as before.
+pub fn prepare_icon_jpeg_over_for(
+    model: &DeviceModel,
+    target: ArtworkTarget,
+    icon: crate::binding_icons::BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+    (background, strip_background): (Option<&Path>, Option<&Path>),
+    (previous, next): (bool, bool),
+) -> Result<Vec<u8>, String> {
     let (width, height) = (model.zone_px().0 as i32, model.zone_px().1 as i32);
     match target {
         ArtworkTarget::Keypad(_) => {
-            match crate::binding_icons::compose_key_image_for(model, icon, caption, text)? {
+            match crate::binding_icons::compose_key_image_over_for(
+                model, icon, caption, text, background,
+            )? {
                 Some(image) => encode_jpeg(model, Part::Key, &image),
                 // No free band beside the user's text: the plain text picture.
-                None => {
-                    prepare_button_jpeg_for(model, None, text.unwrap_or(&ButtonText::default()))
-                }
+                None => prepare_button_jpeg_for(
+                    model,
+                    background,
+                    text.unwrap_or(&ButtonText::default()),
+                ),
             }
         }
         ArtworkTarget::EncoderZone(zone) => {
@@ -965,6 +993,34 @@ mod tests {
         let data = image.read_pixel_bytes();
         let offset = y * stride + x * channels;
         [data[offset], data[offset + 1], data[offset + 2]]
+    }
+
+    #[test]
+    fn a_key_icon_drawn_over_artwork_keeps_the_artwork_in_the_device_jpeg() {
+        let source = fixture(120, 120);
+        let jpeg = prepare_icon_jpeg_over_for(
+            &PLUS,
+            ArtworkTarget::Keypad(1),
+            crate::binding_icons::BindingIcon::Timer,
+            "Timer",
+            None,
+            (Some(&source), None),
+            (false, false),
+        );
+        fs::remove_file(&source).unwrap();
+        let image = Pixbuf::from_read(std::io::Cursor::new(jpeg.unwrap())).unwrap();
+        let [red, _, blue] = pixel(&image, 3, 116);
+        assert!(red > 200 && blue < 60, "left artwork half: {red}, {blue}");
+        let [red, _, blue] = pixel(&image, 116, 116);
+        assert!(red < 60 && blue > 200, "right artwork half: {red}, {blue}");
+        let amber = (14..64)
+            .flat_map(|y| (0..120).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let [red, green, blue] = pixel(&image, x, y);
+                red > 200 && green > 150 && blue < 170
+            })
+            .count();
+        assert!(amber > 100, "the icon is drawn over it: {amber}");
     }
 
     #[test]

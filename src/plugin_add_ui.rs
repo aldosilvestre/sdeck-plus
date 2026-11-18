@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-/// Receives a message for the status line and whether it reports a failure.
+/// Receives a message for the window's toast and whether it reports a failure.
 pub(crate) type Notify = Rc<dyn Fn(&str, bool)>;
 
 const POLL: Duration = Duration::from_millis(40);
@@ -1020,7 +1020,7 @@ impl AddPluginDialog {
     }
 
     /// A report that arrives after the dialog closed: an install outcome still reaches the
-    /// status line; any staged copy is released.
+    /// toast; any staged copy is released.
     fn report_detached(&self, report: Report) {
         match report {
             Report::Installed { candidate, outcome } => {

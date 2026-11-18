@@ -273,18 +273,14 @@ fn the_editor_heading_row_stays_visible_while_the_form_scrolls() {
             return;
         };
         let widgets = &fixture.widgets;
-        let save = widgets
-            .binding_ui
-            .status
-            .ancestor(gtk::Window::static_type())
-            .and_then(|_| {
-                let mut buttons: Vec<Button> = Vec::new();
-                collect(widgets.root.upcast_ref(), &mut buttons);
-                buttons.into_iter().find(|button| {
-                    button
-                        .tooltip_text()
-                        .is_some_and(|tip| tip.starts_with("Save binding"))
-                })
+        let mut buttons: Vec<Button> = Vec::new();
+        collect(widgets.root.upcast_ref(), &mut buttons);
+        let save = buttons
+            .into_iter()
+            .find(|button| {
+                button
+                    .tooltip_text()
+                    .is_some_and(|tip| tip.starts_with("Save binding"))
             })
             .expect("Save binding");
         let row = save.parent().unwrap();
