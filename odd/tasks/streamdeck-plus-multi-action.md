@@ -22,7 +22,8 @@ Branch: feat/multi-action (from main 3d4e1aa; that commit holds the user's earli
 - T2 (S6) nested traversal: asset links, config bundle, ownership, layer cleanup, validation (design in L6). done; worker mwlh6pwp-3-fdoe; commit: see L10.
 - T3 (S2,S3,S4,A4) runtime sequencer with per-step completion (design in L7). done; worker mwlh7def-4-c2re; commit: see L11.
 - T4 (S3,S5,L8) editor: Multi action step list in More actions + own icon (design in L8, L13). done; worker mwlhv988-7-02wz; commit: see L15.
-- T5 (S7) docs, changelog, screenshots. pending.
+- T5 (S7) docs, changelog, screenshots. in progress.
+- T6 (S1-S6) hardening regression tests from verifier probes (L9, L12, L14) + dim the catalog Multi row for dials (L15 advisory). in progress.
 
 ## Log
 L1: "podemos analizar la posibilidad de agregar una nueva accion, esta sera un multi accion, es decir un accion que puede hacer multiples acciones."
