@@ -497,7 +497,7 @@ impl LayerStore {
             action,
             Action::Feature(crate::features::FeatureAction::Multi { .. })
         );
-        let action = action.try_map_leaves(normalize_keyboard_action)?;
+        let action = normalize_step_keys(action)?;
         if multi {
             // Normalized key names must still fit the stored multi action.
             validate_action(&action)?;
@@ -956,6 +956,28 @@ fn validate_action(a: &Action) -> io::Result<()> {
         _ => Ok(()),
     }
 }
+/// [`normalize_keyboard_action`] on the action, or on every action step of a multi action,
+/// whose errors then name the step's 1-based position ("Step 2: ...").
+fn normalize_step_keys(action: Action) -> io::Result<Action> {
+    use crate::features::{FeatureAction, MultiStep};
+    match action {
+        Action::Feature(FeatureAction::Multi { steps }) => {
+            let steps = steps
+                .into_iter()
+                .enumerate()
+                .map(|(index, step)| match step {
+                    MultiStep::Action(action) => normalize_keyboard_action(action)
+                        .map(MultiStep::Action)
+                        .map_err(|error| invalid(&format!("Step {}: {error}", index + 1))),
+                    wait @ MultiStep::Wait { .. } => Ok(wait),
+                })
+                .collect::<io::Result<_>>()?;
+            Ok(Action::Feature(FeatureAction::Multi { steps }))
+        }
+        other => normalize_keyboard_action(other),
+    }
+}
+
 /// [`validate_action`] for one step of a multi action.
 pub(crate) fn validate_step_action(a: &Action) -> io::Result<()> {
     validate_action(a)
@@ -1753,6 +1775,42 @@ mod tests {
         fs::create_dir_all(&p).unwrap();
         p
     }
+    #[test]
+    fn a_multi_action_key_name_error_names_its_step() {
+        use crate::features::{FeatureAction, MultiStep};
+        let root = temp();
+        let mut store = LayerStore::open_at(&root).unwrap();
+        let unknown = || Action::KeyPress {
+            key: "XF86Unsupported".into(),
+        };
+        let multi = Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                MultiStep::Action(Action::Command("x".into())),
+                MultiStep::Wait { milliseconds: 100 },
+                MultiStep::Action(unknown()),
+            ],
+        });
+        let error = store
+            .bind(DEFAULT_LAYER, Trigger::KeyPress(1), multi)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("Step 3: Unsupported physical key"),
+            "{error}"
+        );
+        assert_eq!(store.binding(DEFAULT_LAYER, &Trigger::KeyPress(1)), None);
+        // A plain binding keeps its message as it was.
+        let error = store
+            .bind(DEFAULT_LAYER, Trigger::KeyPress(1), unknown())
+            .unwrap_err();
+        assert!(
+            error.to_string().starts_with("Unsupported physical key"),
+            "{error}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn swap_keys_exchanges_actions_only_in_memory_and_selected_layer() {
         let root = temp();

@@ -279,8 +279,8 @@ Source artboard: `design/overlays/03-compact-command.html`.
 The connection badge heads the profile rail as a small pill (11px text). The header keeps the title
 and the detail line.
 
-Dialogs (confirmations, the artwork error, page name, New/Edit profile, setup help, Updates and
-the shortcut reference) share one frame: surface fill, 1px edge, radius 12, 14px padding, 10px
+Dialogs (confirmations, the artwork error, page name, New/Edit profile, the multi action step
+dialog, setup help, Updates and the shortcut reference) share one frame: surface fill, 1px edge, radius 12, 14px padding, 10px
 gap, a 16px/700 title, a muted body, and ONE right-aligned action row of natural-width buttons
 with an 8px gap: the dismissal first with its `Esc` key hint (monospace 11px chip: Cancel, Keep
 editing or Close), then the primary (suggested) or danger action. No action is full width and none
@@ -564,7 +564,8 @@ two columns fit.
   application, shortcut, named event, play sound, media transport, volume,
   mute, audio output, scroll, text, open file, website, close application,
   shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
-  stream, microphone mute and visibility, plus `more` for More actions, `none`
+  stream, microphone mute, visibility and `multi` for a multi action (three bars
+  beside a timeline of three dots, in the system amber family), plus `more` for More actions, `none`
   (menus only), `missing-file` (a red cross in a soft circle, its own red
   family, drawn instead of an icon on a key or touch section whose sound or
   file target no longer exists, captioned "Missing file"; unlike other icons it
@@ -652,6 +653,38 @@ two columns fit.
   `brightness` and OBS `obs-scene`; Action rows, the guidance line (20px) and
   the closed Action button show the chosen action's icon, while the Action
   menu row keeps `more`.
+- **Multi action:** a "Multi action" row in the catalog's System category, for a key press or
+  key hold only: the More actions picker of a dial or the touch strip does not offer it, and
+  dropping it on a dial selects nothing and says why. Choosing it replaces the action's fields
+  (below its icon and description) with the step list: a "Steps" heading with the bundled
+  `sdeck-multi-symbolic` icon, then a boxed, numbered list like the page folders (`desk_field`
+  fill, 1px `desk_edge`, radius 10, 40px rows with a hairline between them). Each row shows its
+  number (muted 13px/700), the step's binding icon (16px; a wait uses `timer`), its summary
+  ("Run echo one", "Wait 2 s", "Wait 750 ms"; ellipsized, full text as tooltip) and four
+  frameless 34px icon buttons: Move up, Move down, Edit step (pencil) and Remove step (red
+  trash), each with a two-line tooltip (its name, then what it does to step n) and an accessible
+  name naming the step ("Move step 2 up"). Up is disabled on the first row, Down on the last.
+  An empty list reads "No steps yet. Add the actions to run, in order." Below it come the
+  captioned **Add step** and **Add wait** (`list-add-symbolic`), disabled with an explaining
+  tooltip at 16 steps. Adding, editing, moving or removing a step is an unsaved edit like any
+  field; nothing runs until Test action or the key. Save refuses an invalid list with the
+  model's sentence ("A multi action needs 1 to 16 steps", "A multi action needs at least one
+  action step", "Step 1: Go to profile or page can only be the last step", "Could not save
+  binding: Step 2: Unsupported physical key ...") in the toast and stores nothing.
+  The **step dialog** (`ui::form_dialog`: modal, transient for the window, 400px, not
+  resizable; the body scrolls past 460px) has a title ("Add step", "Edit step", "Add wait",
+  "Edit wait"), a muted subtitle naming the step's number and one right-aligned action row:
+  Cancel with its `Esc` hint, then the suggested **Add** (new step) or **Save** (edited step).
+  A step shows the step form: an Action menu with the editor's action types except None (plus
+  Plugin action once a plugin exists), then the editor's own fields, guidance and shortcut
+  preview (`src/action_form.rs`), whose More actions offer every category except Multi action,
+  Start timer, Cancel timer and the touchscreen page actions. Go to profile or page and the
+  page actions are accepted here; Save of the binding allows them only as the last step. A wait
+  shows a number field and an ms/s unit drop-down (10 ms to 60 s; seconds may have decimals; a
+  whole number of seconds reopens in seconds). An invalid step keeps the dialog open with an
+  error banner naming it ("Step 3: a wait must last 10 ms to 60 seconds", "Step 3: enter how
+  long to wait, as a number"); Escape or Cancel changes nothing, and the dialog never runs the
+  step.
 - **Artwork targets:** every row of the Artwork target menu starts with a
   26x22 mini map of the shown model's keys over its strip sections (eight keys
   over four sections on the +, the 9x4 grid over six sections on the + XL, at the
@@ -890,8 +923,9 @@ two columns fit.
   and keep the previous behavior if saving fails. Explicit Quit always exits.
 
 Shared native helpers live in `src/ui.rs`: `button(icon, caption)`,
-`decorate_button(button, icon, caption)`, `popover(title, body)`, and
-`section_heading(icon, text)`. Colors and sizes trace to this contract.
+`decorate_button(button, icon, caption)`, `popover(title, body)`,
+`form_dialog(parent, title, subtitle, body, dismiss, primary)` (the dialog frame the profile
+and step dialogs share), and `section_heading(icon, text)`. Colors and sizes trace to this contract.
 
 ## 6. Motion and interaction
 

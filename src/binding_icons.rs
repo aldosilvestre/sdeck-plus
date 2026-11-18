@@ -93,6 +93,8 @@ pub enum BindingIcon {
     MediaIdle,
     /// The "More actions" family as a whole.
     More,
+    /// Several actions and waits run in order from one key.
+    Multi,
     /// A sound or file the binding names is gone: a red cross.
     MissingFile,
     /// Fallback for anything without a dedicated picture.
@@ -100,7 +102,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -157,6 +159,7 @@ impl BindingIcon {
         Self::Play,
         Self::MediaIdle,
         Self::More,
+        Self::Multi,
         Self::MissingFile,
         Self::Generic,
     ];
@@ -277,7 +280,8 @@ impl BindingIcon {
                     VolumeDirection::Down => Self::VolumeDown,
                 },
             },
-            FeatureAction::Plugin(_) | FeatureAction::Multi { .. } => Self::More,
+            FeatureAction::Plugin(_) => Self::More,
+            FeatureAction::Multi { .. } => Self::Multi,
             FeatureAction::Timer { .. } => Self::Timer,
             FeatureAction::CancelTimer => Self::CancelTimer,
         }
@@ -366,6 +370,7 @@ impl BindingIcon {
             Self::Play => "play",
             Self::MediaIdle => "media-idle",
             Self::More => "more",
+            Self::Multi => "multi",
             Self::MissingFile => "missing-file",
             Self::Generic => "generic",
         }
@@ -472,7 +477,8 @@ impl BindingIcon {
             | Self::Timer
             | Self::CancelTimer
             | Self::Brightness
-            | Self::Sleep => C::System,
+            | Self::Sleep
+            | Self::Multi => C::System,
             Self::Website => C::Web,
             Self::Cloud
             | Self::PartlyCloudy
@@ -1783,6 +1789,19 @@ fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Erro
             pen.soft(cairo)?;
             for x in [-6.0, 0.0, 6.0] {
                 circle(cairo, x, 0.0, 2.2);
+            }
+            pen.solid(cairo)
+        }
+        BindingIcon::Multi => {
+            // Steps in order: three bars beside a timeline of three dots.
+            for y in [-7.0, 0.0, 7.0] {
+                rounded(cairo, -2.0, y - 2.5, 13.0, 5.0, 2.5);
+            }
+            pen.duo(cairo)?;
+            polyline(cairo, &[(-7.5, -7.0), (-7.5, 7.0)]);
+            pen.line(cairo)?;
+            for y in [-7.0, 0.0, 7.0] {
+                circle(cairo, -7.5, y, 2.6);
             }
             pen.solid(cairo)
         }

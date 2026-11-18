@@ -63,6 +63,12 @@ pub(crate) struct EditorWidgets {
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
     audio_input: audio_output::OutputPicker,
+    /// Multi action runs only from a key press or a key hold.
+    key_trigger: Cell<bool>,
+    /// The step form of a multi action offers no Multi, timers or touchscreen pages.
+    step_form: bool,
+    /// The steps of a multi action; the step form itself has none.
+    steps: Option<crate::multi_editor::StepList>,
 }
 
 impl Deref for FeatureEditor {
@@ -97,6 +103,16 @@ fn field(label: &str, widget: &impl IsA<gtk::Widget>) -> (GtkBox, Label) {
 
 impl FeatureEditor {
     pub(crate) fn new() -> Self {
+        Self::build(false)
+    }
+
+    /// The More actions form of a multi action step: without Multi action, Start timer,
+    /// Cancel timer and the touchscreen page actions.
+    pub(crate) fn for_steps() -> Self {
+        Self::build(true)
+    }
+
+    fn build(step_form: bool) -> Self {
         let root = GtkBox::new(Orientation::Vertical, 12);
         let category =
             gtk::DropDown::from_strings(&["System", "Multimedia", "Organization", "Device", "OBS"]);
@@ -116,6 +132,11 @@ impl FeatureEditor {
         guidance.append(&action_icon);
         guidance.append(&description);
         root.append(&guidance);
+        let steps = (!step_form).then(crate::multi_editor::StepList::new);
+        if let Some(steps) = &steps {
+            steps.root().set_visible(false);
+            root.append(steps.root());
+        }
         let first = Entry::builder().hexpand(true).width_chars(12).build();
         let second = Entry::builder().hexpand(true).width_chars(12).build();
         let text = TextView::new();
@@ -195,6 +216,9 @@ impl FeatureEditor {
             picker: RefCell::new(None),
             audio_output,
             audio_input,
+            key_trigger: Cell::new(true),
+            step_form,
+            steps,
         }));
         let weak = Rc::downgrade(&editor.0);
         crate::binding_icon::icon_dropdown(&editor.action, move |position| {
@@ -231,8 +255,15 @@ impl FeatureEditor {
     }
 
     fn choices(&self) -> impl Iterator<Item = Choice> {
-        let category = self.category.selected();
-        let touchscreen = self.touchscreen.get();
+        self.choices_in(self.category.selected())
+    }
+
+    /// The actions offered in `category` for the edited control.
+    fn choices_in(&self, category: u32) -> impl Iterator<Item = Choice> {
+        let touchscreen = self.touchscreen.get() && !self.step_form;
+        let step_form = self.step_form;
+        // The step form has no step list, so it never offers a nested multi action.
+        let multi = self.key_trigger.get() && self.steps.is_some();
         Choice::ALL.into_iter().filter(move |choice| {
             choice.category() == category
                 && (touchscreen
@@ -240,7 +271,34 @@ impl FeatureEditor {
                         choice,
                         Choice::NextTouchscreenPage | Choice::PreviousTouchscreenPage
                     ))
+                && (multi || *choice != Choice::Multi)
+                && !(step_form && matches!(choice, Choice::Timer | Choice::CancelTimer))
         })
+    }
+
+    /// The step list of a multi action; the step form has none.
+    #[allow(dead_code)] // tests and captures reach the list through it
+    pub(crate) fn steps(&self) -> Option<&crate::multi_editor::StepList> {
+        self.steps.as_ref()
+    }
+
+    /// Lets the step dialog offer the store's pages and the installed plugins.
+    pub(crate) fn set_step_context(
+        &self,
+        layers: &Rc<RefCell<sdeck_plus::layers::LayerStore>>,
+        plugins: &crate::plugin_ui::PluginHub,
+    ) {
+        if let Some(steps) = &self.steps {
+            steps.set_context(layers, plugins);
+        }
+    }
+
+    /// Whether the edited event is a key press or a key hold, the only ones a multi action runs
+    /// from.
+    pub(crate) fn set_key_trigger(&self, key: bool) {
+        if self.key_trigger.replace(key) != key {
+            self.refresh_choices();
+        }
     }
 
     /// The icon of the selected feature action, if one is selected.
@@ -355,7 +413,14 @@ impl FeatureEditor {
         ] {
             row.set_visible(false);
         }
+        if let Some(steps) = &self.steps {
+            steps.root().set_visible(false);
+        }
         let Ok(choice) = self.choice() else { return };
+        if let Some(steps) = &self.steps {
+            // The step list replaces the fields.
+            steps.root().set_visible(choice == Choice::Multi);
+        }
         self.audio_output
             .root()
             .set_visible(choice == Choice::SetAudioOutput);
@@ -490,6 +555,9 @@ impl FeatureEditor {
         }
         let text_notify = notify.clone();
         self.text.buffer().connect_changed(move |_| text_notify());
+        if let Some(steps) = &self.steps {
+            steps.connect_changed(notify.clone());
+        }
         self.flag.connect_toggled(move |_| notify());
     }
 
@@ -507,6 +575,10 @@ impl FeatureEditor {
             self.number.text().to_string(),
             self.direction.selected().to_string(),
             self.flag.is_active().to_string(),
+            self.steps
+                .as_ref()
+                .map(crate::multi_editor::StepList::snapshot)
+                .unwrap_or_default(),
         ]
         .join("\u{1f}")
     }
@@ -515,10 +587,22 @@ impl FeatureEditor {
     pub(crate) fn select_catalog_choice(&self, choice: Choice) {
         self.reset();
         self.category.set_selected(choice.category());
-        if let Some(index) = self.choices().position(|value| value == choice) {
+        let offered = self.choices().position(|value| value == choice);
+        if let Some(index) = offered {
             self.action.set_selected(index as u32);
+        } else {
+            // Not for this control (a multi action dropped on a dial): nothing is selected,
+            // so nothing can be saved, and the guidance says why.
+            self.action.set_selected(gtk::INVALID_LIST_POSITION);
         }
         self.update_fields();
+        if offered.is_none() {
+            self.description.set_text(&format!(
+                "{} runs only from a key press or a key hold. Choose another action for this control.",
+                choice.label()
+            ));
+            crate::binding_icon::set_binding_icon(&self.action_icon, choice.binding_icon());
+        }
     }
 
     pub(crate) fn reset(&self) {
@@ -532,6 +616,9 @@ impl FeatureEditor {
         self.volume_mode.set(None);
         self.direction.set_selected(0);
         self.flag.set_active(false);
+        if let Some(steps) = &self.steps {
+            steps.clear();
+        }
         self.category.set_selected(0);
         self.action.set_selected(0);
         self.update_fields();
@@ -670,6 +757,13 @@ impl FeatureEditor {
                 direction: VolumeDirection::Down,
                 db: numeric.parse().map_err(|error| invalid_number(&error))?,
             }),
+            Choice::Multi => FeatureAction::Multi {
+                steps: self
+                    .steps
+                    .as_ref()
+                    .ok_or("A multi action cannot contain another multi action.")?
+                    .steps(),
+            },
             Choice::Visibility => FeatureAction::Obs(ObsAction::SourceVisibility {
                 scene: first,
                 source: second,
@@ -837,9 +931,16 @@ impl FeatureEditor {
                 Choice::Timer
             }
             FeatureAction::CancelTimer => Choice::CancelTimer,
+            FeatureAction::Multi { steps } => match &self.steps {
+                Some(list) => {
+                    list.populate(steps);
+                    Choice::Multi
+                }
+                // The step form never shows a nested multi action.
+                None => return,
+            },
             // The plugin editor owns plugin actions; there is no built-in choice to show.
-            // Plugins have their own editor; multi actions get theirs in T4.
-            FeatureAction::Plugin(_) | FeatureAction::Multi { .. } => return,
+            FeatureAction::Plugin(_) => return,
         };
         self.category.set_selected(choice.category());
         if let Some(index) = self.choices().position(|value| value == choice) {

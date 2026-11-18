@@ -2,6 +2,13 @@ use super::*;
 use gtk::glib::translate::IntoGlib;
 
 impl FeatureEditor {
+    /// Every action label the editor offers for its control, category by category.
+    pub(crate) fn offered(&self) -> Vec<&'static str> {
+        (0..5)
+            .flat_map(|category| self.choices_in(category).map(Choice::label))
+            .collect()
+    }
+
     pub(crate) fn wait_for_audio_outputs(&self) {
         self.audio_output.wait_until_loaded();
     }
