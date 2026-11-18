@@ -77,31 +77,13 @@ impl Backend for Native {
                 "Text requires a Wayland compositor (WAYLAND_DISPLAY) and wl-copy",
             ));
         }
-        let child = Command::new("wl-copy")
-            .args(["--type", "text/plain;charset=utf-8"])
-            .stdin(Stdio::piped())
-            .spawn()?;
-        // Keep a cleanup guard for the pipe-write and wait error paths.
-        let mut child = ClipboardChild {
-            child,
-            completed: false,
-        };
-        let mut input =
-            child.child.stdin.take().ok_or_else(|| {
-                io::Error::other("wl-copy did not provide its requested stdin pipe")
-            })?;
-        input.write_all(value.as_bytes())?;
-        drop(input);
-        let status = child.child.wait()?;
-        child.completed = true;
-        // wl-copy daemonizes by default after establishing clipboard ownership;
-        // its foreground parent exits before paste is sent.
-        if status.success() {
-            Ok(())
-        } else {
-            // The child is already reaped. This is not a fallback clipboard path.
-            Err(io::Error::other(format!("wl-copy exited with {status}")))
+        wl_copy(value, false)?;
+        // Terminals paste the primary selection on Shift+Insert. A compositor
+        // without primary selection still pastes the clipboard in other apps.
+        if let Err(error) = wl_copy(value, true) {
+            eprintln!("Text could not set the primary selection: {error}");
         }
+        Ok(())
     }
 
     fn play_audio(&mut self, path: &Path) -> io::Result<()> {
@@ -200,6 +182,40 @@ fn open_exit_error(result: io::Result<std::process::ExitStatus>) -> Option<Strin
         Ok(status) if status.success() => None,
         Ok(status) => Some(format!("xdg-open exited with {status}")),
         Err(error) => Some(format!("Cannot reap xdg-open: {error}")),
+    }
+}
+
+/// Hand `value` to `wl-copy`, for the primary selection when `primary`.
+fn wl_copy(value: &str, primary: bool) -> io::Result<()> {
+    let mut command = Command::new("wl-copy");
+    if primary {
+        command.arg("--primary");
+    }
+    let child = command
+        .args(["--type", "text/plain;charset=utf-8"])
+        .stdin(Stdio::piped())
+        .spawn()?;
+    // Keep a cleanup guard for the pipe-write and wait error paths.
+    let mut child = ClipboardChild {
+        child,
+        completed: false,
+    };
+    let mut input = child
+        .child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("wl-copy did not provide its requested stdin pipe"))?;
+    input.write_all(value.as_bytes())?;
+    drop(input);
+    let status = child.child.wait()?;
+    child.completed = true;
+    // wl-copy daemonizes by default after establishing selection ownership;
+    // its foreground parent exits before paste is sent.
+    if status.success() {
+        Ok(())
+    } else {
+        // The child is already reaped. This is not a fallback clipboard path.
+        Err(io::Error::other(format!("wl-copy exited with {status}")))
     }
 }
 

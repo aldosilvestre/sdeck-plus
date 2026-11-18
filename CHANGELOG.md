@@ -36,6 +36,12 @@ All notable changes to this project are documented here. The format follows
   show as a line below the Add plugin and Update plugins buttons, so the tabs sit right under
   them; they appear in the toast, which now opens at the top center of the window.
 
+### Fixed
+
+- **Type text works in terminals:** the text is now pasted with Shift+Insert after being copied to
+  both the clipboard and the primary selection. Ctrl+V was a literal-insert prefix in terminals, so
+  only "^M" appeared when Press Enter was on.
+
 ## [1.0.0] - 2026-11-15
 
 ### Added

@@ -505,8 +505,8 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Text, files, websites and processes</h4>
-              <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
-                 and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+              <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Shift+Insert chord, not synthetic Unicode keycodes: it replaces the clipboard
+                 and the primary selection, so it pastes in terminals (which read the primary selection) as well as in GTK, Qt and browser windows (which read the clipboard). Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
                  <strong>Close application</strong> targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
             </article>
             <article class="card">

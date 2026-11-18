@@ -1,8 +1,10 @@
 //! System actions for the serial action worker. No adapter invokes a shell.
 //!
-//! Text replaces the Wayland clipboard, then sends physical Ctrl+V; the focused
-//! application must support that paste binding. Keyboard/uinput and compositor
-//! failures are returned, not treated as successful text entry.
+//! Text replaces the Wayland clipboard and primary selection, then sends
+//! physical Shift+Insert, which pastes in terminals (from the primary
+//! selection) as well as in GTK, Qt and browser windows (from the clipboard);
+//! Ctrl+V would be a literal-insert prefix in a terminal. Keyboard/uinput and
+//! compositor failures are returned, not treated as successful text entry.
 
 #[path = "desktop_actions/audio.rs"]
 mod audio;
@@ -396,7 +398,7 @@ impl DesktopRuntime {
             }
             DesktopAction::Text { value, enter } => {
                 self.backend.clipboard(value)?;
-                keyboard.send(&chord("CTRL+V")?)?;
+                keyboard.send(&chord("SHIFT+INSERT")?)?;
                 if *enter {
                     keyboard.send(&chord("ENTER")?)?;
                 }
@@ -714,7 +716,7 @@ mod tests {
             state.lock().unwrap().calls,
             [
                 Call::Clipboard(value.into()),
-                Call::Key(chord("CTRL+V").unwrap()),
+                Call::Key(chord("SHIFT+INSERT").unwrap()),
                 Call::Key(chord("ENTER").unwrap()),
             ]
         );
@@ -739,7 +741,7 @@ mod tests {
             state.lock().unwrap().calls,
             [
                 Call::Clipboard("x".into()),
-                Call::Key(chord("CTRL+V").unwrap()),
+                Call::Key(chord("SHIFT+INSERT").unwrap()),
             ]
         );
     }
