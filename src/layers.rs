@@ -840,7 +840,18 @@ fn validate_action(a: &Action) -> io::Result<()> {
         _ => Ok(()),
     }
 }
+/// [`validate_action`] for one step of a multi action.
+pub(crate) fn validate_step_action(a: &Action) -> io::Result<()> {
+    validate_action(a)
+}
 fn validate_binding_action(trigger: &Trigger, action: &Action) -> io::Result<()> {
+    if matches!(
+        action,
+        Action::Feature(crate::features::FeatureAction::Multi { .. })
+    ) && !matches!(trigger, Trigger::KeyPress(_) | Trigger::KeyHold(_))
+    {
+        return Err(invalid("multi actions require a key press or key hold"));
+    }
     if matches!(
         action,
         Action::Feature(crate::features::FeatureAction::Touchscreen(_))
@@ -979,7 +990,7 @@ fn decode_trigger(model: &DeviceModel, s: &str) -> Result<Trigger, String> {
     validate_trigger(model, &t).map_err(|e| e.to_string())?;
     Ok(t)
 }
-fn encode_action(a: &Action) -> io::Result<String> {
+pub(crate) fn encode_action(a: &Action) -> io::Result<String> {
     validate_action(a)?;
     Ok(match a {
         Action::None => "none".into(),
@@ -1008,7 +1019,7 @@ fn encode_action(a: &Action) -> io::Result<String> {
         Action::Feature(action) => format!("feature-v1:{}", hex(action.encode()?.as_bytes())),
     })
 }
-fn decode_action(s: &str) -> Result<Action, String> {
+pub(crate) fn decode_action(s: &str) -> Result<Action, String> {
     let action = if s == "none" {
         Action::None
     } else if let Some(value) = s.strip_prefix("feature-v1:") {

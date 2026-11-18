@@ -1358,6 +1358,10 @@ impl FeatureRuntime {
                     }
                 }
                 FeatureAction::Plugin(binding) => self.submit_plugin(&binding),
+                // Runs once the sequencer exists (feature task T3).
+                FeatureAction::Multi { .. } => {
+                    self.report("Multi actions cannot run yet.", true);
+                }
                 FeatureAction::Obs(action) => {
                     if !self.obs_valid.get() {
                         self.report("OBS settings are unavailable.", true);
