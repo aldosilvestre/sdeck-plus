@@ -328,6 +328,42 @@ fn removing_a_page_drops_only_the_multi_steps_that_go_to_it() {
     }
 }
 
+#[test]
+fn removing_a_page_keeps_the_page_return_of_a_multi_action_that_survives() {
+    use crate::layers::PageReturn;
+    let fixture = Fixture::new();
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    store.create("Other").unwrap();
+    store.create("Third").unwrap();
+    let back = Some(PageReturn {
+        layer: "Third".into(),
+        seconds: 5,
+    });
+    store
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            multi(vec![step(shortcut()), wait(100), go_to("Other")]),
+        )
+        .unwrap();
+    store
+        .set_return("Base", &Trigger::KeyPress(1), back.clone())
+        .unwrap();
+
+    assert!(store.remove("Other").unwrap());
+    store.persist().unwrap();
+
+    let loaded = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(loaded.conflicts().is_empty(), "{:?}", loaded.conflicts());
+    for layers in [&store, &loaded] {
+        assert_eq!(
+            layers.binding("Base", &Trigger::KeyPress(1)),
+            Some(multi(vec![step(shortcut()), wait(100)]))
+        );
+        assert_eq!(layers.page_return("Base", &Trigger::KeyPress(1)), back);
+    }
+}
+
 /// Previous behavior of the shared page cleanup on touchscreen pages: a plain
 /// Go to page there leaves with the page it goes to, and so does its return.
 #[test]

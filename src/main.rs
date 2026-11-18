@@ -5123,6 +5123,7 @@ mod tests {
     mod live_info_tests;
     mod model_selector_tests;
     mod model_session_tests;
+    mod multi_action_catalog_tests;
     mod multi_action_editor_tests;
     mod multi_action_runtime_tests;
     mod multimedia_action_tests;
