@@ -25,6 +25,7 @@ impl FeatureRuntime {
         if operation == Operation::Import {
             self.cancel_key_holds();
             self.cancel_timer();
+            self.cancel_multi_runs();
         }
         self.artwork.chooser_owners.borrow_mut().clear();
         if let Some(root) = self.configuration_root.borrow().upgrade() {

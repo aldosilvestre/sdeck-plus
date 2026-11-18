@@ -30,6 +30,7 @@ mod folders;
 mod key_hold;
 mod key_swap;
 mod model_session;
+mod multi;
 mod page_controls;
 #[cfg(test)]
 mod page_return_tests;
@@ -171,6 +172,21 @@ pub(crate) fn run_worker_at(
                 );
                 None
             }
+            LayerCommand::ExecuteStep {
+                binding_id,
+                action,
+                step,
+            } => {
+                crate::execute_layer_step_for(
+                    &mut executor,
+                    root.as_deref(),
+                    &binding_id,
+                    &action,
+                    step,
+                    &output,
+                );
+                None
+            }
             LayerCommand::ObsSave(config) => Some(
                 match active_root(root.as_deref()).and_then(|root| config.save_at(&root)) {
                     Ok(()) => MonitorEvent::AppEvent {
@@ -230,6 +246,7 @@ pub(crate) fn run_worker_at(
                 }
             }
             LayerCommand::Execute { .. }
+            | LayerCommand::ExecuteStep { .. }
             | LayerCommand::ObsProbe(_)
             | LayerCommand::ExportConfiguration { .. }
             | LayerCommand::ImportConfiguration { .. }
@@ -287,6 +304,8 @@ pub(crate) struct FeatureRuntime {
     timer: Rc<RefCell<Option<glib::SourceId>>>,
     timer_sound: Rc<RefCell<timer_sound::TimerSound>>,
     page_return: Rc<RefCell<Option<glib::SourceId>>>,
+    /// Multi action sequences in progress, one per binding.
+    multi: Rc<RefCell<multi::Runs<glib::SourceId>>>,
     info_watch: Rc<RefCell<Option<mpsc::Sender<std::collections::BTreeSet<InfoSource>>>>>,
     brightness: Rc<Cell<u8>>,
     sleeping: Rc<Cell<bool>>,
@@ -451,6 +470,7 @@ impl FeatureRuntime {
             timer: Rc::new(RefCell::new(None)),
             timer_sound: Rc::new(RefCell::new(timer_sound::TimerSound::default())),
             page_return: Rc::new(RefCell::new(None)),
+            multi: Rc::default(),
             info_watch: Rc::new(RefCell::new(None)),
             brightness: Rc::new(Cell::new(100)),
             sleeping: Rc::new(Cell::new(false)),
@@ -1077,13 +1097,8 @@ impl FeatureRuntime {
             Some(Ok(id)) => self
                 .status
                 .set_text(&format!("Plugin {name} queued ({id}).")),
-            Some(Err(Rejected::Busy)) => self.report(
-                &format!("Plugin {name} was not queued: too many plugin requests are waiting."),
-                true,
-            ),
-            Some(Err(Rejected::Stopped)) | None => {
-                self.report("Plugin actions are unavailable.", true)
-            }
+            Some(Err(rejected)) => self.report(&multi::plugin_rejection(&name, rejected), true),
+            None => self.report(&multi::plugin_rejection(&name, Rejected::Stopped), true),
         }
     }
 
@@ -1092,13 +1107,19 @@ impl FeatureRuntime {
     }
 
     fn submit(&self, command: LayerCommand) -> bool {
-        match self.output.send(command) {
+        match self.send_command(command) {
             Ok(()) => true,
             Err(error) => {
-                self.report(&format!("Action worker unavailable: {error}"), true);
+                self.report(&error, true);
                 false
             }
         }
+    }
+
+    fn send_command(&self, command: LayerCommand) -> Result<(), String> {
+        self.output
+            .send(command)
+            .map_err(|error| format!("Action worker unavailable: {error}"))
     }
 
     /// Tell the reader which sources any binding currently shows.
@@ -1249,12 +1270,24 @@ impl FeatureRuntime {
     }
 
     fn navigate(&self, action: &NavigationAction) {
+        match self.try_navigate(action) {
+            Ok(true) => self
+                .status
+                .set_text(&format!("Selected {}", self.indicator.text())),
+            Ok(false) => self
+                .status
+                .set_text("No matching page or folder in this view."),
+            Err(error) => self.report(&error, true),
+        }
+    }
+
+    /// Moves to the page or folder `action` names; `Ok(false)` when this view has none.
+    fn try_navigate(&self, action: &NavigationAction) -> Result<bool, String> {
         self.cancel_key_holds();
         let result = {
             let mut organization = self.organization.borrow_mut();
             let Some(organization) = organization.as_mut() else {
-                self.report("Organization navigation is unavailable.", true);
-                return;
+                return Err("Organization navigation is unavailable.".into());
             };
             organization.navigate(&mut self.layers.borrow_mut(), action)
         };
@@ -1262,14 +1295,42 @@ impl FeatureRuntime {
             Ok(true) => {
                 self.refresh_selection();
                 self.persist(self.layers.borrow().clone());
-                self.status
-                    .set_text(&format!("Selected {}", self.indicator.text()));
+                Ok(true)
             }
-            Ok(false) => self
-                .status
-                .set_text("No matching page or folder in this view."),
-            Err(error) => self.report(&format!("Navigation failed: {error}"), true),
+            Ok(false) => Ok(false),
+            Err(error) => Err(format!("Navigation failed: {error}")),
         }
+    }
+
+    fn switch_layer(&self, target: &str) -> Result<(), String> {
+        self.cancel_key_holds();
+        if self.layers.borrow_mut().apply_switch(target) {
+            self.refresh_selection();
+            self.persist(self.layers.borrow().clone());
+            Ok(())
+        } else {
+            Err("Destination profile or page is unavailable.".into())
+        }
+    }
+
+    fn emit(&self, name: String) -> Result<(), String> {
+        match self.events.borrow().as_ref() {
+            Some(output) => output
+                .send(MonitorEvent::AppEvent { name })
+                .map_err(|error| format!("Event delivery failed: {error}")),
+            None => Err("Application event output is unavailable.".into()),
+        }
+    }
+
+    fn send_device(&self, action: DeviceAction) -> Result<(), String> {
+        match self.device.borrow().as_ref() {
+            Some(output) => output
+                .send(action.clone())
+                .map_err(|error| format!("Device action unavailable: {error}"))?,
+            None => return Err("Device output is unavailable.".into()),
+        }
+        self.track_brightness(&action);
+        Ok(())
     }
 
     /// Time on the monotonic key clock.
@@ -1312,37 +1373,21 @@ impl FeatureRuntime {
         match action {
             Action::None => {}
             Action::SwitchLayer(target) => {
-                self.cancel_key_holds();
-                if self.layers.borrow_mut().apply_switch(&target) {
-                    self.refresh_selection();
-                    self.persist(self.layers.borrow().clone());
-                } else {
-                    self.report("Destination profile or page is unavailable.", true);
+                if let Err(error) = self.switch_layer(&target) {
+                    self.report(&error, true);
                 }
             }
             Action::Emit(name) => {
-                if let Some(output) = self.events.borrow().as_ref() {
-                    if let Err(error) = output.send(MonitorEvent::AppEvent { name }) {
-                        self.report(&format!("Event delivery failed: {error}"), true);
-                    }
-                } else {
-                    self.report("Application event output is unavailable.", true);
+                if let Err(error) = self.emit(name) {
+                    self.report(&error, true);
                 }
             }
             Action::Feature(feature) => match feature {
                 FeatureAction::Navigation(action) => self.navigate(&action),
                 FeatureAction::Touchscreen(action) => self.navigate_touchscreen(action),
-                FeatureAction::Device(action) => match self.device.borrow().as_ref() {
-                    Some(output) => match output.send(action.clone()) {
-                        Ok(()) => {
-                            self.track_brightness(&action);
-                            self.status.set_text("Device action queued.");
-                        }
-                        Err(error) => {
-                            self.report(&format!("Device action unavailable: {error}"), true)
-                        }
-                    },
-                    None => self.report("Device output is unavailable.", true),
+                FeatureAction::Device(action) => match self.send_device(action) {
+                    Ok(()) => self.status.set_text("Device action queued."),
+                    Err(error) => self.report(&error, true),
                 },
                 FeatureAction::Timer { seconds } => self.start_timer(seconds),
                 FeatureAction::CancelTimer => {
@@ -1358,10 +1403,7 @@ impl FeatureRuntime {
                     }
                 }
                 FeatureAction::Plugin(binding) => self.submit_plugin(&binding),
-                // Runs once the sequencer exists (feature task T3).
-                FeatureAction::Multi { .. } => {
-                    self.report("Multi actions cannot run yet.", true);
-                }
+                FeatureAction::Multi { steps } => self.start_multi(binding_id, steps, None),
                 FeatureAction::Obs(action) => {
                     if !self.obs_valid.get() {
                         self.report("OBS settings are unavailable.", true);
@@ -1401,13 +1443,22 @@ impl FeatureRuntime {
         {
             return;
         }
+        if let Action::Feature(FeatureAction::Multi { steps }) = action {
+            // A sequence starts its page return after its last step succeeded.
+            self.start_multi(binding_id, steps, page_return);
+            return;
+        }
         self.execute(binding_id, action);
         if let Some(value) = page_return {
-            if self.layers.borrow().layers().contains_key(&value.layer) {
-                self.arm_page_return(value);
-            } else {
-                self.report("The return page no longer exists.", true);
-            }
+            self.schedule_page_return(value);
+        }
+    }
+
+    fn schedule_page_return(&self, value: PageReturn) {
+        if self.layers.borrow().layers().contains_key(&value.layer) {
+            self.arm_page_return(value);
+        } else {
+            self.report("The return page no longer exists.", true);
         }
     }
 
