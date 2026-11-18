@@ -1,6 +1,6 @@
 use super::{tests::Fixture, LayerStore, NavigationAction, Organization};
 use crate::{
-    features::FeatureAction,
+    features::{FeatureAction, MultiStep},
     layers::{Action, Trigger},
 };
 
@@ -96,6 +96,46 @@ fn renamed_folder_links_follow_only_on_the_owning_page() {
     );
     f.layers.select(&second);
     assert_eq!(f.organization.folders(&f.layers), ["Tools"]);
+}
+
+#[test]
+fn renamed_folder_follows_the_open_folder_step_of_a_multi_action() {
+    // Given
+    let mut f = Fixture::new();
+    f.folder("Tools");
+    f.layers.select("Base");
+    let multi = |folder: &str| {
+        Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                MultiStep::Action(Action::Emit("go".into())),
+                MultiStep::Wait { milliseconds: 100 },
+                MultiStep::Action(open_folder(folder)),
+            ],
+        })
+    };
+    f.layers
+        .bind("Base", Trigger::KeyPress(1), multi("Tools"))
+        .unwrap();
+    f.layers
+        .bind("Base", Trigger::KeyPress(2), multi("Other"))
+        .unwrap();
+    // When
+    f.organization
+        .rename_folder(&mut f.layers, "Tools", "Studio")
+        .unwrap();
+    f.layers.persist().unwrap();
+    // Then: only the step that opens the renamed folder follows it.
+    let reopened = LayerStore::open_at(&f.root).unwrap();
+    for layers in [&f.layers, &reopened] {
+        assert_eq!(
+            layers.binding("Base", &Trigger::KeyPress(1)),
+            Some(multi("Studio"))
+        );
+        assert_eq!(
+            layers.binding("Base", &Trigger::KeyPress(2)),
+            Some(multi("Other"))
+        );
+    }
 }
 
 #[test]

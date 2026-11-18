@@ -25,11 +25,16 @@ const MAX_ATTEMPTS: u32 = 10_000;
 /// Only absolute paths of sounds and "open" targets are linked; anything else
 /// is returned unchanged, as is a path that already points into the links
 /// directory. A file that does not exist yet still gets a (dangling) link, so
-/// the control can show that it could not be configured.
+/// the control can show that it could not be configured. Each step of a multi
+/// action is linked the same way.
 ///
 /// # Errors
 /// Reports a failure to create the links directory or the link itself.
 pub fn link_action(root: &Path, action: Action) -> io::Result<Action> {
+    action.try_map_leaves(|leaf| link_leaf(root, leaf))
+}
+
+fn link_leaf(root: &Path, action: Action) -> io::Result<Action> {
     Ok(match action {
         Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
             let path = link_for(root, &path)?.unwrap_or(path);
@@ -46,8 +51,13 @@ pub fn link_action(root: &Path, action: Action) -> io::Result<Action> {
     })
 }
 
-/// The action as the user chose it, with an app link shown as its real target.
+/// The action as the user chose it, with an app link shown as its real target,
+/// in every step of a multi action too.
 pub fn unlink_action(root: &Path, action: &Action) -> Action {
+    action.clone().map_leaves(|leaf| unlink_leaf(root, &leaf))
+}
+
+fn unlink_leaf(root: &Path, action: &Action) -> Action {
     match action {
         Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
             Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
@@ -69,8 +79,13 @@ pub fn unlink_action(root: &Path, action: &Action) -> Action {
 /// original is gone counts as missing. A relative path is looked up from the
 /// working directory, as playback does, and "~" is not expanded, as playback
 /// does not. URLs given to "Open" are not files, and a path that cannot be
-/// inspected is not guessed about.
+/// inspected is not guessed about. A multi action is missing a target when
+/// any of its steps is.
 pub fn missing_target(action: &Action) -> bool {
+    action.leaves().into_iter().any(missing_leaf_target)
+}
+
+fn missing_leaf_target(action: &Action) -> bool {
     let path = match action {
         Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
             path.as_path()
