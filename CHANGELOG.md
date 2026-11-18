@@ -30,8 +30,9 @@ All notable changes to this project are documented here. The format follows
   case), so `user{Tab}password{Enter}` fills a login form and sends it. Under the Text field, the
   **Insert key** buttons (Enter, Tab, Esc, ↑, ↓, ←, →) put a key at the cursor and a muted
   line shows what is typed ("Types: user ⇥ password ⏎"), in the binding editor and in a multi
-  action step. `{{` types a literal `{`; any other brace is typed as written, so existing texts keep
-  working (only a `{{` now types a single brace). With `wtype` each part of the text is one run
+  action step. `{{` types a literal `{`; any other brace is typed as written. An existing text that
+  contains one of these tokens or `{{` now presses that key or types a single brace; write
+  `{{Enter}` to type the word `{Enter}` itself. With `wtype` each part of the text is one run
   with the keys after it, in order; without it each part is pasted and each key pressed as a
   physical key. **Press Enter after text** and the stored action are unchanged.
 

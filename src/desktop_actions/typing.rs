@@ -184,6 +184,20 @@ mod tests {
     }
 
     #[test]
+    fn brace_edges_and_runs_never_put_text_in_argv() {
+        assert_eq!(text_segments("{{Enter}}"), [text("{Enter}}")]);
+        assert_eq!(text_segments("{Enter}}"), [key(TextKey::Enter), text("}")]);
+        let long = format!("{{{}", "a".repeat(200_000));
+        assert_eq!(text_segments(&long), [text(&long)]);
+        let runs = super::wtype_runs(&text_segments("-k Tab{Tab}--help"), true);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].0, ["-", "-k", "Tab"]);
+        assert_eq!(runs[0].1, "-k Tab");
+        assert_eq!(runs[1].0, ["-", "-k", "Return"]);
+        assert_eq!(runs[1].1, "--help");
+    }
+
+    #[test]
     fn each_token_is_its_key() {
         for (value, expected) in [
             ("{Enter}", TextKey::Enter),
