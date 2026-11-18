@@ -506,7 +506,10 @@ sudo udevadm control --reload-rules</code></pre>
             <article class="card">
               <h4>Text, files, websites and processes</h4>
               <p>Text is typed through a Wayland virtual keyboard with <code>wtype</code>, so it reaches any focused window (terminals included) whatever its paste shortcuts are, and it leaves the clipboard alone; a line break in the text is typed as Return.
-                 Without <code>wtype</code> it falls back to the Wayland clipboard (<code>wl-copy</code>): it replaces the clipboard and the primary selection and sends a physical Shift+Insert chord, which only works where Shift+Insert pastes. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+                 <strong>Type text</strong> can also press keys at any point, like a small macro: <code>{Enter}</code>, <code>{Tab}</code>, <code>{Esc}</code>, <code>{Up}</code>, <code>{Down}</code>, <code>{Left}</code> and <code>{Right}</code> (in any letter case) press that key there, so <code>user{Tab}password{Enter}</code> fills a login form and sends it.
+                 The <strong>Insert key</strong> buttons under the text put a key at the cursor, and the line below them shows what is typed (<code>Types: user &#8677; password &#9166;</code>); <strong>Press Enter after text</strong> still adds a final Enter. <code>{{</code> types a literal <code>{</code>; any other brace, such as <code>{Foo}</code>, is typed as written.
+                 Each part of the text is one <code>wtype</code> run with the keys after it, one run after another; if <code>wtype</code> disappears partway, the action stops with an error and nothing is typed twice.
+                 Without <code>wtype</code> it falls back to the Wayland clipboard (<code>wl-copy</code>): for each part of the text it replaces the clipboard and the primary selection and sends a physical Shift+Insert chord, which only works where Shift+Insert pastes, and each key is pressed as a physical key. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
                  <strong>Close application</strong> targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
             </article>
             <article class="card">

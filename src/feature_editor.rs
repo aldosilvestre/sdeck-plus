@@ -3,7 +3,8 @@ use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation, Tex
 use sdeck_plus::{
     binding_icons::BindingIcon,
     desktop_actions::{
-        DesktopAction, MediaCommand, ScrollDirection, VolumeDirection, DEFAULT_VOLUME_STEP,
+        text_segments, DesktopAction, MediaCommand, ScrollDirection, TextKey, TextSegment,
+        VolumeDirection, DEFAULT_VOLUME_STEP,
     },
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
@@ -36,6 +37,10 @@ pub(crate) struct EditorWidgets {
     first: Entry,
     second: Entry,
     text: TextView,
+    /// Type text: one button per key, inserting its token at the cursor (`TextKey::ALL` order).
+    text_keys: Vec<gtk::Button>,
+    /// Type text: what the text types, keys as symbols ("Types: aldo ⇥ mi-clave ⏎").
+    text_preview: Label,
     number: Entry,
     /// Whether `number` currently holds a volume step rather than another numeric field.
     volume_mode: Cell<Option<u8>>,
@@ -84,6 +89,73 @@ impl Drop for EditorWidgets {
         if let Some(picker) = self.picker.get_mut().take() {
             picker.destroy();
         }
+    }
+}
+
+/// The caption of a key's Insert key button and the key's spoken name.
+fn text_key_caption(key: TextKey) -> (&'static str, &'static str) {
+    match key {
+        TextKey::Enter => ("Enter", "Enter"),
+        TextKey::Tab => ("Tab", "Tab"),
+        TextKey::Escape => ("Esc", "Escape"),
+        TextKey::Up => ("↑", "Up arrow"),
+        TextKey::Down => ("↓", "Down arrow"),
+        TextKey::Left => ("←", "Left arrow"),
+        TextKey::Right => ("→", "Right arrow"),
+    }
+}
+
+/// The "Insert key:" row under the Type text field: one compact linked button per key.
+fn text_key_row() -> (GtkBox, Vec<gtk::Button>) {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    let label = Label::new(Some("Insert key:"));
+    label.add_css_class("muted");
+    let keys = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .accessible_role(gtk::AccessibleRole::Group)
+        .build();
+    keys.add_css_class("linked");
+    keys.add_css_class("text-keys");
+    keys.update_relation(&[gtk::accessible::Relation::LabelledBy(&[label.upcast_ref()])]);
+    let buttons = TextKey::ALL
+        .into_iter()
+        .map(|key| {
+            let (caption, name) = text_key_caption(key);
+            let button = gtk::Button::with_label(caption);
+            button.set_tooltip_text(Some(&format!(
+                "Insert {}\nPresses {name} at this point of the text.",
+                key.token()
+            )));
+            button.update_property(&[gtk::accessible::Property::Label(&format!(
+                "Insert {name} key"
+            ))]);
+            keys.append(&button);
+            button
+        })
+        .collect();
+    row.append(&label);
+    row.append(&keys);
+    (row, buttons)
+}
+
+/// What a Type text value types, for the line under its field: text as written, keys as
+/// symbols, a final ⏎ for Press Enter after text ("Types: aldo ⇥ mi-clave ⏎"). Empty when it
+/// types nothing.
+pub(crate) fn typed_preview(value: &str, enter: bool) -> String {
+    let mut parts: Vec<String> = text_segments(value)
+        .into_iter()
+        .map(|segment| match segment {
+            TextSegment::Text(text) => text,
+            TextSegment::Key(key) => key.symbol().to_owned(),
+        })
+        .collect();
+    if enter {
+        parts.push(TextKey::Enter.symbol().to_owned());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("Types: {}", parts.join(" "))
     }
 }
 
@@ -163,8 +235,20 @@ impl FeatureEditor {
         text.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
             text_label.upcast_ref()
         ])]);
+        let (text_key_row, text_keys) = text_key_row();
+        text_row.append(&text_key_row);
+        let text_preview = Label::new(None);
+        text_preview.add_css_class("muted");
+        text_preview.set_xalign(0.0);
+        text_preview.set_wrap(true);
+        text_preview.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        text_preview.set_max_width_chars(38);
+        text_preview.set_lines(3);
+        text_preview.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        text_preview.set_visible(false);
+        text_row.append(&text_preview);
         text_row.append(&crate::ui::helper(
-            "Enter the text to type, including any line breaks.",
+            "Enter the text to type, including any line breaks. Keys in braces, such as {Tab} or {Enter}, are pressed there; {{ types {.",
         ));
         let (number_row, number_label) = field("", &number);
         let (direction_row, _) = field("Direction", &direction);
@@ -192,6 +276,8 @@ impl FeatureEditor {
             first,
             second,
             text,
+            text_keys,
+            text_preview,
             number,
             volume_mode: Cell::new(None),
             direction,
@@ -239,6 +325,26 @@ impl FeatureEditor {
                 Self(editor).update_fields();
             }
         });
+        for (key, button) in TextKey::ALL.into_iter().zip(&editor.text_keys) {
+            let weak = Rc::downgrade(&editor.0);
+            button.connect_clicked(move |_| {
+                if let Some(editor) = weak.upgrade() {
+                    Self(editor).insert_text_key(key);
+                }
+            });
+        }
+        let weak = Rc::downgrade(&editor.0);
+        editor.text.buffer().connect_changed(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                Self(editor).update_text_preview();
+            }
+        });
+        let weak = Rc::downgrade(&editor.0);
+        editor.flag.connect_toggled(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                Self(editor).update_text_preview();
+            }
+        });
         for (button, action) in [
             (&editor.browse_file, gtk::FileChooserAction::Open),
             (&editor.browse_folder, gtk::FileChooserAction::SelectFolder),
@@ -252,6 +358,30 @@ impl FeatureEditor {
         }
         editor.reset();
         editor
+    }
+
+    /// Insert `key`'s token at the Type text cursor, replacing any selection, as typing would.
+    fn insert_text_key(&self, key: TextKey) {
+        let buffer = self.text.buffer();
+        buffer.begin_user_action();
+        buffer.delete_selection(true, true);
+        buffer.insert_at_cursor(key.token());
+        buffer.end_user_action();
+        self.text.grab_focus();
+        self.text.scroll_mark_onscreen(&buffer.get_insert());
+    }
+
+    fn update_text_preview(&self) {
+        let buffer = self.text.buffer();
+        let preview = typed_preview(
+            &buffer.text(&buffer.start_iter(), &buffer.end_iter(), false),
+            self.flag.is_active(),
+        );
+        // Three lines at most: the full preview stays available as the tooltip.
+        self.text_preview
+            .set_tooltip_text((!preview.is_empty()).then_some(preview.as_str()));
+        self.text_preview.set_text(&preview);
+        self.text_preview.set_visible(!preview.is_empty());
     }
 
     fn choices(&self) -> impl Iterator<Item = Choice> {

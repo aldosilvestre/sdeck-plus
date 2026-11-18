@@ -70,7 +70,7 @@ impl Backend for Native {
         Ok(())
     }
 
-    fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()> {
+    fn type_text(&mut self, args: &[String], input: &str) -> io::Result<()> {
         if std::env::var_os("WAYLAND_DISPLAY").is_none_or(|value| value.is_empty()) {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -78,13 +78,9 @@ impl Backend for Native {
             ));
         }
         // "-" reads the text from stdin, so it is never parsed as an option;
-        // Enter follows in the same invocation and virtual keyboard.
-        let args: &[&str] = if enter {
-            &["-", "-k", "Return"]
-        } else {
-            &["-"]
-        };
-        feed("wtype", args, value.as_bytes())
+        // the "-k" keys around it follow in order in the same virtual keyboard.
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        feed("wtype", &args, input.as_bytes())
     }
 
     fn clipboard(&mut self, value: &str) -> io::Result<()> {

@@ -25,6 +25,15 @@ All notable changes to this project are documented here. The format follows
   the row unchanged without showing or running it. There is no per-step timeout: a command that
   never ends keeps that key's sequence busy (and, like a single Command, the action worker) until it
   ends. New `sdeck-multi-symbolic` icon on keys and in menus.
+- **Keys inside Type text:** a Type text action can press keys at any point of its text, like a
+  small macro: `{Enter}`, `{Tab}`, `{Esc}`, `{Up}`, `{Down}`, `{Left}` and `{Right}` (in any letter
+  case), so `user{Tab}password{Enter}` fills a login form and sends it. Under the Text field, the
+  **Insert key** buttons (Enter, Tab, Esc, ↑, ↓, ←, →) put a key at the cursor and a muted
+  line shows what is typed ("Types: user ⇥ password ⏎"), in the binding editor and in a multi
+  action step. `{{` types a literal `{`; any other brace is typed as written, so existing texts keep
+  working (only a `{{` now types a single brace). With `wtype` each part of the text is one run
+  with the keys after it, in order; without it each part is pasted and each key pressed as a
+  physical key. **Press Enter after text** and the stored action are unchanged.
 
 ### Changed
 

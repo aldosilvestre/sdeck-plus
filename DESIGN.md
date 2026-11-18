@@ -685,6 +685,18 @@ two columns fit.
   error banner naming it ("Step 3: a wait must last 10 ms to 60 seconds", "Step 3: enter how
   long to wait, as a number"); Escape or Cancel changes nothing, and the dialog never runs the
   step.
+- **Type text keys:** under the Text field (the binding editor and the step dialog share it), a
+  row with a muted "Insert key:" label and one linked group of compact buttons (`text-keys`: 20px
+  high, 4px/8px padding, at least 20px wide) Enter, Tab, Esc, ↑, ↓, ←, → inserts `{Enter}`,
+  `{Tab}`, `{Esc}`, `{Up}`, `{Down}`, `{Left}` or `{Right}` at the cursor (replacing a selection,
+  as typing would) and gives the focus back to the text. Each button has a two-line tooltip
+  ("Insert {Tab}", then "Presses Tab at this point of the text.") and an accessible name such as
+  "Insert Up arrow key"; the group is labelled by "Insert key:". Inserting is an unsaved edit like
+  typing and never runs the action. Below the row, a muted line previews what is typed: the text
+  as written and each key as ⏎ ⇥ ⎋ ↑ ↓ ← →, plus a final ⏎ when Press Enter after text is on
+  ("Types: aldo ⇥ mi-clave ⏎"); it wraps to at most three lines (ellipsized, the full preview as
+  its tooltip) and is hidden while nothing would be typed. The helper line under it explains the
+  braces ("{{ types {"). The row fits the 400px step dialog and never widens the editor.
 - **Artwork targets:** every row of the Artwork target menu starts with a
   26x22 mini map of the shown model's keys over its strip sections (eight keys
   over four sections on the +, the 9x4 grid over six sections on the + XL, at the

@@ -1,9 +1,11 @@
 //! System actions for the serial action worker. No adapter invokes a shell.
 //!
 //! Text is typed through a Wayland virtual keyboard (`wtype`), so it reaches
-//! any focused application whatever its paste shortcuts are. Without `wtype`
-//! it falls back to replacing the clipboard and primary selection and sending
-//! physical Shift+Insert, which only works where that chord pastes.
+//! any focused application whatever its paste shortcuts are; keys named in the
+//! text (`{Tab}`, `{Enter}`, see [`text_segments`]) are pressed in order. Without
+//! `wtype` it falls back to replacing the clipboard and primary selection and
+//! sending physical Shift+Insert for each text part (which only works where that
+//! chord pastes) and the physical key for each named key.
 //! Keyboard/uinput and compositor failures are returned, not treated as
 //! successful text entry.
 
@@ -18,8 +20,11 @@ mod mouse;
 mod mpris;
 #[path = "desktop_actions/native.rs"]
 mod native;
+#[path = "desktop_actions/typing.rs"]
+mod typing;
 
 pub use mpris::{read_players, PlaybackStatus, PlayerState};
+pub use typing::{text_segments, TextKey, TextSegment};
 
 use crate::{
     keyboard::{parse_chord, Chord},
@@ -323,9 +328,10 @@ trait Backend: Send {
     fn media(&mut self, command: MediaCommand) -> io::Result<()>;
     fn open(&mut self, target: &str) -> io::Result<()>;
     fn clipboard(&mut self, value: &str) -> io::Result<()>;
-    /// Type `value`, then Return when `enter`, through a Wayland virtual
-    /// keyboard. `NotFound` means no typer is installed.
-    fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()>;
+    /// Run the Wayland virtual-keyboard typer (`wtype`) once with `args` and
+    /// `input` on its stdin, and wait for it. `NotFound` means no typer is
+    /// installed.
+    fn type_text(&mut self, args: &[String], input: &str) -> io::Result<()>;
     fn play_audio(&mut self, path: &std::path::Path) -> io::Result<()>;
     fn stop_audio(&mut self) -> io::Result<()>;
     fn set_audio_output(&mut self, name: &str) -> io::Result<()>;
@@ -400,17 +406,7 @@ impl DesktopRuntime {
                 }
                 Ok(())
             }
-            DesktopAction::Text { value, enter } => match self.backend.type_text(value, *enter) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    self.backend.clipboard(value)?;
-                    keyboard.send(&chord("SHIFT+INSERT")?)?;
-                    if *enter {
-                        keyboard.send(&chord("ENTER")?)?;
-                    }
-                    Ok(())
-                }
-                typed => typed,
-            },
+            DesktopAction::Text { value, enter } => self.type_text(value, *enter, keyboard),
             DesktopAction::Open { target } => self.backend.open(target),
             DesktopAction::Website { url } => self.backend.open(url),
             DesktopAction::CloseApplication { executable } => self.backend.run(&[
@@ -463,6 +459,55 @@ impl DesktopRuntime {
         }
     }
 
+    /// Types `value` with its keys, then Return when `enter`, in order: one wtype
+    /// run per text part. Without wtype (missing on the first run, so nothing was
+    /// typed yet) it pastes each text part and presses each key instead.
+    fn type_text(
+        &mut self,
+        value: &str,
+        enter: bool,
+        keyboard: &mut impl KeyboardSender,
+    ) -> io::Result<()> {
+        let mut segments = text_segments(value);
+        if segments.is_empty() {
+            // An empty text still runs the typer once, as it always did.
+            segments.push(TextSegment::Text(String::new()));
+        }
+        for (run, (args, input)) in typing::wtype_runs(&segments, enter).into_iter().enumerate() {
+            match self.backend.type_text(&args, &input) {
+                Err(error) if run == 0 && error.kind() == io::ErrorKind::NotFound => {
+                    return self.paste_text(&segments, enter, keyboard);
+                }
+                // Earlier runs were typed: a later failure is returned, never retyped.
+                result => result?,
+            }
+        }
+        Ok(())
+    }
+
+    /// The fallback without wtype: the clipboard and Shift+Insert for each text
+    /// part, the physical key for each named key, then Enter when `enter`.
+    fn paste_text(
+        &mut self,
+        segments: &[TextSegment],
+        enter: bool,
+        keyboard: &mut impl KeyboardSender,
+    ) -> io::Result<()> {
+        for segment in segments {
+            match segment {
+                TextSegment::Text(text) => {
+                    self.backend.clipboard(text)?;
+                    keyboard.send(&chord("SHIFT+INSERT")?)?;
+                }
+                TextSegment::Key(key) => keyboard.send(&chord(key.chord())?)?,
+            }
+        }
+        if enter {
+            keyboard.send(&chord("ENTER")?)?;
+        }
+        Ok(())
+    }
+
     /// Drains failed background open exits and checks owned audio for completion.
     /// Call on the serial worker's receive timeout as well as after dispatch.
     /// Successful exits are reaped silently; each failed exit is reported once.
@@ -482,7 +527,8 @@ mod tests {
         Media(MediaCommand),
         Open(String),
         Clipboard(String),
-        Type(String, bool),
+        /// One wtype run: its arguments and its stdin.
+        Type(Vec<String>, String),
         Play(PathBuf),
         Stop,
         SetAudioOutput(String),
@@ -498,6 +544,8 @@ mod tests {
         calls: Vec<Call>,
         fail_backend: bool,
         typer_missing: bool,
+        /// The typer disappears after this many runs.
+        typer_missing_after: Option<usize>,
         typer_fails: bool,
         errors: Vec<String>,
     }
@@ -530,15 +578,24 @@ mod tests {
         fn clipboard(&mut self, value: &str) -> io::Result<()> {
             self.call(Call::Clipboard(value.into()))
         }
-        fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()> {
+        fn type_text(&mut self, args: &[String], input: &str) -> io::Result<()> {
             let (missing, fails) = {
                 let state = self.0.lock().unwrap();
-                (state.typer_missing, state.typer_fails)
+                let runs = state
+                    .calls
+                    .iter()
+                    .filter(|call| matches!(call, Call::Type(..)))
+                    .count();
+                (
+                    state.typer_missing
+                        || state.typer_missing_after.is_some_and(|after| runs >= after),
+                    state.typer_fails,
+                )
             };
             if missing {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "wtype not found"));
             }
-            self.call(Call::Type(value.into(), enter))?;
+            self.call(Call::Type(args.to_vec(), input.into()))?;
             if fails {
                 return Err(io::Error::other("wtype exited with exit status: 1"));
             }
@@ -592,6 +649,25 @@ mod tests {
             } else {
                 Ok(())
             }
+        }
+    }
+
+    /// One expected wtype run.
+    fn run(args: &[&str], input: &str) -> Call {
+        Call::Type(
+            args.iter().map(|arg| arg.to_string()).collect(),
+            input.into(),
+        )
+    }
+
+    fn key(name: &str) -> Call {
+        Call::Key(chord(name).unwrap())
+    }
+
+    fn text(value: &str, enter: bool) -> DesktopAction {
+        DesktopAction::Text {
+            value: value.into(),
+            enter,
         }
     }
 
@@ -790,7 +866,131 @@ mod tests {
         // Then the typer gets the exact text and Enter; no clipboard, no chord.
         assert_eq!(
             state.lock().unwrap().calls,
-            [Call::Type(value.into(), true)]
+            [run(&["-", "-k", "Return"], value)]
+        );
+        assert_eq!(keyboard.sends, 0);
+    }
+
+    #[test]
+    fn text_without_keys_keeps_its_single_wtype_run() {
+        // Given texts with no key token, with and without Enter.
+        for (value, enter, args) in [
+            ("  日本語\nλ  ", false, &["-"][..]),
+            ("x", true, &["-", "-k", "Return"][..]),
+            ("", false, &["-"][..]),
+            ("", true, &["-", "-k", "Return"][..]),
+            ("{Foo} }", false, &["-"][..]),
+        ] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            // When each is dispatched.
+            runtime.execute(&text(value, enter), &mut keyboard).unwrap();
+            // Then it is the same one run as before keys existed.
+            assert_eq!(state.lock().unwrap().calls, [run(args, value)], "{value:?}");
+            assert_eq!(keyboard.sends, 0);
+        }
+    }
+
+    #[test]
+    fn keys_in_the_text_are_typed_in_order_one_run_per_text_part() {
+        // Given a login text with a Tab between its fields and a final Enter key.
+        let value = "aldo{Tab}mi-clave{Enter}";
+        for (enter, last) in [
+            (false, &["-", "-k", "Return"][..]),
+            (true, &["-", "-k", "Return", "-k", "Return"][..]),
+        ] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            // When it is dispatched, with and without Press Enter after text.
+            runtime.execute(&text(value, enter), &mut keyboard).unwrap();
+            // Then each text part is one wtype run with the keys after it; the option adds Return.
+            assert_eq!(
+                state.lock().unwrap().calls,
+                [run(&["-", "-k", "Tab"], "aldo"), run(last, "mi-clave")],
+                "enter {enter}"
+            );
+            assert_eq!(keyboard.sends, 0);
+        }
+    }
+
+    #[test]
+    fn keys_before_any_text_and_key_only_texts_press_every_key() {
+        for (value, enter, expected) in [
+            (
+                "{Tab}{tab}aldo",
+                false,
+                vec![run(&["-k", "Tab", "-k", "Tab", "-"], "aldo")],
+            ),
+            (
+                "{Esc}{Up}{Down}{Left}{Right}",
+                true,
+                vec![run(
+                    &[
+                        "-k", "Escape", "-k", "Up", "-k", "Down", "-k", "Left", "-k", "Right",
+                        "-k", "Return",
+                    ],
+                    "",
+                )],
+            ),
+            (
+                "a{{b{Enter}c",
+                false,
+                vec![run(&["-", "-k", "Return"], "a{b"), run(&["-"], "c")],
+            ),
+        ] {
+            let (mut runtime, mut keyboard, state) = fixture();
+            runtime.execute(&text(value, enter), &mut keyboard).unwrap();
+            assert_eq!(state.lock().unwrap().calls, expected, "{value:?}");
+            assert_eq!(keyboard.sends, 0);
+        }
+    }
+
+    #[test]
+    fn without_wtype_each_part_is_pasted_and_each_key_pressed_in_order() {
+        // Given no virtual-keyboard typer.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
+        // When a text with keys and Press Enter after text is dispatched.
+        runtime
+            .execute(&text("aldo{Tab}mi-clave{Enter}", true), &mut keyboard)
+            .unwrap();
+        // Then each text part is pasted, each key pressed, and Enter comes last.
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [
+                Call::Clipboard("aldo".into()),
+                key("SHIFT+INSERT"),
+                key("TAB"),
+                Call::Clipboard("mi-clave".into()),
+                key("SHIFT+INSERT"),
+                key("ENTER"),
+                key("ENTER"),
+            ]
+        );
+        // And every other key maps to its physical key.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
+        runtime
+            .execute(&text("{Esc}{Up}{Down}{Left}{Right}", false), &mut keyboard)
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap().calls,
+            ["ESCAPE", "UP", "DOWN", "LEFT", "RIGHT"].map(key)
+        );
+    }
+
+    #[test]
+    fn wtype_missing_after_the_first_run_is_an_error_without_retyping() {
+        // Given a typer that disappears after typing the first part.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing_after = Some(1);
+        // When a text with two parts is dispatched.
+        let error = runtime
+            .execute(&text("aldo{Tab}mi-clave", true), &mut keyboard)
+            .unwrap_err();
+        // Then its error is returned; nothing is pasted or typed again.
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [run(&["-", "-k", "Tab"], "aldo")]
         );
         assert_eq!(keyboard.sends, 0);
     }
@@ -812,7 +1012,10 @@ mod tests {
             .unwrap_err();
         // Then its error is returned and nothing is pasted or pressed.
         assert_eq!(error.to_string(), "wtype exited with exit status: 1");
-        assert_eq!(state.lock().unwrap().calls, [Call::Type("x".into(), true)]);
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [run(&["-", "-k", "Return"], "x")]
+        );
         assert_eq!(keyboard.sends, 0);
     }
 
