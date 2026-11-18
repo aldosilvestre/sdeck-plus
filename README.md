@@ -142,7 +142,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 The installer prints these commands when it finds a device your user cannot open, and the
 AUR packages ship the rule (no manual step). sdeck-plus itself never changes permissions.
 
-Some actions need optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions
+Some actions need optional tools such as `mpv`, `wpctl`, `wtype` or `wl-copy`, and keyboard actions
 need `/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.
 

@@ -340,7 +340,8 @@ missing_tools=()
 for entry in \
     'mpv:sound playback' \
     'wpctl:volume and mute' \
-    'wl-copy:text pasting' \
+    'wtype:typing text' \
+    'wl-copy:text pasting without wtype' \
     'xdg-open:opening files and websites'; do
     if ! command -v "${entry%%:*}" >/dev/null 2>&1; then
         missing_tools+=("${entry%%:*} (${entry#*:})")

@@ -1,10 +1,11 @@
 //! System actions for the serial action worker. No adapter invokes a shell.
 //!
-//! Text replaces the Wayland clipboard and primary selection, then sends
-//! physical Shift+Insert, which pastes in terminals (from the primary
-//! selection) as well as in GTK, Qt and browser windows (from the clipboard);
-//! Ctrl+V would be a literal-insert prefix in a terminal. Keyboard/uinput and
-//! compositor failures are returned, not treated as successful text entry.
+//! Text is typed through a Wayland virtual keyboard (`wtype`), so it reaches
+//! any focused application whatever its paste shortcuts are. Without `wtype`
+//! it falls back to replacing the clipboard and primary selection and sending
+//! physical Shift+Insert, which only works where that chord pastes.
+//! Keyboard/uinput and compositor failures are returned, not treated as
+//! successful text entry.
 
 #[path = "desktop_actions/audio.rs"]
 mod audio;
@@ -322,6 +323,9 @@ trait Backend: Send {
     fn media(&mut self, command: MediaCommand) -> io::Result<()>;
     fn open(&mut self, target: &str) -> io::Result<()>;
     fn clipboard(&mut self, value: &str) -> io::Result<()>;
+    /// Type `value`, then Return when `enter`, through a Wayland virtual
+    /// keyboard. `NotFound` means no typer is installed.
+    fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()>;
     fn play_audio(&mut self, path: &std::path::Path) -> io::Result<()>;
     fn stop_audio(&mut self) -> io::Result<()>;
     fn set_audio_output(&mut self, name: &str) -> io::Result<()>;
@@ -396,14 +400,17 @@ impl DesktopRuntime {
                 }
                 Ok(())
             }
-            DesktopAction::Text { value, enter } => {
-                self.backend.clipboard(value)?;
-                keyboard.send(&chord("SHIFT+INSERT")?)?;
-                if *enter {
-                    keyboard.send(&chord("ENTER")?)?;
+            DesktopAction::Text { value, enter } => match self.backend.type_text(value, *enter) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    self.backend.clipboard(value)?;
+                    keyboard.send(&chord("SHIFT+INSERT")?)?;
+                    if *enter {
+                        keyboard.send(&chord("ENTER")?)?;
+                    }
+                    Ok(())
                 }
-                Ok(())
-            }
+                typed => typed,
+            },
             DesktopAction::Open { target } => self.backend.open(target),
             DesktopAction::Website { url } => self.backend.open(url),
             DesktopAction::CloseApplication { executable } => self.backend.run(&[
@@ -475,6 +482,7 @@ mod tests {
         Media(MediaCommand),
         Open(String),
         Clipboard(String),
+        Type(String, bool),
         Play(PathBuf),
         Stop,
         SetAudioOutput(String),
@@ -489,6 +497,8 @@ mod tests {
     struct State {
         calls: Vec<Call>,
         fail_backend: bool,
+        typer_missing: bool,
+        typer_fails: bool,
         errors: Vec<String>,
     }
 
@@ -519,6 +529,20 @@ mod tests {
         }
         fn clipboard(&mut self, value: &str) -> io::Result<()> {
             self.call(Call::Clipboard(value.into()))
+        }
+        fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()> {
+            let (missing, fails) = {
+                let state = self.0.lock().unwrap();
+                (state.typer_missing, state.typer_fails)
+            };
+            if missing {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "wtype not found"));
+            }
+            self.call(Call::Type(value.into(), enter))?;
+            if fails {
+                return Err(io::Error::other("wtype exited with exit status: 1"));
+            }
+            Ok(())
         }
         fn play_audio(&mut self, path: &std::path::Path) -> io::Result<()> {
             self.call(Call::Play(path.into()))
@@ -698,8 +722,9 @@ mod tests {
 
     #[test]
     fn text_preserves_unicode_and_orders_paste_before_enter() {
-        // Given exact Unicode clipboard content.
+        // Given exact Unicode clipboard content and no virtual-keyboard typer.
         let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
         let value = "  日本語\nλ  ";
         // When text with Enter is dispatched.
         runtime
@@ -724,8 +749,9 @@ mod tests {
 
     #[test]
     fn text_without_enter_sends_only_paste() {
-        // Given a text action without Enter.
+        // Given a text action without Enter and no virtual-keyboard typer.
         let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
         // When the action is dispatched.
         runtime
             .execute(
@@ -747,9 +773,54 @@ mod tests {
     }
 
     #[test]
-    fn text_sends_no_keys_when_clipboard_adapter_fails() {
-        // Given a missing clipboard adapter or compositor.
+    fn text_is_typed_by_the_virtual_keyboard_without_clipboard_or_paste_keys() {
+        // Given a virtual-keyboard typer (wtype) on the host.
         let (mut runtime, mut keyboard, state) = fixture();
+        let value = "  日本語\nλ  ";
+        // When text with Enter is dispatched.
+        runtime
+            .execute(
+                &DesktopAction::Text {
+                    value: value.into(),
+                    enter: true,
+                },
+                &mut keyboard,
+            )
+            .unwrap();
+        // Then the typer gets the exact text and Enter; no clipboard, no chord.
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [Call::Type(value.into(), true)]
+        );
+        assert_eq!(keyboard.sends, 0);
+    }
+
+    #[test]
+    fn a_failing_typer_is_an_error_without_a_clipboard_fallback() {
+        // Given a typer that is installed but fails (e.g. no virtual keyboard).
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_fails = true;
+        // When text is dispatched.
+        let error = runtime
+            .execute(
+                &DesktopAction::Text {
+                    value: "x".into(),
+                    enter: true,
+                },
+                &mut keyboard,
+            )
+            .unwrap_err();
+        // Then its error is returned and nothing is pasted or pressed.
+        assert_eq!(error.to_string(), "wtype exited with exit status: 1");
+        assert_eq!(state.lock().unwrap().calls, [Call::Type("x".into(), true)]);
+        assert_eq!(keyboard.sends, 0);
+    }
+
+    #[test]
+    fn text_sends_no_keys_when_clipboard_adapter_fails() {
+        // Given no typer and a missing clipboard adapter or compositor.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
         state.lock().unwrap().fail_backend = true;
         // When text is dispatched.
         let error = runtime
@@ -768,8 +839,9 @@ mod tests {
 
     #[test]
     fn text_does_not_send_enter_when_paste_fails() {
-        // Given unavailable uinput on the paste send.
+        // Given no typer and unavailable uinput on the paste send.
         let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().typer_missing = true;
         keyboard.fail_at = Some(0);
         // When text is dispatched.
         let error = runtime

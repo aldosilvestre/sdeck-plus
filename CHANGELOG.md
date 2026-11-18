@@ -38,9 +38,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Type text works in terminals:** the text is now pasted with Shift+Insert after being copied to
-  both the clipboard and the primary selection. Ctrl+V was a literal-insert prefix in terminals, so
-  only "^M" appeared when Press Enter was on.
+- **Type text works in any window, terminals included:** the text is now typed through a Wayland
+  virtual keyboard with `wtype`, so it no longer depends on each application's paste shortcut and
+  leaves the clipboard alone. Ctrl+V was a literal-insert prefix in terminals (only "^M" appeared),
+  and no paste chord works everywhere (kitty with `clear_all_shortcuts` showed "<S-Insert>").
+  Without `wtype` it falls back to the clipboard and primary selection plus Shift+Insert.
 
 ## [1.0.0] - 2026-11-15
 

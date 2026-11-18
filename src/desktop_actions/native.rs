@@ -70,6 +70,23 @@ impl Backend for Native {
         Ok(())
     }
 
+    fn type_text(&mut self, value: &str, enter: bool) -> io::Result<()> {
+        if std::env::var_os("WAYLAND_DISPLAY").is_none_or(|value| value.is_empty()) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Text requires a Wayland compositor (WAYLAND_DISPLAY)",
+            ));
+        }
+        // "-" reads the text from stdin, so it is never parsed as an option;
+        // Enter follows in the same invocation and virtual keyboard.
+        let args: &[&str] = if enter {
+            &["-", "-k", "Return"]
+        } else {
+            &["-"]
+        };
+        feed("wtype", args, value.as_bytes())
+    }
+
     fn clipboard(&mut self, value: &str) -> io::Result<()> {
         if std::env::var_os("WAYLAND_DISPLAY").is_none_or(|value| value.is_empty()) {
             return Err(io::Error::new(
@@ -187,51 +204,62 @@ fn open_exit_error(result: io::Result<std::process::ExitStatus>) -> Option<Strin
 
 /// Hand `value` to `wl-copy`, for the primary selection when `primary`.
 fn wl_copy(value: &str, primary: bool) -> io::Result<()> {
-    let mut command = Command::new("wl-copy");
-    if primary {
-        command.arg("--primary");
-    }
-    let child = command
-        .args(["--type", "text/plain;charset=utf-8"])
+    let args: &[&str] = if primary {
+        &["--primary", "--type", "text/plain;charset=utf-8"]
+    } else {
+        &["--type", "text/plain;charset=utf-8"]
+    };
+    // wl-copy daemonizes by default after establishing selection ownership;
+    // its foreground parent exits before paste is sent.
+    feed("wl-copy", args, value.as_bytes())
+}
+
+/// Run `program` with `input` on its stdin and wait for it. A missing program
+/// is `NotFound`; a failed exit is an error naming the program.
+fn feed(program: &str, args: &[&str], input: &[u8]) -> io::Result<()> {
+    let child = Command::new(program)
+        .args(args)
+        // The text is UTF-8 whatever locale the app was started with.
+        .env("LC_ALL", "C.UTF-8")
         .stdin(Stdio::piped())
         .spawn()?;
     // Keep a cleanup guard for the pipe-write and wait error paths.
     let mut child = ClipboardChild {
         child,
+        program,
         completed: false,
     };
-    let mut input = child
+    let mut stdin = child
         .child
         .stdin
         .take()
-        .ok_or_else(|| io::Error::other("wl-copy did not provide its requested stdin pipe"))?;
-    input.write_all(value.as_bytes())?;
-    drop(input);
+        .ok_or_else(|| io::Error::other(format!("{program} did not provide its stdin pipe")))?;
+    stdin.write_all(input)?;
+    drop(stdin);
     let status = child.child.wait()?;
     child.completed = true;
-    // wl-copy daemonizes by default after establishing selection ownership;
-    // its foreground parent exits before paste is sent.
     if status.success() {
         Ok(())
     } else {
-        // The child is already reaped. This is not a fallback clipboard path.
-        Err(io::Error::other(format!("wl-copy exited with {status}")))
+        // The child is already reaped. This is not a fallback path.
+        Err(io::Error::other(format!("{program} exited with {status}")))
     }
 }
 
-struct ClipboardChild {
+struct ClipboardChild<'a> {
     child: Child,
+    program: &'a str,
     completed: bool,
 }
 
-impl Drop for ClipboardChild {
+impl Drop for ClipboardChild<'_> {
     fn drop(&mut self) {
         if !self.completed {
             if let Err(error) = self.child.kill() {
-                eprintln!("Cannot terminate failed wl-copy: {error}");
+                eprintln!("Cannot terminate failed {}: {error}", self.program);
             }
             if let Err(error) = self.child.wait() {
-                eprintln!("Cannot reap failed wl-copy: {error}");
+                eprintln!("Cannot reap failed {}: {error}", self.program);
             }
         }
     }
