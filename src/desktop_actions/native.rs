@@ -80,7 +80,7 @@ impl Backend for Native {
         // "-" reads the text from stdin, so it is never parsed as an option;
         // the "-k" keys around it follow in order in the same virtual keyboard.
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        feed("wtype", &args, input.as_bytes())
+        feed("wtype", &args, input.as_bytes(), Stdio::piped()).map_err(typer_error)
     }
 
     fn clipboard(&mut self, value: &str) -> io::Result<()> {
@@ -207,17 +207,31 @@ fn wl_copy(value: &str, primary: bool) -> io::Result<()> {
     };
     // wl-copy daemonizes by default after establishing selection ownership;
     // its foreground parent exits before paste is sent.
-    feed("wl-copy", args, value.as_bytes())
+    feed("wl-copy", args, value.as_bytes(), Stdio::inherit())
+}
+
+/// wtype prints this and exits before it makes its keyboard or reads its input,
+/// so [`typer_error`] makes that failure `Unsupported`: the text may be pasted.
+const NO_VIRTUAL_KEYBOARD: &str = "Compositor does not support the virtual keyboard protocol";
+
+fn typer_error(error: io::Error) -> io::Error {
+    if error.to_string().ends_with(NO_VIRTUAL_KEYBOARD) {
+        io::Error::new(io::ErrorKind::Unsupported, error.to_string())
+    } else {
+        error
+    }
 }
 
 /// Run `program` with `input` on its stdin and wait for it. A missing program
-/// is `NotFound`; a failed exit is an error naming the program.
-fn feed(program: &str, args: &[&str], input: &[u8]) -> io::Result<()> {
+/// is `NotFound`; a failed exit is an error naming the program, with its error
+/// output when `stderr` is piped (not for wl-copy, whose daemon keeps that pipe).
+fn feed(program: &str, args: &[&str], input: &[u8], stderr: Stdio) -> io::Result<()> {
     let child = Command::new(program)
         .args(args)
         // The text is UTF-8 whatever locale the app was started with.
         .env("LC_ALL", "C.UTF-8")
         .stdin(Stdio::piped())
+        .stderr(stderr)
         .spawn()?;
     // Keep a cleanup guard for the pipe-write and wait error paths.
     let mut child = ClipboardChild {
@@ -230,16 +244,24 @@ fn feed(program: &str, args: &[&str], input: &[u8]) -> io::Result<()> {
         .stdin
         .take()
         .ok_or_else(|| io::Error::other(format!("{program} did not provide its stdin pipe")))?;
-    stdin.write_all(input)?;
+    let written = stdin.write_all(input);
     drop(stdin);
+    // wtype without a virtual keyboard exits unread: its exit and message say so.
+    if written.as_ref().is_err_and(|error| {
+        child.child.stderr.is_none() || error.kind() != io::ErrorKind::BrokenPipe
+    }) {
+        return written;
+    }
+    let errors = child.child.stderr.take().map(io::read_to_string);
+    let errors = errors.transpose()?.unwrap_or_default();
     let status = child.child.wait()?;
     child.completed = true;
     if status.success() {
-        Ok(())
-    } else {
-        // The child is already reaped. This is not a fallback path.
-        Err(io::Error::other(format!("{program} exited with {status}")))
+        return written;
     }
+    // The child is already reaped. This is not a fallback path.
+    let message = format!("{program} exited with {status}: {}", errors.trim());
+    Err(io::Error::other(message.trim_end_matches(": ")))
 }
 
 struct ClipboardChild<'a> {
@@ -294,6 +316,21 @@ mod tests {
         let error = open_exit_error(result);
         // Then the worker can surface the failure.
         assert!(error.is_some());
+    }
+
+    #[test]
+    fn a_typer_without_a_virtual_keyboard_is_unsupported_even_before_reading_its_input() {
+        // Given a typer that prints wtype's message and exits without reading 1 MiB of text.
+        let script = format!("echo '{NO_VIRTUAL_KEYBOARD}' >&2; exit 1");
+        let typed = feed("sh", &["-c", &script], &vec![b'x'; 1 << 20], Stdio::piped());
+        // Then the broken pipe hides neither its exit nor its message.
+        let error = typed.map_err(typer_error).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        // And another failure stays an error with its message.
+        let typed = feed("sh", &["-c", "echo oops >&2; exit 1"], b"x", Stdio::piped());
+        let error = typed.map_err(typer_error).unwrap_err();
+        assert_eq!(error.to_string(), "sh exited with exit status: 1: oops");
+        assert_eq!(error.kind(), io::ErrorKind::Other);
     }
 
     #[test]

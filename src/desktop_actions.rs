@@ -3,7 +3,8 @@
 //! Text is typed through a Wayland virtual keyboard (`wtype`), so it reaches
 //! any focused application whatever its paste shortcuts are; keys named in the
 //! text (`{Tab}`, `{Enter}`, see [`text_segments`]) are pressed in order. Without
-//! `wtype` it falls back to replacing the clipboard and primary selection and
+//! `wtype`, or on a compositor without the virtual-keyboard protocol, it falls
+//! back to replacing the clipboard and primary selection and
 //! sending physical Shift+Insert for each text part (which only works where that
 //! chord pastes) and the physical key for each named key.
 //! Keyboard/uinput and compositor failures are returned, not treated as
@@ -330,7 +331,7 @@ trait Backend: Send {
     fn clipboard(&mut self, value: &str) -> io::Result<()>;
     /// Run the Wayland virtual-keyboard typer (`wtype`) once with `args` and
     /// `input` on its stdin, and wait for it. `NotFound` means no typer is
-    /// installed.
+    /// installed and `Unsupported` no virtual keyboard: both typed nothing.
     fn type_text(&mut self, args: &[String], input: &str) -> io::Result<()>;
     fn play_audio(&mut self, path: &std::path::Path) -> io::Result<()>;
     fn stop_audio(&mut self) -> io::Result<()>;
@@ -343,6 +344,9 @@ trait Backend: Send {
         Vec::new()
     }
 }
+
+/// Typer errors before any input: not installed, or no virtual keyboard.
+const NOTHING_TYPED: [io::ErrorKind; 2] = [io::ErrorKind::NotFound, io::ErrorKind::Unsupported];
 
 /// One runtime per serial worker; owns toggle state, audio, and the wheel device.
 pub struct DesktopRuntime {
@@ -460,7 +464,7 @@ impl DesktopRuntime {
     }
 
     /// Types `value` with its keys, then Return when `enter`, in order: one wtype
-    /// run per text part. Without wtype (missing on the first run, so nothing was
+    /// run per text part. Without wtype or its virtual keyboard (first run, so nothing was
     /// typed yet) it pastes each text part and presses each key instead.
     fn type_text(
         &mut self,
@@ -475,7 +479,7 @@ impl DesktopRuntime {
         }
         for (run, (args, input)) in typing::wtype_runs(&segments, enter).into_iter().enumerate() {
             match self.backend.type_text(&args, &input) {
-                Err(error) if run == 0 && error.kind() == io::ErrorKind::NotFound => {
+                Err(error) if run == 0 && NOTHING_TYPED.contains(&error.kind()) => {
                     return self.paste_text(&segments, enter, keyboard);
                 }
                 // Earlier runs were typed: a later failure is returned, never retyped.
@@ -547,6 +551,8 @@ mod tests {
         /// The typer disappears after this many runs.
         typer_missing_after: Option<usize>,
         typer_fails: bool,
+        /// The compositor has no virtual keyboard from this run on.
+        no_keyboard_after: Option<usize>,
         errors: Vec<String>,
     }
 
@@ -579,7 +585,7 @@ mod tests {
             self.call(Call::Clipboard(value.into()))
         }
         fn type_text(&mut self, args: &[String], input: &str) -> io::Result<()> {
-            let (missing, fails) = {
+            let (missing, fails, unsupported) = {
                 let state = self.0.lock().unwrap();
                 let runs = state
                     .calls
@@ -590,10 +596,14 @@ mod tests {
                     state.typer_missing
                         || state.typer_missing_after.is_some_and(|after| runs >= after),
                     state.typer_fails,
+                    state.no_keyboard_after.is_some_and(|after| runs >= after),
                 )
             };
             if missing {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "wtype not found"));
+            }
+            if unsupported {
+                return Err(io::ErrorKind::Unsupported.into()); // wtype typed nothing.
             }
             self.call(Call::Type(args.to_vec(), input.into()))?;
             if fails {
@@ -996,8 +1006,28 @@ mod tests {
     }
 
     #[test]
+    fn without_a_virtual_keyboard_the_text_is_pasted_unless_a_part_was_typed() {
+        // Given wtype on a compositor without the virtual-keyboard protocol.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().no_keyboard_after = Some(0);
+        // When a text with a key is dispatched, wtype types nothing: it is pasted.
+        let typed = runtime.execute(&text("a{Tab}", false), &mut keyboard);
+        typed.unwrap();
+        assert_eq!(
+            state.lock().unwrap().calls,
+            [Call::Clipboard("a".into()), key("SHIFT+INSERT"), key("TAB")]
+        );
+        // And after a typed part it is an error; nothing is pasted or typed again.
+        let (mut runtime, mut keyboard, state) = fixture();
+        state.lock().unwrap().no_keyboard_after = Some(1);
+        let typed = runtime.execute(&text("a{Tab}b", true), &mut keyboard);
+        assert_eq!(typed.unwrap_err().kind(), io::ErrorKind::Unsupported);
+        assert_eq!(state.lock().unwrap().calls, [run(&["-", "-k", "Tab"], "a")]);
+    }
+
+    #[test]
     fn a_failing_typer_is_an_error_without_a_clipboard_fallback() {
-        // Given a typer that is installed but fails (e.g. no virtual keyboard).
+        // Given an installed typer failing for another reason than no virtual keyboard.
         let (mut runtime, mut keyboard, state) = fixture();
         state.lock().unwrap().typer_fails = true;
         // When text is dispatched.
