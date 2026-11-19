@@ -604,7 +604,9 @@ two columns fit.
   host (`example.com`). User button text is never shortened or rewrapped.
 - **Live information:** readings use the same vocabulary (`for_glyph`): sun =
   `brightness`, muted speaker = `mute` (grey speaker, red cross), headphones =
-  `audio-output`, recording = `record`, live = `stream`, OBS idle =
+  `audio-output`, microphone (both microphone readings, headsets included) =
+  `audio-input`, muted microphone = `microphone-mute` (grey microphone, red
+  slash), recording = `record`, live = `stream`, OBS idle =
   `obs-scene`, now playing = `play`, `pause` or `media-idle` (a struck-through
   note), plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
   `storm`, `fog`, `cpu`, `memory` and `temperature`, duotone and shadowed

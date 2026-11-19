@@ -47,7 +47,8 @@ permissions on its own.
   focused application (Hyprland), with an optional return to the previous profile
   when focus leaves, plus touchscreen pages navigated by swiping.
 - **Artwork, button text and action icons** on keys, the touch strip and its zones.
-- **Live information:** volume, audio output, time, weather, CPU, memory,
+- **Live information:** volume, audio output, microphone volume and input
+  device (with a microphone icon), time, weather, CPU, memory,
   temperature, device brightness, OBS state and now playing, updated on the
   device.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume

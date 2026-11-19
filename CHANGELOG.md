@@ -48,6 +48,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Microphone readings show a microphone:** the live information for **Microphone volume and
+  mute** and **Audio input device** drew a speaker (or headphones for a headset microphone); it now
+  shows a microphone, grey with a red slash while muted.
+
 - **Start at login after reinstalling:** the login entry kept naming the previous executable
   (for example `/usr/bin/sdeck-plus` after moving to `install.sh`, or the reverse with the pacman
   package), so the session skipped it after a reboot while the tray still showed it on.

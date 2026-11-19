@@ -511,6 +511,8 @@ fn live_information_glyphs_come_from_the_binding_vocabulary() {
         (Glyph::Live, Some(BindingIcon::Stream)),
         (Glyph::ObsIdle, Some(BindingIcon::ObsScene)),
         (Glyph::Speaker, Some(BindingIcon::Volume)),
+        (Glyph::Microphone, Some(BindingIcon::AudioInput)),
+        (Glyph::MicrophoneMuted, Some(BindingIcon::MicrophoneMute)),
         (Glyph::Cloud, Some(BindingIcon::Cloud)),
         (Glyph::PartlyCloudy, Some(BindingIcon::PartlyCloudy)),
         (Glyph::Rain, Some(BindingIcon::Rain)),
