@@ -271,20 +271,18 @@ fn multi_action_is_offered_only_for_key_press_and_key_hold() {
             touch.contains(&"Next touchscreen page"),
             "touch keeps its own choices"
         );
-        // Dropped on a dial it is refused and nothing is stored or sent.
+        // Dragged from a key's catalog onto a dial it is refused like an unfit plugin
+        // action: the editor stays on the key and nothing is stored or sent.
+        ui.select_control(ControlKind::Button, Some(1), true)
+            .unwrap();
         assert!(drop_on_dial(&editor.widgets, "Multi action", 0));
         choose_event(&editor.widgets, 0, "Press");
-        assert_eq!(ui.control_kind(), ControlKind::Encoder);
-        assert!(ui.feature_editor.parse().is_err());
-        assert!(
-            texts(ui.feature_editor.root.upcast_ref())
-                .iter()
-                .any(|text| text
-                    .starts_with("Multi action runs only from a key press or a key hold.")),
-            "the guidance says why nothing is selected"
+        assert_eq!(
+            editor.toast(),
+            "Multi action cannot be assigned to a dial press."
         );
-        assert!(!editor.list().root().is_mapped(), "no step list on a dial");
-        editor.save();
+        assert_eq!(ui.control_kind(), ControlKind::Button);
+        assert!(!editor.list().root().is_mapped(), "no step list was opened");
         assert_eq!(
             editor
                 .layers
@@ -296,10 +294,7 @@ fn multi_action_is_offered_only_for_key_press_and_key_hold() {
             .commands()
             .iter()
             .any(|command| matches!(command, LayerCommand::SaveBinding(..))));
-        // On a key the catalog shows the empty step list as a draft (the dial draft is dropped).
-        ui.select_control(ControlKind::Button, Some(1), true)
-            .unwrap();
-        assert_eq!(ui.control_kind(), ControlKind::Button);
+        // On a key the catalog shows the empty step list as a draft.
         catalog_row(&editor.widgets, "Multi action").emit_clicked();
         assert_eq!(ui.action_kind(), ActionKind::Extended);
         assert!(

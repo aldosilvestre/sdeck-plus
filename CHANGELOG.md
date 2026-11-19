@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Multi action:** **More actions > System > Multi action** runs several actions from one key
+  press or key hold (not dials or the touch strip) in strict order: each step starts only after the
+  previous one finished (a command when its process exits, an application once it is launched, a
+  plugin action when the plugin answers). A list of 1 to 16 steps, at least one an action, with
+  optional waits of 10 ms to 60 s (milliseconds or seconds) that never block the window or other
+  keys. Steps can be any action except None, another multi action, the timers and the touchscreen
+  page actions; Go to profile or page and the page/folder actions only as the last step. The editor
+  shows a numbered step list with Move up, Move down, Edit step and Remove step per row, plus **Add
+  step** and **Add wait** dialogs; editing or saving never runs a step, and Save refuses an invalid
+  list with a sentence. The first failing step stops the rest with the toast "Multi action stopped
+  at step <n>: <error>"; the status line says "Multi action started." and "Multi action
+  finished.", a page return starts after the last step, and pressing the key again while it runs
+  is ignored. Sounds, files, pages and folders named by steps follow links, export/import, page or
+  folder removal and folder renames like single actions. It is stored in the existing `feature-v1`
+  row within the 4096-byte action limit ("Multi action is too large to store"); older builds keep
+  the row unchanged without showing or running it. There is no per-step timeout: a command that
+  never ends keeps that key's sequence busy (and, like a single Command, the action worker) until it
+  ends. New `sdeck-multi-symbolic` icon on keys and in menus.
+
 ### Changed
 
 - **Undo a removal from its toast only:** Remove binding no longer leaves an **Undo remove**

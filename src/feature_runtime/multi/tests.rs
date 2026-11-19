@@ -178,3 +178,61 @@ fn a_wait_that_ended_forgets_its_timer_instead_of_handing_it_back() {
     // The fired timer is gone already; removing it again would be an error.
     assert_eq!(runs.cancel_all(), Vec::<u32>::new());
 }
+
+#[test]
+fn a_duplicate_finish_cannot_skip_the_step_now_in_flight() {
+    let mut runs = Runs::<u32>::default();
+    assert!(runs.begin(KEY, steps(), None));
+    let (_, _, command) = action(&mut runs, KEY);
+    assert_eq!(runs.finish(command, Ok(())), Some(Ok(KEY.to_owned())));
+    let (_, pause) = wait(&mut runs, KEY);
+    // A duplicate or late report of the first step while the wait is in flight.
+    assert_eq!(runs.finish(command, Ok(())), None);
+    assert_eq!(runs.finish(command, Err("late".into())), None);
+    assert_eq!(runs.advance(KEY), None, "the wait still runs");
+    assert_eq!(runs.finish(pause, Ok(())), Some(Ok(KEY.to_owned())));
+}
+
+#[test]
+fn tokens_stay_unique_across_runs_cancels_and_failures() {
+    let mut runs = Runs::<u32>::default();
+    let mut seen = std::collections::BTreeSet::new();
+    for round in 0..5 {
+        assert!(runs.begin(KEY, steps(), None));
+        let (_, _, token) = action(&mut runs, KEY);
+        assert!(seen.insert(token), "token {token} reused");
+        match round % 3 {
+            0 => assert_eq!(runs.cancel_all(), Vec::<u32>::new()),
+            1 => assert_eq!(
+                runs.finish(token, Err("x".into())),
+                Some(Err("Multi action stopped at step 1: x".into()))
+            ),
+            _ => {
+                assert_eq!(runs.finish(token, Ok(())), Some(Ok(KEY.to_owned())));
+                let (_, pause) = wait(&mut runs, KEY);
+                assert!(seen.insert(pause), "token {pause} reused");
+                assert_eq!(runs.cancel_all(), Vec::<u32>::new());
+            }
+        }
+        // A stale token of the previous run never touches the new run.
+        assert!(runs.begin(KEY, steps(), None));
+        let (_, _, fresh) = action(&mut runs, KEY);
+        assert!(seen.insert(fresh), "token {fresh} reused");
+        assert_eq!(runs.finish(token, Ok(())), None);
+        assert!(runs.is_running(KEY));
+        assert_eq!(runs.advance(KEY), None, "the fresh step still runs");
+        assert_eq!(runs.cancel_all(), Vec::<u32>::new());
+    }
+}
+
+#[test]
+fn a_finished_run_hands_back_a_late_timer() {
+    let mut runs = Runs::<u32>::default();
+    assert!(runs.begin(KEY, steps(), None));
+    let (_, _, command) = action(&mut runs, KEY);
+    assert_eq!(runs.finish(command, Ok(())), Some(Ok(KEY.to_owned())));
+    let (_, pause) = wait(&mut runs, KEY);
+    assert_eq!(runs.finish(pause, Ok(())), Some(Ok(KEY.to_owned())));
+    // A timer registered for a wait that already ended is orphaned: handed back.
+    assert_eq!(runs.hold_timer(pause, 3), Some(3));
+}

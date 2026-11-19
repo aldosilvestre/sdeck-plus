@@ -1055,6 +1055,144 @@ fn legacy_bundles_relocate_and_check_the_sound_steps_of_a_multi_action() {
     assert_eq!(fs::read(target.join("media/old.mp3")).unwrap(), media);
 }
 
+/// A version 2 bundle (base64 entries) holding `files`.
+fn legacy_v2_bundle(f: &Fixture, files: &[(&str, &[u8])]) -> PathBuf {
+    let bundle = f.0.join(format!(
+        "{}-v2.sdeck-plus.json",
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let entries = files
+        .iter()
+        .map(|(path, bytes)| Entry {
+            path: (*path).into(),
+            data: Some(STANDARD.encode(bytes)),
+        })
+        .collect();
+    write_private(
+        &bundle,
+        &serde_json::to_vec(&Bundle {
+            format: "sdeck-plus".into(),
+            version: 2,
+            model: None,
+            files: entries,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    bundle
+}
+
+/// A multi action that plays `first`, waits, then plays `second`.
+fn two_sound_multi(first: PathBuf, second: PathBuf) -> Action {
+    use crate::features::MultiStep;
+    let sound = |path| {
+        MultiStep::Action(Action::Feature(FeatureAction::Desktop(
+            DesktopAction::PlayAudio { path },
+        )))
+    };
+    Action::Feature(FeatureAction::Multi {
+        steps: vec![
+            sound(first),
+            MultiStep::Wait { milliseconds: 100 },
+            sound(second),
+        ],
+    })
+}
+
+#[test]
+fn legacy_v2_bundles_relocate_both_sound_steps_of_a_multi_action_and_keep_its_wait() {
+    let f = Fixture::new();
+    let source = f.root("source");
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            two_sound_multi("media/one.mp3".into(), "media/two.mp3".into()),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let conf = fs::read(source.join("layers.conf")).unwrap();
+    let bundle = legacy_v2_bundle(
+        &f,
+        &[
+            ("layers.conf", &conf),
+            ("media/one.mp3", b"first sound"),
+            ("media/two.mp3", b"second sound"),
+        ],
+    );
+    let target = f.root("target");
+
+    import(&bundle, &target).unwrap();
+
+    let imported = LayerStore::open_at(&target).unwrap();
+    assert!(
+        imported.conflicts().is_empty(),
+        "{:?}",
+        imported.conflicts()
+    );
+    assert_eq!(
+        imported.binding("Base", &Trigger::KeyPress(1)),
+        Some(two_sound_multi(
+            target.join("media/one.mp3"),
+            target.join("media/two.mp3"),
+        ))
+    );
+    assert_eq!(
+        fs::read(target.join("media/one.mp3")).unwrap(),
+        b"first sound"
+    );
+    assert_eq!(
+        fs::read(target.join("media/two.mp3")).unwrap(),
+        b"second sound"
+    );
+}
+
+#[test]
+fn a_legacy_import_missing_the_media_of_a_sound_step_changes_nothing() {
+    let f = Fixture::new();
+    let source = f.root("source");
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            two_sound_multi("media/one.mp3".into(), "media/missing.mp3".into()),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let conf = fs::read(source.join("layers.conf")).unwrap();
+    let target = f.root("target");
+    let mut kept = LayerStore::open_at(&target).unwrap();
+    kept.bind("Base", Trigger::KeyPress(2), Action::Emit("keep".into()))
+        .unwrap();
+    kept.persist().unwrap();
+    let before = snapshot(&target);
+
+    for bundle in [
+        f.bundle(&[("layers.conf", &conf), ("media/one.mp3", b"first sound")]),
+        legacy_v2_bundle(
+            &f,
+            &[("layers.conf", &conf), ("media/one.mp3", b"first sound")],
+        ),
+    ] {
+        let error = import(&bundle, &target).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(snapshot(&target), before);
+        assert!(!target.join("media").exists());
+    }
+    assert_eq!(
+        fs::read_dir(&f.0)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("stage"))
+            .count(),
+        0,
+        "no stage is left behind"
+    );
+}
+
 #[test]
 fn export_rejects_ambiguous_basenames_without_changing_inputs_or_destination() {
     let f = Fixture::new();

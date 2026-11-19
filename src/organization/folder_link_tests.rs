@@ -1,8 +1,104 @@
-use super::{tests::Fixture, LayerStore, NavigationAction};
+use super::{tests::Fixture, LayerStore, NavigationAction, Organization};
 use crate::{
     features::{FeatureAction, MultiStep},
-    layers::{Action, PageReturn, Trigger},
+    layers::{encode_action, normalize_keyboard_action, Action, PageReturn, Trigger},
 };
+use std::fs;
+
+/// Each page's bindings and page returns.
+type Pages = Vec<(
+    String,
+    std::collections::BTreeMap<Trigger, Action>,
+    std::collections::BTreeMap<Trigger, PageReturn>,
+)>;
+
+/// What a failed folder operation must leave as it was: views, pages, selection and disk.
+pub(super) type Snapshot = (
+    std::collections::BTreeMap<String, super::View>,
+    Pages,
+    String,
+    Vec<u8>,
+    Vec<u8>,
+);
+
+pub(super) fn snapshot(f: &Fixture) -> Snapshot {
+    (
+        f.organization.views.clone(),
+        f.layers
+            .layers()
+            .values()
+            .map(|page| {
+                (
+                    page.name.clone(),
+                    page.bindings.clone(),
+                    page.returns.clone(),
+                )
+            })
+            .collect(),
+        f.layers.active().to_owned(),
+        fs::read(f.root.join("layers.conf")).unwrap(),
+        fs::read(f.root.join("organization.json")).unwrap(),
+    )
+}
+
+/// Base owns the folder "Tools"; its key 1 runs a multi action that presses a key
+/// whose name was hand-edited into one no keyboard has, then opens "Tools"; its
+/// key 2 opens "Tools". Both stores are saved and read back from disk.
+///
+/// Returns the fixture and the error saving that multi action again reports.
+pub(super) fn folder_with_unreadable_key_step() -> (Fixture, String) {
+    let mut f = Fixture::new();
+    f.organization = Organization::open_at(&f.root, &f.layers).unwrap();
+    f.folder("Tools");
+    f.layers.select("Base");
+    let open = Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(
+        "Tools".into(),
+    )));
+    let multi = |key: &str| {
+        Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                MultiStep::Action(Action::KeyPress { key: key.into() }),
+                MultiStep::Action(open.clone()),
+            ],
+        })
+    };
+    let Action::KeyPress { key } =
+        normalize_keyboard_action(Action::KeyPress { key: "a".into() }).unwrap()
+    else {
+        unreachable!("a key press stays a key press");
+    };
+    f.layers
+        .bind("Base", Trigger::KeyPress(1), multi(&key))
+        .unwrap();
+    f.layers
+        .bind("Base", Trigger::KeyPress(2), open.clone())
+        .unwrap();
+    f.layers.persist().unwrap();
+    f.organization.persist().unwrap();
+    let path = f.root.join("layers.conf");
+    let text = fs::read_to_string(&path).unwrap();
+    let stored = encode_action(&multi(&key)).unwrap();
+    assert!(text.contains(&stored), "{text}");
+    let unreadable = Action::KeyPress {
+        key: "no such key".into(),
+    };
+    let edited = encode_action(&multi("no such key")).unwrap();
+    fs::write(&path, text.replace(&stored, &edited)).unwrap();
+    f.layers = LayerStore::open_at(&f.root).unwrap();
+    f.organization = Organization::open_at(&f.root, &f.layers).unwrap();
+    // The edited step is kept as it was written, as legacy key names are.
+    assert!(
+        f.layers.conflicts().is_empty(),
+        "{:?}",
+        f.layers.conflicts()
+    );
+    assert_eq!(
+        f.layers.binding("Base", &Trigger::KeyPress(1)),
+        Some(multi("no such key"))
+    );
+    let error = normalize_keyboard_action(unreadable).unwrap_err();
+    (f, format!("Step 1: {error}"))
+}
 
 #[test]
 fn folder_deletion_unlinks_only_its_owning_page() {
@@ -97,4 +193,21 @@ fn folder_deletion_drops_only_the_open_folder_step_of_a_multi_action() {
         assert_eq!(layers.binding("Base", &Trigger::KeyPress(2)), None);
         assert_eq!(layers.page_return("Base", &Trigger::KeyPress(2)), None);
     }
+}
+
+#[test]
+fn folder_deletion_blocked_by_an_unreadable_key_step_changes_nothing() {
+    // Given
+    let (mut f, expected) = folder_with_unreadable_key_step();
+    let before = snapshot(&f);
+    // When
+    let error = f
+        .organization
+        .remove_folder(&mut f.layers, "Tools")
+        .unwrap_err();
+    // Then: the step is named, and the folder, both links and the files remain.
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(error.to_string(), expected);
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(f.organization.folders(&f.layers), ["Tools"]);
 }

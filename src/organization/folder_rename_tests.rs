@@ -172,6 +172,24 @@ fn rename_errors_leave_both_stores_unchanged() {
 }
 
 #[test]
+fn rename_blocked_by_an_unreadable_key_step_changes_nothing() {
+    use super::folder_link_tests::{folder_with_unreadable_key_step, snapshot};
+    // Given
+    let (mut f, expected) = folder_with_unreadable_key_step();
+    let before = snapshot(&f);
+    // When
+    let error = f
+        .organization
+        .rename_folder(&mut f.layers, "Tools", "Studio")
+        .unwrap_err();
+    // Then: the step is named; the folder name, links and files stay as they were.
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(error.to_string(), expected);
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(f.organization.folders(&f.layers), ["Tools"]);
+}
+
+#[test]
 fn renaming_to_the_same_name_is_a_no_op() {
     let (mut f, ..) = nested_fixture();
     let views = f.organization.views.clone();

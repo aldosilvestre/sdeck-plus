@@ -831,11 +831,65 @@ fn capture_documentation_screenshots() {
     }
     artwork.refresh(true);
 
+    // A four-step multi action on key 8: the editor card with its numbered step list.
+    {
+        use sdeck_plus::features::MultiStep;
+        let steps = vec![
+            MultiStep::Action(Action::Shortcut {
+                modifiers: vec!["CTRL".into()],
+                key: "S".into(),
+            }),
+            MultiStep::Wait { milliseconds: 500 },
+            MultiStep::Action(Action::Command("notify-send Saved".into())),
+            MultiStep::Action(Action::SwitchLayer("Studio".into())),
+        ];
+        artwork
+            .layers
+            .borrow_mut()
+            .bind(
+                "Base",
+                Trigger::KeyPress(8),
+                Action::Feature(FeatureAction::Multi { steps }),
+            )
+            .unwrap();
+    }
+    artwork.refresh(true);
+    widgets.binding_ui.mark_clean();
+    key_button(&widgets.key_labels[7]).emit_clicked();
+    let step_list = widgets
+        .binding_ui
+        .feature_editor
+        .steps()
+        .expect("the binding editor owns a step list")
+        .root()
+        .clone();
+    let editor_card = std::iter::successors(step_list.parent(), |widget| widget.parent())
+        .find(|widget| widget.has_css_class("editor-card"))
+        .expect("the editor card");
+    // The form under the preview scrolls within the window height; a taller window lets
+    // it show every step for the capture. Restore the size after.
+    let form = step_list
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .expect("the editor form scroller");
+    wait_for_frame(&widgets.root);
+    let hidden = form.measure(Orientation::Vertical, form.width()).1 - form.height();
+    widgets.root.set_size_request(1000, 950 + hidden.max(0));
+    wait_for_frame(&widgets.root);
+    save(&directory, &editor_card, "multi-action-editor");
+    widgets.root.set_size_request(1000, 950);
+    wait_for_frame(&widgets.root);
+    artwork
+        .layers
+        .borrow_mut()
+        .unbind("Base", &Trigger::KeyPress(8))
+        .unwrap();
+    artwork.refresh(true);
+
     // Then: every documented artifact was rendered, with no dispatched action.
     assert_eq!(widgets.status.text(), "Not connected");
     assert!(commands.try_iter().all(|command| !matches!(
         command,
-        LayerCommand::Execute { .. } | LayerCommand::ObsProbe(_)
+        LayerCommand::Execute { .. } | LayerCommand::ExecuteStep { .. } | LayerCommand::ObsProbe(_)
     )));
     drop(hardware_commands);
     window.destroy();

@@ -631,3 +631,160 @@ fn single_actions_keep_their_dispatch_status_and_immediate_page_return() {
         runtime.cancel_timer();
     });
 }
+
+#[test]
+fn wrong_duplicate_and_stale_step_tokens_are_ignored_while_a_run_is_in_flight() {
+    run_gtk_test(|| {
+        let fixture = Fixture::new("multi-tokens");
+        let runtime = fixture.runtime();
+        let id = "4:Base:KeyPress(1)";
+        runtime.execute(
+            id.into(),
+            multi(vec![
+                step(Action::Command("true".into())),
+                step(Action::Command("true".into())),
+                step(Action::Emit("end".into())),
+            ]),
+        );
+        let (_, _, first) = fixture.worker_step();
+        // A token no step was given changes nothing, whatever it reports.
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: first + 1000,
+            result: Ok(()),
+        }]);
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: first + 1000,
+            result: Err("bogus".into()),
+        }]);
+        assert!(fixture.executed().is_empty());
+        assert!(runtime.multi_running(id));
+        assert_ne!(
+            fixture.toast().label.text(),
+            "Multi action stopped at step 1: bogus"
+        );
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: first,
+            result: Ok(()),
+        }]);
+        let (second_id, _, second) = fixture.worker_step();
+        assert_eq!(second_id, format!("{id}#step2"));
+        // A duplicate of the first token must not skip step 2.
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: first,
+            result: Ok(()),
+        }]);
+        assert!(fixture.emitted().is_empty() && fixture.executed().is_empty());
+        assert!(runtime.multi_running(id));
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: second,
+            result: Ok(()),
+        }]);
+        assert_eq!(fixture.emitted(), ["end"]);
+        assert!(!runtime.multi_running(id));
+        assert_eq!(runtime.status.text(), "Multi action finished.");
+        // A late report after the run finished stops nothing and says nothing.
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: second,
+            result: Err("late".into()),
+        }]);
+        assert_ne!(
+            fixture.toast().label.text(),
+            "Multi action stopped at step 2: late"
+        );
+        assert_eq!(runtime.status.text(), "Multi action finished.");
+    });
+}
+
+#[test]
+fn cancelling_after_a_wait_fired_twice_or_mid_wait_runs_nothing_more() {
+    run_gtk_test(|| {
+        let fixture = Fixture::new("multi-cancel");
+        let runtime = fixture.runtime();
+        let finished = "4:Base:KeyPress(1)";
+        let waiting = "4:Base:KeyPress(2)";
+        runtime.execute(
+            finished.into(),
+            multi(vec![
+                MultiStep::Wait { milliseconds: 10 },
+                step(Action::Emit("a".into())),
+            ]),
+        );
+        assert_eq!(runtime.status.text(), "Multi action started.");
+        await_text(&runtime.status, "Multi action finished.");
+        // The fired timer is not removed again, however often runs are cancelled.
+        runtime.cancel_multi_runs();
+        runtime.cancel_multi_runs();
+        assert_eq!(fixture.emitted(), ["a"]);
+        // Cancelled mid-wait, twice: the step after the wait never runs.
+        runtime.execute(
+            waiting.into(),
+            multi(vec![
+                MultiStep::Wait { milliseconds: 100 },
+                step(Action::Emit("b".into())),
+            ]),
+        );
+        assert!(runtime.multi_running(waiting));
+        runtime.cancel_multi_runs();
+        runtime.cancel_multi_runs();
+        assert!(!runtime.multi_running(waiting));
+        // The cancelled binding runs afresh; its longer wait outlasts the cancelled one.
+        runtime.execute(
+            waiting.into(),
+            multi(vec![
+                MultiStep::Wait { milliseconds: 150 },
+                step(Action::Emit("c".into())),
+            ]),
+        );
+        assert_eq!(runtime.status.text(), "Multi action started.");
+        await_text(&runtime.status, "Multi action finished.");
+        assert_eq!(fixture.emitted(), ["c"]);
+        assert!(!runtime.multi_running(waiting));
+    });
+}
+
+#[test]
+fn inline_steps_chain_and_navigation_runs_last_after_a_worker_step() {
+    run_gtk_test(|| {
+        let fixture = Fixture::new("multi-inline");
+        let runtime = fixture.runtime();
+        let id = "4:Base:KeyPress(1)";
+        runtime.execute_with_return(
+            id.into(),
+            multi(vec![
+                step(Action::Emit("1".into())),
+                step(Action::Emit("2".into())),
+                step(Action::Feature(FeatureAction::Device(
+                    DeviceAction::Brightness(40),
+                ))),
+                step(Action::Command("true".into())),
+                step(Action::Feature(FeatureAction::Navigation(
+                    NavigationAction::NextPage,
+                ))),
+            ]),
+            Some(PageReturn {
+                layer: "Base".into(),
+                seconds: 60,
+            }),
+        );
+        // The GTK-thread and device steps ran in one go, up to the worker step.
+        assert_eq!(fixture.emitted(), ["1", "2"]);
+        assert_eq!(
+            fixture.device.try_iter().collect::<Vec<_>>(),
+            [DeviceAction::Brightness(40)]
+        );
+        let (step_id, _, token) = fixture.worker_step();
+        assert_eq!(step_id, format!("{id}#step4"));
+        assert!(runtime.multi_running(id));
+        assert!(!runtime.page_return_active());
+        // Finishing it inside apply runs the navigation last and ends the run.
+        fixture.apply(vec![MonitorEvent::StepFinished {
+            step: token,
+            result: Ok(()),
+        }]);
+        assert_eq!(runtime.status.text(), "Multi action finished.");
+        assert!(!runtime.multi_running(id));
+        assert!(runtime.page_return_active());
+        assert!(fixture.executed().is_empty());
+        runtime.cancel_timer();
+    });
+}

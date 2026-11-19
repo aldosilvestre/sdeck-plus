@@ -53,7 +53,8 @@ permissions on its own.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume
   control (configurable volume step, default 5%), audio-output switching, the same
   for the microphone (input volume, mute, rotate input devices, a dial preset), sounds, closing an application, brightness, timers, page
-  returns and an optional two-second key hold for a secondary action.
+  returns, an optional two-second key hold for a secondary action and multi actions that run up to
+  16 steps and waits in order from one key.
 - **OBS Studio:** switch scenes, toggle or explicitly start, stop, pause and resume
   recording and streaming, mute inputs, raise or lower an input's volume in dB
   and show or hide sources over the local WebSocket server.

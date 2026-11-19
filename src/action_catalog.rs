@@ -42,6 +42,12 @@ impl CatalogAction {
             )
         )
     }
+
+    /// The controls a built-in action can take; `None` when it fits every control.
+    /// A multi action runs only from a key press or a key hold.
+    fn controls(&self) -> Option<Vec<PluginControl>> {
+        (self.feature == Some(Choice::Multi)).then(|| vec![PluginControl::Key])
+    }
 }
 
 /// What the user did to the catalog, kept across the rebuilds a model change
@@ -77,24 +83,34 @@ pub(crate) fn connect(
         let confirm_ui = ui.clone();
         let confirm_keys = keys.clone();
         let apply: Assign = Rc::new(move |action, target| {
+            let event = match target {
+                Target::Key(_) => EventKind::ButtonPress,
+                Target::Dial(_, event) => event,
+            };
+            let kind = match target {
+                Target::Key(_) => ControlKind::Button,
+                Target::Dial(..) => ControlKind::Encoder,
+            };
+            let control = plugin_ui::plugin_control(kind, event);
+            let control_name = plugin_ui::control_name(control).to_lowercase();
             if let Some((plugin, id)) = &action.plugin {
-                let event = match target {
-                    Target::Key(_) => EventKind::ButtonPress,
-                    Target::Dial(_, event) => event,
-                };
-                let kind = match target {
-                    Target::Key(_) => ControlKind::Button,
-                    Target::Dial(..) => ControlKind::Encoder,
-                };
-                let control = plugin_ui::plugin_control(kind, event);
                 if !ui.plugins.supports(plugin, id, control) {
                     ui.error(&format!(
-                        "That plugin action cannot be assigned to a {}.",
-                        plugin_ui::control_name(control).to_lowercase()
+                        "That plugin action cannot be assigned to a {control_name}."
                     ));
                     return false;
                 }
                 ui.plugins.set_control(Some(control));
+            }
+            // A built-in action that does not fit the control is refused the same way.
+            if let (Some(choice), Some(controls)) = (action.feature, action.controls()) {
+                if !controls.contains(&control) {
+                    ui.error(&format!(
+                        "{} cannot be assigned to a {control_name}.",
+                        choice.label()
+                    ));
+                    return false;
+                }
             }
             let (kind, index, widget) = match target {
                 Target::Key(index) => (ControlKind::Button, index, index),
@@ -293,14 +309,15 @@ pub(crate) fn connect(
     };
     build_plugins();
     ui.plugins.on_change(build_plugins);
+    let sections = Rc::new(sections);
     {
-        let built = plugin_sections.clone();
+        let (fixed, built) = (sections.clone(), plugin_sections.clone());
         let (ui_hub, weak) = (ui.plugins.clone(), plugin_region.downgrade());
         ui.plugins.on_control(move || {
             if weak.upgrade().is_none() {
                 return false;
             }
-            for section in built.borrow().iter() {
+            for section in fixed.iter().chain(built.borrow().iter()) {
                 section.dim_unfit(ui_hub.control());
             }
             true
@@ -310,7 +327,6 @@ pub(crate) fn connect(
     empty.add_css_class("catalog-empty");
     empty.set_visible(false);
     list.append(&empty);
-    let sections = Rc::new(sections);
     let refresh: Rc<dyn Fn()> = {
         let (sections, plugins) = (sections.clone(), plugin_sections.clone());
         let query = memory.query.clone();
@@ -464,7 +480,8 @@ struct Section {
     revealer: gtk::Revealer,
     chevron: gtk::Image,
     rows: Vec<(Button, String)>,
-    /// Plugin rows only: what each row needs, to dim the ones the selected control cannot take.
+    /// What each plugin row and the Multi action row need (enabled, controls), to dim the
+    /// ones the selected control cannot take; `None` for rows that fit every control.
     fit: Vec<Option<(bool, Vec<PluginControl>)>>,
     expanded: Rc<Cell<bool>>,
 }
@@ -516,6 +533,7 @@ impl Section {
         }
         let mut headings = Vec::new();
         let mut rows = Vec::new();
+        let mut fit = Vec::new();
         for (index, (label, subtitle, icon, action)) in entries.into_iter().enumerate() {
             if let Some((_, text)) = groups.iter().find(|(at, _)| *at == index) {
                 let heading = Label::new(Some(text));
@@ -524,6 +542,7 @@ impl Section {
                 body.append(&heading);
                 headings.push(heading);
             }
+            fit.push(action.controls().map(|controls| (true, controls)));
             rows.push(add_row(
                 &body,
                 label,
@@ -547,10 +566,11 @@ impl Section {
             revealer,
             chevron,
             rows,
-            fit: Vec::new(),
+            fit,
             expanded: Rc::new(Cell::new(expanded)),
         };
         section.apply(expanded);
+        section.dim_unfit(ui.plugins.control());
         let revealer = section.revealer.downgrade();
         let chevron = section.chevron.downgrade();
         let state = section.expanded.clone();
@@ -572,7 +592,8 @@ impl Section {
         self.chevron.set_icon_name(Some(chevron_name(open)));
     }
 
-    /// Dim plugin rows that are disabled or do not fit the control being edited.
+    /// Dim rows that are disabled or do not fit the control being edited: plugin actions
+    /// and the Multi action.
     fn dim_unfit(&self, control: Option<PluginControl>) {
         for ((row, label), fit) in self.rows.iter().zip(&self.fit) {
             let Some((enabled, controls)) = fit else {
