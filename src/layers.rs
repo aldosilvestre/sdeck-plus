@@ -182,6 +182,114 @@ pub enum Action {
     Feature(crate::features::FeatureAction),
 }
 
+impl Action {
+    /// The actions this binding runs: itself, or each action step of a multi
+    /// action (waits are not actions).
+    pub fn leaves(&self) -> Vec<&Action> {
+        use crate::features::{FeatureAction, MultiStep};
+        match self {
+            Action::Feature(FeatureAction::Multi { steps }) => steps
+                .iter()
+                .filter_map(|step| match step {
+                    MultiStep::Action(action) => Some(action),
+                    MultiStep::Wait { .. } => None,
+                })
+                .collect(),
+            other => vec![other],
+        }
+    }
+
+    /// Rebuild the action by mapping itself, or each action step of a multi
+    /// action in order; waits are kept. The first error stops the mapping.
+    ///
+    /// # Errors
+    /// The first error `map` returns.
+    pub fn try_map_leaves<E>(
+        self,
+        mut map: impl FnMut(Action) -> Result<Action, E>,
+    ) -> Result<Action, E> {
+        use crate::features::{FeatureAction, MultiStep};
+        match self {
+            Action::Feature(FeatureAction::Multi { steps }) => {
+                let steps = steps
+                    .into_iter()
+                    .map(|step| match step {
+                        MultiStep::Action(action) => map(action).map(MultiStep::Action),
+                        wait @ MultiStep::Wait { .. } => Ok(wait),
+                    })
+                    .collect::<Result<_, _>>()?;
+                Ok(Action::Feature(FeatureAction::Multi { steps }))
+            }
+            other => map(other),
+        }
+    }
+
+    /// [`Self::try_map_leaves`] for a mapping that cannot fail.
+    pub fn map_leaves(self, mut map: impl FnMut(Action) -> Action) -> Action {
+        match self.try_map_leaves(|action| Ok::<_, std::convert::Infallible>(map(action))) {
+            Ok(action) => action,
+            Err(never) => match never {},
+        }
+    }
+
+    /// The action without the leaves `drop` selects: `None` when a plain
+    /// action is dropped, or when a multi action has no action step left.
+    /// A multi action keeps its other steps, waits included, in order.
+    pub fn without_steps(self, mut drop: impl FnMut(&Action) -> bool) -> Option<Action> {
+        use crate::features::{FeatureAction, MultiStep};
+        match self {
+            Action::Feature(FeatureAction::Multi { steps }) => {
+                let steps: Vec<_> = steps
+                    .into_iter()
+                    .filter(|step| !matches!(step, MultiStep::Action(action) if drop(action)))
+                    .collect();
+                steps
+                    .iter()
+                    .any(|step| matches!(step, MultiStep::Action(_)))
+                    .then_some(Action::Feature(FeatureAction::Multi { steps }))
+            }
+            other => (!drop(&other)).then_some(other),
+        }
+    }
+}
+
+/// Whether `action` is a Go to page whose target `missing` selects.
+fn switches_to(action: &Action, missing: impl Fn(&str) -> bool) -> bool {
+    matches!(action, Action::SwitchLayer(target) if missing(target))
+}
+
+/// Drop the bindings, or the multi action steps, that go to a page `missing`
+/// selects. Returns each changed trigger in order, with `true` when its whole
+/// binding was removed and `false` when only steps of it were.
+fn drop_switches(
+    bindings: &mut BTreeMap<Trigger, Action>,
+    missing: impl Fn(&str) -> bool,
+) -> Vec<(Trigger, bool)> {
+    let mut changed = Vec::new();
+    bindings.retain(|trigger, action| {
+        if !action
+            .leaves()
+            .into_iter()
+            .any(|leaf| switches_to(leaf, &missing))
+        {
+            return true;
+        }
+        let taken = std::mem::replace(action, Action::None);
+        match taken.without_steps(|leaf| switches_to(leaf, &missing)) {
+            Some(kept) => {
+                *action = kept;
+                changed.push((trigger.clone(), false));
+                true
+            }
+            None => {
+                changed.push((trigger.clone(), true));
+                false
+            }
+        }
+    });
+    changed
+}
+
 /// Optional follow-up of any binding: move once to the page stored in layer
 /// `layer` (its key names the profile, folder and page) after `seconds`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -354,9 +462,7 @@ impl LayerStore {
         self.kept.retain(|row| row.layer != name);
         self.touchscreens.remove_references(name);
         for layer in self.layers.values_mut() {
-            layer.bindings.retain(
-                |_, action| !matches!(action, Action::SwitchLayer(target) if target == name),
-            );
+            drop_switches(&mut layer.bindings, |target| target == name);
             layer.returns.retain(|_, value| value.layer != name);
         }
         if self.active == name {
@@ -387,11 +493,21 @@ impl LayerStore {
         validate_trigger(self.model, &trigger)?;
         validate_action(&action)?;
         validate_binding_action(&trigger, &action)?;
-        let action = normalize_keyboard_action(action)?;
-        if let Action::SwitchLayer(target) = &action {
-            if !self.layers.contains_key(target) {
-                return Err(invalid("unknown target layer"));
-            }
+        let multi = matches!(
+            action,
+            Action::Feature(crate::features::FeatureAction::Multi { .. })
+        );
+        let action = action.try_map_leaves(normalize_keyboard_action)?;
+        if multi {
+            // Normalized key names must still fit the stored multi action.
+            validate_action(&action)?;
+        }
+        if action
+            .leaves()
+            .into_iter()
+            .any(|leaf| switches_to(leaf, |target| !self.layers.contains_key(target)))
+        {
+            return Err(invalid("unknown target layer"));
         }
         let data = if self.layers.contains_key(owner) {
             self.layers.get_mut(owner)
@@ -840,7 +956,18 @@ fn validate_action(a: &Action) -> io::Result<()> {
         _ => Ok(()),
     }
 }
+/// [`validate_action`] for one step of a multi action.
+pub(crate) fn validate_step_action(a: &Action) -> io::Result<()> {
+    validate_action(a)
+}
 fn validate_binding_action(trigger: &Trigger, action: &Action) -> io::Result<()> {
+    if matches!(
+        action,
+        Action::Feature(crate::features::FeatureAction::Multi { .. })
+    ) && !matches!(trigger, Trigger::KeyPress(_) | Trigger::KeyHold(_))
+    {
+        return Err(invalid("multi actions require a key press or key hold"));
+    }
     if matches!(
         action,
         Action::Feature(crate::features::FeatureAction::Touchscreen(_))
@@ -979,7 +1106,7 @@ fn decode_trigger(model: &DeviceModel, s: &str) -> Result<Trigger, String> {
     validate_trigger(model, &t).map_err(|e| e.to_string())?;
     Ok(t)
 }
-fn encode_action(a: &Action) -> io::Result<String> {
+pub(crate) fn encode_action(a: &Action) -> io::Result<String> {
     validate_action(a)?;
     Ok(match a {
         Action::None => "none".into(),
@@ -1008,7 +1135,7 @@ fn encode_action(a: &Action) -> io::Result<String> {
         Action::Feature(action) => format!("feature-v1:{}", hex(action.encode()?.as_bytes())),
     })
 }
-fn decode_action(s: &str) -> Result<Action, String> {
+pub(crate) fn decode_action(s: &str) -> Result<Action, String> {
     let action = if s == "none" {
         Action::None
     } else if let Some(value) = s.strip_prefix("feature-v1:") {
@@ -1209,21 +1336,20 @@ fn parse(model: &DeviceModel, text: &str) -> Result<Parsed, String> {
     }
     let names: Vec<String> = layers.keys().cloned().collect();
     for layer in layers.values_mut() {
-        let dangling: Vec<Trigger> = layer
-            .bindings
-            .iter()
-            .filter(|(_, action)| {
-                matches!(action, Action::SwitchLayer(target) if !names.contains(target))
-            })
-            .map(|(trigger, _)| trigger.clone())
-            .collect();
-        for trigger in dangling {
-            layer.bindings.remove(&trigger);
-            layer.returns.remove(&trigger);
+        let changed = drop_switches(&mut layer.bindings, |target| {
+            !names.iter().any(|name| name == target)
+        });
+        for (trigger, removed) in changed {
+            let reason = if removed {
+                layer.returns.remove(&trigger);
+                "binding references a missing target layer"
+            } else {
+                "multi action step references a missing target layer"
+            };
             conflicts.push(ConfigConflict {
                 layer: layer.name.clone(),
                 control: encode_trigger(&trigger),
-                reason: "binding references a missing target layer".into(),
+                reason: reason.into(),
                 row: String::new(),
                 kept: false,
             });
@@ -1297,11 +1423,12 @@ fn apply_row(
                 });
                 return Ok(Some(reason));
             }
-            let mut action = decode_action(action)?;
+            let action = decode_action(action)?;
             validate_binding_action(&trigger, &action).map_err(|error| error.to_string())?;
-            if let Action::SwitchLayer(target) = &mut action {
-                *target = canonical_layer_name(target);
-            }
+            let action = action.map_leaves(|leaf| match leaf {
+                Action::SwitchLayer(target) => Action::SwitchLayer(canonical_layer_name(&target)),
+                other => other,
+            });
             let data = layers
                 .get_mut(&layer)
                 .ok_or("binding references missing layer")?;

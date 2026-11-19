@@ -838,7 +838,8 @@ impl FeatureEditor {
             }
             FeatureAction::CancelTimer => Choice::CancelTimer,
             // The plugin editor owns plugin actions; there is no built-in choice to show.
-            FeatureAction::Plugin(_) => return,
+            // Plugins have their own editor; multi actions get theirs in T4.
+            FeatureAction::Plugin(_) | FeatureAction::Multi { .. } => return,
         };
         self.category.set_selected(choice.category());
         if let Some(index) = self.choices().position(|value| value == choice) {

@@ -297,9 +297,7 @@ impl Touchscreens {
             .values_mut()
             .flat_map(|profile| &mut profile.pages)
         {
-            page.bindings.retain(
-                |_, action| !matches!(action, Action::SwitchLayer(target) if target == name),
-            );
+            drop_switches(&mut page.bindings, |target| target == name);
             page.returns.retain(|trigger, value| {
                 value.layer != name && page.bindings.contains_key(trigger)
             });

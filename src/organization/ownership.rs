@@ -2,6 +2,12 @@ use super::{action, invalid, LayerStore, NavigationAction, Organization};
 use crate::{features::FeatureAction, layers::Action};
 use std::io;
 
+/// Whether `action` opens the folder `name`.
+fn opens_folder(action: &Action, name: &str) -> bool {
+    matches!(action,
+        Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(folder))) if folder == name)
+}
+
 impl Organization {
     /// Sorted direct child folders belonging to the selected page.
     pub fn folders(&self, layers: &LayerStore) -> Vec<String> {
@@ -62,6 +68,9 @@ impl Organization {
 
     /// Remove only the selected page's named child folder and its descendants.
     ///
+    /// The owner page's bindings that open the folder are removed; a multi
+    /// action loses only that step, unless it leaves no action step.
+    ///
     /// # Errors
     /// Invalid or missing local folder names leave both stores unchanged.
     pub fn remove_folder(&mut self, layers: &mut LayerStore, name: &str) -> io::Result<()> {
@@ -80,16 +89,29 @@ impl Organization {
             return Err(invalid("unknown local folder"));
         }
         let owner = layers.active().to_owned();
-        let links: Vec<_> = layers.layers().get(&owner)
-            .ok_or_else(|| invalid("unknown owning page"))?.bindings.iter()
-            .filter(|(_, action)| matches!(action,
-                Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(folder))) if folder == name)
-            ).map(|(trigger, _)| trigger.clone()).collect();
+        let opens = |action: &Action| opens_folder(action, name);
+        let links: Vec<_> = layers
+            .layers()
+            .get(&owner)
+            .ok_or_else(|| invalid("unknown owning page"))?
+            .bindings
+            .iter()
+            .filter(|(_, action)| action.leaves().into_iter().any(opens))
+            .map(|(trigger, action)| (trigger.clone(), action.clone().without_steps(opens)))
+            .collect();
         let removed = self.descendants(children);
-        self.remove_views(layers, &removed)?;
-        for trigger in links {
-            layers.unbind(&owner, &trigger)?;
+        // Stage the link cleanup so any error leaves both stores unchanged.
+        let mut updated = layers.clone();
+        for (trigger, kept) in links {
+            match kept {
+                Some(action) => updated.bind_configuration(&owner, trigger, action)?,
+                None => {
+                    updated.unbind(&owner, &trigger)?;
+                }
+            }
         }
+        self.remove_views(&mut updated, &removed)?;
+        *layers = updated;
         Ok(())
     }
 
@@ -97,7 +119,8 @@ impl Organization {
     ///
     /// Layer keys stay unchanged (like `rename_page`). The folder's pages, the
     /// folder path of every descendant and the owner page's `OpenFolder(old)`
-    /// bindings move to the new name. Renaming to the same name is a no-op.
+    /// bindings, multi action steps included, move to the new name. Renaming
+    /// to the same name is a no-op.
     ///
     /// # Errors
     /// Invalid names, unknown local folders and names already used by another
@@ -142,15 +165,26 @@ impl Organization {
         }
         super::storage::validate(&views)?;
         let mut updated = layers.clone();
-        let links: Vec<_> = layers.layers().get(&owner)
-            .ok_or_else(|| invalid("unknown owning page"))?.bindings.iter()
-            .filter(|(_, action)| matches!(action,
-                Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(folder))) if folder == old)
-            ).map(|(trigger, _)| trigger.clone()).collect();
-        for trigger in links {
-            let action = Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(
-                new.to_owned(),
-            )));
+        let opens = |action: &Action| opens_folder(action, old);
+        let links: Vec<_> = layers
+            .layers()
+            .get(&owner)
+            .ok_or_else(|| invalid("unknown owning page"))?
+            .bindings
+            .iter()
+            .filter(|(_, action)| action.leaves().into_iter().any(opens))
+            .map(|(trigger, action)| (trigger.clone(), action.clone()))
+            .collect();
+        for (trigger, action) in links {
+            let action = action.map_leaves(|leaf| {
+                if opens(&leaf) {
+                    Action::Feature(FeatureAction::Navigation(NavigationAction::OpenFolder(
+                        new.to_owned(),
+                    )))
+                } else {
+                    leaf
+                }
+            });
             updated.bind_configuration(&owner, trigger, action)?;
         }
         *layers = updated;

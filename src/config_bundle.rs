@@ -261,19 +261,34 @@ fn validate(stage: &Path, model: &'static DeviceModel) -> io::Result<LayerStore>
     Ok(layers)
 }
 
+/// Every binding of every configuration, with the name of its owner.
+fn all_bindings(layers: &LayerStore) -> Vec<(String, crate::layers::Trigger, Action)> {
+    layers
+        .configurations()
+        .flat_map(|layer| {
+            layer
+                .bindings
+                .iter()
+                .map(|(trigger, action)| (layer.name.clone(), trigger.clone(), action.clone()))
+        })
+        .collect()
+}
+
+/// Every sound a binding plays: one entry per sound step of a multi action.
 fn audio_bindings(layers: &LayerStore) -> Vec<(String, crate::layers::Trigger, PathBuf)> {
     layers
         .configurations()
         .flat_map(|layer| {
-            let name = &layer.name;
-            layer.bindings.iter().filter_map(move |(trigger, action)| {
-                if let Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) =
-                    action
-                {
-                    Some((name.clone(), trigger.clone(), path.clone()))
-                } else {
-                    None
-                }
+            layer.bindings.iter().flat_map(move |(trigger, action)| {
+                action
+                    .leaves()
+                    .into_iter()
+                    .filter_map(move |leaf| match leaf {
+                        Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                            path,
+                        })) => Some((layer.name.clone(), trigger.clone(), path.clone())),
+                        _ => None,
+                    })
             })
         })
         .collect()
@@ -302,31 +317,50 @@ fn local_reference(root: &Path, reference: &Path, folder: &str) -> io::Result<Pa
     Ok(root.join(folder).join(name))
 }
 
+/// Make every file reference portable (export, with `destination`) or local
+/// to `root` (import), in each step of a multi action too. Only bindings that
+/// name a file are rebound.
 fn transform_files(
     layers: &mut LayerStore,
     root: &Path,
     destination: Option<&Path>,
 ) -> io::Result<()> {
-    let bindings: Vec<_> = layers
-        .configurations()
-        .flat_map(|layer| {
-            layer
-                .bindings
-                .iter()
-                .map(|(trigger, action)| (layer.name.clone(), trigger.clone(), action.clone()))
-        })
-        .collect();
     let mut names = BTreeMap::new();
-    for (layer, trigger, action) in bindings {
+    for (layer, trigger, action) in all_bindings(layers) {
         let action = if destination.is_some() {
             crate::asset_links::unlink_action(root, &action)
         } else {
             action
         };
-        let convert = |path: &Path,
-                       folder: &str,
-                       names: &mut BTreeMap<String, PathBuf>|
-         -> io::Result<PathBuf> {
+        let mut names_a_file = false;
+        let transformed = action.try_map_leaves(|leaf| -> io::Result<Action> {
+            Ok(
+                match transform_file(root, destination, &mut names, &leaf)? {
+                    Some(transformed) => {
+                        names_a_file = true;
+                        transformed
+                    }
+                    None => leaf,
+                },
+            )
+        })?;
+        if names_a_file {
+            layers.bind_configuration(&layer, trigger, transformed)?;
+        }
+    }
+    Ok(())
+}
+
+/// One action with its file reference transformed as [`transform_files`]
+/// describes, or `None` when it names no file.
+fn transform_file(
+    root: &Path,
+    destination: Option<&Path>,
+    names: &mut BTreeMap<String, PathBuf>,
+    action: &Action,
+) -> io::Result<Option<Action>> {
+    let convert =
+        |path: &Path, folder: &str, names: &mut BTreeMap<String, PathBuf>| -> io::Result<PathBuf> {
             if let Some(destination) = destination {
                 let original = if path.is_absolute() {
                     path.to_owned()
@@ -349,43 +383,40 @@ fn transform_files(
                 local_reference(root, path, folder)
             }
         };
-        let transformed = match action {
-            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
-                Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
-                    path: convert(&path, "sonidos", &mut names)?,
-                }))
+    Ok(Some(match action {
+        Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                path: convert(path, "sonidos", names)?,
+            }))
+        }
+        Action::Feature(FeatureAction::Desktop(DesktopAction::Open { target })) => {
+            let path = if target.starts_with("file://") && destination.is_some() {
+                gtk::glib::filename_from_uri(target)
+                    .map_err(|_| invalid("invalid file URI"))?
+                    .0
+            } else if target.starts_with("file://") {
+                return Err(invalid("file reference must use its relative type folder"));
+            } else if target.contains("://") || target.starts_with("mailto:") {
+                return Ok(None);
+            } else {
+                PathBuf::from(target)
+            };
+            Action::Feature(FeatureAction::Desktop(DesktopAction::Open {
+                target: convert(&path, "archivos", names)?
+                    .to_string_lossy()
+                    .into_owned(),
+            }))
+        }
+        Action::Launch { executable, args }
+            if executable.components().count() > 1 || executable.is_absolute() =>
+        {
+            Action::Launch {
+                executable: convert(executable, "archivos", names)?,
+                args: args.clone(),
             }
-            Action::Feature(FeatureAction::Desktop(DesktopAction::Open { target })) => {
-                let path = if target.starts_with("file://") && destination.is_some() {
-                    gtk::glib::filename_from_uri(&target)
-                        .map_err(|_| invalid("invalid file URI"))?
-                        .0
-                } else if target.starts_with("file://") {
-                    return Err(invalid("file reference must use its relative type folder"));
-                } else if target.contains("://") || target.starts_with("mailto:") {
-                    continue;
-                } else {
-                    PathBuf::from(target)
-                };
-                Action::Feature(FeatureAction::Desktop(DesktopAction::Open {
-                    target: convert(&path, "archivos", &mut names)?
-                        .to_string_lossy()
-                        .into_owned(),
-                }))
-            }
-            Action::Launch { executable, args }
-                if executable.components().count() > 1 || executable.is_absolute() =>
-            {
-                Action::Launch {
-                    executable: convert(&executable, "archivos", &mut names)?,
-                    args,
-                }
-            }
-            _ => continue,
-        };
-        layers.bind_configuration(&layer, trigger, transformed)?;
-    }
-    Ok(())
+        }
+        _ => return Ok(None),
+    }))
 }
 
 fn portable_artwork(bytes: &[u8]) -> io::Result<Vec<u8>> {
@@ -411,17 +442,25 @@ fn portable_artwork(bytes: &[u8]) -> io::Result<Vec<u8>> {
     Ok(result.into_bytes())
 }
 
-fn bind_audio(
-    layers: &mut LayerStore,
-    layer: &str,
-    trigger: crate::layers::Trigger,
-    path: PathBuf,
-) -> io::Result<()> {
-    layers.bind_configuration(
-        layer,
-        trigger,
-        Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })),
-    )
+/// Point every sound of a legacy bundle, sound steps of a multi action
+/// included, at its installed copy under `root`.
+fn relocate_audio(layers: &mut LayerStore, root: &Path) -> io::Result<()> {
+    for (layer, trigger, action) in all_bindings(layers) {
+        let mut plays_audio = false;
+        let relocated = action.map_leaves(|leaf| match leaf {
+            Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })) => {
+                plays_audio = true;
+                Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio {
+                    path: root.join(path),
+                }))
+            }
+            other => other,
+        });
+        if plays_audio {
+            layers.bind_configuration(&layer, trigger, relocated)?;
+        }
+    }
+    Ok(())
 }
 
 fn persist_layers(layers: &LayerStore) -> io::Result<()> {
@@ -663,9 +702,7 @@ pub fn import_for(
         materialize(&stage, &files)?;
         let mut layers = validate(&stage, model)?;
         validate_portable_audio(&layers, &stage)?;
-        for (layer, trigger, path) in audio_bindings(&layers) {
-            bind_audio(&mut layers, &layer, trigger, root.join(path))?;
-        }
+        relocate_audio(&mut layers, &root)?;
         persist_layers(&layers)?;
         for name in CONFIGS {
             if stage.join(name).exists() {

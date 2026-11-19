@@ -277,7 +277,7 @@ impl BindingIcon {
                     VolumeDirection::Down => Self::VolumeDown,
                 },
             },
-            FeatureAction::Plugin(_) => Self::More,
+            FeatureAction::Plugin(_) | FeatureAction::Multi { .. } => Self::More,
             FeatureAction::Timer { .. } => Self::Timer,
             FeatureAction::CancelTimer => Self::CancelTimer,
         }
