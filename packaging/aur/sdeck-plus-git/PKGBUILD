@@ -14,7 +14,8 @@ options=('!lto')
 optdepends=('mpv: sound playback'
             'wireplumber: volume and mute (wpctl)'
             'pipewire: audio output discovery (pw-dump)'
-            'wl-clipboard: text pasting (wl-copy)'
+            'wtype: typing text into any window'
+            'wl-clipboard: text pasting without wtype (wl-copy)'
             'xdg-utils: opening files and websites (xdg-open)'
             'curl: weather information')
 provides=('sdeck-plus')

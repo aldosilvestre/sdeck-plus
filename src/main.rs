@@ -5150,6 +5150,7 @@ mod tests {
     mod touchscreen_tests;
     mod tray_startup;
     mod two_device_tests;
+    mod type_text_keys_tests;
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;

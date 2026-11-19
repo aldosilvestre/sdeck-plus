@@ -25,6 +25,16 @@ All notable changes to this project are documented here. The format follows
   the row unchanged without showing or running it. There is no per-step timeout: a command that
   never ends keeps that key's sequence busy (and, like a single Command, the action worker) until it
   ends. New `sdeck-multi-symbolic` icon on keys and in menus.
+- **Keys inside Type text:** a Type text action can press keys at any point of its text, like a
+  small macro: `{Enter}`, `{Tab}`, `{Esc}`, `{Up}`, `{Down}`, `{Left}` and `{Right}` (in any letter
+  case), so `user{Tab}password{Enter}` fills a login form and sends it. Under the Text field, the
+  **Insert key** buttons (Enter, Tab, Esc, ↑, ↓, ←, →) put a key at the cursor and a muted
+  line shows what is typed ("Types: user ⇥ password ⏎"), in the binding editor and in a multi
+  action step. `{{` types a literal `{`; any other brace is typed as written. An existing text that
+  contains one of these tokens or `{{` now presses that key or types a single brace; write
+  `{{Enter}` to type the word `{Enter}` itself. With `wtype` each part of the text is one run
+  with the keys after it, in order; without it or its virtual keyboard each part is pasted and
+  each key pressed physically. **Press Enter after text** and the stored action are unchanged.
 
 ### Changed
 
@@ -35,6 +45,15 @@ All notable changes to this project are documented here. The format follows
 - **Messages in a top-center toast only:** binding and plugin-install results and errors no longer
   show as a line below the Add plugin and Update plugins buttons, so the tabs sit right under
   them; they appear in the toast, which now opens at the top center of the window.
+
+### Fixed
+
+- **Type text works in any window, terminals included:** the text is now typed through a Wayland
+  virtual keyboard with `wtype`, so it no longer depends on each application's paste shortcut and
+  leaves the clipboard alone. Ctrl+V was a literal-insert prefix in terminals (only "^M" appeared),
+  and no paste chord works everywhere (kitty with `clear_all_shortcuts` showed "<S-Insert>").
+  Without `wtype`, or when the compositor lacks its virtual-keyboard protocol, it falls back to
+  the clipboard and primary selection plus Shift+Insert.
 
 ## [1.0.0] - 2026-11-15
 

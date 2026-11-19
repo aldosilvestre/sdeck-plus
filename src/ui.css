@@ -410,6 +410,8 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     font-weight: 600;
     box-shadow: inset 0 0 0 1px @desk_violet;
 }
+/* Type text: the Insert key buttons are one compact linked row under the Text field. */
+.text-keys > button { min-height: 20px; min-width: 20px; padding: 4px 8px; }
 .navigation-card { background-color: @desk_surface; }
 .artwork-controls button, .button-text-choices button { min-height: 20px; padding: 4px 8px; }
 .button-text-choices button { min-width: 28px; }

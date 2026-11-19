@@ -271,7 +271,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             <article class="card">
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
-                 <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
+                 <code>curl</code> (weather), <code>wtype</code> (typing text; <code>wl-clipboard</code> is the fallback), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
               <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
                  <code>TAG+="uaccess"</code>:</p>
               <div class="code-block">
@@ -505,8 +505,11 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Text, files, websites and processes</h4>
-              <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
-                 and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+              <p>Text is typed through a Wayland virtual keyboard with <code>wtype</code>, so it reaches any focused window (terminals included) whatever its paste shortcuts are, and it leaves the clipboard alone; a line break in the text is typed as Return.
+                 <strong>Type text</strong> can also press keys at any point, like a small macro: <code>{Enter}</code>, <code>{Tab}</code>, <code>{Esc}</code>, <code>{Up}</code>, <code>{Down}</code>, <code>{Left}</code> and <code>{Right}</code> (in any letter case) press that key there, so <code>user{Tab}password{Enter}</code> fills a login form and sends it.
+                 The <strong>Insert key</strong> buttons under the text put a key at the cursor, and the line below them shows what is typed (<code>Types: user &#8677; password &#9166;</code>); <strong>Press Enter after text</strong> still adds a final Enter. <code>{{</code> types a literal <code>{</code>; any other brace, such as <code>{Foo}</code>, is typed as written. To type a token itself, double its opening brace (<code>{{Enter}</code> types <code>{Enter}</code>); a text saved before this version that contains a token or <code>{{</code> now presses that key or types a single brace.
+                 Each part of the text is one <code>wtype</code> run with the keys after it, one run after another; if <code>wtype</code> disappears partway, the action stops with an error and nothing is typed twice.
+                 Without <code>wtype</code>, or when the compositor lacks the virtual-keyboard protocol <code>wtype</code> needs (checked before anything is typed), it falls back to the Wayland clipboard (<code>wl-copy</code>): for each part of the text it replaces the clipboard and the primary selection and sends a physical Shift+Insert chord, which only works where Shift+Insert pastes, and each key is pressed as a physical key. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
                  <strong>Close application</strong> targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
             </article>
             <article class="card">
