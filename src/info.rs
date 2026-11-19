@@ -97,9 +97,8 @@ impl InfoSource {
     /// Icon used before the first reading and when a reading fails.
     pub fn glyph(self) -> Glyph {
         match self {
-            Self::Volume | Self::AudioDevice | Self::InputVolume | Self::InputDevice => {
-                Glyph::Speaker
-            }
+            Self::Volume | Self::AudioDevice => Glyph::Speaker,
+            Self::InputVolume | Self::InputDevice => Glyph::Microphone,
             Self::Brightness => Glyph::Sun,
             Self::Clock => Glyph::None,
             Self::Weather => Glyph::Cloud,
@@ -109,6 +108,29 @@ impl InfoSource {
             Self::Obs => Glyph::ObsIdle,
             Self::NowPlaying => Glyph::MediaIdle,
         }
+    }
+
+    /// Parses `wpctl` output for an audio source; other sources have none.
+    ///
+    /// Microphone sources show a microphone (crossed out while muted) where
+    /// the outputs show a speaker or headphones.
+    pub fn parse(self, output: &str) -> Option<InfoValue> {
+        let value = match self {
+            Self::Volume | Self::InputVolume => parse_volume(output)?,
+            Self::AudioDevice | Self::InputDevice => parse_audio_device(output)?,
+            _ => return None,
+        };
+        if !matches!(self, Self::InputVolume | Self::InputDevice) {
+            return Some(value);
+        }
+        Some(InfoValue {
+            glyph: if value.glyph == Glyph::SpeakerMuted {
+                Glyph::MicrophoneMuted
+            } else {
+                Glyph::Microphone
+            },
+            ..value
+        })
     }
 
     /// Shown until the first reading arrives.
@@ -169,6 +191,9 @@ pub enum Glyph {
     Speaker,
     SpeakerMuted,
     Headphones,
+    /// Microphone (audio source) volume and device.
+    Microphone,
+    MicrophoneMuted,
     Sun,
     Cloud,
     PartlyCloudy,
@@ -611,12 +636,10 @@ impl InfoReader {
 
     fn try_read(&mut self, source: InfoSource) -> Option<InfoValue> {
         match source {
-            InfoSource::Volume | InfoSource::InputVolume => {
-                parse_volume(&run("wpctl", &source.wpctl_args()?)?)
-            }
-            InfoSource::AudioDevice | InfoSource::InputDevice => {
-                parse_audio_device(&run("wpctl", &source.wpctl_args()?)?)
-            }
+            InfoSource::Volume
+            | InfoSource::InputVolume
+            | InfoSource::AudioDevice
+            | InfoSource::InputDevice => source.parse(&run("wpctl", &source.wpctl_args()?)?),
             InfoSource::Brightness => None,
             InfoSource::Clock => {
                 let output = run("date", &["+%H:%M%n%a %d"])?;
@@ -1051,7 +1074,14 @@ mod tests {
             "Microphone volume and mute"
         );
         assert_eq!(InfoSource::InputDevice.label(), "Audio input device");
-        assert_eq!(InfoSource::InputVolume.glyph(), Glyph::Speaker);
+        for source in [InfoSource::InputVolume, InfoSource::InputDevice] {
+            assert_eq!(source.glyph(), Glyph::Microphone);
+            assert_eq!(source.placeholder().glyph, Glyph::Microphone);
+            assert_eq!(source.unavailable().glyph, Glyph::Microphone);
+        }
+        for source in [InfoSource::Volume, InfoSource::AudioDevice] {
+            assert_eq!(source.glyph(), Glyph::Speaker);
+        }
         for source in [InfoSource::InputVolume, InfoSource::InputDevice] {
             assert!(source.is_polled() && source.follows_actions());
         }
@@ -1073,14 +1103,34 @@ mod tests {
                 InfoSource::NowPlaying,
             ]
         );
-        // The same parsers read a microphone: muted shows the muted glyph.
-        let muted = parse_volume("Volume: 0.80 [MUTED]").unwrap();
-        assert_eq!(muted.glyph, Glyph::SpeakerMuted);
-        let mic = parse_audio_device(
-            "id 55, type PipeWire:Interface:Node\n  * node.description = \"USB Headset Mic\"\n",
-        )
-        .unwrap();
-        assert_eq!(mic.glyph, Glyph::Headphones);
+        // A microphone reading shows a microphone, crossed out while muted,
+        // even for a headset; outputs keep the speaker and headphones.
+        let headset =
+            "id 55, type PipeWire:Interface:Node\n  * node.description = \"USB Headset Mic\"\n";
+        let muted = InfoSource::InputVolume
+            .parse("Volume: 0.80 [MUTED]")
+            .unwrap();
+        assert_eq!(
+            (muted.glyph, muted.inactive),
+            (Glyph::MicrophoneMuted, true)
+        );
+        assert_eq!((muted.headline.as_str(), muted.level), ("80%", Some(80)));
+        let on = InfoSource::InputVolume.parse("Volume: 0.80").unwrap();
+        assert_eq!((on.glyph, on.inactive), (Glyph::Microphone, false));
+        let mic = InfoSource::InputDevice.parse(headset).unwrap();
+        assert_eq!(mic.glyph, Glyph::Microphone);
+        assert_eq!(
+            mic,
+            InfoValue {
+                glyph: Glyph::Microphone,
+                ..parse_audio_device(headset).unwrap()
+            }
+        );
+        let speaker = InfoSource::Volume.parse("Volume: 0.80 [MUTED]").unwrap();
+        assert_eq!(speaker.glyph, Glyph::SpeakerMuted);
+        let headphones = InfoSource::AudioDevice.parse(headset).unwrap();
+        assert_eq!(headphones.glyph, Glyph::Headphones);
+        assert_eq!(InfoSource::Clock.parse("12:00"), None);
     }
 
     #[test]

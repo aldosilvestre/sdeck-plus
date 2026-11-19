@@ -176,6 +176,8 @@ impl BindingIcon {
             Glyph::Speaker => Self::Volume,
             Glyph::SpeakerMuted => Self::Mute,
             Glyph::Headphones => Self::AudioOutput,
+            Glyph::Microphone => Self::AudioInput,
+            Glyph::MicrophoneMuted => Self::MicrophoneMute,
             Glyph::Sun => Self::Brightness,
             Glyph::Cloud => Self::Cloud,
             Glyph::PartlyCloudy => Self::PartlyCloudy,
@@ -1205,7 +1207,6 @@ impl Pen {
     }
 }
 
-/// A speaker body pointing right, its mouth at x = -1.
 /// A microphone body, shifted left so a +/- mark fits on its right.
 fn microphone(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     rounded(cairo, -7.0, -10.5, 7.5, 13.5, 3.75);
@@ -1217,6 +1218,7 @@ fn microphone(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     pen.line(cairo)
 }
 
+/// A speaker body pointing right, its mouth at x = -1.
 fn speaker(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     closed(
         cairo,
