@@ -45,6 +45,8 @@ pub(crate) type Invoke =
 struct Job {
     request_id: String,
     binding: PluginBinding,
+    /// The multi action step this request runs, reported back when it ends.
+    step: Option<u64>,
 }
 
 /// Why a request was not admitted.
@@ -65,6 +67,20 @@ pub(crate) struct PluginSender {
 impl PluginSender {
     /// Queues a snapshot of `binding` without waiting and returns its request id.
     pub(crate) fn submit(&self, binding: &PluginBinding) -> Result<String, Rejected> {
+        self.enqueue(binding, None)
+    }
+
+    /// [`Self::submit`] for step `step` of a multi action: its end is reported as
+    /// [`MonitorEvent::StepFinished`] instead of a status.
+    pub(crate) fn submit_step(
+        &self,
+        binding: &PluginBinding,
+        step: u64,
+    ) -> Result<String, Rejected> {
+        self.enqueue(binding, Some(step))
+    }
+
+    fn enqueue(&self, binding: &PluginBinding, step: Option<u64>) -> Result<String, Rejected> {
         if self.stop.load(Ordering::Acquire) {
             return Err(Rejected::Stopped);
         }
@@ -72,6 +88,7 @@ impl PluginSender {
         let job = Job {
             request_id: request_id.clone(),
             binding: binding.clone(),
+            step,
         };
         self.jobs.try_send(job).map_err(|error| match error {
             mpsc::TrySendError::Full(_) => Rejected::Busy,
@@ -297,17 +314,20 @@ pub(crate) fn spawn_queries(
 
 fn report(job: &Job, result: Result<InvokeOutcome, PluginError>) -> MonitorEvent {
     let name = format!("{}/{}", job.binding.plugin_id, job.binding.action_id);
-    match result {
-        Ok(outcome) => MonitorEvent::AppEvent {
+    let result = result
+        .map_err(|error| format!("Plugin {name} failed: {error} (request {})", job.request_id));
+    match (job.step, result) {
+        (Some(step), result) => MonitorEvent::StepFinished {
+            step,
+            result: result.map(drop),
+        },
+        (None, Ok(outcome)) => MonitorEvent::AppEvent {
             name: match outcome.message {
                 Some(message) => format!("Plugin {name}: {message}"),
                 None => format!("Plugin {name} finished."),
             },
         },
-        Err(error) => MonitorEvent::LayerError(format!(
-            "Plugin {name} failed: {error} (request {})",
-            job.request_id
-        )),
+        (None, Err(error)) => MonitorEvent::LayerError(error),
     }
 }
 
@@ -662,6 +682,53 @@ mod tests {
             panic!("a missing plugin answers with an error");
         };
         assert!(result.unwrap_err().contains("not installed"));
+        assert!(worker.shutdown());
+    }
+
+    #[test]
+    fn a_multi_action_step_reports_its_end_by_token_instead_of_a_status() {
+        let (results, events) = mpsc::channel();
+        let invoke: Invoke = Box::new(|binding, _| {
+            if binding.action_id == "bad" {
+                Err(PluginError::Disabled("demo".into()))
+            } else {
+                ok()
+            }
+        });
+        let (sender, mut worker) = spawn(invoke, results).unwrap();
+        sender.submit_step(&binding("good"), 41).unwrap();
+        assert_eq!(
+            events.recv_timeout(BOUND).unwrap(),
+            MonitorEvent::StepFinished {
+                step: 41,
+                result: Ok(())
+            }
+        );
+        let finished = MonitorEvent::PluginFinished {
+            plugin_id: "demo".into(),
+        };
+        assert_eq!(events.recv_timeout(BOUND).unwrap(), finished);
+        let id = sender.submit_step(&binding("bad"), 42).unwrap();
+        assert_eq!(
+            events.recv_timeout(BOUND).unwrap(),
+            MonitorEvent::StepFinished {
+                step: 42,
+                result: Err(format!(
+                    "Plugin demo/bad failed: {} (request {id})",
+                    PluginError::Disabled("demo".into())
+                ))
+            }
+        );
+        assert_eq!(events.recv_timeout(BOUND).unwrap(), finished);
+        // A plain request still reports its status.
+        sender.submit(&binding("good")).unwrap();
+        assert_eq!(
+            events.recv_timeout(BOUND).unwrap(),
+            MonitorEvent::AppEvent {
+                name: "Plugin demo/good: done".into()
+            }
+        );
+        assert_eq!(events.recv_timeout(BOUND).unwrap(), finished);
         assert!(worker.shutdown());
     }
 

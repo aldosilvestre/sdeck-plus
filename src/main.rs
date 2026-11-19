@@ -86,6 +86,12 @@ enum LayerCommand {
         binding_id: String,
         action: Action,
     },
+    /// One step of a multi action; its end is reported with `step`.
+    ExecuteStep {
+        binding_id: String,
+        action: Action,
+        step: u64,
+    },
     ObsSave(sdeck_plus::obs::ObsConfig),
     ObsProbe(sdeck_plus::obs::ObsConfig),
     ExportConfiguration {
@@ -133,14 +139,7 @@ fn execute_layer_action_for(
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
-    let result = match action {
-        Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
-            feature_runtime::active_root(root)
-                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
-                .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
-        }
-        _ => executor.execute_for(binding_id, action),
-    };
+    let result = run_layer_action(executor, root, binding_id, action);
     let succeeded = result.is_ok();
     let event = match result {
         Ok(()) => MonitorEvent::AppEvent {
@@ -155,6 +154,54 @@ fn execute_layer_action_for(
         if let Err(error) = output.send(MonitorEvent::ActionDispatched) {
             eprintln!("Action completion delivery failed: {error}");
         }
+    }
+}
+
+/// One step of a multi action: its end, success or error, is reported with the
+/// step's token instead of a status, so the sequence starts the next step.
+fn execute_layer_step_for(
+    executor: &mut sdeck_plus::layers::ActionExecutor<
+        impl sdeck_plus::layers::ProcessRunner,
+        impl sdeck_plus::layers::KeyboardSender,
+    >,
+    root: Option<&std::path::Path>,
+    binding_id: &str,
+    action: &Action,
+    step: u64,
+    output: &mpsc::Sender<MonitorEvent>,
+) {
+    let result = run_layer_action(executor, root, binding_id, action);
+    let succeeded = result.is_ok();
+    let finished = MonitorEvent::StepFinished {
+        step,
+        result: result.map_err(|error| error.to_string()),
+    };
+    if let Err(error) = output.send(finished) {
+        eprintln!("Step result delivery failed: {error}");
+    }
+    if succeeded {
+        if let Err(error) = output.send(MonitorEvent::ActionDispatched) {
+            eprintln!("Action completion delivery failed: {error}");
+        }
+    }
+}
+
+fn run_layer_action(
+    executor: &mut sdeck_plus::layers::ActionExecutor<
+        impl sdeck_plus::layers::ProcessRunner,
+        impl sdeck_plus::layers::KeyboardSender,
+    >,
+    root: Option<&std::path::Path>,
+    binding_id: &str,
+    action: &Action,
+) -> std::io::Result<()> {
+    match action {
+        Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
+            feature_runtime::active_root(root)
+                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
+                .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
+        }
+        _ => executor.execute_for(binding_id, action),
     }
 }
 
@@ -2115,6 +2162,9 @@ impl EventSurface {
                 result,
             } => artwork.update_plugin_value(layer, target, binding, result),
             MonitorEvent::PluginFinished { plugin_id } => artwork.plugin_finished(&plugin_id),
+            MonitorEvent::StepFinished { step, result } => {
+                feature_runtime.step_finished(step, result);
+            }
             MonitorEvent::BindingSaveResult(result) => {
                 let (message, failed) = match result {
                     Ok(()) => ("Binding saved successfully.".to_owned(), false),
@@ -5243,6 +5293,7 @@ mod tests {
     mod live_info_tests;
     mod model_selector_tests;
     mod model_session_tests;
+    mod multi_action_runtime_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;
     mod page_return_tests;

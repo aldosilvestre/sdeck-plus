@@ -179,6 +179,12 @@ pub enum MonitorEvent {
     PluginFinished {
         plugin_id: String,
     },
+    /// A worker finished one step of a multi action; `step` is the token the
+    /// application gave that step. In memory only.
+    StepFinished {
+        step: u64,
+        result: Result<(), String>,
+    },
     /// Liveness probe; consumers ignore this message.
     Heartbeat,
 }
