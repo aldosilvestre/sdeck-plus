@@ -217,6 +217,9 @@ pub enum ArtworkCommand {
         caption: String,
         /// The key's user button text, kept exactly where it was placed.
         text: Option<crate::button_text::ButtonText>,
+        /// The key's own artwork, drawn under the icon instead of black (an
+        /// idle timer key keeps its icon over it). Touch sections have none.
+        path: Option<PathBuf>,
         strip_path: Option<PathBuf>,
         previous: bool,
         next: bool,
@@ -671,18 +674,19 @@ fn prepare_artwork_at_for(
             icon,
             caption,
             text,
+            path,
             strip_path,
             previous,
             next,
         } => (
             target,
-            image_output::prepare_icon_jpeg_for(
+            image_output::prepare_icon_jpeg_over_for(
                 model,
                 target,
                 icon,
                 &caption,
                 text.as_ref(),
-                strip_path.as_deref(),
+                (path.as_deref(), strip_path.as_deref()),
                 (previous, next),
             )?,
         ),

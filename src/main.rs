@@ -1180,6 +1180,7 @@ fn build_body(
         application_row,
         args_row,
         modifier_row,
+        toast.clone(),
     );
     // Everything below, summaries included, describes the model of these stores.
     // Tests never read the user's plugin folder; they load a temporary root themselves.
@@ -1406,23 +1407,19 @@ fn build_body(
     binding_buttons.append(&toolbar_gap);
     let plugin_installed: plugin_add_ui::Notify = {
         let ui = binding_ui.clone();
-        Rc::new(move |message, failed| {
-            ui.status.set_text(message);
-            ui::feedback(&ui.status, failed);
-        })
+        Rc::new(move |message, failed| ui.report(message, failed))
     };
     binding_buttons.append(&plugin_ui::add_button(
         &binding_ui.plugins,
         plugin_installed,
     ));
     binding_buttons.append(&plugin_ui::rescan_button(&binding_ui.plugins));
-    // The status line and Undo remove top the right-hand panel, above its tabs, beside the
-    // plugin buttons; Save/Test/Remove sit in the editor card's heading row.
-    let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
-    binding_feedback.add_css_class("binding-toolbar");
-    binding_feedback.append(&binding_buttons);
-    binding_feedback.append(&binding_ui.status);
-    binding_feedback.append(&binding_ui.undo_remove);
+    // The plugin buttons top the right-hand panel, right above its tabs: results and errors
+    // show in the window's toast, never as a line below them. Save/Test/Remove sit in the
+    // editor card's heading row; undoing a Remove lives in its toast.
+    let binding_toolbar = GtkBox::new(Orientation::Vertical, 8);
+    binding_toolbar.add_css_class("binding-toolbar");
+    binding_toolbar.append(&binding_buttons);
     let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
@@ -1487,7 +1484,7 @@ fn build_body(
                     action,
                     page_return,
                 ),
-                Err(error) => ui.status.set_text(&error),
+                Err(error) => ui.error(&error),
             }
         });
     }
@@ -1610,7 +1607,6 @@ fn build_body(
         let layers = layers.clone();
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
-        let toast = toast.clone();
         let artwork = artwork.clone();
         save_binding.connect_clicked(move |_| {
             match ui
@@ -1625,9 +1621,7 @@ fn build_body(
                             &ui.info_location.text(),
                         );
                         if let Err(error) = saved {
-                            let message = format!("Could not save weather location: {error}");
-                            ui.error(&message);
-                            toast.show(&message, true);
+                            ui.error(&format!("Could not save weather location: {error}"));
                             return;
                         }
                     }
@@ -1648,24 +1642,15 @@ fn build_body(
                             if runtime.save_binding(snapshot) {
                                 ui.status.set_text("Binding updated; saving to disk…");
                             } else {
-                                let error = "Could not save binding: saving worker is unavailable.";
-                                ui.error(error);
-                                toast.show(error, true);
+                                ui.error("Could not save binding: saving worker is unavailable.");
                             }
                             ui.refresh_summaries(&layers);
                             artwork.refresh(true);
                         }
-                        Err(error) => {
-                            let message = format!("Could not save binding: {error}");
-                            ui.error(&message);
-                            toast.show(&message, true);
-                        }
+                        Err(error) => ui.error(&format!("Could not save binding: {error}")),
                     }
                 }
-                Err(error) => {
-                    ui.error(&error);
-                    toast.show(&error, true);
-                }
+                Err(error) => ui.error(&error),
             }
         });
     }
@@ -1688,69 +1673,24 @@ fn build_body(
                     Ok((removed, snapshot)) if !removed.is_empty() => {
                         runtime.persist(snapshot);
                         ui.clear_action_fields();
-                        ui.status.set_text("Control configuration removed.");
                         ui.mark_clean();
-                        *ui.removed.borrow_mut() = Some(removed);
-                        ui.undo_remove.set_visible(true);
-                        ui::feedback(&ui.status, false);
+                        // Only the toast confirms the removal. Clearing the fields may have
+                        // recorded "Unsaved changes." here: the status is left empty.
+                        ui.status.set_text("");
+                        ui::clear_feedback(&ui.status);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
-                        // The same undo, offered where the eye already is.
-                        let undo = ui.undo_remove.clone();
                         toast.show_with_action(
                             "Control configuration removed.",
                             "Undo",
-                            Rc::new(move || undo.emit_clicked()),
+                            undo_removal(removed, &layers, &runtime, &ui, &artwork),
                         );
                     }
-                    Ok(_) => ui.status.set_text("No binding exists for that control."),
+                    Ok(_) => ui.report("No binding exists for that control.", false),
                     Err(error) => ui.error(&format!("Could not remove binding: {error}")),
                 }
             }
             Err(error) => ui.error(&error),
-        });
-    }
-    {
-        let layers = layers.clone();
-        let runtime = feature_runtime.clone();
-        let ui = binding_ui.clone();
-        let artwork = artwork.clone();
-        let toast = toast.clone();
-        binding_ui.undo_remove.clone().connect_clicked(move |_| {
-            let Some(removed) = ui.removed.borrow_mut().take() else {
-                return;
-            };
-            ui.undo_remove.set_visible(false);
-            let snapshot = {
-                let mut store = layers.borrow_mut();
-                store.restore_removed(&removed).map(|_| store.clone())
-            };
-            match snapshot {
-                Ok(snapshot) => {
-                    let saving = runtime.save_binding(snapshot);
-                    ui.load_selected_binding(&layers);
-                    ui.refresh_summaries(&layers);
-                    artwork.refresh(true);
-                    if saving {
-                        ui.status.set_text("Binding restored; saving to disk…");
-                    } else {
-                        ui.error("Could not save binding: saving worker is unavailable.");
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    // The removal can no longer be undone safely; keep the user's edits.
-                    let message = "Cannot undo: this control was changed after it was removed.";
-                    ui.error(message);
-                    toast.show(message, true);
-                }
-                Err(error) => {
-                    *ui.removed.borrow_mut() = Some(removed);
-                    ui.undo_remove.set_visible(true);
-                    let message = format!("Could not restore binding: {error}");
-                    ui.error(&message);
-                    toast.show(&message, true);
-                }
-            }
         });
     }
     let feedback = GtkBox::new(Orientation::Horizontal, 8);
@@ -1867,7 +1807,7 @@ fn build_body(
         }
         tab = button.next_sibling();
     }
-    side_panel.append(&binding_feedback);
+    side_panel.append(&binding_toolbar);
     side_panel.append(&switcher);
     side_panel.append(&tabs);
     // The catalog's width must not depend on the height the grid allocates it (see stable_width).
@@ -1926,6 +1866,52 @@ fn dial_totals() -> RefCell<Vec<i64>> {
         .max()
         .unwrap_or_default();
     RefCell::new(vec![0; dials])
+}
+
+/// The toast's Undo for a Remove. It puts `removed` back once, into the profiles and pages
+/// that owned it, whatever is selected by then; restoring never overwrites a later edit.
+/// Dropping it, when its toast closes or another message replaces it, releases the bindings.
+fn undo_removal(
+    removed: Vec<RemovedBinding>,
+    layers: &Rc<RefCell<LayerStore>>,
+    runtime: &feature_runtime::FeatureRuntime,
+    ui: &BindingUi,
+    artwork: &ArtworkUi,
+) -> Rc<dyn Fn()> {
+    let pending = Cell::new(Some(removed));
+    let (layers, runtime, ui, artwork) =
+        (layers.clone(), runtime.clone(), ui.clone(), artwork.clone());
+    Rc::new(move || {
+        let Some(removed) = pending.take() else {
+            return;
+        };
+        let snapshot = {
+            let mut store = layers.borrow_mut();
+            store.restore_removed(&removed).map(|_| store.clone())
+        };
+        match snapshot {
+            Ok(snapshot) => {
+                let saving = runtime.save_binding(snapshot);
+                ui.load_selected_binding(&layers);
+                ui.refresh_summaries(&layers);
+                artwork.refresh(true);
+                if saving {
+                    ui.status.set_text("Binding restored; saving to disk…");
+                } else {
+                    ui.error("Could not save binding: saving worker is unavailable.");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // The removal can no longer be undone safely; keep the user's edits.
+                ui.error("Cannot undo: this control was changed after it was removed.");
+            }
+            Err(error) => {
+                // Restoring checks against the current configuration (a deleted page, say):
+                // the same Undo would fail again, so it is not offered twice.
+                ui.error(&format!("Could not restore binding: {error}"));
+            }
+        }
+    })
 }
 
 /// What a model's events are applied to: its editor, the preview that mirrors
@@ -2251,8 +2237,8 @@ struct BindingUi {
     shortcut_preview: Label,
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
-    undo_remove: Button,
-    removed: Rc<RefCell<Option<Vec<RemovedBinding>>>>,
+    /// Where results and errors show: the editor has no inline message line.
+    toast: ui::Toast,
 }
 
 impl BindingUi {
@@ -2282,6 +2268,7 @@ impl BindingUi {
         application_row: GtkBox,
         args_row: GtkBox,
         modifier_row: GtkBox,
+        toast: ui::Toast,
     ) -> Self {
         // The closed button names the chosen More action instead of "•••";
         // menu rows keep one icon per action type.
@@ -2366,10 +2353,6 @@ impl BindingUi {
         let refresh = refresh_info.clone();
         info_toggle.connect_toggled(move |_| refresh());
         info_source.connect_selected_notify(move |_| refresh_info());
-        let undo_remove = ui::button("edit-undo-symbolic", "Undo remove");
-        undo_remove.set_tooltip_text(Some("Restore the control you just removed"));
-        undo_remove.set_halign(gtk::Align::Start);
-        undo_remove.set_visible(false);
         let shortcut_preview = Label::new(None);
         shortcut_preview.add_css_class("muted");
         shortcut_preview.set_xalign(0.0);
@@ -2469,8 +2452,7 @@ impl BindingUi {
             ),
             shortcut_preview,
             baseline: std::rc::Rc::new(RefCell::new(None)),
-            undo_remove,
-            removed: Rc::new(RefCell::new(None)),
+            toast,
         };
         ui.connect_dirty_tracking();
         let weak = ui.action_picker.downgrade();
@@ -2495,9 +2477,16 @@ impl BindingUi {
         ui
     }
 
-    fn error(&self, message: &str) {
+    /// Show a result in the toast: a success closes itself, a failure stays until dismissed.
+    /// `status` keeps a copy as the editor's state; it is never shown in the window.
+    fn report(&self, message: &str, failed: bool) {
         self.status.set_text(message);
-        ui::feedback(&self.status, true);
+        ui::feedback(&self.status, failed);
+        self.toast.show(message, failed);
+    }
+
+    fn error(&self, message: &str) {
+        self.report(message, true);
     }
 
     /// Make the summaries, dial captions and control numbers describe `model`.
@@ -3843,6 +3832,7 @@ impl ArtworkUi {
                 icon: icon.icon,
                 caption: icon.caption,
                 text,
+                path: icon.background,
                 strip_path: matches!(target, ArtworkTarget::EncoderZone(_))
                     .then(|| strip_path.clone())
                     .flatten(),
@@ -4221,8 +4211,9 @@ impl ArtworkUi {
     }
 
     /// The binding icon a key or touch section shows on `layer` when it has
-    /// no artwork of its own and no live information. Derived at render
-    /// time from the binding; it is never written into the artwork stores.
+    /// no artwork of its own and no live information (an idle timer key also
+    /// shows it over its artwork). Derived at render time from the binding;
+    /// it is never written into the artwork stores.
     fn control_icon(&self, layer: &str, target: ArtworkTarget) -> Option<ControlIcon> {
         let action = {
             let layers = self.layers.borrow();
@@ -4235,10 +4226,12 @@ impl ArtworkUi {
             }
         }?;
         let icon = BindingIcon::for_saved_action(&action);
-        // A missing file is an error to show over the control's own picture;
-        // every other icon only fills a control that has none.
-        let own_picture =
-            icon != BindingIcon::MissingFile && self.info_background(layer, target).is_some();
+        let artwork = self.info_background(layer, target);
+        // A missing file is an error to show over the control's own picture,
+        // and a timer key draws its icon over its artwork so it stays
+        // recognizable; every other icon only fills a control that has none.
+        let over_artwork = icon == BindingIcon::Timer && matches!(target, ArtworkTarget::Keypad(_));
+        let own_picture = icon != BindingIcon::MissingFile && !over_artwork && artwork.is_some();
         if !icon.shown_on_controls() || own_picture || self.shows_info(layer, target) {
             return None;
         }
@@ -4255,13 +4248,15 @@ impl ArtworkUi {
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
                 && next,
+            background: artwork.filter(|_| over_artwork),
         })
     }
 
     /// The 120x120 key picture for `text` as the key shows it: over its own
     /// artwork, else over its binding icon tile (when the text leaves room for
-    /// the icon), else on the neutral black key. Also returns whether the key
-    /// shows anything. Derived when drawing; nothing is stored.
+    /// the icon; a timer key's tile keeps its artwork), else on the neutral
+    /// black key. Also returns whether the key shows anything. Derived when
+    /// drawing; nothing is stored.
     fn key_text_image(
         &self,
         layer: &str,
@@ -4270,10 +4265,8 @@ impl ArtworkUi {
     ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
         let path = self.info_background(layer, target);
         let icon = self.control_icon(layer, target);
-        let missing = icon
-            .as_ref()
-            .is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
-        if path.is_none() || missing {
+        let over_artwork = icon.as_ref().is_some_and(ControlIcon::shown_over_artwork);
+        if path.is_none() || over_artwork {
             if let Some(icon) = icon {
                 if let Some(image) = icon.compose(Some(text))? {
                     return Ok((image, true));
@@ -4367,9 +4360,17 @@ struct ControlIcon {
     /// A page indicator paints at this section's outer left/right edge.
     previous: bool,
     next: bool,
+    /// The key's own artwork, drawn under the icon instead of black.
+    background: Option<std::path::PathBuf>,
 }
 
 impl ControlIcon {
+    /// Whether the icon shows even though the control has artwork of its
+    /// own: a missing file's cross replaces it, a timer icon draws over it.
+    fn shown_over_artwork(&self) -> bool {
+        self.icon == BindingIcon::MissingFile || self.background.is_some()
+    }
+
     /// The key image or transparent touch-section foreground, or `None` when
     /// user button text leaves no room for an icon.
     fn compose(
@@ -4377,11 +4378,12 @@ impl ControlIcon {
         text: Option<&sdeck_plus::button_text::ButtonText>,
     ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
         match self.target {
-            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_for(
+            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_over_for(
                 self.model,
                 self.icon,
                 &self.caption,
                 text,
+                self.background.as_deref(),
             ),
             ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
                 self.icon,
@@ -4427,8 +4429,8 @@ fn set_button_picture(
     text: Option<&sdeck_plus::button_text::ButtonText>,
     icon: Option<&ControlIcon>,
 ) {
-    let missing = icon.is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
-    if path.is_none() || missing {
+    let over_artwork = icon.is_some_and(ControlIcon::shown_over_artwork);
+    if path.is_none() || over_artwork {
         match icon.map(|icon| icon.compose(text)).transpose() {
             Ok(Some(Some(image))) => {
                 picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
@@ -5381,6 +5383,7 @@ mod tests {
             application_row,
             args_row,
             modifier_row,
+            ui::Toast::new(),
         ))
     }
 
@@ -7511,14 +7514,14 @@ mod tests {
             assert!(commands.try_recv().is_err());
         }
 
-        // Remove deletes the binding, and the feedback line can bring it back.
+        // Remove deletes the binding, and the toast's Undo can bring it back.
         let removed_action = layers.borrow().binding(&layer, &trigger).unwrap();
         find("Remove binding").emit_clicked();
         while commands.try_recv().is_ok() {}
         assert!(layers.borrow().binding(&layer, &trigger).is_none());
-        let undo = ui.undo_remove.clone();
-        assert!(undo.is_visible());
-        undo.emit_clicked();
+        let toast = &widgets.toast;
+        assert!(toast.action.is_visible());
+        toast.action.emit_clicked();
         assert_eq!(
             layers.borrow().binding(&layer, &trigger),
             Some(removed_action)
@@ -7527,7 +7530,7 @@ mod tests {
             commands.try_recv().unwrap(),
             LayerCommand::SaveBinding(..)
         ));
-        assert!(!undo.is_visible());
+        assert!(!toast.root.reveals_child());
         while commands.try_recv().is_ok() {}
 
         let original = layers.borrow().active().to_owned();

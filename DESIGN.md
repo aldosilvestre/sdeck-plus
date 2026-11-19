@@ -124,7 +124,7 @@ more readable sentences, Install disabled; nothing is installed or left staged),
 (valid preview of an id that is already installed; the button reads Replace) and
 **installing** (everything disabled; spinner). An AlreadyInstalled answer from a race moves the
 dialog to replace with an explanation instead of failing silently. On success the dialog closes,
-the sidebar is rescanned so the plugin appears as its own disabled item, and the status line
+the sidebar is rescanned so the plugin appears as its own disabled item, and the toast
 says "Installed <name> <version>. It is disabled: enable it in the Plugins section." (a
 replacement also says it was disabled and must be enabled again).
 
@@ -136,13 +136,13 @@ Replace is used only after an explicit press on a valid preview and disables the
 installs are serialised through one hub-wide slot (a second request is refused); closing the
 dialog never blocks: it cancels a running check and returns, and the main-loop poll joins the
 finished worker later (a cancelled check leaves no staging directory; an install already
-started completes, then the sidebar is rescanned and the status line reports it). Errors are sentences, never debug output.
+started completes, then the sidebar is rescanned and the toast reports it). Errors are sentences, never debug output.
 Everything shown from a plugin or from git (names, labels, requirement text, git's message) is
 displayed literally (no markup) with control, zero-width and bidirectional-format characters
 removed; a long plugin name, version or id chip is ellipsized with the full text as its tooltip. Releasing a
 staged copy (closing, Escape, editing, a failed replace, the main window closing) never blocks
 the GTK thread: the directory is deleted on a short-lived thread, and an install that finishes
-or fails after the dialog closed is reported on the status line.
+or fails after the dialog closed is reported in the toast.
 
 Known limits: a collapsed section's rows are not in the widget tree until it opens; with many requirements at 520 px wide the last optional rows can sit under the pinned callouts until scrolled; the repository error offers no "choose a folder instead" shortcut (the message says to); Replace overwrites whatever version is installed at that moment, which may differ
 from the one the preview showed if another install ran in between; the staged copy is validated and copied at check time, so
@@ -267,7 +267,8 @@ radius 8, 10px between icon and label, a hover fill; selected rows use the selec
 1px violet inset edge. Separators are 1px with a 6px vertical margin. A trailing `kbd` hint
 appears only on rows with a real shortcut (none today). Form popovers (OBS settings, Button text,
 Page folders) start with a bold title and a muted subtitle inside the body, like the help
-popover, and pad their content 12px inside the popover's own 6px. The toast is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
+popover, and pad their content 12px inside the popover's own 6px. The toast sits at the top
+center of the window, 24px below its top edge, over the content. It is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
 success, red alert for an error), the message in ink, then its optional action. A success hides
 itself after a few seconds and has no Dismiss button; an error stays and shows an icon-only Dismiss.
 Every feedback label sits in a banner row the first time it shows feedback: 8px radius, 6px 10px
@@ -286,7 +287,9 @@ editing or Close), then the primary (suggested) or danger action. No action is f
 sits in a second row. Destructive confirmations default to Cancel.
 
 A toast may carry one action (violet, 600 weight) beside its message, as "Undo" after removing a
-binding; using it runs it once and closes the toast, and any later message drops it.
+binding; using it runs it once and closes the toast, and any later message drops it. A toast with
+an action stays 10 seconds (a plain success 5); when it closes, its action is dropped and can no
+longer run.
 
 ## 4. Spacing and layout
 
@@ -318,19 +321,21 @@ event and takes its action from the catalog) and Save/Test/Remove controls have
 action hides its Category and Action dropdowns (the catalog chooses them) while
 keeping the action's icon, description and fields.
 A small "Options" heading groups the page-return and live-information checks.
-Binding feedback sits directly under its action buttons at an 8px vertical gap
-in primary ink, while the Appearance separator, a 4px extra top margin and an
+Binding results and errors show only in the toast, never as a message line in
+the side panel. The Appearance separator, a 4px extra top margin and an
 ink "Appearance" heading keep action and artwork sections distinct.
-That status line reads "Unsaved changes." in the warning tone as soon as any
-editor field differs from the loaded or saved binding; loading, saving or
-removing resets it.
+The editor tracks whether any field differs from the loaded or saved binding
+(loading, saving or removing resets it) without showing a message for it.
 Selecting another preview control while edits are unsaved asks first with the
 compact confirmation style (Keep editing is the default, Discard changes is
 destructive). Remove clears the whole selected control (a key's press and hold,
 a dial's press, turns and exact ticks, a touch area's gestures) with their page
-returns and live information, whichever event is selected. It leaves an Undo
-remove button under that status line until it is used or another Remove
-replaces it; one Undo re-saves everything that was removed. Undo never overwrites later edits: if the control was changed after Remove, it refuses with a status message and the Undo button goes away.
+returns and live information, whichever event is selected. Only its toast
+confirms it ("Control configuration removed.", with an Undo action for 10
+seconds), and there is no lasting Undo button.
+Selecting another control keeps that toast; another Remove or any later message
+replaces it. One Undo re-saves everything that was removed, into the profile or
+page that owned it. Undo never overwrites later edits: if the control was changed after Remove, it refuses with an error message and offers nothing to retry.
 The related controls inside Appearance use 4px gaps to keep expanded artwork
 and the taller shortcut/argument fields compact within the scrolling workspace.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
@@ -587,7 +592,11 @@ two columns fit.
   indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
   placement: top text puts the icon below it, bottom text above it, and
   centered or vertical text leaves the key as before. Icons are derived when
-  drawing, never stored, and never replace artwork; None and unassigned
+  drawing, never stored, and never replace artwork; other actions' artwork
+  hides their icon, but an idle Start timer key draws its icon and caption
+  over its own artwork instead of black, so the key stays recognizable (its
+  countdown still draws over the artwork, and Cancel timer keeps the plain
+  artwork). None and unassigned
   controls stay empty; page indicators still paint last. Preview and hardware
   use identical pixels. Automatic captions wrap only between whole words and
   end in an ellipsis when a word does not fit; a website shows only its URL
@@ -717,9 +726,10 @@ two columns fit.
   the editor card's heading row, level with "Configuring: <control> · <event>"
   (artboard 03-profile-rail): a floppy disk (violet fill), a play triangle
   (neutral) and a red X in a circle. Each tooltip has two lines, its name then
-  what it does, and doubles as the accessible name and test caption. The status
-  line and Undo remove stay at the top of the right-hand panel, in its toolbar
-  row with the plugin buttons. The heading row is the editor card's fixed top:
+  what it does, and doubles as the accessible name and test caption. The
+  right-hand panel's toolbar holds only the plugin buttons, right above its
+  tabs: no message ever shows below them (results and errors go to the toast at
+  the top center of the window). The heading row is the editor card's fixed top:
   only the form below it scrolls, so Save, Test and Remove stay visible. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.

@@ -1143,6 +1143,90 @@ fn confirm_dialogs_read_left_aligned_and_their_cancel_button_shows_an_escape_hin
 }
 
 #[test]
+fn an_action_toast_stays_ten_seconds_and_then_releases_its_action() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let toast = ui::Toast::new();
+        let runs = Rc::new(Cell::new(0));
+        let counter = runs.clone();
+        let held = Rc::new(());
+        let released = Rc::downgrade(&held);
+        let shown = std::time::Instant::now();
+        toast.show_with_action(
+            "Control configuration removed.",
+            "Undo",
+            Rc::new(move || {
+                let _held = &held;
+                counter.set(counter.get() + 1);
+            }),
+        );
+        let lifetime = ui::time_until_closed(&toast, shown, Duration::from_secs(15))
+            .expect("the action toast closes by itself");
+        assert!(lifetime >= Duration::from_secs(10), "{lifetime:?}");
+        assert!(
+            released.upgrade().is_none(),
+            "an expired action is released, with what it holds"
+        );
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 0, "an expired action never runs");
+    });
+}
+
+#[test]
+fn dismissing_or_unrealizing_an_action_toast_releases_its_action() {
+    run_gtk_test(|| {
+        if !init_gtk_for_test() {
+            return;
+        }
+        let runs = Rc::new(Cell::new(0));
+        let offer = |toast: &ui::Toast| {
+            let counter = runs.clone();
+            let held = Rc::new(());
+            let released = Rc::downgrade(&held);
+            toast.show_with_action(
+                "Control configuration removed.",
+                "Undo",
+                Rc::new(move || {
+                    let _held = &held;
+                    counter.set(counter.get() + 1);
+                }),
+            );
+            released
+        };
+        // Dismissed: the action goes with its message.
+        let toast = ui::Toast::new();
+        let released = offer(&toast);
+        toast.dismiss.emit_clicked();
+        assert!(!toast.root.reveals_child());
+        assert!(
+            released.upgrade().is_none(),
+            "a dismissed action is released"
+        );
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 0);
+        // Unrealized with its window: its timer stops, so its action and message go too.
+        let window = gtk::Window::new();
+        let toast = ui::Toast::new();
+        window.set_child(Some(&toast.wrap(&Label::new(Some("Body")))));
+        window.present();
+        wait_for_frame(&window);
+        assert!(toast.root.is_realized());
+        let released = offer(&toast);
+        window.destroy();
+        assert!(!toast.root.is_realized());
+        assert!(!toast.root.reveals_child());
+        assert!(
+            released.upgrade().is_none(),
+            "an unrealized action is released"
+        );
+        toast.action.emit_clicked();
+        assert_eq!(runs.get(), 0);
+    });
+}
+
+#[test]
 fn a_toast_can_carry_one_action_that_runs_once_and_closes_it() {
     run_gtk_test(|| {
         if !init_gtk_for_test() {

@@ -556,11 +556,14 @@ fn a_folder_is_checked_previewed_and_installed_disabled() {
                 assert!(plugins_json(scratch).is_none(), "nothing was enabled");
                 assert!(!scratch.plugins().join("newplug/ran.marker").exists());
                 assert!(scratch.plugins().join("newplug/lib/helper.py").is_file());
-                let status = widgets.binding_ui.status.text();
+                // The outcome shows in the toast, never as a line below the plugin buttons.
+                assert!(widgets.toast.root.reveals_child());
                 assert_eq!(
-                    status.as_str(),
+                    widgets.toast.label.text().as_str(),
                     "Installed Fixture 2.0.0. It is disabled: enable it in the Plugins section."
                 );
+                assert!(!widgets.toast.tone.has_css_class("feedback-error"));
+                assert!(widgets.binding_ui.status.parent().is_none());
                 assert!(
                     labels_in(widgets.root.upcast_ref())
                         .iter()
@@ -717,7 +720,7 @@ fn an_installed_id_offers_replace_which_disables_the_plugin_only_when_pressed() 
                 assert_eq!(manifest.version, "2.0.0");
                 assert!(!enabled, "replace disables until enabled again");
                 assert!(!plugins_json(scratch).unwrap_or_default().contains("dup"));
-                let status = widgets.binding_ui.status.text();
+                let status = widgets.toast.label.text();
                 assert!(
                     status.contains("Installed Fixture 2.0.0")
                         && status.contains("was disabled")
@@ -1035,7 +1038,7 @@ fn closing_during_an_install_lets_it_finish_then_rescans_and_reports() {
                 });
                 assert!(!hub.manifest("late").unwrap().1, "installed disabled");
                 assert_eq!(
-                    widgets.binding_ui.status.text().as_str(),
+                    widgets.toast.label.text().as_str(),
                     "Installed Fixture 1.0.0. It is disabled: enable it in the Plugins section."
                 );
                 assert!(plugins_json(scratch).is_none());
@@ -1332,7 +1335,7 @@ fn closing_the_main_window_during_a_check_cancels_it_and_cleans_up() {
 }
 
 #[test]
-fn an_install_that_fails_after_the_dialog_closed_is_reported_on_the_status_line() {
+fn an_install_that_fails_after_the_dialog_closed_is_reported_in_the_toast() {
     run_gtk_test(|| {
         with_dialog(
             "detachfail",
@@ -1349,12 +1352,15 @@ fn an_install_that_fails_after_the_dialog_closed_is_reported_on_the_status_line(
                 dialog.install_button().emit_clicked();
                 dialog.window().close();
                 wait_until("the failure to be reported", || {
-                    w.binding_ui.status.text().contains("failed")
+                    w.toast.label.text().contains("failed")
                 });
-                let status = w.binding_ui.status.text();
+                let status = w.toast.label.text();
                 assert!(status.starts_with("Installing Fixture failed:"), "{status}");
                 assert!(status.contains("plugins.json"), "{status}");
-                assert!(w.binding_ui.status.has_css_class("feedback-error"));
+                // An error stays until dismissed.
+                assert!(w.toast.root.reveals_child());
+                assert!(w.toast.tone.has_css_class("feedback-error"));
+                assert!(w.toast.dismiss.is_visible());
                 assert!(hub.try_begin_install().is_some());
                 scratch.nothing_staged();
             },

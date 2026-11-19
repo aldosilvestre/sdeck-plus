@@ -396,22 +396,23 @@ fn assert_inspector_grouping() {
     assert!(heading.has_css_class("inspector-heading"));
     assert!(!ui.info_toggle.is_ancestor(&sidebar_settings(widgets)));
 
-    // Status: readable ink directly under the action row, not muted metadata.
+    // Status: kept as the editor's state, never shown as a line in the window; results
+    // show in the toast.
     assert!(!ui.status.has_css_class("muted"));
     assert!(ui.status.has_css_class("binding-status"));
-    let actions = ui
-        .status
-        .prev_sibling()
-        .expect("status follows the toolbar row");
-    // Save/Test/Remove moved to the editor heading row; the plugin controls fill this row.
+    assert!(ui.status.parent().is_none(), "no inline status line");
+    // Save/Test/Remove moved to the editor heading row; the plugin controls fill the toolbar.
     let save = find_button(widgets, "Save binding");
     assert!(save.parent().unwrap().has_css_class("editor-heading-row"));
+    let mut buttons = Vec::new();
+    super::action_catalog_tests::collect_catalog_buttons(widgets.root.upcast_ref(), &mut buttons);
+    let add_plugin = buttons
+        .iter()
+        .find(|button| button.tooltip_text().as_deref() == Some("Add plugin…"))
+        .expect("the Add plugin button");
+    let actions = add_plugin.parent().expect("the plugin buttons row");
     assert_ne!(save.parent().as_ref(), Some(&actions));
-    let gap = bounds(ui.status.upcast_ref()).y() - bounds(&actions).y() - actions.height() as f32;
-    assert!(
-        (0.0..=8.5).contains(&gap),
-        "status stays with its actions: {gap}"
-    );
+    assert!(actions.parent().unwrap().has_css_class("binding-toolbar"));
 
     // Appearance: a clearly separated section with an ink heading.
     let appearance = widgets.artwork_section.parent().unwrap();
