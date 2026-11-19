@@ -1,6 +1,6 @@
 use super::{tests::Fixture, LayerStore, NavigationAction, Organization};
 use crate::{
-    features::FeatureAction,
+    features::{FeatureAction, MultiStep},
     layers::{Action, Trigger},
 };
 
@@ -99,6 +99,46 @@ fn renamed_folder_links_follow_only_on_the_owning_page() {
 }
 
 #[test]
+fn renamed_folder_follows_the_open_folder_step_of_a_multi_action() {
+    // Given
+    let mut f = Fixture::new();
+    f.folder("Tools");
+    f.layers.select("Base");
+    let multi = |folder: &str| {
+        Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                MultiStep::Action(Action::Emit("go".into())),
+                MultiStep::Wait { milliseconds: 100 },
+                MultiStep::Action(open_folder(folder)),
+            ],
+        })
+    };
+    f.layers
+        .bind("Base", Trigger::KeyPress(1), multi("Tools"))
+        .unwrap();
+    f.layers
+        .bind("Base", Trigger::KeyPress(2), multi("Other"))
+        .unwrap();
+    // When
+    f.organization
+        .rename_folder(&mut f.layers, "Tools", "Studio")
+        .unwrap();
+    f.layers.persist().unwrap();
+    // Then: only the step that opens the renamed folder follows it.
+    let reopened = LayerStore::open_at(&f.root).unwrap();
+    for layers in [&f.layers, &reopened] {
+        assert_eq!(
+            layers.binding("Base", &Trigger::KeyPress(1)),
+            Some(multi("Studio"))
+        );
+        assert_eq!(
+            layers.binding("Base", &Trigger::KeyPress(2)),
+            Some(multi("Other"))
+        );
+    }
+}
+
+#[test]
 fn rename_errors_leave_both_stores_unchanged() {
     for (old, new) in [
         ("Tools", ""),
@@ -129,6 +169,24 @@ fn rename_errors_leave_both_stores_unchanged() {
             open_folder("Tools")
         );
     }
+}
+
+#[test]
+fn rename_blocked_by_an_unreadable_key_step_changes_nothing() {
+    use super::folder_link_tests::{folder_with_unreadable_key_step, snapshot};
+    // Given
+    let (mut f, expected) = folder_with_unreadable_key_step();
+    let before = snapshot(&f);
+    // When
+    let error = f
+        .organization
+        .rename_folder(&mut f.layers, "Tools", "Studio")
+        .unwrap_err();
+    // Then: the step is named; the folder name, links and files stay as they were.
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(error.to_string(), expected);
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(f.organization.folders(&f.layers), ["Tools"]);
 }
 
 #[test]

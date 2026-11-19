@@ -124,7 +124,7 @@ more readable sentences, Install disabled; nothing is installed or left staged),
 (valid preview of an id that is already installed; the button reads Replace) and
 **installing** (everything disabled; spinner). An AlreadyInstalled answer from a race moves the
 dialog to replace with an explanation instead of failing silently. On success the dialog closes,
-the sidebar is rescanned so the plugin appears as its own disabled item, and the status line
+the sidebar is rescanned so the plugin appears as its own disabled item, and the toast
 says "Installed <name> <version>. It is disabled: enable it in the Plugins section." (a
 replacement also says it was disabled and must be enabled again).
 
@@ -136,13 +136,13 @@ Replace is used only after an explicit press on a valid preview and disables the
 installs are serialised through one hub-wide slot (a second request is refused); closing the
 dialog never blocks: it cancels a running check and returns, and the main-loop poll joins the
 finished worker later (a cancelled check leaves no staging directory; an install already
-started completes, then the sidebar is rescanned and the status line reports it). Errors are sentences, never debug output.
+started completes, then the sidebar is rescanned and the toast reports it). Errors are sentences, never debug output.
 Everything shown from a plugin or from git (names, labels, requirement text, git's message) is
 displayed literally (no markup) with control, zero-width and bidirectional-format characters
 removed; a long plugin name, version or id chip is ellipsized with the full text as its tooltip. Releasing a
 staged copy (closing, Escape, editing, a failed replace, the main window closing) never blocks
 the GTK thread: the directory is deleted on a short-lived thread, and an install that finishes
-or fails after the dialog closed is reported on the status line.
+or fails after the dialog closed is reported in the toast.
 
 Known limits: a collapsed section's rows are not in the widget tree until it opens; with many requirements at 520 px wide the last optional rows can sit under the pinned callouts until scrolled; the repository error offers no "choose a folder instead" shortcut (the message says to); Replace overwrites whatever version is installed at that moment, which may differ
 from the one the preview showed if another install ran in between; the staged copy is validated and copied at check time, so
@@ -267,7 +267,8 @@ radius 8, 10px between icon and label, a hover fill; selected rows use the selec
 1px violet inset edge. Separators are 1px with a 6px vertical margin. A trailing `kbd` hint
 appears only on rows with a real shortcut (none today). Form popovers (OBS settings, Button text,
 Page folders) start with a bold title and a muted subtitle inside the body, like the help
-popover, and pad their content 12px inside the popover's own 6px. The toast is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
+popover, and pad their content 12px inside the popover's own 6px. The toast sits at the top
+center of the window, 24px below its top edge, over the content. It is a pill (`desk_hover` fill, 999px radius): a tone glyph (green check for a
 success, red alert for an error), the message in ink, then its optional action. A success hides
 itself after a few seconds and has no Dismiss button; an error stays and shows an icon-only Dismiss.
 Every feedback label sits in a banner row the first time it shows feedback: 8px radius, 6px 10px
@@ -278,15 +279,17 @@ Source artboard: `design/overlays/03-compact-command.html`.
 The connection badge heads the profile rail as a small pill (11px text). The header keeps the title
 and the detail line.
 
-Dialogs (confirmations, the artwork error, page name, New/Edit profile, setup help, Updates and
-the shortcut reference) share one frame: surface fill, 1px edge, radius 12, 14px padding, 10px
+Dialogs (confirmations, the artwork error, page name, New/Edit profile, the multi action step
+dialog, setup help, Updates and the shortcut reference) share one frame: surface fill, 1px edge, radius 12, 14px padding, 10px
 gap, a 16px/700 title, a muted body, and ONE right-aligned action row of natural-width buttons
 with an 8px gap: the dismissal first with its `Esc` key hint (monospace 11px chip: Cancel, Keep
 editing or Close), then the primary (suggested) or danger action. No action is full width and none
 sits in a second row. Destructive confirmations default to Cancel.
 
 A toast may carry one action (violet, 600 weight) beside its message, as "Undo" after removing a
-binding; using it runs it once and closes the toast, and any later message drops it.
+binding; using it runs it once and closes the toast, and any later message drops it. A toast with
+an action stays 10 seconds (a plain success 5); when it closes, its action is dropped and can no
+longer run.
 
 ## 4. Spacing and layout
 
@@ -318,19 +321,21 @@ event and takes its action from the catalog) and Save/Test/Remove controls have
 action hides its Category and Action dropdowns (the catalog chooses them) while
 keeping the action's icon, description and fields.
 A small "Options" heading groups the page-return and live-information checks.
-Binding feedback sits directly under its action buttons at an 8px vertical gap
-in primary ink, while the Appearance separator, a 4px extra top margin and an
+Binding results and errors show only in the toast, never as a message line in
+the side panel. The Appearance separator, a 4px extra top margin and an
 ink "Appearance" heading keep action and artwork sections distinct.
-That status line reads "Unsaved changes." in the warning tone as soon as any
-editor field differs from the loaded or saved binding; loading, saving or
-removing resets it.
+The editor tracks whether any field differs from the loaded or saved binding
+(loading, saving or removing resets it) without showing a message for it.
 Selecting another preview control while edits are unsaved asks first with the
 compact confirmation style (Keep editing is the default, Discard changes is
 destructive). Remove clears the whole selected control (a key's press and hold,
 a dial's press, turns and exact ticks, a touch area's gestures) with their page
-returns and live information, whichever event is selected. It leaves an Undo
-remove button under that status line until it is used or another Remove
-replaces it; one Undo re-saves everything that was removed. Undo never overwrites later edits: if the control was changed after Remove, it refuses with a status message and the Undo button goes away.
+returns and live information, whichever event is selected. Only its toast
+confirms it ("Control configuration removed.", with an Undo action for 10
+seconds), and there is no lasting Undo button.
+Selecting another control keeps that toast; another Remove or any later message
+replaces it. One Undo re-saves everything that was removed, into the profile or
+page that owned it. Undo never overwrites later edits: if the control was changed after Remove, it refuses with an error message and offers nothing to retry.
 The related controls inside Appearance use 4px gaps to keep expanded artwork
 and the taller shortcut/argument fields compact within the scrolling workspace.
 Appearance tools and artwork disclosure use 12px gaps without extra empty cards.
@@ -559,7 +564,8 @@ two columns fit.
   application, shortcut, named event, play sound, media transport, volume,
   mute, audio output, scroll, text, open file, website, close application,
   shortcut toggle, timer, cancel timer, brightness, sleep, OBS scene, record,
-  stream, microphone mute and visibility, plus `more` for More actions, `none`
+  stream, microphone mute, visibility and `multi` for a multi action (three bars
+  beside a timeline of three dots, in the system amber family), plus `more` for More actions, `none`
   (menus only), `missing-file` (a red cross in a soft circle, its own red
   family, drawn instead of an icon on a key or touch section whose sound or
   file target no longer exists, captioned "Missing file"; unlike other icons it
@@ -587,14 +593,20 @@ two columns fit.
   indicator reserves 30px at that outer edge and uses a 50px icon. User button text keeps its
   placement: top text puts the icon below it, bottom text above it, and
   centered or vertical text leaves the key as before. Icons are derived when
-  drawing, never stored, and never replace artwork; None and unassigned
+  drawing, never stored, and never replace artwork; other actions' artwork
+  hides their icon, but an idle Start timer key draws its icon and caption
+  over its own artwork instead of black, so the key stays recognizable (its
+  countdown still draws over the artwork, and Cancel timer keeps the plain
+  artwork). None and unassigned
   controls stay empty; page indicators still paint last. Preview and hardware
   use identical pixels. Automatic captions wrap only between whole words and
   end in an ellipsis when a word does not fit; a website shows only its URL
   host (`example.com`). User button text is never shortened or rewrapped.
 - **Live information:** readings use the same vocabulary (`for_glyph`): sun =
   `brightness`, muted speaker = `mute` (grey speaker, red cross), headphones =
-  `audio-output`, recording = `record`, live = `stream`, OBS idle =
+  `audio-output`, microphone (both microphone readings, headsets included) =
+  `audio-input`, muted microphone = `microphone-mute` (grey microphone, red
+  slash), recording = `record`, live = `stream`, OBS idle =
   `obs-scene`, now playing = `play`, `pause` or `media-idle` (a struck-through
   note), plus `volume`, `cloud`, `partly-cloudy`, `rain`, `snow`,
   `storm`, `fog`, `cpu`, `memory` and `temperature`, duotone and shadowed
@@ -643,6 +655,50 @@ two columns fit.
   `brightness` and OBS `obs-scene`; Action rows, the guidance line (20px) and
   the closed Action button show the chosen action's icon, while the Action
   menu row keeps `more`.
+- **Multi action:** a "Multi action" row in the catalog's System category, for a key press or
+  key hold only: the More actions picker of a dial or the touch strip does not offer it, and
+  dropping it on a dial selects nothing and says why. Choosing it replaces the action's fields
+  (below its icon and description) with the step list: a "Steps" heading with the bundled
+  `sdeck-multi-symbolic` icon, then a boxed, numbered list like the page folders (`desk_field`
+  fill, 1px `desk_edge`, radius 10, 40px rows with a hairline between them). Each row shows its
+  number (muted 13px/700), the step's binding icon (16px; a wait uses `timer`), its summary
+  ("Run echo one", "Wait 2 s", "Wait 750 ms"; ellipsized, full text as tooltip) and four
+  frameless 34px icon buttons: Move up, Move down, Edit step (pencil) and Remove step (red
+  trash), each with a two-line tooltip (its name, then what it does to step n) and an accessible
+  name naming the step ("Move step 2 up"). Up is disabled on the first row, Down on the last.
+  An empty list reads "No steps yet. Add the actions to run, in order." Below it come the
+  captioned **Add step** and **Add wait** (`list-add-symbolic`), disabled with an explaining
+  tooltip at 16 steps. Adding, editing, moving or removing a step is an unsaved edit like any
+  field; nothing runs until Test action or the key. Save refuses an invalid list with the
+  model's sentence ("A multi action needs 1 to 16 steps", "A multi action needs at least one
+  action step", "Step 1: Go to profile or page can only be the last step", "Could not save
+  binding: Step 2: Unsupported physical key ...") in the toast and stores nothing.
+  The **step dialog** (`ui::form_dialog`: modal, transient for the window, 400px, not
+  resizable; the body scrolls past 460px) has a title ("Add step", "Edit step", "Add wait",
+  "Edit wait"), a muted subtitle naming the step's number and one right-aligned action row:
+  Cancel with its `Esc` hint, then the suggested **Add** (new step) or **Save** (edited step).
+  A step shows the step form: an Action menu with the editor's action types except None (plus
+  Plugin action once a plugin exists), then the editor's own fields, guidance and shortcut
+  preview (`src/action_form.rs`), whose More actions offer every category except Multi action,
+  Start timer, Cancel timer and the touchscreen page actions. Go to profile or page and the
+  page actions are accepted here; Save of the binding allows them only as the last step. A wait
+  shows a number field and an ms/s unit drop-down (10 ms to 60 s; seconds may have decimals; a
+  whole number of seconds reopens in seconds). An invalid step keeps the dialog open with an
+  error banner naming it ("Step 3: a wait must last 10 ms to 60 seconds", "Step 3: enter how
+  long to wait, as a number"); Escape or Cancel changes nothing, and the dialog never runs the
+  step.
+- **Type text keys:** under the Text field (the binding editor and the step dialog share it), a
+  row with a muted "Insert key:" label and one linked group of compact buttons (`text-keys`: 20px
+  high, 4px/8px padding, at least 20px wide) Enter, Tab, Esc, ↑, ↓, ←, → inserts `{Enter}`,
+  `{Tab}`, `{Esc}`, `{Up}`, `{Down}`, `{Left}` or `{Right}` at the cursor (replacing a selection,
+  as typing would) and gives the focus back to the text. Each button has a two-line tooltip
+  ("Insert {Tab}", then "Presses Tab at this point of the text.") and an accessible name such as
+  "Insert Up arrow key"; the group is labelled by "Insert key:". Inserting is an unsaved edit like
+  typing and never runs the action. Below the row, a muted line previews what is typed: the text
+  as written and each key as ⏎ ⇥ ⎋ ↑ ↓ ← →, plus a final ⏎ when Press Enter after text is on
+  ("Types: aldo ⇥ mi-clave ⏎"); it wraps to at most three lines (ellipsized, the full preview as
+  its tooltip) and is hidden while nothing would be typed. The helper line under it explains the
+  braces ("{{ types {"). The row fits the 400px step dialog and never widens the editor.
 - **Artwork targets:** every row of the Artwork target menu starts with a
   26x22 mini map of the shown model's keys over its strip sections (eight keys
   over four sections on the +, the 9x4 grid over six sections on the + XL, at the
@@ -717,9 +773,10 @@ two columns fit.
   the editor card's heading row, level with "Configuring: <control> · <event>"
   (artboard 03-profile-rail): a floppy disk (violet fill), a play triangle
   (neutral) and a red X in a circle. Each tooltip has two lines, its name then
-  what it does, and doubles as the accessible name and test caption. The status
-  line and Undo remove stay at the top of the right-hand panel, in its toolbar
-  row with the plugin buttons. The heading row is the editor card's fixed top:
+  what it does, and doubles as the accessible name and test caption. The
+  right-hand panel's toolbar holds only the plugin buttons, right above its
+  tabs: no message ever shows below them (results and errors go to the toast at
+  the top center of the window). The heading row is the editor card's fixed top:
   only the form below it scrolls, so Save, Test and Remove stay visible. The
   floppy and circled X are bundled symbolic icons (`sdeck-save-symbolic`,
   `sdeck-remove-symbolic`) so they do not depend on the desktop theme.
@@ -880,8 +937,9 @@ two columns fit.
   and keep the previous behavior if saving fails. Explicit Quit always exits.
 
 Shared native helpers live in `src/ui.rs`: `button(icon, caption)`,
-`decorate_button(button, icon, caption)`, `popover(title, body)`, and
-`section_heading(icon, text)`. Colors and sizes trace to this contract.
+`decorate_button(button, icon, caption)`, `popover(title, body)`,
+`form_dialog(parent, title, subtitle, body, dismiss, primary)` (the dialog frame the profile
+and step dialogs share), and `section_heading(icon, text)`. Colors and sizes trace to this contract.
 
 ## 6. Motion and interaction
 

@@ -47,13 +47,15 @@ permissions on its own.
   focused application (Hyprland), with an optional return to the previous profile
   when focus leaves, plus touchscreen pages navigated by swiping.
 - **Artwork, button text and action icons** on keys, the touch strip and its zones.
-- **Live information:** volume, audio output, time, weather, CPU, memory,
+- **Live information:** volume, audio output, microphone volume and input
+  device (with a microphone icon), time, weather, CPU, memory,
   temperature, device brightness, OBS state and now playing, updated on the
   device.
 - **Actions:** commands, applications, keyboard shortcuts, media and volume
   control (configurable volume step, default 5%), audio-output switching, the same
   for the microphone (input volume, mute, rotate input devices, a dial preset), sounds, closing an application, brightness, timers, page
-  returns and an optional two-second key hold for a secondary action.
+  returns, an optional two-second key hold for a secondary action and multi actions that run up to
+  16 steps and waits in order from one key.
 - **OBS Studio:** switch scenes, toggle or explicitly start, stop, pause and resume
   recording and streaming, mute inputs, raise or lower an input's volume in dB
   and show or hide sources over the local WebSocket server.
@@ -97,7 +99,9 @@ offers **Update** after finding a newer stable release. Only pressing it runs
 that release's installer from GitHub, pinned to the detected tag. After success,
 choose **Restart now** when ready; the old instance releases the device before
 its replacement starts. Packages under `/usr` (including pacman/AUR installs)
-must be updated with their package manager; checkouts and custom prefixes show
+must be updated with their package manager (remove the other copy before
+switching between `install.sh` and a package; **Start at login** follows the
+remaining executable); checkouts and custom prefixes show
 manual-install guidance instead. See the [update documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration)
 for execution limits and failure handling.
 
@@ -141,7 +145,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 The installer prints these commands when it finds a device your user cannot open, and the
 AUR packages ship the rule (no manual step). sdeck-plus itself never changes permissions.
 
-Some actions need optional tools such as `mpv`, `wpctl` or `wl-copy`, and keyboard actions
+Some actions need optional tools such as `mpv`, `wpctl`, `wtype` or `wl-copy`, and keyboard actions
 need `/dev/uinput` access. See [Install](https://aldosilvestre.github.io/sdeck-plus/docs.html#install)
 for the full list and installer options.
 

@@ -228,6 +228,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p><strong>Prebuilt binary.</strong> From v1.0.0 each GitHub release also carries <code>sdeck-plus-X.Y.Z-x86_64-linux.tar.gz</code> and its <code>.sha256</code>:
                  the <code>sdeck-plus</code> binary, the launcher, the icon, the udev rule, the license, the README and an <code>INSTALL.md</code> with the install steps. On Arch Linux the release also carries <code>sdeck-plus-X.Y.Z-1-x86_64.pkg.tar.zst</code>, which installs with <code>sudo pacman -U</code>; the tarball is not a pacman package. It is built on Arch Linux and links GTK 4 dynamically, so it runs only on x86_64 with glibc 2.39 or newer and GTK 4.8 or newer.
                  Check it with <code>sha256sum -c</code>, then copy the binary to a directory on your <code>PATH</code>; on other systems use the installer, which builds from source.</p>
+              <p><strong>Switching between the installer and the package.</strong> Remove the other copy first (<code>./install.sh --uninstall</code> before <code>sudo pacman -U</code>,
+                 or <code>sudo pacman -R sdeck-plus</code> before <code>./install.sh</code>) so only one <code>sdeck-plus</code> remains. <strong>Start at login</strong> keeps working:
+                 <code>install.sh</code> repoints an existing entry at its executable, and the package's executable repoints an entry whose executable no longer exists the next time it starts.</p>
               <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">
 <pre><code>cargo run</code></pre>
@@ -241,8 +244,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>After installing</h4>
-              <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable, a <strong>Start at login</strong> entry pointing elsewhere,
+              <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable,
                  missing optional tools, and a connected device your user cannot open (printing the udev rule an administrator can install, without running it).</p>
+              <p>An existing <strong>Start at login</strong> entry that points at another executable (for example <code>/usr/bin/sdeck-plus</code> from the pacman package) is
+                 repointed at the installed one; no entry is created when there is none. A symlinked entry is left untouched, and one without an <code>Exec</code> line in its
+                 <code>[Desktop Entry]</code> group is reported with a note to disable and re-enable <strong>Start at login</strong> from the installed application.</p>
             </article>
             <article class="card">
               <h4>Uninstall</h4>
@@ -271,7 +277,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             <article class="card">
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
-                 <code>curl</code> (weather), <code>wl-clipboard</code> (text), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
+                 <code>curl</code> (weather), <code>wtype</code> (typing text; <code>wl-clipboard</code> is the fallback), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
               <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
                  <code>TAG+="uaccess"</code>:</p>
               <div class="code-block">
@@ -422,7 +428,7 @@ sudo udevadm control --reload-rules</code></pre>
                 <li>Select a profile tab and page, then click one of the keys (eight on the Stream Deck +, 36 on the + XL), the touch strip or one of the dials (four or six).</li>
                 <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key's Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below. Select <strong>Hold 2 seconds</strong> to configure its optional secondary action without replacing the short action.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
-                <li>The three icon buttons at the right end of the editor's heading row (beside <em>Configuring: …</em>) act on the selected control and stay visible while the form below them scrolls: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. <strong>Undo remove</strong>, right below, brings all of it back. If you changed that control after removing it, Undo refuses and keeps your changes. Hover any of them for a tooltip that explains what it does; the result message appears at the top of the right-hand panel.</li>
+                <li>The three icon buttons at the right end of the editor's heading row (beside <em>Configuring: …</em>) act on the selected control and stay visible while the form below them scrolls: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. Only a toast confirms it, with an <strong>Undo</strong> action for ten seconds that brings all of it back, even if you selected another control meanwhile; a later Remove or message replaces it. If you changed that control after removing it, Undo refuses and keeps your changes. Hover any of them for a tooltip that explains what it does; results and errors appear in a toast at the top center of the window, never as a line below the plugin buttons.</li>
               </ol>
               <p>A toast confirms success only after the binding is written to disk and disappears after five seconds; errors stay, with an icon-only <strong>Dismiss</strong> button, until dismissed or replaced.
                  Selecting a configured event loads its saved action for editing. Bindings do not inherit or fall through between layers.</p>
@@ -459,6 +465,7 @@ sudo udevadm control --reload-rules</code></pre>
                  named events, the categorized <strong>More actions</strong>, <strong>Play sound</strong> and <strong>None</strong>.
                  Untouched buttons, including those on new profiles and pages, start with <strong>None</strong>: it keeps a saved binding that does nothing,
                  can still show artwork, text or live information, and never schedules a page return.</p>
+              <p>A key can also run several actions in order with <strong>More actions &gt; System &gt; Multi action</strong> (see <a href="#multi-action">Multi action</a>).</p>
               <p><strong>Test action</strong> runs the selected action immediately and can affect the desktop, the device or OBS; test only what you intend to perform.</p>
             </article>
             <article class="card">
@@ -504,8 +511,11 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Text, files, websites and processes</h4>
-              <p>Pasting text uses the Wayland clipboard (<code>wl-copy</code>) and a physical Ctrl+V chord, not synthetic Unicode keycodes: it replaces the clipboard
-                 and needs the focused application to accept Ctrl+V. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
+              <p>Text is typed through a Wayland virtual keyboard with <code>wtype</code>, so it reaches any focused window (terminals included) whatever its paste shortcuts are, and it leaves the clipboard alone; a line break in the text is typed as Return.
+                 <strong>Type text</strong> can also press keys at any point, like a small macro: <code>{Enter}</code>, <code>{Tab}</code>, <code>{Esc}</code>, <code>{Up}</code>, <code>{Down}</code>, <code>{Left}</code> and <code>{Right}</code> (in any letter case) press that key there, so <code>user{Tab}password{Enter}</code> fills a login form and sends it.
+                 The <strong>Insert key</strong> buttons under the text put a key at the cursor, and the line below them shows what is typed (<code>Types: user &#8677; password &#9166;</code>); <strong>Press Enter after text</strong> still adds a final Enter. <code>{{</code> types a literal <code>{</code>; any other brace, such as <code>{Foo}</code>, is typed as written. To type a token itself, double its opening brace (<code>{{Enter}</code> types <code>{Enter}</code>); a text saved before this version that contains a token or <code>{{</code> now presses that key or types a single brace.
+                 Each part of the text is one <code>wtype</code> run with the keys after it, one run after another; if <code>wtype</code> disappears partway, the action stops with an error and nothing is typed twice.
+                 Without <code>wtype</code>, or when the compositor lacks the virtual-keyboard protocol <code>wtype</code> needs (checked before anything is typed), it falls back to the Wayland clipboard (<code>wl-copy</code>): for each part of the text it replaces the clipboard and the primary selection and sends a physical Shift+Insert chord, which only works where Shift+Insert pastes, and each key is pressed as a physical key. Files, folders and HTTP(S) websites open with <code>xdg-open</code>.
                  <strong>Close application</strong> targets its exact Linux process basename (1–15 ASCII bytes), not a window title or a shell pattern.</p>
             </article>
             <article class="card">
@@ -523,7 +533,7 @@ sudo udevadm control --reload-rules</code></pre>
                  Release before two seconds to run only the short action; hold for two seconds to run only the secondary action. Releasing afterwards does nothing.
                  For example, assign <strong>Start timer</strong> to the short action and <strong>Cancel timer</strong> to the hold action.</p>
               <a href="screenshots/key-hold-action.png"><img width="1032" height="982" src="screenshots/key-hold-action.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Hold 2 seconds selected for key 8 with Cancel timer as its secondary action."></a>
-              <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> removes the whole key, the short and the hold action together (<strong>Undo remove</strong> restores both);
+              <p>Clear the toggle to edit the short action again. <strong>Remove binding</strong> removes the whole key, the short and the hold action together (<strong>Undo</strong> in its toast restores both for ten seconds);
                  without a hold action, keys run immediately on key-down. Hold actions keep independent page returns and do not replace primary artwork or live information.
                  Dial presses and touch-strip gestures are unchanged.</p>
             </article>
@@ -551,6 +561,32 @@ sudo udevadm control --reload-rules</code></pre>
               <p>A non-None binding can return to a page after a delay: tick <strong>Return to a page afterwards</strong>, pick the destination
                  (listed with its profile and folder, such as <code>Base</code> or <code>Studio / Page 2</code>) and a delay of 1–86400 seconds.
                  Pressing the key again restarts the wait and <strong>Device &gt; Cancel timer</strong> cancels it. Saving never starts the wait.</p>
+            </article>
+            <article class="card wide" id="multi-action">
+              <h4>Multi action</h4>
+              <p><strong>Multi action</strong>, in the System category of the Actions catalog, runs several actions from one key in a fixed order, for example a shortcut, a short wait, a command and then a page change.
+                 It is available only for a key press and for a key's <strong>Hold 2 seconds</strong> action; the catalog dims it while a dial or the touch strip is selected, and dropping it on a dial is refused with a message such as "Multi action cannot be assigned to a dial press."</p>
+              <p><strong>Editing the steps.</strong> Choosing it replaces the action's fields with a numbered <strong>Steps</strong> list, empty for a new multi action. <strong>Add step</strong> opens a dialog with the editor's Action menu and fields (None is not offered);
+                 <strong>Add wait</strong> asks how long to pause, in milliseconds or seconds, from 10 ms to 60 s (seconds may have decimals). Each row shows the step's number, icon and summary, such as <em>Wait 500 ms</em>, and four buttons:
+                 <strong>Move up</strong>, <strong>Move down</strong>, <strong>Edit step</strong> (pencil) and <strong>Remove step</strong> (trash). A multi action holds 1 to 16 steps, at least one of them an action; Add step and Add wait are disabled at 16.
+                 Changing the steps is an unsaved edit like any other field: <strong>Save binding</strong> stores the whole list, and editing or saving never runs a step. <strong>Test action</strong> runs the whole sequence.</p>
+              <p><strong>What a step can be.</strong> Any action except None, another Multi action, <strong>Start timer</strong>, <strong>Cancel timer</strong> and the touchscreen page actions. <strong>Go to profile or page</strong> and the Organization page and folder actions may only be the last step.
+                 Save refuses a list that breaks a rule with a sentence in the toast, such as "Step 1: Go to profile or page can only be the last step" or "A multi action needs at least one action step", and stores nothing.
+                 The whole multi action, every step included, must fit the 4096-byte storage limit of one action; a longer one is refused with "Multi action is too large to store".</p>
+              <p><strong>Strict order.</strong> Each step starts only after the previous one finished: a command when its process exits, an application as soon as it is launched (not when it closes), a plugin action when the plugin answers,
+                 shortcuts, desktop and OBS actions once they are done, and device actions (brightness, sleep) once they are queued for the Stream Deck. A wait pauses only its own sequence: the window and the other keys keep working.
+                 The status line reads "Multi action started." and, after the last step, "Multi action finished."; a <strong>Return to a page afterwards</strong> set on the binding starts only then.
+                 Pressing the key again while its sequence runs is ignored: it neither restarts it nor starts a second one.</p>
+              <p><strong>When a step fails.</strong> The first step that fails stops the sequence; the remaining steps do not run, and an error toast names the step, for example "Multi action stopped at step 2: process exited with exit status: 1".
+                 A command fails when it exits with an error. An error reported after its step already counted as finished, such as an application that fails after it was launched, does not stop the sequence.</p>
+              <p><strong>Limits.</strong> A step has no time limit of its own: a command that never ends keeps the key's sequence waiting, and further presses ignored, until it ends. As with a single <strong>Command</strong> action, it also holds the action worker,
+                 so the commands, shortcuts, desktop and OBS actions of other keys wait behind it. Importing a configuration ends running sequences without running their remaining steps.
+                 Sounds, files and applications named by steps are handled like those of a single action (app-owned links, export references, the missing-file cross); deleting a profile, page or folder removes only the steps that go to it, or the whole binding when no action step is left,
+                 and renaming a folder updates its steps. Older versions of sdeck-plus keep a saved multi action unchanged but neither show nor run it.</p>
+              <figure>
+                <a href="screenshots/multi-action-editor.png"><img width="406" height="456" src="screenshots/multi-action-editor.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Key 8 configured with a four-step multi action: Shortcut CTRL+S, Wait 500 ms, Run notify-send Saved and Go to Studio, each row with Move up, Move down, Edit step and Remove step buttons, then Add step and Add wait."></a>
+                <figcaption>A four-step multi action: a shortcut, a 500 ms wait, a command and, as the last step, Go to profile or page.</figcaption>
+              </figure>
             </article>
             <article class="card wide">
               <h4>Physical keyboard actions and <code>/dev/uinput</code></h4>
@@ -584,7 +620,7 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>Live information on keys and dials</h4>
               <p>In the <strong>Binding</strong> tab of the right-hand panel, tick <strong>Show live information on the key</strong> for the selected key or dial and choose volume (crossed out while muted), audio output device,
                  Stream Deck brightness, time and date, weather, CPU, memory, temperature (bars turn amber and red under load), OBS state (recording, streaming and scene)
-                 the microphone (<strong>Microphone volume and mute</strong>, crossed out while muted, or the <strong>Audio input device</strong> name) or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
+                 the microphone (<strong>Microphone volume and mute</strong>, crossed out while muted, or the <strong>Audio input device</strong> name, both with a microphone icon) or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
                  On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
                  beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
                  window preview matches the device.</p>
@@ -725,7 +761,7 @@ sudo udevadm control --reload-rules</code></pre>
               <p>Every action has a two-tone icon used in the <strong>Action</strong> and <strong>More actions</strong> menus, on the preview dials, and on keys and touch sections without
                  their own artwork, both in the preview and on the device. Each family has its own color: media violet, audio cyan, OBS red, apps and system amber, websites blue,
                  pages and folders white. Badges above the preview strip list what swipes, tap and hold do (dimmed while an unbound swipe keeps its default page change).
-                 Your artwork normally wins; a missing sound/file target instead shows a red cross even over artwork or behind centered/vertical text (live information retains priority). For other action icons, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
+                 Your artwork normally wins; an idle <strong>Start timer</strong> key keeps its icon over the image when button text leaves room (the running countdown and <strong>Cancel timer</strong> are unchanged). A missing sound/file target instead shows a red cross even over artwork or behind centered/vertical text (live information retains priority). For other action icons, button text keeps its placement (the icon uses free space above or below it), and keys set to <strong>None</strong> or left unassigned stay black.
                  Icons are never saved into your artwork or text.</p>
             </article>
           </div>
@@ -821,7 +857,8 @@ sudo udevadm control --reload-rules</code></pre>
                  <strong>Open configuration</strong>, <strong>Start at login</strong>, <strong>Start in tray</strong> (on by default; saved in <code>tray.json</code>), <strong>About</strong> and <strong>Quit</strong>.
                  A tray supporting StatusNotifierItem is needed to keep running with the window hidden.</p>
               <p>Autostart writes <code>$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop</code> (or <code>~/.config/autostart/</code>) and starts the current executable with
-                 <code>--background</code>; disable and re-enable it after moving the executable. Run <code>cargo run -- --background</code> for a quiet manual start.
+                 <code>--background</code>. When the entry's executable no longer exists, for example after switching between <code>install.sh</code> and the pacman package,
+                 the next start repoints it at the running executable (a symlinked entry is left alone, and Cargo builds under <code>target/</code> never take it over). Run <code>cargo run -- --background</code> for a quiet manual start.
                  Startup waits up to 10 seconds for successful tray registration and an available host, without blocking configuration or device initialization.
                  If no usable tray appears (including an unreachable session bus), configuration opens with an explanation; closing it exits instead of hiding.
                  Repeated launches reuse the running instance and open configuration even while tray readiness is pending; late registration never hides that window.
@@ -971,6 +1008,7 @@ cargo test --offline --test plugin_sdk</code></pre>
                 <table class="ref-table key-table">
                   <tr><th><code>src/main.rs</code></th><td>Startup, configuration window, worker lifecycle, GTK test fixtures</td></tr>
                   <tr><th><code>src/feature_runtime.rs</code></th><td>Serialized action work, profiles, page returns, feedback</td></tr>
+                  <tr><th><code>src/features.rs</code>, <code>src/feature_runtime/multi.rs</code>, <code>src/multi_editor.rs</code>, <code>src/action_form.rs</code></th><td>Multi action: model and validation, the step sequencer, the step list and dialog, and the action form shared by the editor and the step dialog</td></tr>
                   <tr><th><code>src/device_model.rs</code>, <code>src/device_roots.rs</code></th><td>Model registry (<a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>) and each model's data folder</td></tr>
                   <tr><th><code>src/preview_layout.rs</code></th><td>Preview geometry for any registry model</td></tr>
                   <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>

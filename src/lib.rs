@@ -33,6 +33,10 @@ mod feature_persistence_tests;
 #[cfg(test)]
 mod key_hold_tests;
 #[cfg(test)]
+mod multi_action_hardening_tests;
+#[cfg(test)]
+mod multi_action_tests;
+#[cfg(test)]
 mod touchscreen_navigation_tests;
 #[cfg(test)]
 mod touchscreen_tests;

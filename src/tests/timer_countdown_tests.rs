@@ -630,6 +630,75 @@ fn cancellation_restores_custom_artwork_and_button_text_without_changing_assignm
 }
 
 #[test]
+fn cancellation_restores_the_timer_icon_over_the_keys_artwork() {
+    run_gtk_test(|| {
+        let fixture = CountdownFixture::new("countdown-icon-artwork");
+        let target = ArtworkTarget::Keypad(2);
+        let background = {
+            let mut images = fixture.artwork.store.borrow_mut();
+            let images = images.as_mut().unwrap();
+            images
+                .assign_in_layer("Base", target, fixture.root.join("source.png"))
+                .unwrap();
+            images.assigned_path_in_layer("Base", target).unwrap()
+        };
+        fixture.artwork.refresh(true);
+        let idle = fixture.preview(2);
+        while fixture.hardware.try_recv().is_ok() {}
+        fixture.press(2, 45);
+        // The countdown keeps drawing over the key's artwork, as before.
+        let countdown: Vec<_> = fixture
+            .hardware
+            .try_iter()
+            .filter_map(|command| match command {
+                ArtworkCommand::ComposeInfo {
+                    target: shown,
+                    path,
+                    value,
+                    ..
+                } if shown == target => Some((path, value)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            countdown,
+            [(
+                Some(background.clone()),
+                expected_countdown("00:45", "mm:ss")
+            )]
+        );
+        assert_ne!(fixture.preview(2), idle, "the countdown replaces the key");
+        fixture.widgets.feature_runtime.cancel_timer();
+        assert_eq!(fixture.preview(2), idle, "the idle picture comes back");
+        let restored: Vec<_> = fixture
+            .hardware
+            .try_iter()
+            .flat_map(|command| match command {
+                ArtworkCommand::Replace(commands) => commands,
+                command => vec![command],
+            })
+            .filter(|command| match command {
+                ArtworkCommand::Assign { target: shown, .. }
+                | ArtworkCommand::ComposeIcon { target: shown, .. }
+                | ArtworkCommand::ComposeInfo { target: shown, .. } => *shown == target,
+                ArtworkCommand::ComposeButton { key, .. } => *key == 2,
+                _ => false,
+            })
+            .collect();
+        assert!(
+            matches!(
+                restored[..],
+                [ArtworkCommand::ComposeIcon {
+                    icon: sdeck_plus::binding_icons::BindingIcon::Timer,
+                    ..
+                }]
+            ),
+            "cancellation restores the timer icon over the artwork: {restored:?}"
+        );
+    });
+}
+
+#[test]
 fn completion_restores_normal_icon_and_ticks_are_deduplicated() {
     run_gtk_test(|| {
         let fixture = CountdownFixture::new("countdown-completion");

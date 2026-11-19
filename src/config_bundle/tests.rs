@@ -59,6 +59,19 @@ impl Drop for Fixture {
 
 const LAYERS: &[u8] = b"streamdeck-layers-v1\nactive\t42617365\nlayer\t42617365\n";
 
+fn bind_audio(
+    layers: &mut LayerStore,
+    layer: &str,
+    trigger: Trigger,
+    path: PathBuf,
+) -> io::Result<()> {
+    layers.bind_configuration(
+        layer,
+        trigger,
+        Action::Feature(FeatureAction::Desktop(DesktopAction::PlayAudio { path })),
+    )
+}
+
 fn contents(path: &Path) -> BTreeMap<String, Vec<u8>> {
     let bundle: Bundle = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     assert_eq!(bundle.format, "sdeck-plus");
@@ -905,6 +918,279 @@ fn metadata_export_uses_type_folders_without_contents_or_parent_paths() {
     let again = f.0.join("again.json");
     export(&destination, &again).unwrap();
     assert_eq!(fs::read(&bundle).unwrap(), fs::read(&again).unwrap());
+}
+
+#[test]
+fn multi_action_file_steps_export_as_bundled_references_and_import_back() {
+    use crate::{asset_links::link_action, features::MultiStep};
+    let f = Fixture::new();
+    let root = f.root("source");
+    let audio = f.0.join("multi sound.wav");
+    write_private(&audio, b"audio").unwrap();
+    let notes = f.0.join("plan.txt");
+    write_private(&notes, b"notes").unwrap();
+    let desktop = |action| MultiStep::Action(Action::Feature(FeatureAction::Desktop(action)));
+    // Sound, file and program steps between steps that name no file.
+    let multi = |sound: PathBuf, file: PathBuf, program: PathBuf| {
+        Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                desktop(DesktopAction::PlayAudio { path: sound }),
+                MultiStep::Wait { milliseconds: 250 },
+                desktop(DesktopAction::Open {
+                    target: file.to_string_lossy().into_owned(),
+                }),
+                MultiStep::Action(Action::Launch {
+                    executable: program,
+                    args: vec!["--go".into()],
+                }),
+                desktop(DesktopAction::Open {
+                    target: "https://example.com/".into(),
+                }),
+                MultiStep::Action(Action::Emit("done".into())),
+            ],
+        })
+    };
+    let chosen = multi(audio.clone(), notes.clone(), f.0.join("bin/tool"));
+    let mut layers = LayerStore::open_at(&root).unwrap();
+    layers
+        .bind_configuration(
+            "Base",
+            Trigger::KeyPress(1),
+            link_action(&root, chosen).unwrap(),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let before = fs::read(root.join("layers.conf")).unwrap();
+    let bundle = f.0.join("multi.sdeck-plus.json");
+
+    export(&root, &bundle).unwrap();
+
+    assert_eq!(fs::read(root.join("layers.conf")).unwrap(), before);
+    let files = contents(&bundle);
+    assert!(files.keys().all(|path| CONFIGS.contains(&path.as_str())));
+    let exported = f.0.join("exported");
+    private_dir(&exported).unwrap();
+    write_private(&exported.join("layers.conf"), &files["layers.conf"]).unwrap();
+    assert_eq!(
+        LayerStore::open_at(&exported)
+            .unwrap()
+            .binding("Base", &Trigger::KeyPress(1)),
+        Some(multi(
+            "./sonidos/multi sound.wav".into(),
+            "./archivos/plan.txt".into(),
+            "./archivos/tool".into(),
+        ))
+    );
+    let destination = f.root("destination");
+    import(&bundle, &destination).unwrap();
+    assert_eq!(
+        LayerStore::open_at(&destination)
+            .unwrap()
+            .binding("Base", &Trigger::KeyPress(1)),
+        Some(multi(
+            destination.join("sonidos/multi sound.wav"),
+            destination.join("archivos/plan.txt"),
+            destination.join("archivos/tool"),
+        ))
+    );
+}
+
+#[test]
+fn legacy_bundles_relocate_and_check_the_sound_steps_of_a_multi_action() {
+    use crate::features::MultiStep;
+    let f = Fixture::new();
+    let source = f.root("source");
+    let multi = |path: PathBuf| {
+        Action::Feature(FeatureAction::Multi {
+            steps: vec![
+                MultiStep::Action(Action::Emit("start".into())),
+                MultiStep::Wait { milliseconds: 100 },
+                MultiStep::Action(Action::Feature(FeatureAction::Desktop(
+                    DesktopAction::PlayAudio { path },
+                ))),
+            ],
+        })
+    };
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    layers
+        .bind("Base", Trigger::KeyPress(1), multi("media/old.mp3".into()))
+        .unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(2),
+            multi(f.0.join("elsewhere.mp3")),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let external = fs::read(source.join("layers.conf")).unwrap();
+    layers.unbind("Base", &Trigger::KeyPress(2)).unwrap();
+    layers.persist().unwrap();
+    let bundled = fs::read(source.join("layers.conf")).unwrap();
+    let target = f.root("target");
+    let before = fs::read(target.join("layers.conf")).unwrap();
+    let media: &[u8] = b"legacy sound";
+
+    // A sound step outside the bundle is refused and changes nothing.
+    let error = import(
+        &f.bundle(&[("layers.conf", &external), ("media/old.mp3", media)]),
+        &target,
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "audio reference must name bundled media");
+    assert_eq!(fs::read(target.join("layers.conf")).unwrap(), before);
+    assert!(!target.join("media").exists());
+
+    import(
+        &f.bundle(&[("layers.conf", &bundled), ("media/old.mp3", media)]),
+        &target,
+    )
+    .unwrap();
+    assert_eq!(
+        LayerStore::open_at(&target)
+            .unwrap()
+            .binding("Base", &Trigger::KeyPress(1)),
+        Some(multi(target.join("media/old.mp3")))
+    );
+    assert_eq!(fs::read(target.join("media/old.mp3")).unwrap(), media);
+}
+
+/// A version 2 bundle (base64 entries) holding `files`.
+fn legacy_v2_bundle(f: &Fixture, files: &[(&str, &[u8])]) -> PathBuf {
+    let bundle = f.0.join(format!(
+        "{}-v2.sdeck-plus.json",
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let entries = files
+        .iter()
+        .map(|(path, bytes)| Entry {
+            path: (*path).into(),
+            data: Some(STANDARD.encode(bytes)),
+        })
+        .collect();
+    write_private(
+        &bundle,
+        &serde_json::to_vec(&Bundle {
+            format: "sdeck-plus".into(),
+            version: 2,
+            model: None,
+            files: entries,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    bundle
+}
+
+/// A multi action that plays `first`, waits, then plays `second`.
+fn two_sound_multi(first: PathBuf, second: PathBuf) -> Action {
+    use crate::features::MultiStep;
+    let sound = |path| {
+        MultiStep::Action(Action::Feature(FeatureAction::Desktop(
+            DesktopAction::PlayAudio { path },
+        )))
+    };
+    Action::Feature(FeatureAction::Multi {
+        steps: vec![
+            sound(first),
+            MultiStep::Wait { milliseconds: 100 },
+            sound(second),
+        ],
+    })
+}
+
+#[test]
+fn legacy_v2_bundles_relocate_both_sound_steps_of_a_multi_action_and_keep_its_wait() {
+    let f = Fixture::new();
+    let source = f.root("source");
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            two_sound_multi("media/one.mp3".into(), "media/two.mp3".into()),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let conf = fs::read(source.join("layers.conf")).unwrap();
+    let bundle = legacy_v2_bundle(
+        &f,
+        &[
+            ("layers.conf", &conf),
+            ("media/one.mp3", b"first sound"),
+            ("media/two.mp3", b"second sound"),
+        ],
+    );
+    let target = f.root("target");
+
+    import(&bundle, &target).unwrap();
+
+    let imported = LayerStore::open_at(&target).unwrap();
+    assert!(
+        imported.conflicts().is_empty(),
+        "{:?}",
+        imported.conflicts()
+    );
+    assert_eq!(
+        imported.binding("Base", &Trigger::KeyPress(1)),
+        Some(two_sound_multi(
+            target.join("media/one.mp3"),
+            target.join("media/two.mp3"),
+        ))
+    );
+    assert_eq!(
+        fs::read(target.join("media/one.mp3")).unwrap(),
+        b"first sound"
+    );
+    assert_eq!(
+        fs::read(target.join("media/two.mp3")).unwrap(),
+        b"second sound"
+    );
+}
+
+#[test]
+fn a_legacy_import_missing_the_media_of_a_sound_step_changes_nothing() {
+    let f = Fixture::new();
+    let source = f.root("source");
+    let mut layers = LayerStore::open_at(&source).unwrap();
+    layers
+        .bind(
+            "Base",
+            Trigger::KeyPress(1),
+            two_sound_multi("media/one.mp3".into(), "media/missing.mp3".into()),
+        )
+        .unwrap();
+    layers.persist().unwrap();
+    let conf = fs::read(source.join("layers.conf")).unwrap();
+    let target = f.root("target");
+    let mut kept = LayerStore::open_at(&target).unwrap();
+    kept.bind("Base", Trigger::KeyPress(2), Action::Emit("keep".into()))
+        .unwrap();
+    kept.persist().unwrap();
+    let before = snapshot(&target);
+
+    for bundle in [
+        f.bundle(&[("layers.conf", &conf), ("media/one.mp3", b"first sound")]),
+        legacy_v2_bundle(
+            &f,
+            &[("layers.conf", &conf), ("media/one.mp3", b"first sound")],
+        ),
+    ] {
+        let error = import(&bundle, &target).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(snapshot(&target), before);
+        assert!(!target.join("media").exists());
+    }
+    assert_eq!(
+        fs::read_dir(&f.0)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("stage"))
+            .count(),
+        0,
+        "no stage is left behind"
+    );
 }
 
 #[test]

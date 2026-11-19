@@ -3,7 +3,8 @@ use gtk::{prelude::*, Box as GtkBox, CheckButton, Entry, Label, Orientation, Tex
 use sdeck_plus::{
     binding_icons::BindingIcon,
     desktop_actions::{
-        DesktopAction, MediaCommand, ScrollDirection, VolumeDirection, DEFAULT_VOLUME_STEP,
+        text_segments, DesktopAction, MediaCommand, ScrollDirection, TextKey, TextSegment,
+        VolumeDirection, DEFAULT_VOLUME_STEP,
     },
     device_control::DeviceAction,
     features::{FeatureAction, TouchscreenAction},
@@ -36,6 +37,10 @@ pub(crate) struct EditorWidgets {
     first: Entry,
     second: Entry,
     text: TextView,
+    /// Type text: one button per key, inserting its token at the cursor (`TextKey::ALL` order).
+    text_keys: Vec<gtk::Button>,
+    /// Type text: what the text types, keys as symbols ("Types: aldo ⇥ mi-clave ⏎").
+    text_preview: Label,
     number: Entry,
     /// Whether `number` currently holds a volume step rather than another numeric field.
     volume_mode: Cell<Option<u8>>,
@@ -63,6 +68,12 @@ pub(crate) struct EditorWidgets {
     picker: RefCell<Option<gtk::FileChooserNative>>,
     audio_output: audio_output::OutputPicker,
     audio_input: audio_output::OutputPicker,
+    /// Multi action runs only from a key press or a key hold.
+    key_trigger: Cell<bool>,
+    /// The step form of a multi action offers no Multi, timers or touchscreen pages.
+    step_form: bool,
+    /// The steps of a multi action; the step form itself has none.
+    steps: Option<crate::multi_editor::StepList>,
 }
 
 impl Deref for FeatureEditor {
@@ -78,6 +89,73 @@ impl Drop for EditorWidgets {
         if let Some(picker) = self.picker.get_mut().take() {
             picker.destroy();
         }
+    }
+}
+
+/// The caption of a key's Insert key button and the key's spoken name.
+fn text_key_caption(key: TextKey) -> (&'static str, &'static str) {
+    match key {
+        TextKey::Enter => ("Enter", "Enter"),
+        TextKey::Tab => ("Tab", "Tab"),
+        TextKey::Escape => ("Esc", "Escape"),
+        TextKey::Up => ("↑", "Up arrow"),
+        TextKey::Down => ("↓", "Down arrow"),
+        TextKey::Left => ("←", "Left arrow"),
+        TextKey::Right => ("→", "Right arrow"),
+    }
+}
+
+/// The "Insert key:" row under the Type text field: one compact linked button per key.
+fn text_key_row() -> (GtkBox, Vec<gtk::Button>) {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    let label = Label::new(Some("Insert key:"));
+    label.add_css_class("muted");
+    let keys = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .accessible_role(gtk::AccessibleRole::Group)
+        .build();
+    keys.add_css_class("linked");
+    keys.add_css_class("text-keys");
+    keys.update_relation(&[gtk::accessible::Relation::LabelledBy(&[label.upcast_ref()])]);
+    let buttons = TextKey::ALL
+        .into_iter()
+        .map(|key| {
+            let (caption, name) = text_key_caption(key);
+            let button = gtk::Button::with_label(caption);
+            button.set_tooltip_text(Some(&format!(
+                "Insert {}\nPresses {name} at this point of the text.",
+                key.token()
+            )));
+            button.update_property(&[gtk::accessible::Property::Label(&format!(
+                "Insert {name} key"
+            ))]);
+            keys.append(&button);
+            button
+        })
+        .collect();
+    row.append(&label);
+    row.append(&keys);
+    (row, buttons)
+}
+
+/// What a Type text value types, for the line under its field: text as written, keys as
+/// symbols, a final ⏎ for Press Enter after text ("Types: aldo ⇥ mi-clave ⏎"). Empty when it
+/// types nothing.
+pub(crate) fn typed_preview(value: &str, enter: bool) -> String {
+    let mut parts: Vec<String> = text_segments(value)
+        .into_iter()
+        .map(|segment| match segment {
+            TextSegment::Text(text) => text,
+            TextSegment::Key(key) => key.symbol().to_owned(),
+        })
+        .collect();
+    if enter {
+        parts.push(TextKey::Enter.symbol().to_owned());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("Types: {}", parts.join(" "))
     }
 }
 
@@ -97,6 +175,16 @@ fn field(label: &str, widget: &impl IsA<gtk::Widget>) -> (GtkBox, Label) {
 
 impl FeatureEditor {
     pub(crate) fn new() -> Self {
+        Self::build(false)
+    }
+
+    /// The More actions form of a multi action step: without Multi action, Start timer,
+    /// Cancel timer and the touchscreen page actions.
+    pub(crate) fn for_steps() -> Self {
+        Self::build(true)
+    }
+
+    fn build(step_form: bool) -> Self {
         let root = GtkBox::new(Orientation::Vertical, 12);
         let category =
             gtk::DropDown::from_strings(&["System", "Multimedia", "Organization", "Device", "OBS"]);
@@ -116,6 +204,11 @@ impl FeatureEditor {
         guidance.append(&action_icon);
         guidance.append(&description);
         root.append(&guidance);
+        let steps = (!step_form).then(crate::multi_editor::StepList::new);
+        if let Some(steps) = &steps {
+            steps.root().set_visible(false);
+            root.append(steps.root());
+        }
         let first = Entry::builder().hexpand(true).width_chars(12).build();
         let second = Entry::builder().hexpand(true).width_chars(12).build();
         let text = TextView::new();
@@ -142,8 +235,20 @@ impl FeatureEditor {
         text.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
             text_label.upcast_ref()
         ])]);
+        let (text_key_row, text_keys) = text_key_row();
+        text_row.append(&text_key_row);
+        let text_preview = Label::new(None);
+        text_preview.add_css_class("muted");
+        text_preview.set_xalign(0.0);
+        text_preview.set_wrap(true);
+        text_preview.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        text_preview.set_max_width_chars(38);
+        text_preview.set_lines(3);
+        text_preview.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        text_preview.set_visible(false);
+        text_row.append(&text_preview);
         text_row.append(&crate::ui::helper(
-            "Enter the text to type, including any line breaks.",
+            "Enter the text to type, including any line breaks. Keys in braces, such as {Tab} or {Enter}, are pressed there; {{ types {.",
         ));
         let (number_row, number_label) = field("", &number);
         let (direction_row, _) = field("Direction", &direction);
@@ -171,6 +276,8 @@ impl FeatureEditor {
             first,
             second,
             text,
+            text_keys,
+            text_preview,
             number,
             volume_mode: Cell::new(None),
             direction,
@@ -195,6 +302,9 @@ impl FeatureEditor {
             picker: RefCell::new(None),
             audio_output,
             audio_input,
+            key_trigger: Cell::new(true),
+            step_form,
+            steps,
         }));
         let weak = Rc::downgrade(&editor.0);
         crate::binding_icon::icon_dropdown(&editor.action, move |position| {
@@ -215,6 +325,26 @@ impl FeatureEditor {
                 Self(editor).update_fields();
             }
         });
+        for (key, button) in TextKey::ALL.into_iter().zip(&editor.text_keys) {
+            let weak = Rc::downgrade(&editor.0);
+            button.connect_clicked(move |_| {
+                if let Some(editor) = weak.upgrade() {
+                    Self(editor).insert_text_key(key);
+                }
+            });
+        }
+        let weak = Rc::downgrade(&editor.0);
+        editor.text.buffer().connect_changed(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                Self(editor).update_text_preview();
+            }
+        });
+        let weak = Rc::downgrade(&editor.0);
+        editor.flag.connect_toggled(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                Self(editor).update_text_preview();
+            }
+        });
         for (button, action) in [
             (&editor.browse_file, gtk::FileChooserAction::Open),
             (&editor.browse_folder, gtk::FileChooserAction::SelectFolder),
@@ -230,9 +360,40 @@ impl FeatureEditor {
         editor
     }
 
+    /// Insert `key`'s token at the Type text cursor, replacing any selection, as typing would.
+    fn insert_text_key(&self, key: TextKey) {
+        let buffer = self.text.buffer();
+        buffer.begin_user_action();
+        buffer.delete_selection(true, true);
+        buffer.insert_at_cursor(key.token());
+        buffer.end_user_action();
+        self.text.grab_focus();
+        self.text.scroll_mark_onscreen(&buffer.get_insert());
+    }
+
+    fn update_text_preview(&self) {
+        let buffer = self.text.buffer();
+        let preview = typed_preview(
+            &buffer.text(&buffer.start_iter(), &buffer.end_iter(), false),
+            self.flag.is_active(),
+        );
+        // Three lines at most: the full preview stays available as the tooltip.
+        self.text_preview
+            .set_tooltip_text((!preview.is_empty()).then_some(preview.as_str()));
+        self.text_preview.set_text(&preview);
+        self.text_preview.set_visible(!preview.is_empty());
+    }
+
     fn choices(&self) -> impl Iterator<Item = Choice> {
-        let category = self.category.selected();
-        let touchscreen = self.touchscreen.get();
+        self.choices_in(self.category.selected())
+    }
+
+    /// The actions offered in `category` for the edited control.
+    fn choices_in(&self, category: u32) -> impl Iterator<Item = Choice> {
+        let touchscreen = self.touchscreen.get() && !self.step_form;
+        let step_form = self.step_form;
+        // The step form has no step list, so it never offers a nested multi action.
+        let multi = self.key_trigger.get() && self.steps.is_some();
         Choice::ALL.into_iter().filter(move |choice| {
             choice.category() == category
                 && (touchscreen
@@ -240,7 +401,34 @@ impl FeatureEditor {
                         choice,
                         Choice::NextTouchscreenPage | Choice::PreviousTouchscreenPage
                     ))
+                && (multi || *choice != Choice::Multi)
+                && !(step_form && matches!(choice, Choice::Timer | Choice::CancelTimer))
         })
+    }
+
+    /// The step list of a multi action; the step form has none.
+    #[allow(dead_code)] // tests and captures reach the list through it
+    pub(crate) fn steps(&self) -> Option<&crate::multi_editor::StepList> {
+        self.steps.as_ref()
+    }
+
+    /// Lets the step dialog offer the store's pages and the installed plugins.
+    pub(crate) fn set_step_context(
+        &self,
+        layers: &Rc<RefCell<sdeck_plus::layers::LayerStore>>,
+        plugins: &crate::plugin_ui::PluginHub,
+    ) {
+        if let Some(steps) = &self.steps {
+            steps.set_context(layers, plugins);
+        }
+    }
+
+    /// Whether the edited event is a key press or a key hold, the only ones a multi action runs
+    /// from.
+    pub(crate) fn set_key_trigger(&self, key: bool) {
+        if self.key_trigger.replace(key) != key {
+            self.refresh_choices();
+        }
     }
 
     /// The icon of the selected feature action, if one is selected.
@@ -355,7 +543,14 @@ impl FeatureEditor {
         ] {
             row.set_visible(false);
         }
+        if let Some(steps) = &self.steps {
+            steps.root().set_visible(false);
+        }
         let Ok(choice) = self.choice() else { return };
+        if let Some(steps) = &self.steps {
+            // The step list replaces the fields.
+            steps.root().set_visible(choice == Choice::Multi);
+        }
         self.audio_output
             .root()
             .set_visible(choice == Choice::SetAudioOutput);
@@ -490,6 +685,9 @@ impl FeatureEditor {
         }
         let text_notify = notify.clone();
         self.text.buffer().connect_changed(move |_| text_notify());
+        if let Some(steps) = &self.steps {
+            steps.connect_changed(notify.clone());
+        }
         self.flag.connect_toggled(move |_| notify());
     }
 
@@ -507,6 +705,10 @@ impl FeatureEditor {
             self.number.text().to_string(),
             self.direction.selected().to_string(),
             self.flag.is_active().to_string(),
+            self.steps
+                .as_ref()
+                .map(crate::multi_editor::StepList::snapshot)
+                .unwrap_or_default(),
         ]
         .join("\u{1f}")
     }
@@ -515,10 +717,22 @@ impl FeatureEditor {
     pub(crate) fn select_catalog_choice(&self, choice: Choice) {
         self.reset();
         self.category.set_selected(choice.category());
-        if let Some(index) = self.choices().position(|value| value == choice) {
+        let offered = self.choices().position(|value| value == choice);
+        if let Some(index) = offered {
             self.action.set_selected(index as u32);
+        } else {
+            // Not for this control (a multi action dropped on a dial): nothing is selected,
+            // so nothing can be saved, and the guidance says why.
+            self.action.set_selected(gtk::INVALID_LIST_POSITION);
         }
         self.update_fields();
+        if offered.is_none() {
+            self.description.set_text(&format!(
+                "{} runs only from a key press or a key hold. Choose another action for this control.",
+                choice.label()
+            ));
+            crate::binding_icon::set_binding_icon(&self.action_icon, choice.binding_icon());
+        }
     }
 
     pub(crate) fn reset(&self) {
@@ -532,6 +746,9 @@ impl FeatureEditor {
         self.volume_mode.set(None);
         self.direction.set_selected(0);
         self.flag.set_active(false);
+        if let Some(steps) = &self.steps {
+            steps.clear();
+        }
         self.category.set_selected(0);
         self.action.set_selected(0);
         self.update_fields();
@@ -670,6 +887,13 @@ impl FeatureEditor {
                 direction: VolumeDirection::Down,
                 db: numeric.parse().map_err(|error| invalid_number(&error))?,
             }),
+            Choice::Multi => FeatureAction::Multi {
+                steps: self
+                    .steps
+                    .as_ref()
+                    .ok_or("A multi action cannot contain another multi action.")?
+                    .steps(),
+            },
             Choice::Visibility => FeatureAction::Obs(ObsAction::SourceVisibility {
                 scene: first,
                 source: second,
@@ -837,6 +1061,14 @@ impl FeatureEditor {
                 Choice::Timer
             }
             FeatureAction::CancelTimer => Choice::CancelTimer,
+            FeatureAction::Multi { steps } => match &self.steps {
+                Some(list) => {
+                    list.populate(steps);
+                    Choice::Multi
+                }
+                // The step form never shows a nested multi action.
+                None => return,
+            },
             // The plugin editor owns plugin actions; there is no built-in choice to show.
             FeatureAction::Plugin(_) => return,
         };

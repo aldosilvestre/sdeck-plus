@@ -15,6 +15,13 @@ On Arch Linux use the `sdeck-plus-X.Y.Z-1-x86_64.pkg.tar.zst` file from the same
 sha256sum -c sdeck-plus-X.Y.Z-x86_64-linux.tar.gz.sha256
 ```
 
+## Start at login after moving the binary
+
+If **Start at login** was on for a copy that is no longer there (for example
+`/usr/bin/sdeck-plus` from a removed pacman package), start the new copy once:
+it repoints the login entry at itself. An entry whose executable still exists
+is left alone, so remove the old copy first.
+
 ## Install for your user (no root)
 
 From the folder this file is in:

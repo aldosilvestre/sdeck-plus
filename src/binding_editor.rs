@@ -413,6 +413,19 @@ pub fn action_caption(action: &Action) -> String {
     action_summary(Some(action))
 }
 
+/// One line naming a step of a multi action: its action's summary, or how long it waits
+/// ("Wait 2 s" for whole seconds, else "Wait 750 ms").
+pub fn step_summary(step: &crate::features::MultiStep) -> String {
+    use crate::features::MultiStep;
+    match step {
+        MultiStep::Action(action) => action_summary(Some(action)),
+        MultiStep::Wait { milliseconds } if milliseconds % 1000 == 0 => {
+            format!("Wait {} s", milliseconds / 1000)
+        }
+        MultiStep::Wait { milliseconds } => format!("Wait {milliseconds} ms"),
+    }
+}
+
 /// The host of an `http(s)://` URL, without user info, port or path.
 pub fn url_host(url: &str) -> Option<String> {
     let (scheme, rest) = url.trim().split_once("://")?;

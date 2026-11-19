@@ -93,6 +93,8 @@ pub enum BindingIcon {
     MediaIdle,
     /// The "More actions" family as a whole.
     More,
+    /// Several actions and waits run in order from one key.
+    Multi,
     /// A sound or file the binding names is gone: a red cross.
     MissingFile,
     /// Fallback for anything without a dedicated picture.
@@ -100,7 +102,7 @@ pub enum BindingIcon {
 }
 
 impl BindingIcon {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::NoAction,
         Self::GoToPage,
         Self::NextPage,
@@ -157,6 +159,7 @@ impl BindingIcon {
         Self::Play,
         Self::MediaIdle,
         Self::More,
+        Self::Multi,
         Self::MissingFile,
         Self::Generic,
     ];
@@ -173,6 +176,8 @@ impl BindingIcon {
             Glyph::Speaker => Self::Volume,
             Glyph::SpeakerMuted => Self::Mute,
             Glyph::Headphones => Self::AudioOutput,
+            Glyph::Microphone => Self::AudioInput,
+            Glyph::MicrophoneMuted => Self::MicrophoneMute,
             Glyph::Sun => Self::Brightness,
             Glyph::Cloud => Self::Cloud,
             Glyph::PartlyCloudy => Self::PartlyCloudy,
@@ -278,6 +283,7 @@ impl BindingIcon {
                 },
             },
             FeatureAction::Plugin(_) => Self::More,
+            FeatureAction::Multi { .. } => Self::Multi,
             FeatureAction::Timer { .. } => Self::Timer,
             FeatureAction::CancelTimer => Self::CancelTimer,
         }
@@ -366,6 +372,7 @@ impl BindingIcon {
             Self::Play => "play",
             Self::MediaIdle => "media-idle",
             Self::More => "more",
+            Self::Multi => "multi",
             Self::MissingFile => "missing-file",
             Self::Generic => "generic",
         }
@@ -472,7 +479,8 @@ impl BindingIcon {
             | Self::Timer
             | Self::CancelTimer
             | Self::Brightness
-            | Self::Sleep => C::System,
+            | Self::Sleep
+            | Self::Multi => C::System,
             Self::Website => C::Web,
             Self::Cloud
             | Self::PartlyCloudy
@@ -821,6 +829,22 @@ pub fn compose_key_image_for(
     caption: &str,
     text: Option<&ButtonText>,
 ) -> Result<Option<Pixbuf>, String> {
+    compose_key_image_over_for(model, icon, caption, text, None)
+}
+
+/// [`compose_key_image_for`] drawn over `background`, the key's own artwork
+/// (cropped to cover the key like any artwork), instead of black. The cross
+/// of a missing file always keeps its black key.
+///
+/// # Errors
+/// Returns image decoding, text validation, cairo or allocation failures.
+pub fn compose_key_image_over_for(
+    model: &DeviceModel,
+    icon: BindingIcon,
+    caption: &str,
+    text: Option<&ButtonText>,
+    background: Option<&std::path::Path>,
+) -> Result<Option<Pixbuf>, String> {
     // A missing file is an error the key must show: the cross sits behind the
     // user's text wherever it is placed.
     if icon == BindingIcon::MissingFile {
@@ -842,7 +866,7 @@ pub fn compose_key_image_for(
     };
     let default = ButtonText::default();
     let base =
-        crate::image_output::compose_button_image_for(model, None, text.unwrap_or(&default))?;
+        crate::image_output::compose_button_image_for(model, background, text.unwrap_or(&default))?;
     let side = base.width();
     let scale = f64::from(side) / f64::from(KEY);
     let mut surface = rgb_surface(&base)?;
@@ -1183,7 +1207,6 @@ impl Pen {
     }
 }
 
-/// A speaker body pointing right, its mouth at x = -1.
 /// A microphone body, shifted left so a +/- mark fits on its right.
 fn microphone(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     rounded(cairo, -7.0, -10.5, 7.5, 13.5, 3.75);
@@ -1195,6 +1218,7 @@ fn microphone(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     pen.line(cairo)
 }
 
+/// A speaker body pointing right, its mouth at x = -1.
 fn speaker(cairo: &Context, pen: Pen) -> Result<(), cairo::Error> {
     closed(
         cairo,
@@ -1767,6 +1791,19 @@ fn glyph(cairo: &Context, icon: BindingIcon, pen: Pen) -> Result<(), cairo::Erro
             pen.soft(cairo)?;
             for x in [-6.0, 0.0, 6.0] {
                 circle(cairo, x, 0.0, 2.2);
+            }
+            pen.solid(cairo)
+        }
+        BindingIcon::Multi => {
+            // Steps in order: three bars beside a timeline of three dots.
+            for y in [-7.0, 0.0, 7.0] {
+                rounded(cairo, -2.0, y - 2.5, 13.0, 5.0, 2.5);
+            }
+            pen.duo(cairo)?;
+            polyline(cairo, &[(-7.5, -7.0), (-7.5, 7.0)]);
+            pen.line(cairo)?;
+            for y in [-7.0, 0.0, 7.0] {
+                circle(cairo, -7.5, y, 2.6);
             }
             pen.solid(cairo)
         }

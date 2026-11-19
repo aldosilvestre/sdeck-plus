@@ -177,7 +177,8 @@ fn hold_editor_saves_reloads_removes_and_undoes_independently() {
             .borrow()
             .binding("Base", &Trigger::KeyPress(1))
             .is_none());
-        ui.undo_remove.emit_clicked();
+        assert!(widgets.toast.action.is_visible(), "the toast offers Undo");
+        widgets.toast.action.emit_clicked();
         assert!(fixture
             .layers
             .borrow()

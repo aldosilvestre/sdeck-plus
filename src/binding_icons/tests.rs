@@ -171,6 +171,14 @@ fn every_action_family_maps_to_a_named_icon() {
         (feature(FeatureAction::Timer { seconds: 5 }), "timer"),
         (feature(FeatureAction::CancelTimer), "cancel-timer"),
         (
+            feature(FeatureAction::Multi {
+                steps: vec![crate::features::MultiStep::Action(Action::Command(
+                    "make".into(),
+                ))],
+            }),
+            "multi",
+        ),
+        (
             feature(FeatureAction::Obs(ObsAction::Scene("Cam".into()))),
             "obs-scene",
         ),
@@ -306,6 +314,31 @@ fn keys_without_text_show_the_icon_above_its_caption() {
     assert!(bright(&image, 70..110) > 20, "caption in the lower band");
     // Black around, like an empty key.
     assert_eq!(bright(&image, 0..4), 0);
+}
+
+#[test]
+fn a_key_icon_over_artwork_keeps_the_artwork_around_the_icon() {
+    let source =
+        std::env::temp_dir().join(format!("key-icon-over-artwork-{}.png", std::process::id()));
+    let artwork = Pixbuf::new(Colorspace::Rgb, false, 8, 2, 2).unwrap();
+    artwork.fill(0x4488ffff);
+    artwork.savev(&source, "png", &[]).unwrap();
+    let image = compose_key_image_over_for(&PLUS, BindingIcon::Timer, "Timer", None, Some(&source));
+    std::fs::remove_file(&source).unwrap();
+    let image = image.unwrap().expect("an icon key");
+    assert_eq!((image.width(), image.height()), (120, 120));
+    assert_eq!(
+        image.read_pixel_bytes()[..3],
+        [0x44, 0x88, 0xff],
+        "the artwork shows where nothing is drawn"
+    );
+    let bytes = image.read_pixel_bytes();
+    let stride = image.rowstride() as usize;
+    let amber = (14..64)
+        .flat_map(|y| (0..120).map(move |x| y * stride + x * 3))
+        .filter(|at| bytes[*at] > 200 && bytes[at + 1] > 150 && bytes[at + 2] < 170)
+        .count();
+    assert!(amber > 100, "the timer icon is drawn over it: {amber}");
 }
 
 #[test]
@@ -478,6 +511,8 @@ fn live_information_glyphs_come_from_the_binding_vocabulary() {
         (Glyph::Live, Some(BindingIcon::Stream)),
         (Glyph::ObsIdle, Some(BindingIcon::ObsScene)),
         (Glyph::Speaker, Some(BindingIcon::Volume)),
+        (Glyph::Microphone, Some(BindingIcon::AudioInput)),
+        (Glyph::MicrophoneMuted, Some(BindingIcon::MicrophoneMute)),
         (Glyph::Cloud, Some(BindingIcon::Cloud)),
         (Glyph::PartlyCloudy, Some(BindingIcon::PartlyCloudy)),
         (Glyph::Rain, Some(BindingIcon::Rain)),

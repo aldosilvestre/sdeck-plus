@@ -201,7 +201,7 @@ fn removing_an_xl_control_clears_all_of_it_and_one_undo_restores_it() {
         let Some(f) = fixture("xl-remove", &PLUS_XL) else {
             return;
         };
-        let ui = &f.widgets.binding_ui;
+        let toast = &f.widgets.toast;
         for control in [
             ControlRef::Key(36),
             ControlRef::Key(20),
@@ -220,8 +220,9 @@ fn removing_an_xl_control_clears_all_of_it_and_one_undo_restores_it() {
                     "{control:?} {trigger:?} is removed"
                 );
             }
-            assert!(ui.undo_remove.is_visible(), "{control:?}");
-            ui.undo_remove.emit_clicked();
+            assert!(toast.action.is_visible(), "{control:?}");
+            assert_eq!(toast.action.label().as_deref(), Some("Undo"));
+            toast.action.emit_clicked();
             for (index, trigger) in triggers.iter().enumerate() {
                 assert_eq!(
                     f.layers.borrow().binding("Base", trigger),
@@ -229,7 +230,7 @@ fn removing_an_xl_control_clears_all_of_it_and_one_undo_restores_it() {
                     "{control:?} {trigger:?} is restored"
                 );
             }
-            assert!(!ui.undo_remove.is_visible(), "{control:?}");
+            assert!(!toast.root.reveals_child(), "{control:?}");
         }
     });
 }
@@ -252,14 +253,14 @@ fn undo_on_an_xl_control_refuses_after_a_later_edit() {
                 .borrow_mut()
                 .bind("Base", trigger.clone(), Action::Command("newer".into()))
                 .unwrap();
-            ui.undo_remove.emit_clicked();
+            f.widgets.toast.action.emit_clicked();
             assert_eq!(
                 f.layers.borrow().binding("Base", &trigger),
                 Some(Action::Command("newer".into())),
                 "{control:?}"
             );
             assert!(ui.status.text().contains("Cannot undo"), "{control:?}");
-            assert!(!ui.undo_remove.is_visible());
+            assert!(!f.widgets.toast.action.is_visible());
         }
     });
 }

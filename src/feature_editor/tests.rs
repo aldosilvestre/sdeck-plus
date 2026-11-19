@@ -2,6 +2,28 @@ use super::*;
 use gtk::glib::translate::IntoGlib;
 
 impl FeatureEditor {
+    /// Every action label the editor offers for its control, category by category.
+    pub(crate) fn offered(&self) -> Vec<&'static str> {
+        (0..5)
+            .flat_map(|category| self.choices_in(category).map(Choice::label))
+            .collect()
+    }
+
+    /// The Type text field's buffer.
+    pub(crate) fn text_buffer(&self) -> gtk::TextBuffer {
+        self.text.buffer()
+    }
+
+    /// The Insert key buttons under the Type text field, in order.
+    pub(crate) fn text_key_buttons(&self) -> Vec<gtk::Button> {
+        self.text_keys.clone()
+    }
+
+    /// The "Types: ..." line under the Type text field.
+    pub(crate) fn text_preview(&self) -> Label {
+        self.text_preview.clone()
+    }
+
     pub(crate) fn wait_for_audio_outputs(&self) {
         self.audio_output.wait_until_loaded();
     }
@@ -548,5 +570,33 @@ pub(crate) fn examples() -> Vec<FeatureAction> {
             ticks: 3,
         }));
     }
+    // Keys in the text are kept as written, with the escape and an unknown brace.
+    actions.push(FeatureAction::Desktop(DesktopAction::Text {
+        value: "aldo{Tab}mi-clave{enter}{{x} {Foo}".into(),
+        enter: false,
+    }));
     actions
+}
+
+#[test]
+fn the_type_text_preview_shows_text_as_written_and_keys_as_symbols() {
+    for (value, enter, expected) in [
+        (
+            "aldo{Tab}mi-clave{Enter}",
+            false,
+            "Types: aldo ⇥ mi-clave ⏎",
+        ),
+        (
+            "aldo{Tab}mi-clave{Enter}",
+            true,
+            "Types: aldo ⇥ mi-clave ⏎ ⏎",
+        ),
+        ("{Esc}{up}{Down}{Left}{RIGHT}", false, "Types: ⎋ ↑ ↓ ← →"),
+        ("hello", false, "Types: hello"),
+        ("a{{b {Foo}", false, "Types: a{b {Foo}"),
+        ("", true, "Types: ⏎"),
+        ("", false, ""),
+    ] {
+        assert_eq!(typed_preview(value, enter), expected, "{value:?} {enter}");
+    }
 }

@@ -108,6 +108,7 @@
     <symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="2" y="6" width="20" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
     <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+    <symbol id="i-multi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5v14"/><circle cx="4.5" cy="5" r="1.6" fill="currentColor"/><circle cx="4.5" cy="12" r="1.6" fill="currentColor"/><circle cx="4.5" cy="19" r="1.6" fill="currentColor"/><rect class="duo" x="9.5" y="3" width="11.5" height="4" rx="2"/><rect class="duo" x="9.5" y="10" width="11.5" height="4" rx="2"/><rect class="duo" x="9.5" y="17" width="11.5" height="4" rx="2"/></symbol>
     <symbol id="i-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></symbol>
     <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle class="duo" cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
     <symbol id="i-mouse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect class="duo" x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
@@ -404,12 +405,12 @@
         <article class="tile tile-2 reveal reveal-delay-2">
           <span class="tile-icon" style="--c: var(--fam-web)"><svg aria-hidden="true"><use href="#i-image"/></svg></span>
           <h3>Artwork, text and icons</h3>
-          <p>Images for keys, the strip and touch zones, styled text on each key, and an action icon on keys and zones without artwork.</p>
+          <p>Images for keys, the strip and touch zones, styled text on each key, and an action icon on keys and zones without artwork. Idle timer keys also keep their icon over the background when text leaves room.</p>
         </article>
         <article class="tile tile-2 reveal">
           <span class="tile-icon" style="--c: var(--fam-load)"><svg aria-hidden="true"><use href="#i-cpu"/></svg></span>
           <h3>Live information</h3>
-          <p>Volume, audio output, time, weather, CPU, memory, temperature, device brightness, OBS state and now playing, updated on the device.</p>
+          <p>Volume, audio output, microphone, time, weather, CPU, memory, temperature, device brightness, OBS state and now playing, updated on the device.</p>
           <div class="mini-bars" aria-hidden="true">
             <div class="mini-bar"><span>CPU</span><span class="track"><span class="fill" style="--v: 23%; --c: var(--fam-load)"></span></span><b>23%</b></div>
             <div class="mini-bar"><span>Memory</span><span class="track"><span class="fill" style="--v: 64%; --c: var(--fam-system)"></span></span><b>64%</b></div>
@@ -604,7 +605,7 @@
           <div class="feature-text">
             <p class="feature-num">06 · Live information</p>
             <h3>Live information</h3>
-            <p>Show volume, output device, brightness, time and date, weather, CPU, memory, temperature, OBS state or the media now playing.
+            <p>Show volume, output device, microphone volume or input device (with a microphone icon), brightness, time and date, weather, CPU, memory, temperature, OBS state or the media now playing.
                Readings update on keys and eligible dial or touch-section bindings, over their own artwork.
                <strong>None</strong> can show information without running an action.</p>
             <p>Choose live information in the <strong>Binding</strong> tab. Weather accepts a city or coordinates and needs an internet connection. The readings below are demonstration values.</p>
@@ -864,7 +865,7 @@
         <p class="lead">Beyond layers, commands, applications, shortcuts and sounds, <strong>More actions</strong> provides the categories below.</p>
         <div class="tablist" role="tablist" aria-label="Action categories" aria-orientation="vertical">
           <button class="tab" type="button" role="tab" id="tab-core" aria-controls="panel-core" aria-selected="true" style="--c: var(--fam-media)"><span class="tab-dot" aria-hidden="true"></span>Core actions<span class="tab-count">8</span></button>
-          <button class="tab" type="button" role="tab" id="tab-system" aria-controls="panel-system" aria-selected="false" tabindex="-1" style="--c: var(--fam-system)"><span class="tab-dot" aria-hidden="true"></span>System<span class="tab-count">6</span></button>
+          <button class="tab" type="button" role="tab" id="tab-system" aria-controls="panel-system" aria-selected="false" tabindex="-1" style="--c: var(--fam-system)"><span class="tab-dot" aria-hidden="true"></span>System<span class="tab-count">7</span></button>
           <button class="tab" type="button" role="tab" id="tab-multimedia" aria-controls="panel-multimedia" aria-selected="false" tabindex="-1" style="--c: var(--fam-audio)"><span class="tab-dot" aria-hidden="true"></span>Multimedia<span class="tab-count">8</span></button>
           <button class="tab" type="button" role="tab" id="tab-organization" aria-controls="panel-organization" aria-selected="false" tabindex="-1" style="--c: var(--fam-org)"><span class="tab-dot" aria-hidden="true"></span>Organization<span class="tab-count">6</span></button>
           <button class="tab" type="button" role="tab" id="tab-device" aria-controls="panel-device" aria-selected="false" tabindex="-1" style="--c: var(--fam-load)"><span class="tab-dot" aria-hidden="true"></span>Device<span class="tab-count">4</span></button>
@@ -890,7 +891,7 @@
         </section>
         <section class="panel reveal" id="panel-system" role="tabpanel" aria-labelledby="tab-system" style="--c: var(--fam-system)">
           <h3><span class="tile-icon" style="--c: var(--fam-system)"><svg aria-hidden="true"><use href="#i-bolt"/></svg></span>System</h3>
-          <p>Alternate two shortcuts, paste Unicode text with optional Enter, open files, folders or websites, close a process, scroll the mouse wheel.</p>
+          <p>Alternate two shortcuts, paste Unicode text with optional Enter, open files, folders or websites, close a process, scroll the mouse wheel, or run several actions from one key in order with a <strong>Multi action</strong>: up to 16 steps, with waits of 10 ms to 60 s between them; the first failing step stops the rest.</p>
           <ul class="action-grid">
             <li><svg aria-hidden="true"><use href="#i-swap"/></svg>Alternate two shortcuts</li>
             <li><svg aria-hidden="true"><use href="#i-clipboard"/></svg>Paste Unicode text, optional Enter</li>
@@ -898,6 +899,7 @@
             <li><svg aria-hidden="true"><use href="#i-globe"/></svg>Open websites</li>
             <li><svg aria-hidden="true"><use href="#i-x-circle"/></svg>Close a process</li>
             <li><svg aria-hidden="true"><use href="#i-mouse"/></svg>Scroll the mouse wheel</li>
+            <li><svg aria-hidden="true"><use href="#i-multi"/></svg>Multi action: several actions in order (keys only)</li>
           </ul>
         </section>
         <section class="panel reveal" id="panel-multimedia" role="tabpanel" aria-labelledby="tab-multimedia" style="--c: var(--fam-audio)">

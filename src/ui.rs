@@ -5,6 +5,11 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 /// What a toast's action button runs; taken out when used, so it runs once.
 type ToastHandler = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
+/// How long a plain success message stays before it closes itself.
+const MESSAGE_LIFETIME: Duration = Duration::from_secs(5);
+/// How long a message with an action (such as Undo) stays, and its action with it.
+const ACTION_LIFETIME: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 pub(crate) struct Toast {
     pub(crate) root: gtk::Revealer,
@@ -21,12 +26,13 @@ pub(crate) struct Toast {
 
 impl Toast {
     pub(crate) fn new() -> Self {
+        // Messages show at the top center of the window, over its body.
         let root = gtk::Revealer::builder()
             .halign(gtk::Align::Center)
-            .valign(gtk::Align::End)
+            .valign(gtk::Align::Start)
             .margin_start(24)
             .margin_end(24)
-            .margin_bottom(24)
+            .margin_top(24)
             .accessible_role(gtk::AccessibleRole::Alert)
             .transition_type(gtk::RevealerTransitionType::Crossfade)
             .build();
@@ -54,16 +60,18 @@ impl Toast {
         content.append(&dismiss);
         root.set_child(Some(&content));
         let timeout = Rc::new(RefCell::new(None::<glib::SourceId>));
-        let pending = timeout.clone();
-        let weak = root.downgrade();
-        dismiss.connect_clicked(move |_| {
-            if let Some(source) = pending.borrow_mut().take() {
-                source.remove();
-            }
-            if let Some(root) = weak.upgrade() {
-                root.set_reveal_child(false);
-            }
-        });
+        {
+            let (handler, pending, weak) = (handler.clone(), timeout.clone(), root.downgrade());
+            dismiss.connect_clicked(move |_| {
+                if let Some(source) = pending.borrow_mut().take() {
+                    source.remove();
+                }
+                drop(handler.take());
+                if let Some(root) = weak.upgrade() {
+                    root.set_reveal_child(false);
+                }
+            });
+        }
         {
             let (handler, pending, weak) = (handler.clone(), timeout.clone(), root.downgrade());
             action.connect_clicked(move |_| {
@@ -80,10 +88,14 @@ impl Toast {
                 }
             });
         }
-        let pending = timeout.clone();
-        root.connect_unrealize(move |_| {
+        let (pending, expiring) = (timeout.clone(), handler.clone());
+        root.connect_unrealize(move |root| {
             if let Some(source) = pending.borrow_mut().take() {
                 source.remove();
+            }
+            // Without its timer an action would outlive its time: it goes, and its message.
+            if expiring.take().is_some() {
+                root.set_reveal_child(false);
             }
         });
         Self {
@@ -104,11 +116,13 @@ impl Toast {
         overlay
     }
 
-    /// A message with one action beside it (for example Undo). It stays a little longer than a
-    /// plain message, since reading it and deciding takes longer.
+    /// A message with one action beside it (for example Undo). It stays ten seconds, twice as
+    /// long as a plain message, since reading it and deciding takes longer. When it closes, or
+    /// another message replaces it, the action is dropped: it can no longer run, and what it
+    /// holds is released.
     #[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
     pub(crate) fn show_with_action(&self, message: &str, caption: &str, run: Rc<dyn Fn()>) {
-        self.show(message, false);
+        self.present(message, false, Some(ACTION_LIFETIME));
         self.action.set_label(caption);
         self.action
             .update_property(&[gtk::accessible::Property::Label(caption)]);
@@ -116,13 +130,19 @@ impl Toast {
         *self.handler.borrow_mut() = Some(run);
     }
 
+    /// A message: a success closes itself after five seconds, an error stays until dismissed.
     pub(crate) fn show(&self, message: &str, failed: bool) {
+        self.present(message, failed, (!failed).then_some(MESSAGE_LIFETIME));
+    }
+
+    /// Replace whatever the toast shows with `message`, closing it after `lifetime` if any.
+    fn present(&self, message: &str, failed: bool, lifetime: Option<Duration>) {
         if let Some(source) = self.timeout.borrow_mut().take() {
             source.remove();
         }
         // Any earlier action no longer belongs to this message.
         self.action.set_visible(false);
-        *self.handler.borrow_mut() = None;
+        drop(self.handler.take());
         self.label.set_text(message);
         // The message stays in ink; only the tone glyph carries the colour.
         for class in ["feedback-error", "feedback-success"] {
@@ -140,18 +160,17 @@ impl Toast {
         }));
         self.dismiss.set_visible(failed);
         self.root.set_reveal_child(true);
-        if !failed {
+        if let Some(lifetime) = lifetime {
             let weak = self.root.downgrade();
-            let pending = self.timeout.clone();
-            *self.timeout.borrow_mut() = Some(glib::timeout_add_local_once(
-                Duration::from_secs(5),
-                move || {
-                    pending.borrow_mut().take();
-                    if let Some(root) = weak.upgrade() {
-                        root.set_reveal_child(false);
-                    }
-                },
-            ));
+            let (pending, handler) = (self.timeout.clone(), self.handler.clone());
+            *self.timeout.borrow_mut() = Some(glib::timeout_add_local_once(lifetime, move || {
+                pending.borrow_mut().take();
+                // An expired action can no longer run; what it holds is released.
+                drop(handler.take());
+                if let Some(root) = weak.upgrade() {
+                    root.set_reveal_child(false);
+                }
+            }));
         }
     }
 }
@@ -183,6 +202,7 @@ pub(crate) fn assert_toast_lifecycle(toast: &Toast) {
         done.quit();
     });
     // Auto-dismiss timing is the behavior under test; await its exact signal.
+    let shown = std::time::Instant::now();
     toast.show("Successful retry", false);
     loop_.run();
     toast.root.disconnect(signal);
@@ -190,6 +210,10 @@ pub(crate) fn assert_toast_lifecycle(toast: &Toast) {
         deadline.remove();
     }
     assert!(!timed_out.get(), "success toast did not auto-dismiss");
+    assert!(
+        shown.elapsed() >= Duration::from_secs(5),
+        "a plain success stays five seconds"
+    );
     assert!(!toast.root.reveals_child());
     assert!(toast.timeout.borrow().is_none());
     toast.show("Dismissible error", true);
@@ -203,6 +227,39 @@ pub(crate) fn assert_toast_lifecycle(toast: &Toast) {
         .unwrap()
         .emit_clicked();
     assert!(!toast.root.reveals_child());
+}
+
+/// Runs the main loop until `toast` closes by itself, at most `limit`: how long after `shown` it
+/// closed, or `None` when it was still open. Awaits the real reveal signal, never a fixed sleep.
+#[cfg(test)]
+pub(crate) fn time_until_closed(
+    toast: &Toast,
+    shown: std::time::Instant,
+    limit: Duration,
+) -> Option<Duration> {
+    let loop_ = glib::MainLoop::new(None, false);
+    let closed = Rc::new(std::cell::Cell::new(None));
+    let (seen, done) = (closed.clone(), loop_.clone());
+    let signal = toast.root.connect_reveal_child_notify(move |root| {
+        if !root.reveals_child() && seen.get().is_none() {
+            seen.set(Some(shown.elapsed()));
+            done.quit();
+        }
+    });
+    let timed_out = Rc::new(std::cell::Cell::new(false));
+    let (flag, done) = (timed_out.clone(), loop_.clone());
+    let deadline = glib::timeout_add_local_once(limit, move || {
+        flag.set(true);
+        done.quit();
+    });
+    if toast.root.reveals_child() {
+        loop_.run();
+    }
+    toast.root.disconnect(signal);
+    if !timed_out.get() {
+        deadline.remove();
+    }
+    closed.get()
 }
 
 pub(crate) fn icon_caption(icon: &str, caption: &str) -> GtkBox {
@@ -478,16 +535,51 @@ pub(crate) fn profile_dialog(
     dismiss: &str,
     primary: Option<&Button>,
 ) -> gtk::Window {
-    let dialog = gtk::Window::builder()
+    let dialog = form_dialog(
+        Some(parent.upcast_ref()),
+        title,
+        subtitle,
+        body,
+        dismiss,
+        primary,
+    )
+    .window;
+    dialog.add_css_class("profile-dialog");
+    dialog
+}
+
+/// The parts of a [`form_dialog`] a caller may change after building it.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) struct FormDialog {
+    pub(crate) window: gtk::Window,
+    pub(crate) title: Label,
+    pub(crate) subtitle: Label,
+    pub(crate) dismiss: Button,
+}
+
+/// The shared modal dialog frame: a title, a one-line muted subtitle, `body`, then the single
+/// right-aligned action row (the dismissal with its `Esc` hint, then `primary`). Escape and the
+/// dismissal hide it; the widgets are reused, never rebuilt.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn form_dialog(
+    parent: Option<&gtk::Window>,
+    title: &str,
+    subtitle: &str,
+    body: &impl IsA<gtk::Widget>,
+    dismiss: &str,
+    primary: Option<&Button>,
+) -> FormDialog {
+    let builder = gtk::Window::builder()
         .title(title)
-        .transient_for(parent)
         .modal(true)
         .destroy_with_parent(true)
         .hide_on_close(true)
         .resizable(false)
-        .default_width(400)
-        .build();
-    dialog.add_css_class("profile-dialog");
+        .default_width(400);
+    let dialog = match parent {
+        Some(parent) => builder.transient_for(parent).build(),
+        None => builder.build(),
+    };
     dialog.add_css_class("popup-dialog");
     let content = GtkBox::new(Orientation::Vertical, 10);
     content.set_margin_top(14);
@@ -530,7 +622,12 @@ pub(crate) fn profile_dialog(
         })),
     ));
     dialog.add_controller(escape);
-    dialog
+    FormDialog {
+        window: dialog,
+        title: heading,
+        subtitle: note,
+        dismiss: close,
+    }
 }
 
 pub(crate) fn section_heading(icon: &str, text: &str) -> GtkBox {

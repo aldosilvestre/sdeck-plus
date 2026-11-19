@@ -157,13 +157,17 @@ if ! pkg-config --print-errors --exists libudev; then
     exit 1
 fi
 
-# One EXIT handler owns both the atomic desktop temporary and release scratch.
-# Never register a second EXIT trap that could discard either cleanup action.
+# One EXIT handler owns the atomic desktop and autostart temporaries and release scratch.
+# Never register a second EXIT trap that could discard any cleanup action.
 release_temporary=''
 desktop_temporary=''
+autostart_temporary=''
 cleanup() {
     if [[ -n $desktop_temporary ]]; then
         rm -f -- "$desktop_temporary"
+    fi
+    if [[ -n $autostart_temporary ]]; then
+        rm -f -- "$autostart_temporary"
     fi
     if [[ -n $release_temporary ]]; then
         rm -rf -- "$release_temporary"
@@ -331,16 +335,47 @@ case ":${PATH:-}:" in
     *) note "$prefix/bin is not in PATH; add it to run 'sdeck-plus' by name." ;;
 esac
 note_running_instance 'a running sdeck-plus still uses the previous executable; quit it from the tray and start it again.'
-if [[ -f $autostart_file ]] &&
-    ! grep -Fxq -- "Exec=$exec_path --background" "$autostart_file"; then
-    note 'Start at login points at another executable; disable and re-enable it from the installed application.'
+# Session startup silently skips an entry whose executable moved (for example
+# from a pacman package in /usr/bin), so repoint our existing entry here.
+autostart_exec="Exec=$exec_path --background"
+if [[ -f $autostart_file && ! -L $autostart_file ]] &&
+    grep -q '^Exec=' "$autostart_file" &&
+    ! grep -Fxq -e "$autostart_exec" -e "$autostart_exec"$'\r' -- "$autostart_file"; then
+    autostart_temporary="$autostart_file.tmp.$$"
+    # CRLF lines keep their \r; exit status 3 means no [Desktop Entry] Exec was replaced.
+    autostart_status=0
+    SDECK_PLUS_EXEC=$autostart_exec awk '
+        {
+            line = $0
+            crlf = sub(/\r$/, "", line)
+        }
+        line ~ /^\[.*\]$/ { in_entry = (line == "[Desktop Entry]") }
+        in_entry && line ~ /^Exec=/ {
+            print ENVIRON["SDECK_PLUS_EXEC"] (crlf ? "\r" : "")
+            replaced = 1
+            next
+        }
+        { print }
+        END { exit (replaced ? 0 : 3) }
+    ' "$autostart_file" > "$autostart_temporary" || autostart_status=$?
+    if (( autostart_status == 3 )); then
+        rm -f -- "$autostart_temporary"
+        note 'Start at login points at another executable; disable and re-enable it from the installed application.'
+    elif (( autostart_status == 0 )) &&
+        chmod 644 "$autostart_temporary" &&
+        mv -f -- "$autostart_temporary" "$autostart_file"; then
+        note 'Start at login now starts the installed executable.'
+    else
+        note "could not update Start at login in $autostart_file; disable and re-enable it from the installed application."
+    fi
 fi
 
 missing_tools=()
 for entry in \
     'mpv:sound playback' \
     'wpctl:volume and mute' \
-    'wl-copy:text pasting' \
+    'wtype:typing text' \
+    'wl-copy:text pasting without wtype' \
     'xdg-open:opening files and websites'; do
     if ! command -v "${entry%%:*}" >/dev/null 2>&1; then
         missing_tools+=("${entry%%:*} (${entry#*:})")

@@ -268,7 +268,11 @@ fn accent(value: &InfoValue) -> Color {
     };
     match value.glyph {
         Glyph::None | Glyph::Timer => WHITE,
-        Glyph::Speaker | Glyph::SpeakerMuted | Glyph::Headphones => CYAN,
+        Glyph::Speaker
+        | Glyph::SpeakerMuted
+        | Glyph::Headphones
+        | Glyph::Microphone
+        | Glyph::MicrophoneMuted => CYAN,
         Glyph::Sun | Glyph::PartlyCloudy | Glyph::Storm => AMBER,
         Glyph::Cloud | Glyph::Fog => CLOUD,
         Glyph::Rain => BLUE,
@@ -322,7 +326,8 @@ fn make_layout(
 
 /// The reading's icon from the binding icon vocabulary, as a duotone in its
 /// accent color over the vocabulary's soft shadow so it reads over any
-/// artwork. A muted speaker keeps a grey speaker with a red cross.
+/// artwork. A muted speaker keeps a grey speaker with a red cross, a muted
+/// microphone a grey microphone with a red slash.
 fn draw_icon(
     cairo: &Context,
     value: &InfoValue,
@@ -347,6 +352,22 @@ fn draw_icon(
             rect.width,
             rect.height,
         );
+        cairo.clip();
+        let result = binding_icons::paint(cairo, icon, center, rect.width, ink(RED));
+        cairo.restore()?;
+        result?;
+    }
+    if value.glyph == Glyph::MicrophoneMuted {
+        // The slash runs from (-9.5, -9.5) to (9.5, 9.5) on the 24-unit grid;
+        // a band two units wide around it repaints only the slash in red.
+        let unit = rect.width / 24.0;
+        let (x, y) = center;
+        cairo.save()?;
+        cairo.move_to(x + unit * -12.0, y + unit * -10.0);
+        cairo.line_to(x + unit * -10.0, y + unit * -12.0);
+        cairo.line_to(x + unit * 12.0, y + unit * 10.0);
+        cairo.line_to(x + unit * 10.0, y + unit * 12.0);
+        cairo.close_path();
         cairo.clip();
         let result = binding_icons::paint(cairo, icon, center, rect.width, ink(RED));
         cairo.restore()?;
@@ -943,6 +964,41 @@ mod tests {
     }
 
     #[test]
+    fn muted_microphone_gets_a_red_slash_over_a_grey_microphone() {
+        use crate::info::InfoSource;
+        let value = InfoSource::InputVolume
+            .parse("Volume: 0.50 [MUTED]")
+            .unwrap();
+        let muted = compose_info_image(&value, None).unwrap();
+        let icon = key_plan(&value, SIZE).icon.unwrap();
+        let at = |x: f64, y: f64| {
+            pixel(
+                &muted,
+                (icon.x + icon.width * (0.5 + x / 24.0)) as usize,
+                (icon.y + icon.height * (0.5 + y / 24.0)) as usize,
+            )
+        };
+        let [red, green, _] = at(7.0, 7.0);
+        assert!(red > 200 && green < 150, "slash is red: {red},{green}");
+        let [red, green, _] = at(3.75, -6.0);
+        assert!(
+            red < 200 && green > 100,
+            "microphone stays grey: {red},{green}"
+        );
+        let ((low, y), _) = bar_points(&value);
+        assert!(near(pixel(&muted, low, y), GREY));
+        // Unmuted, it is a microphone, not the speaker the output volume shows.
+        let mic = InfoSource::InputVolume.parse("Volume: 0.50").unwrap();
+        let speaker = InfoSource::Volume.parse("Volume: 0.50").unwrap();
+        assert_ne!(
+            compose_info_image(&mic, None).unwrap().read_pixel_bytes(),
+            compose_info_image(&speaker, None)
+                .unwrap()
+                .read_pixel_bytes()
+        );
+    }
+
+    #[test]
     fn the_picture_has_no_background_of_its_own() {
         let root = std::env::temp_dir().join(format!("sdeck-render-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -1396,6 +1452,8 @@ mod tests {
         let empty = compose_info_image(&InfoValue::text(Glyph::None, ""), None).unwrap();
         for glyph in [
             Glyph::Headphones,
+            Glyph::Microphone,
+            Glyph::MicrophoneMuted,
             Glyph::Sun,
             Glyph::PartlyCloudy,
             Glyph::Rain,

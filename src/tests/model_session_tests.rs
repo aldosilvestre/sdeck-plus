@@ -498,7 +498,7 @@ fn a_device_switch_asks_nothing_and_the_left_session_keeps_its_draft() {
 }
 
 #[test]
-fn a_hidden_session_keeps_its_timer_and_pending_undo_running() {
+fn a_hidden_session_keeps_its_timer_running_and_the_switch_notice_ends_its_undo() {
     run_gtk_test(|| {
         let Some(harness) = start("hidden-timer", |_| {}) else {
             return;
@@ -509,15 +509,48 @@ fn a_hidden_session_keeps_its_timer_and_pending_undo_running() {
             Action::Feature(sdeck_plus::features::FeatureAction::Timer { seconds: 60 }),
         );
         assert!(runtime.timer_active());
-        runtime.binding_ui().undo_remove.set_visible(true);
-        *runtime.binding_ui().removed.borrow_mut() = Some(Vec::new());
+        let removed = Trigger::KeyPress(1);
+        runtime
+            .layers()
+            .borrow_mut()
+            .bind("Base", removed.clone(), Action::Command("kept".into()))
+            .unwrap();
+        let ui = runtime.binding_ui();
+        ui.select_control(ControlKind::Button, Some(1), true)
+            .unwrap();
+        ui.load_selected_binding(runtime.layers());
+        let mut buttons = Vec::new();
+        super::action_catalog_tests::collect_catalog_buttons(
+            harness.window.upcast_ref(),
+            &mut buttons,
+        );
+        buttons
+            .iter()
+            .find(|button| button_caption(button).as_deref() == Some("Remove binding"))
+            .expect("Remove binding button")
+            .emit_clicked();
+        assert!(runtime
+            .layers()
+            .borrow()
+            .binding("Base", &removed)
+            .is_none());
+        let toast = harness.session.toast();
+        assert_eq!(toast.action.label().as_deref(), Some("Undo"));
 
         harness.connect(&PLUS_XL);
         harness.wait_for_model(&PLUS_XL);
         // The + stays alive behind the XL: its countdown keeps running.
         assert!(runtime.timer_active());
         assert!(!harness.session.runtime().timer_active());
-        assert!(runtime.binding_ui().removed.borrow().is_some());
+        // The switch notice replaces the removal's toast, and its Undo with it.
+        assert_eq!(toast.label.text(), "Switched to Stream Deck + XL.");
+        assert!(!toast.action.is_visible());
+        toast.action.emit_clicked();
+        assert!(runtime
+            .layers()
+            .borrow()
+            .binding("Base", &removed)
+            .is_none());
     });
 }
 

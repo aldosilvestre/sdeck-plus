@@ -111,6 +111,9 @@ impl Tray for MonitorTray {
 
 pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
     let (commands, receiver) = async_channel::unbounded();
+    let executable = std::env::current_exe()?;
+    // A package or install.sh move leaves the login entry naming a missing file.
+    let repaired = crate::autostart::repair_missing_executable(&executable);
     let autostart = crate::autostart::is_enabled();
     let preference_path = crate::tray_preference::path();
     let preference = preference_path
@@ -128,7 +131,7 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
         autostart: *autostart.as_ref().unwrap_or(&false),
         keep_running,
         start_in_tray,
-        executable: std::env::current_exe()?,
+        executable,
         icon: crate::app_icon::tray_pixmap()?,
     };
     let (service, readiness) =
@@ -164,6 +167,8 @@ pub fn install(app: &Application) -> Result<(), Box<dyn std::error::Error>> {
         let mut start_in_tray = start_in_tray;
         if let Err(error) = autostart {
             show_error(&app, &format!("Could not read start at login: {error}"));
+        } else if let Err(error) = repaired {
+            show_error(&app, &format!("Could not update start at login: {error}"));
         }
         if let Err(error) = preference {
             show_error(&app, &format!("Could not read tray preference: {error}. Original preference has not been replaced."));

@@ -8,6 +8,91 @@ use serde::{Deserialize, Serialize};
 use std::io;
 
 const MAX_STORED_ACTION: usize = 4096;
+/// Most steps one multi action may hold.
+pub const MAX_MULTI_STEPS: usize = 16;
+/// Shortest and longest wait step, in milliseconds.
+pub const MULTI_WAIT_RANGE: std::ops::RangeInclusive<u32> = 10..=60_000;
+
+/// One step of [`FeatureAction::Multi`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MultiStep {
+    /// An action, stored with the `layers.conf` action encoding.
+    Action(#[serde(with = "step_action")] crate::layers::Action),
+    /// A pause before the next step.
+    Wait { milliseconds: u32 },
+}
+
+mod step_action {
+    use serde::{de::Error as _, ser::Error as _, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        action: &crate::layers::Action,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let encoded = crate::layers::encode_action(action).map_err(S::Error::custom)?;
+        serializer.serialize_str(&encoded)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::layers::Action, D::Error> {
+        let encoded = String::deserialize(deserializer)?;
+        crate::layers::decode_action(&encoded).map_err(D::Error::custom)
+    }
+}
+
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message.into())
+}
+
+/// Checks the S5 rules of a multi action: 1 to 16 steps, at least one
+/// action, waits of 10 ms to 60 s, no nesting, timers or None, and a page
+/// change only as the last step. Step errors name their 1-based position.
+fn validate_multi(steps: &[MultiStep]) -> io::Result<()> {
+    use crate::layers::Action;
+    if steps.is_empty() || steps.len() > MAX_MULTI_STEPS {
+        return Err(invalid(format!(
+            "A multi action needs 1 to {MAX_MULTI_STEPS} steps"
+        )));
+    }
+    if !steps
+        .iter()
+        .any(|step| matches!(step, MultiStep::Action(_)))
+    {
+        return Err(invalid("A multi action needs at least one action step"));
+    }
+    let last = steps.len() - 1;
+    for (index, step) in steps.iter().enumerate() {
+        let at = |message: &str| invalid(format!("Step {}: {message}", index + 1));
+        let action = match step {
+            MultiStep::Wait { milliseconds } if !MULTI_WAIT_RANGE.contains(milliseconds) => {
+                return Err(at("a wait must last 10 ms to 60 seconds"));
+            }
+            MultiStep::Wait { .. } => continue,
+            MultiStep::Action(action) => action,
+        };
+        match action {
+            Action::None => return Err(at("None cannot be a step of a multi action")),
+            Action::Feature(FeatureAction::Multi { .. }) => {
+                return Err(at("a multi action cannot contain another multi action"))
+            }
+            Action::Feature(FeatureAction::Timer { .. } | FeatureAction::CancelTimer) => {
+                return Err(at("timers cannot be steps of a multi action"))
+            }
+            Action::Feature(FeatureAction::Touchscreen(_)) => {
+                return Err(at("touchscreen page actions require a touchscreen gesture"))
+            }
+            Action::SwitchLayer(_) | Action::Feature(FeatureAction::Navigation(_))
+                if index != last =>
+            {
+                return Err(at("Go to profile or page can only be the last step"))
+            }
+            _ => {}
+        }
+        crate::layers::validate_step_action(action).map_err(|error| at(&error.to_string()))?;
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TouchscreenAction {
@@ -28,12 +113,16 @@ pub enum FeatureAction {
         seconds: u32,
     },
     CancelTimer,
+    /// Several actions and waits run in order from one key.
+    Multi {
+        steps: Vec<MultiStep>,
+    },
 }
 
 impl FeatureAction {
     /// Serialized variant names, so a stored action of another variant can be
     /// told apart from a malformed one (see `layers::unknown_action_kind`).
-    pub(crate) const VARIANTS: [&'static str; 8] = [
+    pub(crate) const VARIANTS: [&'static str; 9] = [
         "Desktop",
         "Navigation",
         "Touchscreen",
@@ -42,6 +131,7 @@ impl FeatureAction {
         "Timer",
         "CancelTimer",
         "Plugin",
+        "Multi",
     ];
 
     pub fn validate(&self) -> io::Result<()> {
@@ -58,6 +148,7 @@ impl FeatureAction {
                 "Timer duration must be between 1 second and 24 hours",
             )),
             Self::Timer { .. } | Self::CancelTimer | Self::Touchscreen(_) => Ok(()),
+            Self::Multi { steps } => validate_multi(steps),
         }
     }
 
@@ -74,6 +165,8 @@ impl FeatureAction {
             Self::Plugin(binding) => format!("Plugin {}: {}", binding.plugin_id, binding.action_id),
             Self::Timer { seconds } => format!("Timer {seconds}s"),
             Self::CancelTimer => "Cancel timer".into(),
+            Self::Multi { steps } if steps.len() == 1 => "Multi action (1 step)".into(),
+            Self::Multi { steps } => format!("Multi action ({} steps)", steps.len()),
         }
     }
 
@@ -84,6 +177,9 @@ impl FeatureAction {
             other => serde_json::to_string(other),
         }
         .map_err(io::Error::other)?;
+        if value.len() > MAX_STORED_ACTION && matches!(self, Self::Multi { .. }) {
+            return Err(invalid("Multi action is too large to store"));
+        }
         if value.len() > MAX_STORED_ACTION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -97,7 +193,8 @@ impl FeatureAction {
         let action: Self = serde_json::from_str(value)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         // Plugin settings are third-party sized; hold them to the limit encode enforces.
-        if matches!(action, Self::Plugin(_)) && value.len() > MAX_STORED_ACTION {
+        if matches!(action, Self::Plugin(_) | Self::Multi { .. }) && value.len() > MAX_STORED_ACTION
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Action settings exceed the 4096-byte storage limit",
@@ -134,6 +231,9 @@ mod tests {
                 "run",
                 crate::plugins::Settings::new(),
             )),
+            FeatureAction::Multi {
+                steps: vec![MultiStep::Action(crate::layers::Action::Emit("a".into()))],
+            },
         ];
         // Adding a variant must break this match, so the list above and VARIANTS get it too.
         for action in &samples {
@@ -145,7 +245,8 @@ mod tests {
                 | FeatureAction::Obs(_)
                 | FeatureAction::Timer { .. }
                 | FeatureAction::CancelTimer
-                | FeatureAction::Plugin(_) => {}
+                | FeatureAction::Plugin(_)
+                | FeatureAction::Multi { .. } => {}
             }
         }
         let names: Vec<String> = samples

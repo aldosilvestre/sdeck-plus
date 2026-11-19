@@ -5,6 +5,66 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Multi action:** **More actions > System > Multi action** runs several actions from one key
+  press or key hold (not dials or the touch strip) in strict order: each step starts only after the
+  previous one finished (a command when its process exits, an application once it is launched, a
+  plugin action when the plugin answers). A list of 1 to 16 steps, at least one an action, with
+  optional waits of 10 ms to 60 s (milliseconds or seconds) that never block the window or other
+  keys. Steps can be any action except None, another multi action, the timers and the touchscreen
+  page actions; Go to profile or page and the page/folder actions only as the last step. The editor
+  shows a numbered step list with Move up, Move down, Edit step and Remove step per row, plus **Add
+  step** and **Add wait** dialogs; editing or saving never runs a step, and Save refuses an invalid
+  list with a sentence. The first failing step stops the rest with the toast "Multi action stopped
+  at step <n>: <error>"; the status line says "Multi action started." and "Multi action
+  finished.", a page return starts after the last step, and pressing the key again while it runs
+  is ignored. Sounds, files, pages and folders named by steps follow links, export/import, page or
+  folder removal and folder renames like single actions. It is stored in the existing `feature-v1`
+  row within the 4096-byte action limit ("Multi action is too large to store"); older builds keep
+  the row unchanged without showing or running it. There is no per-step timeout: a command that
+  never ends keeps that key's sequence busy (and, like a single Command, the action worker) until it
+  ends. New `sdeck-multi-symbolic` icon on keys and in menus.
+- **Keys inside Type text:** a Type text action can press keys at any point of its text, like a
+  small macro: `{Enter}`, `{Tab}`, `{Esc}`, `{Up}`, `{Down}`, `{Left}` and `{Right}` (in any letter
+  case), so `user{Tab}password{Enter}` fills a login form and sends it. Under the Text field, the
+  **Insert key** buttons (Enter, Tab, Esc, ↑, ↓, ←, →) put a key at the cursor and a muted
+  line shows what is typed ("Types: user ⇥ password ⏎"), in the binding editor and in a multi
+  action step. `{{` types a literal `{`; any other brace is typed as written. An existing text that
+  contains one of these tokens or `{{` now presses that key or types a single brace; write
+  `{{Enter}` to type the word `{Enter}` itself. With `wtype` each part of the text is one run
+  with the keys after it, in order; without it or its virtual keyboard each part is pasted and
+  each key pressed physically. **Press Enter after text** and the stored action are unchanged.
+
+### Changed
+
+- **Undo a removal from its toast only:** Remove binding no longer leaves an **Undo remove**
+  button or a "Control configuration removed." status line; the toast alone says it, and its
+  **Undo** stays usable for 10 seconds (plain success toasts still close after 5). Selecting another
+  control keeps it; a later Remove or message replaces it, and an expired Undo can no longer run.
+- **Messages in a top-center toast only:** binding and plugin-install results and errors no longer
+  show as a line below the Add plugin and Update plugins buttons, so the tabs sit right under
+  them; they appear in the toast, which now opens at the top center of the window.
+
+### Fixed
+
+- **Microphone readings show a microphone:** the live information for **Microphone volume and
+  mute** and **Audio input device** drew a speaker (or headphones for a headset microphone); it now
+  shows a microphone, grey with a red slash while muted.
+
+- **Start at login after reinstalling:** the login entry kept naming the previous executable
+  (for example `/usr/bin/sdeck-plus` after moving to `install.sh`, or the reverse with the pacman
+  package), so the session skipped it after a reboot while the tray still showed it on.
+  `install.sh` now repoints an existing entry at the installed executable, and the app repoints an
+  entry whose executable no longer exists at itself when it starts.
+
+- **Type text works in any window, terminals included:** the text is now typed through a Wayland
+  virtual keyboard with `wtype`, so it no longer depends on each application's paste shortcut and
+  leaves the clipboard alone. Ctrl+V was a literal-insert prefix in terminals (only "^M" appeared),
+  and no paste chord works everywhere (kitty with `clear_all_shortcuts` showed "<S-Insert>").
+  Without `wtype`, or when the compositor lacks its virtual-keyboard protocol, it falls back to
+  the clipboard and primary selection plus Shift+Insert.
+
 ## [1.0.0] - 2026-11-15
 
 ### Added

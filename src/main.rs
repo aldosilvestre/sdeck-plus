@@ -25,6 +25,7 @@ use std::{
 };
 
 mod action_catalog;
+mod action_form;
 mod app_icon;
 mod autostart;
 mod button_swap;
@@ -34,6 +35,7 @@ mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
+mod multi_editor;
 mod plugin_add_ui;
 mod plugin_runtime;
 mod plugin_ui;
@@ -86,6 +88,12 @@ enum LayerCommand {
         binding_id: String,
         action: Action,
     },
+    /// One step of a multi action; its end is reported with `step`.
+    ExecuteStep {
+        binding_id: String,
+        action: Action,
+        step: u64,
+    },
     ObsSave(sdeck_plus::obs::ObsConfig),
     ObsProbe(sdeck_plus::obs::ObsConfig),
     ExportConfiguration {
@@ -133,14 +141,7 @@ fn execute_layer_action_for(
     action: &Action,
     output: &mpsc::Sender<MonitorEvent>,
 ) {
-    let result = match action {
-        Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
-            feature_runtime::active_root(root)
-                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
-                .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
-        }
-        _ => executor.execute_for(binding_id, action),
-    };
+    let result = run_layer_action(executor, root, binding_id, action);
     let succeeded = result.is_ok();
     let event = match result {
         Ok(()) => MonitorEvent::AppEvent {
@@ -155,6 +156,54 @@ fn execute_layer_action_for(
         if let Err(error) = output.send(MonitorEvent::ActionDispatched) {
             eprintln!("Action completion delivery failed: {error}");
         }
+    }
+}
+
+/// One step of a multi action: its end, success or error, is reported with the
+/// step's token instead of a status, so the sequence starts the next step.
+fn execute_layer_step_for(
+    executor: &mut sdeck_plus::layers::ActionExecutor<
+        impl sdeck_plus::layers::ProcessRunner,
+        impl sdeck_plus::layers::KeyboardSender,
+    >,
+    root: Option<&std::path::Path>,
+    binding_id: &str,
+    action: &Action,
+    step: u64,
+    output: &mpsc::Sender<MonitorEvent>,
+) {
+    let result = run_layer_action(executor, root, binding_id, action);
+    let succeeded = result.is_ok();
+    let finished = MonitorEvent::StepFinished {
+        step,
+        result: result.map_err(|error| error.to_string()),
+    };
+    if let Err(error) = output.send(finished) {
+        eprintln!("Step result delivery failed: {error}");
+    }
+    if succeeded {
+        if let Err(error) = output.send(MonitorEvent::ActionDispatched) {
+            eprintln!("Action completion delivery failed: {error}");
+        }
+    }
+}
+
+fn run_layer_action(
+    executor: &mut sdeck_plus::layers::ActionExecutor<
+        impl sdeck_plus::layers::ProcessRunner,
+        impl sdeck_plus::layers::KeyboardSender,
+    >,
+    root: Option<&std::path::Path>,
+    binding_id: &str,
+    action: &Action,
+) -> std::io::Result<()> {
+    match action {
+        Action::Feature(sdeck_plus::features::FeatureAction::Obs(action)) => {
+            feature_runtime::active_root(root)
+                .and_then(|root| sdeck_plus::obs::ObsConfig::load_at(&root))
+                .and_then(|config| sdeck_plus::obs::Client::new(config).execute(action))
+        }
+        _ => executor.execute_for(binding_id, action),
     }
 }
 
@@ -1095,23 +1144,23 @@ fn build_body(
     ]);
     let action_picker = gtk::DropDown::new(Some(action_model.clone()), gtk::Expression::NONE);
     action_picker.set_selected(7);
-    let layer_target_model = gtk::StringList::new(&[]);
-    for name in layers.borrow().names() {
-        layer_target_model.append(&name);
-    }
-    let layer_target_picker =
-        gtk::DropDown::new(Some(layer_target_model.clone()), gtk::Expression::NONE);
-    bound_layer_picker(&layer_target_picker);
-    let text_entry = Entry::builder().hexpand(true).build();
-    let application_entry = Entry::builder()
-        .placeholder_text("Executable, for example /usr/bin/firefox")
-        .hexpand(true)
-        .build();
-    let args_view = TextView::new();
-    args_view.set_monospace(true);
-    args_view.set_size_request(-1, 48);
-    let [ctrl_mod, alt_mod, shift_mod, super_mod] =
-        ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
+    // The basic action fields are shared with the step form of a multi action.
+    let action_form::CoreFields {
+        layer_target_model,
+        layer_target_picker,
+        text_entry,
+        application_entry,
+        args_view,
+        super_mod,
+        shift_mod,
+        ctrl_mod,
+        alt_mod,
+        layer_target_row,
+        text_row,
+        application_row,
+        args_row,
+        modifier_row,
+    } = action_form::CoreFields::new(&layers.borrow().names());
     let binding_status = Label::new(Some("Select a physical control to inspect its binding."));
     binding_status.add_css_class("binding-status");
     binding_status.set_xalign(0.0);
@@ -1132,28 +1181,6 @@ fn build_body(
     remove_binding.add_css_class("destructive-action");
     remove_binding.add_css_class("remove-binding");
     let control_number_row = labeled("Number", &control_number_picker);
-    let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
-    let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
-    let application_row = labeled("Application executable", &application_entry);
-    let args_scroller = gtk::ScrolledWindow::builder()
-        .min_content_height(48)
-        .child(&args_view)
-        .build();
-    let args_row = labeled("Arguments (one per line)", &args_scroller);
-    let args_label = args_row.first_child().unwrap().downcast::<Label>().unwrap();
-    args_label.set_mnemonic_widget(Some(&args_view));
-    args_view.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
-        args_label.upcast_ref()
-    ])]);
-    // One aligned, linked row of toggles instead of a ragged check grid.
-    let modifier_buttons = GtkBox::new(Orientation::Horizontal, 0);
-    modifier_buttons.add_css_class("linked");
-    modifier_buttons.add_css_class("modifier-toggles");
-    modifier_buttons.set_halign(gtk::Align::Start);
-    for toggle in [&ctrl_mod, &alt_mod, &shift_mod, &super_mod] {
-        modifier_buttons.append(toggle);
-    }
-    let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
         layer_picker.clone(),
@@ -1180,7 +1207,12 @@ fn build_body(
         application_row,
         args_row,
         modifier_row,
+        toast.clone(),
     );
+    // The step dialog of a multi action offers this store's pages and the session's plugins.
+    binding_ui
+        .feature_editor
+        .set_step_context(&layers, &binding_ui.plugins);
     // Everything below, summaries included, describes the model of these stores.
     // Tests never read the user's plugin folder; they load a temporary root themselves.
     #[cfg(not(test))]
@@ -1333,50 +1365,9 @@ fn build_body(
     form.append(&binding_ui.hold_toggle);
     form.append(&binding_ui.action_guidance);
     form.append(&binding_ui.layer_target_row);
-    let action_fields = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .focusable(false)
-        .min_children_per_line(1)
-        .max_children_per_line(if matches!(binding_ui.action_picker.selected(), 2 | 3) {
-            2
-        } else {
-            1
-        })
-        .homogeneous(true)
-        .column_spacing(16)
-        .row_spacing(12)
-        .hexpand(true)
-        .build();
-    action_fields.add_css_class("action-fields");
-    for row in [
-        &binding_ui.text_row,
-        &binding_ui.modifier_row,
-        &binding_ui.application_row,
-        &binding_ui.args_row,
-    ] {
-        row.set_size_request(180, -1);
-        let cell = gtk::FlowBoxChild::new();
-        cell.set_focusable(false);
-        cell.set_child(Some(row));
-        action_fields.insert(&cell, -1);
-        row.bind_property("visible", &cell, "visible")
-            .sync_create()
-            .build();
-    }
-    action_fields.set_visible(matches!(binding_ui.action_picker.selected(), 1..=4));
-    let fields = action_fields.downgrade();
-    binding_ui
-        .action_picker
-        .connect_selected_notify(move |picker| {
-            if let Some(fields) = fields.upgrade() {
-                fields.set_max_children_per_line(if matches!(picker.selected(), 2 | 3) {
-                    2
-                } else {
-                    1
-                });
-                fields.set_visible(matches!(picker.selected(), 1..=4));
-            }
-        });
+    let action_fields = binding_ui
+        .core_fields()
+        .adaptive_fields(&binding_ui.action_picker);
     form.append(&action_fields);
     form.append(&binding_ui.feature_editor.root);
     form.append(&*binding_ui.plugin_editor);
@@ -1406,23 +1397,19 @@ fn build_body(
     binding_buttons.append(&toolbar_gap);
     let plugin_installed: plugin_add_ui::Notify = {
         let ui = binding_ui.clone();
-        Rc::new(move |message, failed| {
-            ui.status.set_text(message);
-            ui::feedback(&ui.status, failed);
-        })
+        Rc::new(move |message, failed| ui.report(message, failed))
     };
     binding_buttons.append(&plugin_ui::add_button(
         &binding_ui.plugins,
         plugin_installed,
     ));
     binding_buttons.append(&plugin_ui::rescan_button(&binding_ui.plugins));
-    // The status line and Undo remove top the right-hand panel, above its tabs, beside the
-    // plugin buttons; Save/Test/Remove sit in the editor card's heading row.
-    let binding_feedback = GtkBox::new(Orientation::Vertical, 8);
-    binding_feedback.add_css_class("binding-toolbar");
-    binding_feedback.append(&binding_buttons);
-    binding_feedback.append(&binding_ui.status);
-    binding_feedback.append(&binding_ui.undo_remove);
+    // The plugin buttons top the right-hand panel, right above its tabs: results and errors
+    // show in the window's toast, never as a line below them. Save/Test/Remove sit in the
+    // editor card's heading row; undoing a Remove lives in its toast.
+    let binding_toolbar = GtkBox::new(Orientation::Vertical, 8);
+    binding_toolbar.add_css_class("binding-toolbar");
+    binding_toolbar.append(&binding_buttons);
     let artwork_content = GtkBox::new(Orientation::Vertical, 12);
     let target_picker = add_artwork_controls(&artwork_content, &window, &artwork);
     let text_editor = button_text_editor::ButtonTextEditor::new(&artwork);
@@ -1487,7 +1474,7 @@ fn build_body(
                     action,
                     page_return,
                 ),
-                Err(error) => ui.status.set_text(&error),
+                Err(error) => ui.error(&error),
             }
         });
     }
@@ -1610,7 +1597,6 @@ fn build_body(
         let layers = layers.clone();
         let runtime = feature_runtime.clone();
         let ui = binding_ui.clone();
-        let toast = toast.clone();
         let artwork = artwork.clone();
         save_binding.connect_clicked(move |_| {
             match ui
@@ -1625,9 +1611,7 @@ fn build_body(
                             &ui.info_location.text(),
                         );
                         if let Err(error) = saved {
-                            let message = format!("Could not save weather location: {error}");
-                            ui.error(&message);
-                            toast.show(&message, true);
+                            ui.error(&format!("Could not save weather location: {error}"));
                             return;
                         }
                     }
@@ -1648,24 +1632,15 @@ fn build_body(
                             if runtime.save_binding(snapshot) {
                                 ui.status.set_text("Binding updated; saving to disk…");
                             } else {
-                                let error = "Could not save binding: saving worker is unavailable.";
-                                ui.error(error);
-                                toast.show(error, true);
+                                ui.error("Could not save binding: saving worker is unavailable.");
                             }
                             ui.refresh_summaries(&layers);
                             artwork.refresh(true);
                         }
-                        Err(error) => {
-                            let message = format!("Could not save binding: {error}");
-                            ui.error(&message);
-                            toast.show(&message, true);
-                        }
+                        Err(error) => ui.error(&format!("Could not save binding: {error}")),
                     }
                 }
-                Err(error) => {
-                    ui.error(&error);
-                    toast.show(&error, true);
-                }
+                Err(error) => ui.error(&error),
             }
         });
     }
@@ -1688,69 +1663,24 @@ fn build_body(
                     Ok((removed, snapshot)) if !removed.is_empty() => {
                         runtime.persist(snapshot);
                         ui.clear_action_fields();
-                        ui.status.set_text("Control configuration removed.");
                         ui.mark_clean();
-                        *ui.removed.borrow_mut() = Some(removed);
-                        ui.undo_remove.set_visible(true);
-                        ui::feedback(&ui.status, false);
+                        // Only the toast confirms the removal. Clearing the fields may have
+                        // recorded "Unsaved changes." here: the status is left empty.
+                        ui.status.set_text("");
+                        ui::clear_feedback(&ui.status);
                         ui.refresh_summaries(&layers);
                         artwork.refresh(true);
-                        // The same undo, offered where the eye already is.
-                        let undo = ui.undo_remove.clone();
                         toast.show_with_action(
                             "Control configuration removed.",
                             "Undo",
-                            Rc::new(move || undo.emit_clicked()),
+                            undo_removal(removed, &layers, &runtime, &ui, &artwork),
                         );
                     }
-                    Ok(_) => ui.status.set_text("No binding exists for that control."),
+                    Ok(_) => ui.report("No binding exists for that control.", false),
                     Err(error) => ui.error(&format!("Could not remove binding: {error}")),
                 }
             }
             Err(error) => ui.error(&error),
-        });
-    }
-    {
-        let layers = layers.clone();
-        let runtime = feature_runtime.clone();
-        let ui = binding_ui.clone();
-        let artwork = artwork.clone();
-        let toast = toast.clone();
-        binding_ui.undo_remove.clone().connect_clicked(move |_| {
-            let Some(removed) = ui.removed.borrow_mut().take() else {
-                return;
-            };
-            ui.undo_remove.set_visible(false);
-            let snapshot = {
-                let mut store = layers.borrow_mut();
-                store.restore_removed(&removed).map(|_| store.clone())
-            };
-            match snapshot {
-                Ok(snapshot) => {
-                    let saving = runtime.save_binding(snapshot);
-                    ui.load_selected_binding(&layers);
-                    ui.refresh_summaries(&layers);
-                    artwork.refresh(true);
-                    if saving {
-                        ui.status.set_text("Binding restored; saving to disk…");
-                    } else {
-                        ui.error("Could not save binding: saving worker is unavailable.");
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    // The removal can no longer be undone safely; keep the user's edits.
-                    let message = "Cannot undo: this control was changed after it was removed.";
-                    ui.error(message);
-                    toast.show(message, true);
-                }
-                Err(error) => {
-                    *ui.removed.borrow_mut() = Some(removed);
-                    ui.undo_remove.set_visible(true);
-                    let message = format!("Could not restore binding: {error}");
-                    ui.error(&message);
-                    toast.show(&message, true);
-                }
-            }
         });
     }
     let feedback = GtkBox::new(Orientation::Horizontal, 8);
@@ -1867,7 +1797,7 @@ fn build_body(
         }
         tab = button.next_sibling();
     }
-    side_panel.append(&binding_feedback);
+    side_panel.append(&binding_toolbar);
     side_panel.append(&switcher);
     side_panel.append(&tabs);
     // The catalog's width must not depend on the height the grid allocates it (see stable_width).
@@ -1926,6 +1856,52 @@ fn dial_totals() -> RefCell<Vec<i64>> {
         .max()
         .unwrap_or_default();
     RefCell::new(vec![0; dials])
+}
+
+/// The toast's Undo for a Remove. It puts `removed` back once, into the profiles and pages
+/// that owned it, whatever is selected by then; restoring never overwrites a later edit.
+/// Dropping it, when its toast closes or another message replaces it, releases the bindings.
+fn undo_removal(
+    removed: Vec<RemovedBinding>,
+    layers: &Rc<RefCell<LayerStore>>,
+    runtime: &feature_runtime::FeatureRuntime,
+    ui: &BindingUi,
+    artwork: &ArtworkUi,
+) -> Rc<dyn Fn()> {
+    let pending = Cell::new(Some(removed));
+    let (layers, runtime, ui, artwork) =
+        (layers.clone(), runtime.clone(), ui.clone(), artwork.clone());
+    Rc::new(move || {
+        let Some(removed) = pending.take() else {
+            return;
+        };
+        let snapshot = {
+            let mut store = layers.borrow_mut();
+            store.restore_removed(&removed).map(|_| store.clone())
+        };
+        match snapshot {
+            Ok(snapshot) => {
+                let saving = runtime.save_binding(snapshot);
+                ui.load_selected_binding(&layers);
+                ui.refresh_summaries(&layers);
+                artwork.refresh(true);
+                if saving {
+                    ui.status.set_text("Binding restored; saving to disk…");
+                } else {
+                    ui.error("Could not save binding: saving worker is unavailable.");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // The removal can no longer be undone safely; keep the user's edits.
+                ui.error("Cannot undo: this control was changed after it was removed.");
+            }
+            Err(error) => {
+                // Restoring checks against the current configuration (a deleted page, say):
+                // the same Undo would fail again, so it is not offered twice.
+                ui.error(&format!("Could not restore binding: {error}"));
+            }
+        }
+    })
 }
 
 /// What a model's events are applied to: its editor, the preview that mirrors
@@ -2129,6 +2105,9 @@ impl EventSurface {
                 result,
             } => artwork.update_plugin_value(layer, target, binding, result),
             MonitorEvent::PluginFinished { plugin_id } => artwork.plugin_finished(&plugin_id),
+            MonitorEvent::StepFinished { step, result } => {
+                feature_runtime.step_finished(step, result);
+            }
             MonitorEvent::BindingSaveResult(result) => {
                 let (message, failed) = match result {
                     Ok(()) => ("Binding saved successfully.".to_owned(), false),
@@ -2251,8 +2230,8 @@ struct BindingUi {
     shortcut_preview: Label,
     /// Fingerprint of the editor as last loaded or saved; `None` until the first load.
     baseline: std::rc::Rc<RefCell<Option<String>>>,
-    undo_remove: Button,
-    removed: Rc<RefCell<Option<Vec<RemovedBinding>>>>,
+    /// Where results and errors show: the editor has no inline message line.
+    toast: ui::Toast,
 }
 
 impl BindingUi {
@@ -2282,6 +2261,7 @@ impl BindingUi {
         application_row: GtkBox,
         args_row: GtkBox,
         modifier_row: GtkBox,
+        toast: ui::Toast,
     ) -> Self {
         // The closed button names the chosen More action instead of "•••";
         // menu rows keep one icon per action type.
@@ -2366,10 +2346,6 @@ impl BindingUi {
         let refresh = refresh_info.clone();
         info_toggle.connect_toggled(move |_| refresh());
         info_source.connect_selected_notify(move |_| refresh_info());
-        let undo_remove = ui::button("edit-undo-symbolic", "Undo remove");
-        undo_remove.set_tooltip_text(Some("Restore the control you just removed"));
-        undo_remove.set_halign(gtk::Align::Start);
-        undo_remove.set_visible(false);
         let shortcut_preview = Label::new(None);
         shortcut_preview.add_css_class("muted");
         shortcut_preview.set_xalign(0.0);
@@ -2469,8 +2445,7 @@ impl BindingUi {
             ),
             shortcut_preview,
             baseline: std::rc::Rc::new(RefCell::new(None)),
-            undo_remove,
-            removed: Rc::new(RefCell::new(None)),
+            toast,
         };
         ui.connect_dirty_tracking();
         let weak = ui.action_picker.downgrade();
@@ -2495,9 +2470,16 @@ impl BindingUi {
         ui
     }
 
-    fn error(&self, message: &str) {
+    /// Show a result in the toast: a success closes itself, a failure stays until dismissed.
+    /// `status` keeps a copy as the editor's state; it is never shown in the window.
+    fn report(&self, message: &str, failed: bool) {
         self.status.set_text(message);
-        ui::feedback(&self.status, true);
+        ui::feedback(&self.status, failed);
+        self.toast.show(message, failed);
+    }
+
+    fn error(&self, message: &str) {
+        self.report(message, true);
     }
 
     /// Make the summaries, dial captions and control numbers describe `model`.
@@ -2775,76 +2757,38 @@ impl BindingUi {
             .set_visible(kind != ActionKind::None && self.return_toggle.is_active());
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
-        self.action_guidance.set_text(match kind {
-            ActionKind::None => {
-                "Do nothing when this control is used. Live information can still be shown."
-            }
-            ActionKind::MoveToLayer => {
-                "Switch to another profile or page when this control is used."
-            }
-            ActionKind::RunCommand => "Run a shell command with /bin/sh. Saving does not run it.",
-            ActionKind::OpenApplication => "Enter the executable path and one argument per line.",
-            ActionKind::Shortcut => "Type a key or full chord. The checkboxes add modifiers.",
-            ActionKind::EmitLegacy => "Send a named internal event. Mainly used by older bindings.",
-            ActionKind::Extended | ActionKind::Plugin => "",
-        });
-        if matches!(kind, ActionKind::Shortcut) {
-            self.action_guidance.set_markup(
-                "Type a key or chord. <a href=\"shortcut-reference\">Key names and aliases</a>",
-            );
-        }
+        action_form::show_guidance(&self.action_guidance, kind);
         // "Do nothing" needs no explaining on a key, whose selectors are hidden.
         let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
-        if let Some(label) = self
-            .text_row
-            .first_child()
-            .and_then(|child| child.downcast::<Label>().ok())
-        {
-            label.set_text(match kind {
-                ActionKind::RunCommand => "Shell command",
-                ActionKind::Shortcut => "Shortcut",
-                ActionKind::EmitLegacy => "Event name",
-                ActionKind::None
-                | ActionKind::MoveToLayer
-                | ActionKind::OpenApplication
-                | ActionKind::Extended
-                | ActionKind::Plugin => "",
-            });
-        }
         self.feature_editor
             .root
             .set_visible(matches!(kind, ActionKind::Extended));
         self.plugin_editor
             .set_visible(matches!(kind, ActionKind::Plugin));
         self.sync_plugin_control();
-        self.layer_target_row
-            .set_visible(matches!(kind, ActionKind::MoveToLayer));
-        self.application_row
-            .set_visible(matches!(kind, ActionKind::OpenApplication));
-        self.args_row
-            .set_visible(matches!(kind, ActionKind::OpenApplication));
-        let shortcut = matches!(kind, ActionKind::Shortcut);
-        self.modifier_row.set_visible(shortcut);
-        self.text_row.set_visible(matches!(
-            kind,
-            ActionKind::RunCommand | ActionKind::Shortcut | ActionKind::EmitLegacy
-        ));
-        self.text_entry.set_tooltip_text(Some(match kind {
-            ActionKind::Shortcut => "Type a full chord or one key; checkboxes add modifiers without duplicates. Win/Windows/Meta = SUPER; Enter/Return are aliases.",
-            _ => "",
-        }));
-        self.text_entry.set_placeholder_text(Some(match kind {
-            ActionKind::RunCommand => "Shell command run with /bin/sh -c",
-            ActionKind::Shortcut => "A, F5, Enter (no modifiers), or CTRL + D",
-            ActionKind::EmitLegacy => "Internal event name",
-            ActionKind::None
-            | ActionKind::MoveToLayer
-            | ActionKind::OpenApplication
-            | ActionKind::Extended
-            | ActionKind::Plugin => "",
-        }));
+        self.core_fields().show(kind);
+    }
+
+    /// The basic action fields, as shared with the step form of a multi action.
+    fn core_fields(&self) -> action_form::CoreFields {
+        action_form::CoreFields {
+            layer_target_model: self.layer_target_model.clone(),
+            layer_target_picker: self.layer_target_picker.clone(),
+            text_entry: self.text_entry.clone(),
+            application_entry: self.application_entry.clone(),
+            args_view: self.args_view.clone(),
+            super_mod: self.super_mod.clone(),
+            shift_mod: self.shift_mod.clone(),
+            ctrl_mod: self.ctrl_mod.clone(),
+            alt_mod: self.alt_mod.clone(),
+            layer_target_row: self.layer_target_row.clone(),
+            text_row: self.text_row.clone(),
+            application_row: self.application_row.clone(),
+            args_row: self.args_row.clone(),
+            modifier_row: self.modifier_row.clone(),
+        }
     }
 
     fn refresh_layer_targets(&self, names: &[String]) {
@@ -2872,6 +2816,9 @@ impl BindingUi {
         self.sync_plugin_control();
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
+        // A key press or a key hold: the only events a multi action runs from.
+        self.feature_editor
+            .set_key_trigger(self.control_kind() == ControlKind::Button);
         self.clear_action_fields();
         let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
             Ok(selection) => selection,
@@ -2967,14 +2914,10 @@ impl BindingUi {
     }
 
     fn update_shortcut_preview(&self) {
-        let text = match sdeck_plus::keyboard::parse_chord(
-            &self.shortcut_modifiers(),
-            &self.text_entry.text(),
-        ) {
-            Ok(chord) if self.action_kind() == ActionKind::Shortcut => {
-                format!("Presses {}", chord.label())
-            }
-            _ => String::new(),
+        let text = if self.action_kind() == ActionKind::Shortcut {
+            action_form::chord_preview(&self.shortcut_modifiers(), &self.text_entry.text())
+        } else {
+            String::new()
         };
         self.shortcut_preview.set_text(&text);
         self.shortcut_preview.set_visible(!text.is_empty());
@@ -3115,28 +3058,9 @@ impl BindingUi {
                 Action::Feature(self.feature_editor.parse()?),
             ));
         }
-        let destination = dropdown_value(
-            &self.layer_target_model,
-            self.layer_target_picker.selected(),
-        )
-        .unwrap_or_default();
-        let args_buffer = self.args_view.buffer();
-        let args = args_buffer
-            .text(&args_buffer.start_iter(), &args_buffer.end_iter(), false)
-            .to_string();
-        let modifiers = self.shortcut_modifiers();
         let action = {
             let store = layers.borrow();
-            action_from_fields(
-                &store,
-                self.action_kind(),
-                &destination,
-                &self.application_entry.text(),
-                &args,
-                &self.text_entry.text(),
-                &modifiers,
-            )
-            .map_err(|error| error.0)?
+            self.core_fields().action(&store, self.action_kind())?
         };
         Ok((layer, trigger, action))
     }
@@ -3172,14 +3096,7 @@ impl BindingUi {
         self.populate_return(None);
         self.feature_editor.reset();
         self.plugin_editor.reset();
-        self.text_entry.set_text("");
-        self.application_entry.set_text("");
-        let buffer = self.args_view.buffer();
-        buffer.set_text("");
-        self.super_mod.set_active(false);
-        self.shift_mod.set_active(false);
-        self.ctrl_mod.set_active(false);
-        self.alt_mod.set_active(false);
+        self.core_fields().clear();
     }
 
     fn populate_action(&self, action: &Action) {
@@ -3205,46 +3122,11 @@ impl BindingUi {
                 );
                 self.feature_editor.populate(feature);
             }
-            Action::SwitchLayer(target) => {
-                self.action_picker.set_selected(0);
-                select_string(&self.layer_target_model, &self.layer_target_picker, target);
-            }
-            Action::Command(command) => {
-                self.action_picker.set_selected(1);
-                self.text_entry.set_text(command);
-            }
-            Action::KeyPress { key } => {
-                // Inspect legacy names verbatim; only an explicit save canonicalizes them.
-                self.action_picker.set_selected(3);
-                self.text_entry.set_text(key);
-                self.super_mod.set_active(false);
-                self.shift_mod.set_active(false);
-                self.ctrl_mod.set_active(false);
-                self.alt_mod.set_active(false);
-            }
-            Action::Launch { executable, args } => {
-                self.action_picker.set_selected(2);
-                self.application_entry
-                    .set_text(&executable.to_string_lossy());
-                self.args_view
-                    .buffer()
-                    .set_text(&format_application_args(args));
-            }
-            Action::Shortcut { modifiers, key } => {
-                self.action_picker.set_selected(3);
-                self.text_entry.set_text(key);
-                self.super_mod
-                    .set_active(modifiers.iter().any(|m| m == "SUPER"));
-                self.shift_mod
-                    .set_active(modifiers.iter().any(|m| m == "SHIFT"));
-                self.ctrl_mod
-                    .set_active(modifiers.iter().any(|m| m == "CTRL" || m == "CONTROL"));
-                self.alt_mod
-                    .set_active(modifiers.iter().any(|m| m == "ALT"));
-            }
-            Action::Emit(name) => {
-                self.action_picker.set_selected(4);
-                self.text_entry.set_text(name);
+            basic => {
+                if let Some(index) = action_form::core_index(basic) {
+                    self.action_picker.set_selected(index);
+                }
+                self.core_fields().populate(basic);
             }
         }
         self.update_action_visibility();
@@ -3282,20 +3164,7 @@ impl BindingUi {
     }
 
     fn shortcut_modifiers(&self) -> Vec<String> {
-        let mut modifiers = Vec::new();
-        if self.super_mod.is_active() {
-            modifiers.push("SUPER".into());
-        }
-        if self.shift_mod.is_active() {
-            modifiers.push("SHIFT".into());
-        }
-        if self.ctrl_mod.is_active() {
-            modifiers.push("CTRL".into());
-        }
-        if self.alt_mod.is_active() {
-            modifiers.push("ALT".into());
-        }
-        modifiers
+        self.core_fields().modifiers()
     }
 }
 
@@ -3843,6 +3712,7 @@ impl ArtworkUi {
                 icon: icon.icon,
                 caption: icon.caption,
                 text,
+                path: icon.background,
                 strip_path: matches!(target, ArtworkTarget::EncoderZone(_))
                     .then(|| strip_path.clone())
                     .flatten(),
@@ -4221,8 +4091,9 @@ impl ArtworkUi {
     }
 
     /// The binding icon a key or touch section shows on `layer` when it has
-    /// no artwork of its own and no live information. Derived at render
-    /// time from the binding; it is never written into the artwork stores.
+    /// no artwork of its own and no live information (an idle timer key also
+    /// shows it over its artwork). Derived at render time from the binding;
+    /// it is never written into the artwork stores.
     fn control_icon(&self, layer: &str, target: ArtworkTarget) -> Option<ControlIcon> {
         let action = {
             let layers = self.layers.borrow();
@@ -4235,10 +4106,12 @@ impl ArtworkUi {
             }
         }?;
         let icon = BindingIcon::for_saved_action(&action);
-        // A missing file is an error to show over the control's own picture;
-        // every other icon only fills a control that has none.
-        let own_picture =
-            icon != BindingIcon::MissingFile && self.info_background(layer, target).is_some();
+        let artwork = self.info_background(layer, target);
+        // A missing file is an error to show over the control's own picture,
+        // and a timer key draws its icon over its artwork so it stays
+        // recognizable; every other icon only fills a control that has none.
+        let over_artwork = icon == BindingIcon::Timer && matches!(target, ArtworkTarget::Keypad(_));
+        let own_picture = icon != BindingIcon::MissingFile && !over_artwork && artwork.is_some();
         if !icon.shown_on_controls() || own_picture || self.shows_info(layer, target) {
             return None;
         }
@@ -4255,13 +4128,15 @@ impl ArtworkUi {
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
                 && next,
+            background: artwork.filter(|_| over_artwork),
         })
     }
 
     /// The 120x120 key picture for `text` as the key shows it: over its own
     /// artwork, else over its binding icon tile (when the text leaves room for
-    /// the icon), else on the neutral black key. Also returns whether the key
-    /// shows anything. Derived when drawing; nothing is stored.
+    /// the icon; a timer key's tile keeps its artwork), else on the neutral
+    /// black key. Also returns whether the key shows anything. Derived when
+    /// drawing; nothing is stored.
     fn key_text_image(
         &self,
         layer: &str,
@@ -4270,10 +4145,8 @@ impl ArtworkUi {
     ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
         let path = self.info_background(layer, target);
         let icon = self.control_icon(layer, target);
-        let missing = icon
-            .as_ref()
-            .is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
-        if path.is_none() || missing {
+        let over_artwork = icon.as_ref().is_some_and(ControlIcon::shown_over_artwork);
+        if path.is_none() || over_artwork {
             if let Some(icon) = icon {
                 if let Some(image) = icon.compose(Some(text))? {
                     return Ok((image, true));
@@ -4367,9 +4240,17 @@ struct ControlIcon {
     /// A page indicator paints at this section's outer left/right edge.
     previous: bool,
     next: bool,
+    /// The key's own artwork, drawn under the icon instead of black.
+    background: Option<std::path::PathBuf>,
 }
 
 impl ControlIcon {
+    /// Whether the icon shows even though the control has artwork of its
+    /// own: a missing file's cross replaces it, a timer icon draws over it.
+    fn shown_over_artwork(&self) -> bool {
+        self.icon == BindingIcon::MissingFile || self.background.is_some()
+    }
+
     /// The key image or transparent touch-section foreground, or `None` when
     /// user button text leaves no room for an icon.
     fn compose(
@@ -4377,11 +4258,12 @@ impl ControlIcon {
         text: Option<&sdeck_plus::button_text::ButtonText>,
     ) -> Result<Option<gtk::gdk_pixbuf::Pixbuf>, String> {
         match self.target {
-            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_for(
+            ArtworkTarget::Keypad(_) => sdeck_plus::binding_icons::compose_key_image_over_for(
                 self.model,
                 self.icon,
                 &self.caption,
                 text,
+                self.background.as_deref(),
             ),
             ArtworkTarget::EncoderZone(_) => sdeck_plus::binding_icons::compose_zone_image(
                 self.icon,
@@ -4427,8 +4309,8 @@ fn set_button_picture(
     text: Option<&sdeck_plus::button_text::ButtonText>,
     icon: Option<&ControlIcon>,
 ) {
-    let missing = icon.is_some_and(|icon| icon.icon == BindingIcon::MissingFile);
-    if path.is_none() || missing {
+    let over_artwork = icon.is_some_and(ControlIcon::shown_over_artwork);
+    if path.is_none() || over_artwork {
         match icon.map(|icon| icon.compose(text)).transpose() {
             Ok(Some(Some(image))) => {
                 picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&image)));
@@ -5241,6 +5123,9 @@ mod tests {
     mod live_info_tests;
     mod model_selector_tests;
     mod model_session_tests;
+    mod multi_action_catalog_tests;
+    mod multi_action_editor_tests;
+    mod multi_action_runtime_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;
     mod page_return_tests;
@@ -5265,6 +5150,7 @@ mod tests {
     mod touchscreen_tests;
     mod tray_startup;
     mod two_device_tests;
+    mod type_text_keys_tests;
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
@@ -5381,6 +5267,7 @@ mod tests {
             application_row,
             args_row,
             modifier_row,
+            ui::Toast::new(),
         ))
     }
 
@@ -7511,14 +7398,14 @@ mod tests {
             assert!(commands.try_recv().is_err());
         }
 
-        // Remove deletes the binding, and the feedback line can bring it back.
+        // Remove deletes the binding, and the toast's Undo can bring it back.
         let removed_action = layers.borrow().binding(&layer, &trigger).unwrap();
         find("Remove binding").emit_clicked();
         while commands.try_recv().is_ok() {}
         assert!(layers.borrow().binding(&layer, &trigger).is_none());
-        let undo = ui.undo_remove.clone();
-        assert!(undo.is_visible());
-        undo.emit_clicked();
+        let toast = &widgets.toast;
+        assert!(toast.action.is_visible());
+        toast.action.emit_clicked();
         assert_eq!(
             layers.borrow().binding(&layer, &trigger),
             Some(removed_action)
@@ -7527,7 +7414,7 @@ mod tests {
             commands.try_recv().unwrap(),
             LayerCommand::SaveBinding(..)
         ));
-        assert!(!undo.is_visible());
+        assert!(!toast.root.reveals_child());
         while commands.try_recv().is_ok() {}
 
         let original = layers.borrow().active().to_owned();
