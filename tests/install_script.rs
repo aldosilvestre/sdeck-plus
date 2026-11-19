@@ -674,3 +674,156 @@ fn other_hid_devices_get_no_udev_note() {
     let out = run_with_hidraw(&[("hidraw-sdeck-fixture", "0003:00000FD9:00000080")]);
     assert!(!out.contains("udev"), "{out}");
 }
+
+const STALE_LOGIN_ENTRY: &str = "# kept\n[Desktop Entry]\nType=Application\nName=sdeck-plus\n\
+                                 Exec=\"/usr/bin/sdeck-plus\" --background\nTerminal=false\nHidden=false\n\
+                                 [Desktop Action other]\nExec=other\n";
+
+#[test]
+fn install_repoints_a_start_at_login_entry_at_the_installed_executable() {
+    let s = Sandbox::new();
+    s.write("config/autostart/sdeck-plus.desktop", STALE_LOGIN_ENTRY);
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    s.installed();
+    let entry = fs::read_to_string(s.path("config/autostart/sdeck-plus.desktop")).unwrap();
+    let exec = format!(
+        "Exec=\"{}/prefix with %% \\\\$ spaces/bin/sdeck-plus\" --background",
+        s.0.display()
+    );
+    assert_eq!(
+        entry,
+        STALE_LOGIN_ENTRY.replace("Exec=\"/usr/bin/sdeck-plus\" --background", &exec)
+    );
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains("Note: Start at login now starts the installed executable."),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("points at another executable"), "{stdout}");
+    // Re-installing finds it current and leaves it untouched.
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    assert_eq!(
+        fs::read_to_string(s.path("config/autostart/sdeck-plus.desktop")).unwrap(),
+        entry
+    );
+    assert!(!String::from_utf8_lossy(&o.stdout).contains("Start at login"));
+    let mut left = fs::read_dir(s.path("config/autostart"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+    left.sort();
+    assert_eq!(left, ["sdeck-plus.desktop"]);
+}
+
+/// The installed `Exec` line the sandbox expects in a repointed login entry.
+fn installed_login_exec(s: &Sandbox) -> String {
+    format!(
+        "Exec=\"{}/prefix with %% \\\\$ spaces/bin/sdeck-plus\" --background",
+        s.0.display()
+    )
+}
+
+/// The file names left in the sandbox's autostart directory.
+fn autostart_files(s: &Sandbox) -> Vec<String> {
+    let mut left = fs::read_dir(s.path("config/autostart"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+    left.sort();
+    left
+}
+
+#[test]
+fn install_leaves_a_symlinked_start_at_login_entry_alone() {
+    let s = Sandbox::new();
+    s.write("elsewhere/sdeck-plus.desktop", STALE_LOGIN_ENTRY);
+    fs::create_dir_all(s.path("config/autostart")).unwrap();
+    symlink(
+        s.path("elsewhere/sdeck-plus.desktop"),
+        s.path("config/autostart/sdeck-plus.desktop"),
+    )
+    .unwrap();
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    s.installed();
+    assert_eq!(
+        fs::read_to_string(s.path("elsewhere/sdeck-plus.desktop")).unwrap(),
+        STALE_LOGIN_ENTRY
+    );
+    assert!(
+        fs::symlink_metadata(s.path("config/autostart/sdeck-plus.desktop"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(!stdout.contains("Start at login"), "{stdout}");
+    assert_eq!(autostart_files(&s), ["sdeck-plus.desktop"]);
+}
+
+#[test]
+fn install_reports_an_entry_whose_exec_is_outside_its_desktop_entry_group() {
+    let s = Sandbox::new();
+    let entry = "[Desktop Entry]\nType=Application\nHidden=false\n\
+                 [Desktop Action other]\nExec=\"/usr/bin/sdeck-plus\" --background\n";
+    s.write("config/autostart/sdeck-plus.desktop", entry);
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    s.installed();
+    assert_eq!(
+        fs::read_to_string(s.path("config/autostart/sdeck-plus.desktop")).unwrap(),
+        entry
+    );
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains(
+            "Note: Start at login points at another executable; disable and re-enable it from the installed application."
+        ),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("now starts"), "{stdout}");
+    assert_eq!(autostart_files(&s), ["sdeck-plus.desktop"]);
+}
+
+#[test]
+fn install_repoints_a_crlf_start_at_login_entry_and_keeps_its_line_endings() {
+    let s = Sandbox::new();
+    let stale = STALE_LOGIN_ENTRY.replace('\n', "\r\n");
+    s.write("config/autostart/sdeck-plus.desktop", &stale);
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    s.installed();
+    let entry = fs::read_to_string(s.path("config/autostart/sdeck-plus.desktop")).unwrap();
+    assert_eq!(
+        entry,
+        STALE_LOGIN_ENTRY
+            .replace(
+                "Exec=\"/usr/bin/sdeck-plus\" --background",
+                &installed_login_exec(&s)
+            )
+            .replace('\n', "\r\n")
+    );
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains("Note: Start at login now starts the installed executable."),
+        "{stdout}"
+    );
+    // Re-installing finds the CRLF entry current and leaves it untouched.
+    let o = s.run(true, &[], &[]);
+    success(&o);
+    assert_eq!(
+        fs::read_to_string(s.path("config/autostart/sdeck-plus.desktop")).unwrap(),
+        entry
+    );
+    assert!(!String::from_utf8_lossy(&o.stdout).contains("Start at login"));
+    assert_eq!(autostart_files(&s), ["sdeck-plus.desktop"]);
+}
+
+#[test]
+fn install_without_a_start_at_login_entry_does_not_create_one() {
+    let s = Sandbox::new();
+    success(&s.run(true, &[], &[]));
+    assert!(!s.path("config/autostart").exists());
+}

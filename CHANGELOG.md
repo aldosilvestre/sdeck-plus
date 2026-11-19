@@ -48,6 +48,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Start at login after reinstalling:** the login entry kept naming the previous executable
+  (for example `/usr/bin/sdeck-plus` after moving to `install.sh`, or the reverse with the pacman
+  package), so the session skipped it after a reboot while the tray still showed it on.
+  `install.sh` now repoints an existing entry at the installed executable, and the app repoints an
+  entry whose executable no longer exists at itself when it starts.
+
 - **Type text works in any window, terminals included:** the text is now typed through a Wayland
   virtual keyboard with `wtype`, so it no longer depends on each application's paste shortcut and
   leaves the clipboard alone. Ctrl+V was a literal-insert prefix in terminals (only "^M" appeared),
