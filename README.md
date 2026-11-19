@@ -98,7 +98,9 @@ offers **Update** after finding a newer stable release. Only pressing it runs
 that release's installer from GitHub, pinned to the detected tag. After success,
 choose **Restart now** when ready; the old instance releases the device before
 its replacement starts. Packages under `/usr` (including pacman/AUR installs)
-must be updated with their package manager; checkouts and custom prefixes show
+must be updated with their package manager (remove the other copy before
+switching between `install.sh` and a package; **Start at login** follows the
+remaining executable); checkouts and custom prefixes show
 manual-install guidance instead. See the [update documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration)
 for execution limits and failure handling.
 

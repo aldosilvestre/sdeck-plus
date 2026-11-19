@@ -228,6 +228,9 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <p><strong>Prebuilt binary.</strong> From v1.0.0 each GitHub release also carries <code>sdeck-plus-X.Y.Z-x86_64-linux.tar.gz</code> and its <code>.sha256</code>:
                  the <code>sdeck-plus</code> binary, the launcher, the icon, the udev rule, the license, the README and an <code>INSTALL.md</code> with the install steps. On Arch Linux the release also carries <code>sdeck-plus-X.Y.Z-1-x86_64.pkg.tar.zst</code>, which installs with <code>sudo pacman -U</code>; the tarball is not a pacman package. It is built on Arch Linux and links GTK 4 dynamically, so it runs only on x86_64 with glibc 2.39 or newer and GTK 4.8 or newer.
                  Check it with <code>sha256sum -c</code>, then copy the binary to a directory on your <code>PATH</code>; on other systems use the installer, which builds from source.</p>
+              <p><strong>Switching between the installer and the package.</strong> Remove the other copy first (<code>./install.sh --uninstall</code> before <code>sudo pacman -U</code>,
+                 or <code>sudo pacman -R sdeck-plus</code> before <code>./install.sh</code>) so only one <code>sdeck-plus</code> remains. <strong>Start at login</strong> keeps working:
+                 <code>install.sh</code> repoints an existing entry at its executable, and the package's executable repoints an entry whose executable no longer exists the next time it starts.</p>
               <p>Alternatively, clone the repository and run <code>./install.sh</code> to build that checkout without requiring a published release. Or try it without installing:</p>
               <div class="code-block">
 <pre><code>cargo run</code></pre>
@@ -241,8 +244,11 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
             </article>
             <article class="card">
               <h4>After installing</h4>
-              <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable, a <strong>Start at login</strong> entry pointing elsewhere,
+              <p>Afterwards it reports a missing <code>PATH</code> entry, a running instance still using the old executable,
                  missing optional tools, and a connected device your user cannot open (printing the udev rule an administrator can install, without running it).</p>
+              <p>An existing <strong>Start at login</strong> entry that points at another executable (for example <code>/usr/bin/sdeck-plus</code> from the pacman package) is
+                 repointed at the installed one; no entry is created when there is none. A symlinked entry is left untouched, and one without an <code>Exec</code> line in its
+                 <code>[Desktop Entry]</code> group is reported with a note to disable and re-enable <strong>Start at login</strong> from the installed application.</p>
             </article>
             <article class="card">
               <h4>Uninstall</h4>
@@ -851,7 +857,8 @@ sudo udevadm control --reload-rules</code></pre>
                  <strong>Open configuration</strong>, <strong>Start at login</strong>, <strong>Start in tray</strong> (on by default; saved in <code>tray.json</code>), <strong>About</strong> and <strong>Quit</strong>.
                  A tray supporting StatusNotifierItem is needed to keep running with the window hidden.</p>
               <p>Autostart writes <code>$XDG_CONFIG_HOME/autostart/sdeck-plus.desktop</code> (or <code>~/.config/autostart/</code>) and starts the current executable with
-                 <code>--background</code>; disable and re-enable it after moving the executable. Run <code>cargo run -- --background</code> for a quiet manual start.
+                 <code>--background</code>. When the entry's executable no longer exists, for example after switching between <code>install.sh</code> and the pacman package,
+                 the next start repoints it at the running executable (a symlinked entry is left alone, and Cargo builds under <code>target/</code> never take it over). Run <code>cargo run -- --background</code> for a quiet manual start.
                  Startup waits up to 10 seconds for successful tray registration and an available host, without blocking configuration or device initialization.
                  If no usable tray appears (including an unreachable session bus), configuration opens with an explanation; closing it exits instead of hiding.
                  Repeated launches reuse the running instance and open configuration even while tray readiness is pending; late registration never hides that window.

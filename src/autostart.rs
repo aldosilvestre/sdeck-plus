@@ -150,6 +150,113 @@ fn enable_at(root: &Path, executable: &Path) -> io::Result<()> {
     fs::write(directory.join(ENTRY_NAME), contents)
 }
 
+/// Repoints an enabled entry whose executable no longer exists at `executable`.
+///
+/// This happens when sdeck-plus moves between `install.sh` (`~/.local/bin`) and
+/// a pacman package (`/usr/bin`): session startup then silently skips the
+/// entry. Entries that still start something, disabled, symlinked or
+/// unparseable entries, a running executable that no longer exists (Linux names
+/// it `<path> (deleted)`) and Cargo builds (`target/debug`, `target/release`)
+/// are left alone.
+///
+/// # Errors
+/// Returns configuration, read, malformed-entry or write errors.
+pub fn repair_missing_executable(executable: &Path) -> io::Result<bool> {
+    repair_at(
+        &config_home(
+            env::var_os("XDG_CONFIG_HOME").as_deref().map(Path::new),
+            env::var_os("HOME").as_deref().map(Path::new),
+        )?,
+        executable,
+    )
+}
+
+fn repair_at(root: &Path, executable: &Path) -> io::Result<bool> {
+    let entry = root.join("autostart").join(ENTRY_NAME);
+    // Writing through a symlink would change a file owned elsewhere.
+    if is_cargo_build(executable)
+        || fs::metadata(executable).is_err()
+        || fs::symlink_metadata(&entry).is_ok_and(|metadata| metadata.file_type().is_symlink())
+        || !is_enabled_at(root)?
+    {
+        return Ok(false);
+    }
+    let contents = fs::read_to_string(&entry)?;
+    let Some(program) = entry_program(&contents) else {
+        return Ok(false);
+    };
+    match fs::metadata(&program) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        _ => return Ok(false),
+    }
+    enable_at(root, executable)?;
+    Ok(true)
+}
+
+fn is_cargo_build(executable: &Path) -> bool {
+    let mut parents = executable.ancestors().skip(1);
+    let in_profile = parents
+        .next()
+        .and_then(Path::file_name)
+        .is_some_and(|name| ["debug", "release", "deps"].iter().any(|dir| name == *dir));
+    in_profile && parents.any(|parent| parent.file_name().is_some_and(|name| name == "target"))
+}
+
+/// The absolute program of the entry's `Exec` key, with both escape layers decoded.
+fn entry_program(contents: &str) -> Option<PathBuf> {
+    let mut in_entry = false;
+    let value = contents.lines().map(str::trim).find_map(|line| {
+        if line.starts_with('[') && line.ends_with(']') {
+            in_entry = line == "[Desktop Entry]";
+            return None;
+        }
+        let (key, value) = line.split_once('=')?;
+        (in_entry && key.trim() == "Exec").then_some(value.trim_start())
+    })?;
+    // Desktop string escapes are decoded before Exec argument quoting.
+    let mut decoded = String::new();
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            decoded.push(character);
+            continue;
+        }
+        decoded.push(match characters.next()? {
+            's' => ' ',
+            'n' => '\n',
+            't' => '\t',
+            'r' => '\r',
+            '\\' => '\\',
+            _ => return None,
+        });
+    }
+    let mut program = String::new();
+    let mut characters = decoded.chars();
+    if decoded.starts_with('"') {
+        characters.next();
+        loop {
+            match characters.next()? {
+                '"' => break,
+                '\\' => program.push(characters.next()?),
+                '%' => program.push(characters.next().filter(|next| *next == '%')?),
+                character => program.push(character),
+            }
+        }
+    } else {
+        for character in characters.by_ref() {
+            if character == ' ' {
+                break;
+            }
+            program.push(character);
+        }
+    }
+    // Reject an unterminated quote in the remaining arguments.
+    if characters.filter(|character| *character == '"').count() % 2 != 0 {
+        return None;
+    }
+    Some(PathBuf::from(program)).filter(|path| path.is_absolute())
+}
+
 fn disable_at(root: &Path) -> io::Result<()> {
     match fs::remove_file(root.join("autostart").join(ENTRY_NAME)) {
         Ok(()) => Ok(()),
@@ -188,6 +295,14 @@ mod tests {
         fn write(&self, contents: impl AsRef<[u8]>) {
             fs::create_dir_all(self.0.join("autostart")).unwrap();
             fs::write(self.entry(), contents).unwrap();
+        }
+
+        /// Creates a regular file standing in for an executable and returns its path.
+        fn executable(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "binary").unwrap();
+            path
         }
     }
 
@@ -336,5 +451,164 @@ mod tests {
         fs::write(&blocked, "not a directory").unwrap();
         assert!(enable_at(&blocked, Path::new("/apps/monitor")).is_err());
         assert!(is_enabled_at(&blocked).is_err());
+    }
+
+    const STALE: &str = "[Desktop Entry]\nType=Application\nName=sdeck-plus\n\
+                         Exec=\"/usr/bin/sdeck-plus-removed\" --background\nTerminal=false\nHidden=false\n";
+
+    #[test]
+    fn entry_whose_executable_is_gone_is_repointed_at_the_running_one() {
+        // Given: a package or install.sh build replaced the executable at another path.
+        let root = TempRoot::new();
+        root.write(STALE);
+        let current = root.executable(".local/bin/sdeck-plus");
+        // When
+        let repaired = repair_at(&root.0, &current).unwrap();
+        // Then
+        assert!(repaired);
+        let fresh = TempRoot::new();
+        enable_at(&fresh.0, &current).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.entry()).unwrap(),
+            fs::read_to_string(fresh.entry()).unwrap()
+        );
+        assert!(is_enabled_at(&root.0).unwrap());
+    }
+
+    #[test]
+    fn entries_that_still_start_something_or_are_off_are_left_alone() {
+        // An existing executable, also with both escape layers in its path.
+        let root = TempRoot::new();
+        let current = root.executable("sdeck-plus");
+        let existing = root.executable("a b\"$`%f");
+        enable_at(&root.0, &existing).unwrap();
+        let before = fs::read_to_string(root.entry()).unwrap();
+        assert!(!repair_at(&root.0, &current).unwrap());
+        assert_eq!(fs::read_to_string(root.entry()).unwrap(), before);
+        // Disabled, missing, PATH-relative, or unparseable entries.
+        for contents in [
+            STALE.replace("Hidden=false", "Hidden=true"),
+            STALE.replace("\"/usr/bin/sdeck-plus-removed\"", "sdeck-plus-removed"),
+            STALE.replace("Exec=\"/usr/bin/sdeck-plus-removed\" --background\n", ""),
+            STALE.replace("--background", "\"--background"),
+        ] {
+            let root = TempRoot::new();
+            let current = root.executable("sdeck-plus");
+            root.write(&contents);
+            assert!(!repair_at(&root.0, &current).unwrap(), "{contents}");
+            assert_eq!(fs::read_to_string(root.entry()).unwrap(), contents);
+        }
+        let root = TempRoot::new();
+        let current = root.executable("sdeck-plus");
+        assert!(!repair_at(&root.0, &current).unwrap());
+        assert!(!root.entry().exists());
+    }
+
+    #[test]
+    fn a_running_executable_that_no_longer_exists_is_never_written() {
+        // Given: Linux names a replaced running executable "<path> (deleted)".
+        let root = TempRoot::new();
+        root.write(STALE);
+        root.executable("sdeck-plus");
+        for current in [root.0.join("sdeck-plus (deleted)"), root.0.join("missing")] {
+            // When / Then
+            assert!(!repair_at(&root.0, &current).unwrap(), "{current:?}");
+            assert_eq!(fs::read_to_string(root.entry()).unwrap(), STALE);
+        }
+    }
+
+    #[test]
+    fn a_symlinked_entry_is_left_alone() {
+        // Given: the entry links to a stale file that is owned elsewhere.
+        use std::os::unix::fs::symlink;
+        let root = TempRoot::new();
+        let current = root.executable("sdeck-plus");
+        let target = root.0.join("elsewhere.desktop");
+        fs::write(&target, STALE).unwrap();
+        fs::create_dir_all(root.0.join("autostart")).unwrap();
+        symlink(&target, root.entry()).unwrap();
+        // When / Then
+        assert!(!repair_at(&root.0, &current).unwrap());
+        assert_eq!(fs::read_to_string(&target).unwrap(), STALE);
+        assert!(fs::symlink_metadata(root.entry())
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn repair_reads_back_every_path_that_enabling_escapes() {
+        for name in [
+            "a b",
+            "q\"uote",
+            "dol$lar",
+            "back\\slash",
+            "per%cent",
+            "pct%%",
+            "tick`",
+            "tab\tx",
+            "\\s",
+            "é ü",
+        ] {
+            // Given: an entry written for an existing executable with this name.
+            let root = TempRoot::new();
+            let current = root.executable("current");
+            let existing = root.executable(name);
+            enable_at(&root.0, &existing).unwrap();
+            let before = fs::read(root.entry()).unwrap();
+            // When / Then: it still starts something, so it stays as written.
+            assert!(!repair_at(&root.0, &current).unwrap(), "{name:?}");
+            assert_eq!(fs::read(root.entry()).unwrap(), before, "{name:?}");
+            // When / Then: once that executable is gone, it is repointed.
+            fs::remove_file(&existing).unwrap();
+            assert!(repair_at(&root.0, &current).unwrap(), "{name:?}");
+            let fresh = TempRoot::new();
+            enable_at(&fresh.0, &current).unwrap();
+            assert_eq!(
+                fs::read(root.entry()).unwrap(),
+                fs::read(fresh.entry()).unwrap(),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_exec_values_are_never_rewritten() {
+        for contents in [
+            "[Desktop Entry]\nExec=\n",
+            "[Desktop Entry]\nExec=\"\n",
+            "[Desktop Entry]\nExec=\\\n",
+            "[Desktop Entry]\nExec=\\q\n",
+            "[Desktop Entry]\nExec=\"/nonexist%\"\n",
+            "[Desktop Entry]\nExec=\"\"\n",
+            "[Desktop Entry]\nHidden=false\n[Other]\nExec=/nonexist\n",
+        ] {
+            // Given
+            let root = TempRoot::new();
+            let current = root.executable("sdeck-plus");
+            root.write(contents);
+            // When / Then: no repair (or an error), and the entry is unchanged.
+            assert!(
+                !repair_at(&root.0, &current).unwrap_or(false),
+                "{contents:?}"
+            );
+            assert_eq!(fs::read_to_string(root.entry()).unwrap(), contents);
+        }
+    }
+
+    #[test]
+    fn cargo_builds_never_take_over_the_login_entry() {
+        for current in [
+            "src/sdeck-plus/target/debug/sdeck-plus",
+            "src/sdeck-plus/target/release/sdeck-plus",
+            "src/sdeck-plus/target/x86_64-unknown-linux-gnu/release/sdeck-plus",
+            "src/sdeck-plus/target/debug/deps/sdeck_plus-0123abcd",
+        ] {
+            let root = TempRoot::new();
+            root.write(STALE);
+            let executable = root.executable(current);
+            assert!(!repair_at(&root.0, &executable).unwrap(), "{current}");
+            assert_eq!(fs::read_to_string(root.entry()).unwrap(), STALE);
+        }
     }
 }
