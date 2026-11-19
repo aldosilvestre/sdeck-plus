@@ -462,7 +462,7 @@ fn keyboard_steps_are_stored_normalized_like_top_level_keyboard_actions() {
         Some(normalized_chord)
     );
 
-    // A step that cannot be normalized is refused as a top-level one is.
+    // A step that cannot be normalized is refused like a top-level one, naming its step.
     let unknown = Action::KeyPress {
         key: "unknown".into(),
     };
@@ -477,7 +477,7 @@ fn keyboard_steps_are_stored_normalized_like_top_level_keyboard_actions() {
         )
         .unwrap_err();
     assert_eq!(error.kind(), expected.kind());
-    assert_eq!(error.to_string(), expected.to_string());
+    assert_eq!(error.to_string(), format!("Step 2: {expected}"));
     assert_eq!(store.layers()["Base"].bindings, bindings);
     assert_eq!(fs::read(fixture.0.join("layers.conf")).unwrap(), original);
 }

@@ -171,6 +171,14 @@ fn every_action_family_maps_to_a_named_icon() {
         (feature(FeatureAction::Timer { seconds: 5 }), "timer"),
         (feature(FeatureAction::CancelTimer), "cancel-timer"),
         (
+            feature(FeatureAction::Multi {
+                steps: vec![crate::features::MultiStep::Action(Action::Command(
+                    "make".into(),
+                ))],
+            }),
+            "multi",
+        ),
+        (
             feature(FeatureAction::Obs(ObsAction::Scene("Cam".into()))),
             "obs-scene",
         ),

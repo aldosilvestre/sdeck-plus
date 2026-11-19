@@ -8,6 +8,8 @@ pub(crate) enum Choice {
     Website,
     Close,
     Scroll,
+    /// Several actions and waits in order; only for a key press or a key hold.
+    Multi,
     PlayPause,
     Stop,
     Next,
@@ -98,6 +100,7 @@ impl Choice {
                 direction: ScrollDirection::Down,
                 ticks: 1,
             }),
+            Self::Multi => FeatureAction::Multi { steps: Vec::new() },
             Self::PlayPause => FeatureAction::Desktop(D::Media(M::PlayPause)),
             Self::Stop => FeatureAction::Desktop(D::Media(M::Stop)),
             Self::Next => FeatureAction::Desktop(D::Media(M::Next)),
@@ -171,6 +174,7 @@ impl Choice {
             Self::Website => "Open this address in your default browser. Include https:// or http://.",
             Self::Close => "Close processes matching this executable name exactly. Use the basename, not a path or window title.",
             Self::Scroll => "Scroll the pointer in the selected direction by this many ticks.",
+            Self::Multi => "Run several actions from this key, in order: each step starts after the one before it finishes. Add waits between steps if needed. Editing the steps never runs them.",
             Self::PlayPause => "Pause or resume playback in the active media player.",
             Self::Stop => "Stop playback in the active media player.",
             Self::Next => "Skip to the next track in the active media player.",
@@ -214,13 +218,14 @@ impl Choice {
         }
     }
 
-    pub(crate) const ALL: [Self; 46] = [
+    pub(crate) const ALL: [Self; 47] = [
         Self::ShortcutToggle,
         Self::Text,
         Self::Open,
         Self::Website,
         Self::Close,
         Self::Scroll,
+        Self::Multi,
         Self::PlayPause,
         Self::Stop,
         Self::Next,
@@ -270,7 +275,8 @@ impl Choice {
             | Self::Open
             | Self::Website
             | Self::Close
-            | Self::Scroll => 0,
+            | Self::Scroll
+            | Self::Multi => 0,
             Self::PlayPause
             | Self::Stop
             | Self::Next
@@ -322,6 +328,7 @@ impl Choice {
             Self::Website => "Open website",
             Self::Close => "Close application",
             Self::Scroll => "Scroll mouse",
+            Self::Multi => "Multi action",
             Self::PlayPause => "Play / pause",
             Self::Stop => "Stop playback",
             Self::Next => "Next track",

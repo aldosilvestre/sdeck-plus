@@ -25,6 +25,7 @@ use std::{
 };
 
 mod action_catalog;
+mod action_form;
 mod app_icon;
 mod autostart;
 mod button_swap;
@@ -34,6 +35,7 @@ mod device_preference;
 mod dial_presets;
 mod feature_editor;
 mod feature_runtime;
+mod multi_editor;
 mod plugin_add_ui;
 mod plugin_runtime;
 mod plugin_ui;
@@ -1142,23 +1144,23 @@ fn build_body(
     ]);
     let action_picker = gtk::DropDown::new(Some(action_model.clone()), gtk::Expression::NONE);
     action_picker.set_selected(7);
-    let layer_target_model = gtk::StringList::new(&[]);
-    for name in layers.borrow().names() {
-        layer_target_model.append(&name);
-    }
-    let layer_target_picker =
-        gtk::DropDown::new(Some(layer_target_model.clone()), gtk::Expression::NONE);
-    bound_layer_picker(&layer_target_picker);
-    let text_entry = Entry::builder().hexpand(true).build();
-    let application_entry = Entry::builder()
-        .placeholder_text("Executable, for example /usr/bin/firefox")
-        .hexpand(true)
-        .build();
-    let args_view = TextView::new();
-    args_view.set_monospace(true);
-    args_view.set_size_request(-1, 48);
-    let [ctrl_mod, alt_mod, shift_mod, super_mod] =
-        ["Ctrl", "Alt", "Shift", "Super"].map(modifier_toggle);
+    // The basic action fields are shared with the step form of a multi action.
+    let action_form::CoreFields {
+        layer_target_model,
+        layer_target_picker,
+        text_entry,
+        application_entry,
+        args_view,
+        super_mod,
+        shift_mod,
+        ctrl_mod,
+        alt_mod,
+        layer_target_row,
+        text_row,
+        application_row,
+        args_row,
+        modifier_row,
+    } = action_form::CoreFields::new(&layers.borrow().names());
     let binding_status = Label::new(Some("Select a physical control to inspect its binding."));
     binding_status.add_css_class("binding-status");
     binding_status.set_xalign(0.0);
@@ -1179,28 +1181,6 @@ fn build_body(
     remove_binding.add_css_class("destructive-action");
     remove_binding.add_css_class("remove-binding");
     let control_number_row = labeled("Number", &control_number_picker);
-    let layer_target_row = labeled("Destination profile or page", &layer_target_picker);
-    let text_row = labeled("Command / key / shortcut key / event name", &text_entry);
-    let application_row = labeled("Application executable", &application_entry);
-    let args_scroller = gtk::ScrolledWindow::builder()
-        .min_content_height(48)
-        .child(&args_view)
-        .build();
-    let args_row = labeled("Arguments (one per line)", &args_scroller);
-    let args_label = args_row.first_child().unwrap().downcast::<Label>().unwrap();
-    args_label.set_mnemonic_widget(Some(&args_view));
-    args_view.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
-        args_label.upcast_ref()
-    ])]);
-    // One aligned, linked row of toggles instead of a ragged check grid.
-    let modifier_buttons = GtkBox::new(Orientation::Horizontal, 0);
-    modifier_buttons.add_css_class("linked");
-    modifier_buttons.add_css_class("modifier-toggles");
-    modifier_buttons.set_halign(gtk::Align::Start);
-    for toggle in [&ctrl_mod, &alt_mod, &shift_mod, &super_mod] {
-        modifier_buttons.append(toggle);
-    }
-    let modifier_row = labeled("Shortcut modifiers", &modifier_buttons);
 
     let binding_ui = BindingUi::new(
         layer_picker.clone(),
@@ -1229,6 +1209,10 @@ fn build_body(
         modifier_row,
         toast.clone(),
     );
+    // The step dialog of a multi action offers this store's pages and the session's plugins.
+    binding_ui
+        .feature_editor
+        .set_step_context(&layers, &binding_ui.plugins);
     // Everything below, summaries included, describes the model of these stores.
     // Tests never read the user's plugin folder; they load a temporary root themselves.
     #[cfg(not(test))]
@@ -1381,50 +1365,9 @@ fn build_body(
     form.append(&binding_ui.hold_toggle);
     form.append(&binding_ui.action_guidance);
     form.append(&binding_ui.layer_target_row);
-    let action_fields = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .focusable(false)
-        .min_children_per_line(1)
-        .max_children_per_line(if matches!(binding_ui.action_picker.selected(), 2 | 3) {
-            2
-        } else {
-            1
-        })
-        .homogeneous(true)
-        .column_spacing(16)
-        .row_spacing(12)
-        .hexpand(true)
-        .build();
-    action_fields.add_css_class("action-fields");
-    for row in [
-        &binding_ui.text_row,
-        &binding_ui.modifier_row,
-        &binding_ui.application_row,
-        &binding_ui.args_row,
-    ] {
-        row.set_size_request(180, -1);
-        let cell = gtk::FlowBoxChild::new();
-        cell.set_focusable(false);
-        cell.set_child(Some(row));
-        action_fields.insert(&cell, -1);
-        row.bind_property("visible", &cell, "visible")
-            .sync_create()
-            .build();
-    }
-    action_fields.set_visible(matches!(binding_ui.action_picker.selected(), 1..=4));
-    let fields = action_fields.downgrade();
-    binding_ui
-        .action_picker
-        .connect_selected_notify(move |picker| {
-            if let Some(fields) = fields.upgrade() {
-                fields.set_max_children_per_line(if matches!(picker.selected(), 2 | 3) {
-                    2
-                } else {
-                    1
-                });
-                fields.set_visible(matches!(picker.selected(), 1..=4));
-            }
-        });
+    let action_fields = binding_ui
+        .core_fields()
+        .adaptive_fields(&binding_ui.action_picker);
     form.append(&action_fields);
     form.append(&binding_ui.feature_editor.root);
     form.append(&*binding_ui.plugin_editor);
@@ -2814,76 +2757,38 @@ impl BindingUi {
             .set_visible(kind != ActionKind::None && self.return_toggle.is_active());
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
-        self.action_guidance.set_text(match kind {
-            ActionKind::None => {
-                "Do nothing when this control is used. Live information can still be shown."
-            }
-            ActionKind::MoveToLayer => {
-                "Switch to another profile or page when this control is used."
-            }
-            ActionKind::RunCommand => "Run a shell command with /bin/sh. Saving does not run it.",
-            ActionKind::OpenApplication => "Enter the executable path and one argument per line.",
-            ActionKind::Shortcut => "Type a key or full chord. The checkboxes add modifiers.",
-            ActionKind::EmitLegacy => "Send a named internal event. Mainly used by older bindings.",
-            ActionKind::Extended | ActionKind::Plugin => "",
-        });
-        if matches!(kind, ActionKind::Shortcut) {
-            self.action_guidance.set_markup(
-                "Type a key or chord. <a href=\"shortcut-reference\">Key names and aliases</a>",
-            );
-        }
+        action_form::show_guidance(&self.action_guidance, kind);
         // "Do nothing" needs no explaining on a key, whose selectors are hidden.
         let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
-        if let Some(label) = self
-            .text_row
-            .first_child()
-            .and_then(|child| child.downcast::<Label>().ok())
-        {
-            label.set_text(match kind {
-                ActionKind::RunCommand => "Shell command",
-                ActionKind::Shortcut => "Shortcut",
-                ActionKind::EmitLegacy => "Event name",
-                ActionKind::None
-                | ActionKind::MoveToLayer
-                | ActionKind::OpenApplication
-                | ActionKind::Extended
-                | ActionKind::Plugin => "",
-            });
-        }
         self.feature_editor
             .root
             .set_visible(matches!(kind, ActionKind::Extended));
         self.plugin_editor
             .set_visible(matches!(kind, ActionKind::Plugin));
         self.sync_plugin_control();
-        self.layer_target_row
-            .set_visible(matches!(kind, ActionKind::MoveToLayer));
-        self.application_row
-            .set_visible(matches!(kind, ActionKind::OpenApplication));
-        self.args_row
-            .set_visible(matches!(kind, ActionKind::OpenApplication));
-        let shortcut = matches!(kind, ActionKind::Shortcut);
-        self.modifier_row.set_visible(shortcut);
-        self.text_row.set_visible(matches!(
-            kind,
-            ActionKind::RunCommand | ActionKind::Shortcut | ActionKind::EmitLegacy
-        ));
-        self.text_entry.set_tooltip_text(Some(match kind {
-            ActionKind::Shortcut => "Type a full chord or one key; checkboxes add modifiers without duplicates. Win/Windows/Meta = SUPER; Enter/Return are aliases.",
-            _ => "",
-        }));
-        self.text_entry.set_placeholder_text(Some(match kind {
-            ActionKind::RunCommand => "Shell command run with /bin/sh -c",
-            ActionKind::Shortcut => "A, F5, Enter (no modifiers), or CTRL + D",
-            ActionKind::EmitLegacy => "Internal event name",
-            ActionKind::None
-            | ActionKind::MoveToLayer
-            | ActionKind::OpenApplication
-            | ActionKind::Extended
-            | ActionKind::Plugin => "",
-        }));
+        self.core_fields().show(kind);
+    }
+
+    /// The basic action fields, as shared with the step form of a multi action.
+    fn core_fields(&self) -> action_form::CoreFields {
+        action_form::CoreFields {
+            layer_target_model: self.layer_target_model.clone(),
+            layer_target_picker: self.layer_target_picker.clone(),
+            text_entry: self.text_entry.clone(),
+            application_entry: self.application_entry.clone(),
+            args_view: self.args_view.clone(),
+            super_mod: self.super_mod.clone(),
+            shift_mod: self.shift_mod.clone(),
+            ctrl_mod: self.ctrl_mod.clone(),
+            alt_mod: self.alt_mod.clone(),
+            layer_target_row: self.layer_target_row.clone(),
+            text_row: self.text_row.clone(),
+            application_row: self.application_row.clone(),
+            args_row: self.args_row.clone(),
+            modifier_row: self.modifier_row.clone(),
+        }
     }
 
     fn refresh_layer_targets(&self, names: &[String]) {
@@ -2911,6 +2816,9 @@ impl BindingUi {
         self.sync_plugin_control();
         self.feature_editor
             .set_touchscreen(self.control_kind() == ControlKind::Touch);
+        // A key press or a key hold: the only events a multi action runs from.
+        self.feature_editor
+            .set_key_trigger(self.control_kind() == ControlKind::Button);
         self.clear_action_fields();
         let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
             Ok(selection) => selection,
@@ -3006,14 +2914,10 @@ impl BindingUi {
     }
 
     fn update_shortcut_preview(&self) {
-        let text = match sdeck_plus::keyboard::parse_chord(
-            &self.shortcut_modifiers(),
-            &self.text_entry.text(),
-        ) {
-            Ok(chord) if self.action_kind() == ActionKind::Shortcut => {
-                format!("Presses {}", chord.label())
-            }
-            _ => String::new(),
+        let text = if self.action_kind() == ActionKind::Shortcut {
+            action_form::chord_preview(&self.shortcut_modifiers(), &self.text_entry.text())
+        } else {
+            String::new()
         };
         self.shortcut_preview.set_text(&text);
         self.shortcut_preview.set_visible(!text.is_empty());
@@ -3154,28 +3058,9 @@ impl BindingUi {
                 Action::Feature(self.feature_editor.parse()?),
             ));
         }
-        let destination = dropdown_value(
-            &self.layer_target_model,
-            self.layer_target_picker.selected(),
-        )
-        .unwrap_or_default();
-        let args_buffer = self.args_view.buffer();
-        let args = args_buffer
-            .text(&args_buffer.start_iter(), &args_buffer.end_iter(), false)
-            .to_string();
-        let modifiers = self.shortcut_modifiers();
         let action = {
             let store = layers.borrow();
-            action_from_fields(
-                &store,
-                self.action_kind(),
-                &destination,
-                &self.application_entry.text(),
-                &args,
-                &self.text_entry.text(),
-                &modifiers,
-            )
-            .map_err(|error| error.0)?
+            self.core_fields().action(&store, self.action_kind())?
         };
         Ok((layer, trigger, action))
     }
@@ -3211,14 +3096,7 @@ impl BindingUi {
         self.populate_return(None);
         self.feature_editor.reset();
         self.plugin_editor.reset();
-        self.text_entry.set_text("");
-        self.application_entry.set_text("");
-        let buffer = self.args_view.buffer();
-        buffer.set_text("");
-        self.super_mod.set_active(false);
-        self.shift_mod.set_active(false);
-        self.ctrl_mod.set_active(false);
-        self.alt_mod.set_active(false);
+        self.core_fields().clear();
     }
 
     fn populate_action(&self, action: &Action) {
@@ -3244,46 +3122,11 @@ impl BindingUi {
                 );
                 self.feature_editor.populate(feature);
             }
-            Action::SwitchLayer(target) => {
-                self.action_picker.set_selected(0);
-                select_string(&self.layer_target_model, &self.layer_target_picker, target);
-            }
-            Action::Command(command) => {
-                self.action_picker.set_selected(1);
-                self.text_entry.set_text(command);
-            }
-            Action::KeyPress { key } => {
-                // Inspect legacy names verbatim; only an explicit save canonicalizes them.
-                self.action_picker.set_selected(3);
-                self.text_entry.set_text(key);
-                self.super_mod.set_active(false);
-                self.shift_mod.set_active(false);
-                self.ctrl_mod.set_active(false);
-                self.alt_mod.set_active(false);
-            }
-            Action::Launch { executable, args } => {
-                self.action_picker.set_selected(2);
-                self.application_entry
-                    .set_text(&executable.to_string_lossy());
-                self.args_view
-                    .buffer()
-                    .set_text(&format_application_args(args));
-            }
-            Action::Shortcut { modifiers, key } => {
-                self.action_picker.set_selected(3);
-                self.text_entry.set_text(key);
-                self.super_mod
-                    .set_active(modifiers.iter().any(|m| m == "SUPER"));
-                self.shift_mod
-                    .set_active(modifiers.iter().any(|m| m == "SHIFT"));
-                self.ctrl_mod
-                    .set_active(modifiers.iter().any(|m| m == "CTRL" || m == "CONTROL"));
-                self.alt_mod
-                    .set_active(modifiers.iter().any(|m| m == "ALT"));
-            }
-            Action::Emit(name) => {
-                self.action_picker.set_selected(4);
-                self.text_entry.set_text(name);
+            basic => {
+                if let Some(index) = action_form::core_index(basic) {
+                    self.action_picker.set_selected(index);
+                }
+                self.core_fields().populate(basic);
             }
         }
         self.update_action_visibility();
@@ -3321,20 +3164,7 @@ impl BindingUi {
     }
 
     fn shortcut_modifiers(&self) -> Vec<String> {
-        let mut modifiers = Vec::new();
-        if self.super_mod.is_active() {
-            modifiers.push("SUPER".into());
-        }
-        if self.shift_mod.is_active() {
-            modifiers.push("SHIFT".into());
-        }
-        if self.ctrl_mod.is_active() {
-            modifiers.push("CTRL".into());
-        }
-        if self.alt_mod.is_active() {
-            modifiers.push("ALT".into());
-        }
-        modifiers
+        self.core_fields().modifiers()
     }
 }
 
@@ -5293,6 +5123,7 @@ mod tests {
     mod live_info_tests;
     mod model_selector_tests;
     mod model_session_tests;
+    mod multi_action_editor_tests;
     mod multi_action_runtime_tests;
     mod multimedia_action_tests;
     mod organize_popover_tests;

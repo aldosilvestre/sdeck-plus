@@ -535,16 +535,51 @@ pub(crate) fn profile_dialog(
     dismiss: &str,
     primary: Option<&Button>,
 ) -> gtk::Window {
-    let dialog = gtk::Window::builder()
+    let dialog = form_dialog(
+        Some(parent.upcast_ref()),
+        title,
+        subtitle,
+        body,
+        dismiss,
+        primary,
+    )
+    .window;
+    dialog.add_css_class("profile-dialog");
+    dialog
+}
+
+/// The parts of a [`form_dialog`] a caller may change after building it.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) struct FormDialog {
+    pub(crate) window: gtk::Window,
+    pub(crate) title: Label,
+    pub(crate) subtitle: Label,
+    pub(crate) dismiss: Button,
+}
+
+/// The shared modal dialog frame: a title, a one-line muted subtitle, `body`, then the single
+/// right-aligned action row (the dismissal with its `Esc` hint, then `primary`). Escape and the
+/// dismissal hide it; the widgets are reused, never rebuilt.
+#[allow(dead_code)] // unused by the ui_showcase example, which mounts this file
+pub(crate) fn form_dialog(
+    parent: Option<&gtk::Window>,
+    title: &str,
+    subtitle: &str,
+    body: &impl IsA<gtk::Widget>,
+    dismiss: &str,
+    primary: Option<&Button>,
+) -> FormDialog {
+    let builder = gtk::Window::builder()
         .title(title)
-        .transient_for(parent)
         .modal(true)
         .destroy_with_parent(true)
         .hide_on_close(true)
         .resizable(false)
-        .default_width(400)
-        .build();
-    dialog.add_css_class("profile-dialog");
+        .default_width(400);
+    let dialog = match parent {
+        Some(parent) => builder.transient_for(parent).build(),
+        None => builder.build(),
+    };
     dialog.add_css_class("popup-dialog");
     let content = GtkBox::new(Orientation::Vertical, 10);
     content.set_margin_top(14);
@@ -587,7 +622,12 @@ pub(crate) fn profile_dialog(
         })),
     ));
     dialog.add_controller(escape);
-    dialog
+    FormDialog {
+        window: dialog,
+        title: heading,
+        subtitle: note,
+        dismiss: close,
+    }
 }
 
 pub(crate) fn section_heading(icon: &str, text: &str) -> GtkBox {
