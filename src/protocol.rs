@@ -4,6 +4,8 @@ use crate::{
     local_artwork::ArtworkTarget,
 };
 
+mod legacy_mini;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Key {
@@ -41,6 +43,18 @@ pub const FEATURE_REPORT_LEN: usize = 32;
 /// One feature report, as sent with HID SEND FEATURE REPORT.
 pub type FeatureReport = [u8; FEATURE_REPORT_LEN];
 
+/// What a Legacy Mini image header's Key Index byte adds to the zero-based
+/// key: key `n` (one-based) is sent as `n - 1 + MINI_KEY_INDEX_BASE`.
+///
+/// UNVERIFIED on our side (no hardware). Elgato's Mini page only numbers the
+/// keys 0 to 5 in its "Keypad Keys Index Layout" figure and gives the
+/// upload's Key Index no explicit base. The open-source drivers
+/// python-elgato-streamdeck (`StreamDeckMini.set_key_image`) and
+/// node-elgato-stream-deck (`StreamdeckGen1ImageHeaderGenerator`), which run
+/// on real Minis, send `key + 1`, so this follows them. If a real Mini shows
+/// every picture one key off, set this to 0.
+pub(crate) const MINI_KEY_INDEX_BASE: u8 = 1;
+
 /// What one protocol family implements. This is the single dispatch point for
 /// a new family: add a [`ProtocolFamily`] variant, implement this trait for it
 /// and return it from [`protocol_for`]; no other call site changes.
@@ -51,15 +65,16 @@ pub trait FamilyProtocol: Sync {
     /// A message when the family cannot be decoded.
     fn decode(&self, model: &DeviceModel, report: &[u8]) -> Result<Vec<Event>, String>;
 
-    /// The output reports that upload `jpeg` (an encoded image) to `target`.
+    /// The output reports that upload `image`, encoded in the model's format
+    /// (JPEG, or BMP for a Legacy Mini), to `target`.
     ///
     /// # Errors
-    /// A message when the target does not exist or the family cannot be driven.
+    /// A message when the target does not exist or the image cannot be sent.
     fn encode_reports(
         &self,
         model: &DeviceModel,
         target: ArtworkTarget,
-        jpeg: &[u8],
+        image: &[u8],
     ) -> Result<Vec<OutputReport>, String>;
 
     /// The feature report that sets the display backlight to `percent`,
@@ -106,23 +121,22 @@ fn sleep_duration_report([id, command]: [u8; 2], seconds: u32) -> FeatureReport 
 /// Classic, XL, Neo, + and + XL.
 struct Expanded;
 
-/// The original Mini. Its feature reports are implemented; its input and image
-/// protocol are not yet, so decoding and image output fail with a message and
-/// nothing is sent (discovery refuses the family until then).
+/// The original Mini: 65-byte key state input, BMP key images in 1024-byte
+/// `02 01` reports (see `protocol/legacy_mini.rs`) and its own feature reports.
 struct LegacyMini;
 
 impl FamilyProtocol for LegacyMini {
-    fn decode(&self, model: &DeviceModel, _report: &[u8]) -> Result<Vec<Event>, String> {
-        model.ensure_protocol().map(|()| Vec::new())
+    fn decode(&self, model: &DeviceModel, report: &[u8]) -> Result<Vec<Event>, String> {
+        Ok(legacy_mini::decode(model, report))
     }
 
     fn encode_reports(
         &self,
         model: &DeviceModel,
-        _target: ArtworkTarget,
-        _jpeg: &[u8],
+        target: ArtworkTarget,
+        image: &[u8],
     ) -> Result<Vec<OutputReport>, String> {
-        model.ensure_protocol().map(|()| Vec::new())
+        legacy_mini::encode_reports(model, target, image)
     }
 
     // https://docs.elgato.com/streamdeck/hid/mini (Setter Feature Reports).
@@ -148,9 +162,9 @@ impl FamilyProtocol for Expanded {
         &self,
         model: &DeviceModel,
         target: ArtworkTarget,
-        jpeg: &[u8],
+        image: &[u8],
     ) -> Result<Vec<OutputReport>, String> {
-        image_output::encode_expanded_reports(model, target, jpeg)
+        image_output::encode_expanded_reports(model, target, image)
     }
 
     // https://docs.elgato.com/streamdeck/hid/general (Setter Feature Reports).

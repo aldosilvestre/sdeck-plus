@@ -28,8 +28,11 @@ pub enum ProtocolFamily {
     /// Classic, XL, Neo, + and + XL: 0x01 input commands, 0x02 image reports
     /// (0x07 key, 0x0B/0x0C window) and 0x03 feature reports.
     Expanded,
-    /// The original Mini: fixed 65-byte input without a command byte and
-    /// 1024-byte output reports with a 16-byte header. Documented, not implemented.
+    /// The original Mini: a fixed 65-byte input report (report id 0x01, then
+    /// one state byte per key, no command byte), BMP key images in 1024-byte
+    /// `02 01` output reports with a 16-byte header, and feature reports of
+    /// its own. Implemented from Elgato's Mini page and validated with the
+    /// simulator only.
     LegacyMini,
 }
 
@@ -41,9 +44,10 @@ impl ProtocolFamily {
         }
     }
 
-    /// Whether this crate has a handler that can drive the family.
+    /// Whether this crate has a handler that can drive the family (every
+    /// family does; a new one starts out without).
     pub const fn is_implemented(self) -> bool {
-        matches!(self, Self::Expanded)
+        matches!(self, Self::Expanded | Self::LegacyMini)
     }
 }
 
@@ -114,7 +118,8 @@ pub struct DeviceModel {
     /// Whether partial-window image headers swap x/y when rotated.
     pub partial_window_axis_swap: bool,
     pub input_report_len: usize,
-    /// Bytes before the payload of an input report (command, length).
+    /// Bytes before the payload of an input report: the report id, plus the
+    /// command and length on Expanded models.
     pub input_header_len: usize,
     pub image_report_len: usize,
     pub key_header_len: usize,
@@ -261,9 +266,18 @@ pub static NEO: DeviceModel = DeviceModel {
     ..EXPANDED
 };
 
-/// Planned. Facts from the Stream Deck Mini page: the Legacy Mini protocol,
+/// Planned. Facts from the Stream Deck Mini page: the Legacy Mini protocol
+/// (implemented and validated with the simulator only, not yet offered),
 /// 80x80 BMP keys rotated 90 degrees clockwise, 16-byte output header and a
-/// fixed 65-byte input report with no command byte.
+/// fixed 65-byte input report whose byte 0 is the report id, with no command
+/// byte.
+///
+/// The orientation follows the open-source drivers that run on real Minis
+/// (python-elgato-streamdeck, node-elgato-stream-deck): they transpose the
+/// key, which is `Ccw90` with `key_flip_y`. Elgato's page says "rotated 90
+/// degrees clockwise" without a flip; UNVERIFIED on our side (no hardware).
+/// If a real Mini shows its pictures mirrored, `Cw90` without a flip is the
+/// correction.
 pub static MINI: DeviceModel = DeviceModel {
     id: "mini",
     name: "Stream Deck Mini",
@@ -273,10 +287,11 @@ pub static MINI: DeviceModel = DeviceModel {
     key_cols: 3,
     key_rows: 2,
     key_px: 80,
-    key_rotation: Rotation::Cw90,
+    key_rotation: Rotation::Ccw90,
+    key_flip_y: true,
     image_format: ImageFormat::Bmp,
     input_report_len: 65,
-    input_header_len: 0,
+    input_header_len: 1,
     key_header_len: 16,
     zone_header_len: 0,
     ..EXPANDED
