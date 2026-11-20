@@ -13,7 +13,9 @@
 //!
 //! A Stream Deck Neo's information window is drawn as a plain, non-interactive
 //! display (a [`StripLayout`] without zones and with `touch == false`); its two
-//! capacitive sensors are not drawn at all because they have no preview control.
+//! capacitive touch buttons are selectable controls on either side of it,
+//! inside the bezel. A model with touch buttons and no display would show them
+//! as one centred row under its keys.
 
 use crate::device_model::DeviceModel;
 
@@ -44,6 +46,9 @@ const BOTTOM_MARGIN: i32 = 33;
 const KEYS_ONLY_BOTTOM_MARGIN: i32 = 24;
 const XL_BOTTOM_MARGIN: i32 = 24;
 const MIN_WIDTH: i32 = 240;
+/// Side of a touch button, and the gap that separates it from its neighbour.
+const TOUCH_BUTTON_PX: i32 = 28;
+const TOUCH_BUTTON_GAP: i32 = 10;
 
 /// An axis-aligned rectangle in preview pixels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,6 +103,8 @@ pub enum ControlRef {
     Dial(u8),
     /// One touch section of the strip.
     Zone(u8),
+    /// One capacitive touch button (the Stream Deck Neo's), left to right.
+    TouchButton(u8),
 }
 
 impl ControlRef {
@@ -107,6 +114,7 @@ impl ControlRef {
             Self::Key(number) => Some(format!("Button {number}")),
             Self::Dial(number) => Some(format!("Encoder {number}")),
             Self::Zone(number) => Some(format!("Touch zone {number}")),
+            Self::TouchButton(number) => Some(format!("Touch button {number}")),
             Self::Strip => None,
         }
     }
@@ -152,6 +160,8 @@ pub struct PreviewLayout {
     pub keys: Vec<Rect>,
     pub strip: Option<StripLayout>,
     pub dial_rail: Option<DialLayout>,
+    /// Touch buttons left to right: element `n - 1` is touch button `n`.
+    pub touch_buttons: Vec<Rect>,
 }
 
 /// How one family of models is drawn.
@@ -219,7 +229,8 @@ impl PreviewLayout {
     }
 
     /// Every control in the order the preview offers them: keys row-major, then
-    /// the strip, its sections and the dials, as the widgets are created.
+    /// the strip, its sections, the touch buttons and the dials, as the widgets
+    /// are created.
     pub fn controls(&self) -> Vec<ControlRef> {
         let mut controls: Vec<ControlRef> = (1..=self.keys.len())
             .map(|number| ControlRef::Key(number as u8))
@@ -228,6 +239,9 @@ impl PreviewLayout {
             controls.push(ControlRef::Strip);
             controls.extend((1..=strip.zones.len()).map(|number| ControlRef::Zone(number as u8)));
         }
+        controls.extend(
+            (1..=self.touch_buttons.len()).map(|number| ControlRef::TouchButton(number as u8)),
+        );
         if let Some(rail) = &self.dial_rail {
             controls.extend((1..=rail.dials.len()).map(|number| ControlRef::Dial(number as u8)));
         }
@@ -257,6 +271,7 @@ impl PreviewLayout {
                 .dial_rail
                 .as_ref()
                 .and_then(|rail| rail.dials.get(index(number)?).copied()),
+            ControlRef::TouchButton(number) => self.touch_buttons.get(index(number)?).copied(),
         }
     }
 
@@ -274,6 +289,10 @@ impl PreviewLayout {
 
     pub fn zone_count(&self) -> usize {
         self.strip.as_ref().map_or(0, |strip| strip.zones.len())
+    }
+
+    pub fn touch_button_count(&self) -> usize {
+        self.touch_buttons.len()
     }
 }
 
@@ -296,7 +315,22 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
         keys_w
     };
     let has_strip = model.has_strip();
-    let bezel_w = strip_w + 2 * BEZEL_INSET;
+    // Touch buttons flank the display, the first half on its left; without a
+    // display they form one row under the keys.
+    let touch_buttons = i32::from(model.touch_buttons);
+    let left_buttons = touch_buttons - touch_buttons / 2;
+    let button_pitch = TOUCH_BUTTON_PX + TOUCH_BUTTON_GAP;
+    let button_band = if has_strip {
+        left_buttons * button_pitch
+    } else {
+        0
+    };
+    let button_row_w = if has_strip || touch_buttons == 0 {
+        0
+    } else {
+        touch_buttons * button_pitch - TOUCH_BUTTON_GAP
+    };
+    let bezel_w = strip_w + 2 * (BEZEL_INSET + button_band);
     let dials_w = dials * metrics.zone_w;
     let rail_w = if has_strip {
         bezel_w
@@ -307,7 +341,7 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
     let (width, key_x0, side_x) = match metrics.fixed {
         Some(fixed) => fixed,
         None => {
-            let mut width = MIN_WIDTH.max(keys_w + 96);
+            let mut width = MIN_WIDTH.max(keys_w + 96).max(button_row_w + 54);
             if has_strip {
                 width = width.max(bezel_w + 54);
             }
@@ -315,7 +349,7 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
                 width = width.max(rail_w + 54);
             }
             // Keep every margin whole so the layout is symmetric.
-            let parity = keys_w.max(bezel_w).max(rail_w) % 2;
+            let parity = keys_w.max(bezel_w).max(rail_w).max(button_row_w) % 2;
             if width % 2 != parity {
                 width += 1;
             }
@@ -345,7 +379,12 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
     let strip = has_strip.then(|| {
         let bezel = Rect::new(side_x, bottom + KEY_TO_BEZEL, bezel_w, BEZEL_H);
         bottom = bezel.bottom();
-        let rect = Rect::new(bezel.x + BEZEL_INSET, bezel.y + STRIP_Y, strip_w, STRIP_H);
+        let rect = Rect::new(
+            bezel.x + BEZEL_INSET + button_band,
+            bezel.y + STRIP_Y,
+            strip_w,
+            STRIP_H,
+        );
         StripLayout {
             bezel,
             header: Rect::new(rect.x, bezel.y + HEADER_Y, strip_w, HEADER_H),
@@ -363,6 +402,39 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
                 .collect(),
         }
     });
+
+    let touch_button_rects: Vec<Rect> = match &strip {
+        Some(strip) => {
+            let y = strip.rect.y + (STRIP_H - TOUCH_BUTTON_PX) / 2;
+            (0..touch_buttons)
+                .map(|button| {
+                    let x = if button < left_buttons {
+                        strip.rect.x - (left_buttons - button) * button_pitch
+                    } else {
+                        strip.rect.right()
+                            + TOUCH_BUTTON_GAP
+                            + (button - left_buttons) * button_pitch
+                    };
+                    Rect::new(x, y, TOUCH_BUTTON_PX, TOUCH_BUTTON_PX)
+                })
+                .collect()
+        }
+        None if touch_buttons > 0 => {
+            let (x0, y) = ((width - button_row_w) / 2, bottom + KEY_TO_BEZEL);
+            bottom = y + TOUCH_BUTTON_PX;
+            (0..touch_buttons)
+                .map(|button| {
+                    Rect::new(
+                        x0 + button * button_pitch,
+                        y,
+                        TOUCH_BUTTON_PX,
+                        TOUCH_BUTTON_PX,
+                    )
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
 
     let dial_rail = (dials > 0).then(|| {
         let gap = if has_strip {
@@ -424,7 +496,7 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
     });
 
     let height = bottom
-        + if has_strip || dials > 0 {
+        + if has_strip || dials > 0 || touch_buttons > 0 {
             metrics.bottom_margin
         } else {
             KEYS_ONLY_BOTTOM_MARGIN
@@ -438,5 +510,6 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
         keys,
         strip,
         dial_rail,
+        touch_buttons: touch_button_rects,
     }
 }

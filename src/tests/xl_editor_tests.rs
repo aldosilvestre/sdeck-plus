@@ -181,6 +181,7 @@ fn bind_whole_control(f: &ModelFixture, control: ControlRef) -> Vec<Trigger> {
         ],
         ControlRef::Zone(number) => vec![Trigger::ZoneTap(number), Trigger::ZonePress(number)],
         ControlRef::Strip => vec![Trigger::TouchTap, Trigger::TouchPress],
+        ControlRef::TouchButton(number) => vec![Trigger::TouchButton(number)],
     };
     let mut layers = f.layers.borrow_mut();
     for (index, trigger) in triggers.iter().enumerate() {

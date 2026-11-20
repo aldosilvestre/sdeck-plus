@@ -428,6 +428,25 @@ impl DeviceModel {
         self.zone_numbers().contains(&number)
     }
 
+    /// One-based touch button numbers (empty without touch buttons).
+    pub fn touch_button_numbers(&self) -> RangeInclusive<u8> {
+        1..=self.touch_buttons
+    }
+
+    pub fn is_valid_touch_button(&self, number: u8) -> bool {
+        self.touch_button_numbers().contains(&number)
+    }
+
+    /// The one-based touch button a zero-based HID key `index` reports: the
+    /// sensors follow the keys in the input report. `None` for a key or an
+    /// index past the sensors.
+    pub fn touch_button_at(&self, index: usize) -> Option<u8> {
+        let number = index.checked_sub(usize::from(self.keys()))? + 1;
+        u8::try_from(number)
+            .ok()
+            .filter(|number| self.is_valid_touch_button(*number))
+    }
+
     /// Left edge of one-based touch section `number` on the strip.
     pub const fn zone_x(&self, number: u8) -> u32 {
         (number as u32 - 1) * self.zone_px().0

@@ -101,6 +101,14 @@ impl Touchscreens {
                 }
                 let mut data = empty_page(page.owner);
                 for binding in page.bindings {
+                    if let Some(reason) = unknown_trigger_kind(&binding.trigger) {
+                        // As with an unknown action: leave the file and disable writes.
+                        return Err(invalid(&format!(
+                            "binding {} uses a control this build cannot read ({reason}); \
+                             the file is left untouched and saving is disabled",
+                            binding.trigger
+                        )));
+                    }
                     let trigger =
                         decode_trigger(model, &binding.trigger).map_err(|error| invalid(&error))?;
                     if let Some(reason) = unknown_action_kind(&binding.action) {

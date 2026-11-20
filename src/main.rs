@@ -1125,7 +1125,8 @@ fn build_body(
         }
     });
     create_layer.set_sensitive(false);
-    let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad"]);
+    // Indexes follow `BindingUi::control_kind`.
+    let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad", "Touch button"]);
     let control_picker = gtk::DropDown::new(Some(control_model.clone()), gtk::Expression::NONE);
     let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
     let control_number_picker =
@@ -2015,7 +2016,12 @@ impl EventSurface {
                             ));
                             set_active(&label, pressed);
                         }
-                        if let Some(widget) = control_at(preview, ControlRef::Key, index) {
+                        // A touch button is reported as an index after the keys.
+                        let widget = match preview.model().touch_button_at(index) {
+                            Some(number) => preview.control(ControlRef::TouchButton(number)),
+                            None => control_at(preview, ControlRef::Key, index),
+                        };
+                        if let Some(widget) = widget {
                             set_pressed(&widget, pressed);
                         }
                     }
@@ -2395,7 +2401,9 @@ impl BindingUi {
             info_location_row,
             model: Rc::new(Cell::new(&sdeck_plus::device_model::PLUS)),
             summaries: preview::ModelSlots::new(
-                (0..preview::widest(|model| model.keys() + 1 + model.dials))
+                (0..preview::widest(|model| {
+                    model.keys() + 1 + model.dials + model.touch_buttons
+                }))
                     .map(|_| {
                         let label = Label::new(None);
                         label.add_css_class("muted");
@@ -2485,8 +2493,9 @@ impl BindingUi {
     /// Make the summaries, dial captions and control numbers describe `model`.
     fn set_model(&self, model: &'static sdeck_plus::device_model::DeviceModel) {
         self.model.set(model);
-        self.summaries
-            .set_shown(usize::from(model.keys() + 1 + model.dials));
+        self.summaries.set_shown(usize::from(
+            model.keys() + 1 + model.dials + model.touch_buttons,
+        ));
         self.dial_legends.set_shown(usize::from(model.dials));
         self.dial_icons.set_shown(usize::from(model.dials));
         // Slots of a wider model stay empty until a model uses them again.
@@ -2508,10 +2517,15 @@ impl BindingUi {
         use sdeck_plus::preview_layout::ControlRef;
         let model = self.model.get();
         let keys = usize::from(model.keys());
+        // Keys, the strip, the dials, then the touch buttons.
+        let dials = usize::from(model.dials);
         let index = match control {
             ControlRef::Key(number) if model.is_valid_key(number) => usize::from(number) - 1,
             ControlRef::Strip if model.has_strip() => keys,
             ControlRef::Dial(number) if model.is_valid_dial(number) => keys + usize::from(number),
+            ControlRef::TouchButton(number) if model.is_valid_touch_button(number) => {
+                keys + dials + usize::from(number)
+            }
             _ => return None,
         };
         self.summaries.get(index)
@@ -2530,14 +2544,17 @@ impl BindingUi {
                 .unwrap_or_else(|| store.active().to_owned());
             let model = self.model.get();
             let keys = usize::from(model.keys());
-            let summaries = (0..keys + 1 + usize::from(model.dials))
+            let dials = usize::from(model.dials);
+            let summaries = (0..keys + 1 + dials + usize::from(model.touch_buttons))
                 .map(|index| {
                     let (control, number) = if index < keys {
                         (ControlKind::Button, index + 1)
                     } else if index == keys {
                         (ControlKind::Touch, 0)
-                    } else {
+                    } else if index <= keys + dials {
                         (ControlKind::Encoder, index - keys)
+                    } else {
+                        (ControlKind::TouchButton, index - keys - dials)
                     };
                     control_summary(&store, &layer, control, number as u8)
                 })
@@ -2591,11 +2608,13 @@ impl BindingUi {
         }
     }
 
-    /// Keys, dials and a tap or hold on one touch section can show information.
+    /// Keys, dials and a tap or hold on one touch section can show information;
+    /// a touch button has no display.
     fn info_supported(&self) -> bool {
         match self.control_kind() {
             ControlKind::Button => !self.hold_toggle.is_active(),
             ControlKind::Encoder => true,
+            ControlKind::TouchButton => false,
             ControlKind::Touch => {
                 matches!(
                     self.event_kind(),
@@ -2666,6 +2685,12 @@ impl BindingUi {
             ControlKind::Touch => std::iter::once("Any".to_owned())
                 .chain(self.model.get().zone_numbers().map(|n| n.to_string()))
                 .collect(),
+            ControlKind::TouchButton => self
+                .model
+                .get()
+                .touch_button_numbers()
+                .map(|n| n.to_string())
+                .collect(),
         };
         replace_string_list(&self.control_number_model, &numbers);
         self.control_number_row.set_visible(true);
@@ -2730,6 +2755,20 @@ impl BindingUi {
                 }
                 number
             }
+            ControlKind::TouchButton => {
+                let model = self.model.get();
+                if model.touch_buttons == 0 {
+                    return Err(format!("the {} has no touch buttons", model.name));
+                }
+                let number = number.ok_or_else(|| "Select a touch button number.".to_string())?;
+                if !model.is_valid_touch_button(number) {
+                    return Err(format!(
+                        "touch button number must be 1 through {}",
+                        model.touch_buttons
+                    ));
+                }
+                number
+            }
         };
         self.apply_control(control, number, reset_event);
         Ok(())
@@ -2741,11 +2780,12 @@ impl BindingUi {
             ControlKind::Button => 0,
             ControlKind::Encoder => 1,
             ControlKind::Touch => 2,
+            ControlKind::TouchButton => 3,
         });
         self.update_for_control(reset_event);
         self.control_number_picker
             .set_selected(u32::from(match control {
-                ControlKind::Button | ControlKind::Encoder => number - 1,
+                ControlKind::Button | ControlKind::Encoder | ControlKind::TouchButton => number - 1,
                 ControlKind::Touch => number,
             }));
     }
@@ -3136,6 +3176,7 @@ impl BindingUi {
         match self.control_picker.selected() {
             1 => ControlKind::Encoder,
             2 => ControlKind::Touch,
+            3 => ControlKind::TouchButton,
             _ => ControlKind::Button,
         }
     }
@@ -3277,6 +3318,9 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
             Some(zone @ 1..) => format!("Configuring: Touchpad section {zone}"),
             _ => "Configuring: Touchpad".into(),
         },
+        ControlKind::TouchButton => {
+            format!("Configuring: Touch button {}", number.unwrap_or(1))
+        }
     }
 }
 
@@ -5147,6 +5191,7 @@ mod tests {
     mod simulated_device_tests;
     mod timer_countdown_tests;
     mod timer_notification_tests;
+    mod touch_button_ui_tests;
     mod touchscreen_tests;
     mod tray_startup;
     mod two_device_tests;
@@ -5203,7 +5248,8 @@ mod tests {
             .set_gtk_enable_animations(false);
         let layer_model = gtk::StringList::new(&["Base"]);
         let layer_picker = gtk::DropDown::new(Some(layer_model.clone()), gtk::Expression::NONE);
-        let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad"]);
+        let control_model =
+            gtk::StringList::new(&["Button", "Encoder", "Touchpad", "Touch button"]);
         let control_picker = gtk::DropDown::new(Some(control_model), gtk::Expression::NONE);
         let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
         let control_number_picker =

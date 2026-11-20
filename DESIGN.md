@@ -230,7 +230,7 @@ chassis and dials depth without changing their geometry. The control being
 edited retains a 5px violet ring (`#7c3aed`) separated from the hardware by a
 2px light gap, readable on the graphite chassis and over artwork.
 Live input is an inset outline drawn on the control itself, above any artwork:
-green `#22c55e` while a key or dial is held, amber `#f59e0b` for 300ms on a
+green `#22c55e` while a key, touch button or dial is held, amber `#f59e0b` for 300ms on a
 dial turn, and a cyan `#67e8f9` wash over each touched strip zone for 300ms (the
 800px strip maps to four 200px zones; a flick lights every zone it crosses).
 Keyboard focus keeps its cyan outline. Task tabs use the selected-tab surface
@@ -315,8 +315,9 @@ device/editor region have 16px separation. The device and editor also have
 16px layout separation, retained as a vertical gap when they stack.
 The editor uses 16px inner padding and 6px between related form groups, keeping
 the added return and information options within the default 1120x884 layout.
-Event/action selectors (shown for dials and the touch strip only; a key has one
-event and takes its action from the catalog) and Save/Test/Remove controls have
+Event/action selectors (shown for dials, the touch strip and touch buttons; a key has one
+event and takes its action from the catalog; a touch button's one event is Press and
+its action comes from the Action selector) and Save/Test/Remove controls have
 12px inline gaps. The "Do nothing…" hint is also hidden for an unassigned key, and a key's extended
 action hides its Category and Action dropdowns (the catalog chooses them) while
 keeping the action's icon, description and fields.
@@ -390,8 +391,12 @@ enough for its widest row, margins kept whole so it is symmetric); models
 without a strip or dials omit them. The + XL uses those rules with 40px keys on
 a 46px pitch and a 24px bottom margin, so its four rows still fit the window
 (see below). A Neo's information window is drawn as a
-plain display that cannot be selected, and its two capacitive sensors are not
-drawn because they have no preview control.
+plain display that cannot be selected. Its two capacitive touch buttons are
+round 28px pads of key material with the key's inset edge (`.touch-button`), one
+on each side of the window inside the bezel, 10px from it and vertically centred
+on it; the bezel and chassis widen to hold them (376px wide). They are selectable
+controls that take no picture (Elgato documents none). A model with touch
+buttons and no display would show them as one centred row under its keys.
 
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
@@ -649,6 +654,14 @@ two columns fit.
   name read like "Swipe left (default): Next touchscreen page". The badges are
   preview-only: on the device, the edge chevrons already show swipe paging and
   badges would cover section content.
+- **Touch buttons** (Stream Deck Neo): bindable controls with their own actions,
+  stored per keypad page as `tb:1` and `tb:2` in layers.conf. Selecting one heads
+  the editor "Configuring: Touch button N" and shows the Event selector (Press
+  only) and the Action selector; there is no hold check, no live information, no
+  multi action and no picture. A touch runs the action once, when the touch
+  starts: the held state the device repeats and the release run nothing, and
+  there is no hold action. The preview pad's tooltip reads "Touch button N ·
+  Press: <action>". Models without touch buttons offer none.
 - **More actions:** each feature action's icon comes from the same mapping as
   saved controls (derived from a representative action). Category rows use
   System `application`, Multimedia `play-pause`, Organization `folder`, Device
@@ -987,8 +1000,9 @@ Preview controls are named after the device's own numbering: keys "Button 1"
 through "Button N" (row-major), dials "Encoder 1" through "Encoder N", and
 touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
 is the shown model's count (36 keys, 6 dials and 6 sections for the + XL; the
-+ keeps 8, 4 and 4). Tab visits the keys row-major, then the touch strip, its
-sections and the dials; Space or Enter selects the focused control, and any
++ keeps 8, 4 and 4), and touch buttons "Touch button 1" and "Touch button 2"
+(the Neo's, left to right). Tab visits the keys row-major, then the touch strip,
+its sections, the touch buttons and the dials; Space or Enter selects the focused control, and any
 key of the shown model can be dragged onto another to swap them. Every model's
 session uses this order and these names.
 

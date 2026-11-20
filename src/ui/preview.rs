@@ -78,6 +78,7 @@ pub(crate) fn control_of(kind: ControlKind, number: u8) -> Option<ControlRef> {
         (ControlKind::Encoder, number) => Some(ControlRef::Dial(number)),
         (ControlKind::Touch, 0) => Some(ControlRef::Strip),
         (ControlKind::Touch, number) => Some(ControlRef::Zone(number)),
+        (ControlKind::TouchButton, number) => Some(ControlRef::TouchButton(number)),
     }
 }
 
@@ -88,6 +89,7 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
         ControlRef::Dial(number) => (ControlKind::Encoder, number),
         ControlRef::Strip => (ControlKind::Touch, 0),
         ControlRef::Zone(number) => (ControlKind::Touch, number),
+        ControlRef::TouchButton(number) => (ControlKind::TouchButton, number),
     }
 }
 
@@ -489,6 +491,21 @@ impl PreviewView {
             put_in(&bezel, &overlay, &strip.rect, &strip.bezel);
         }
 
+        // Capacitive touch buttons: selectable like keys, but they take no
+        // picture (Elgato documents none), so they hold no artwork.
+        for (index, rect) in layout.touch_buttons.iter().enumerate() {
+            let number = (index + 1) as u8;
+            let button = Button::new();
+            button.add_css_class("control-selectable");
+            button.add_css_class("touch-button");
+            if let Some(name) = ControlRef::TouchButton(number).accessible_name() {
+                button.update_property(&[gtk::accessible::Property::Label(&name)]);
+            }
+            button.set_size_request(rect.w, rect.h);
+            put(&chassis, &button, rect);
+            self.bind(&mut built, ControlRef::TouchButton(number), button);
+        }
+
         if let Some(dials) = &layout.dial_rail {
             let rail = gtk::Fixed::new();
             rail.add_css_class("hardware-rail");
@@ -553,6 +570,7 @@ impl PreviewView {
                     "Button {number} · {text}\nDrag onto another key to swap saved settings and artwork."
                 ),
                 ControlRef::Dial(number) => format!("Encoder {number} · {text}"),
+                ControlRef::TouchButton(number) => format!("Touch button {number} · {text}"),
                 ControlRef::Strip | ControlRef::Zone(_) => text.to_owned(),
             }
             };
