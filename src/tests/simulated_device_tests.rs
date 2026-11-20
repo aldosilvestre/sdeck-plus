@@ -51,6 +51,19 @@ fn open_the_window_with_simulated_devices() {
         pair.bus.plug(&format!("/dev/hidraw{}", index + 1), device);
     }
     pair.wait_devices(devices.len());
+    // Same icons as the real app, which registers its bundled set at startup:
+    // this harness runs under another application id, so GTK does not add the
+    // app's icon path by itself.
+    crate::app_icon::register().unwrap();
+    let theme = gtk::IconTheme::for_display(&gtk::prelude::WidgetExt::display(&pair.window));
+    assert!(
+        theme
+            .resource_path()
+            .iter()
+            .any(|path| path == "/dev/streamdeck/EventMonitor/icons"),
+        "the app's bundled icons are not registered: {:?}",
+        theme.resource_path()
+    );
     pair.window.present();
     eprintln!("Simulated {list} connected through the real hub. Close the window to finish.");
     let main_loop = glib::MainLoop::new(None, false);
