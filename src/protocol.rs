@@ -34,6 +34,13 @@ pub enum Event {
     },
 }
 
+/// Size of every feature report; the host pads it with zeros (Elgato's general
+/// reference and Mini page both fix it to 32 bytes).
+pub const FEATURE_REPORT_LEN: usize = 32;
+
+/// One feature report, as sent with HID SEND FEATURE REPORT.
+pub type FeatureReport = [u8; FEATURE_REPORT_LEN];
+
 /// What one protocol family implements. This is the single dispatch point for
 /// a new family: add a [`ProtocolFamily`] variant, implement this trait for it
 /// and return it from [`protocol_for`]; no other call site changes.
@@ -54,24 +61,57 @@ pub trait FamilyProtocol: Sync {
         target: ArtworkTarget,
         jpeg: &[u8],
     ) -> Result<Vec<OutputReport>, String>;
+
+    /// The feature report that sets the display backlight to `percent`,
+    /// clamped to the documented 0..=100.
+    fn brightness_report(&self, percent: u8) -> FeatureReport;
+
+    /// The feature report that turns every display dark at once: brightness 0.
+    /// The family's sleep command only sets an idle timer
+    /// ([`Self::sleep_timer_report`]), so it cannot blank a device.
+    fn blank_report(&self) -> FeatureReport {
+        self.brightness_report(0)
+    }
+
+    /// The feature report that forcibly shows the boot logo.
+    fn show_logo_report(&self) -> FeatureReport;
+
+    /// The feature report that sets the idle time, in seconds, before the
+    /// device enters its own sleep mode; 0 disables it. The wire value is a
+    /// little-endian INT32, so longer times saturate at `i32::MAX`.
+    fn sleep_timer_report(&self, seconds: u32) -> FeatureReport;
 }
 
 /// The handler of `family`.
 pub fn protocol_for(family: ProtocolFamily) -> &'static dyn FamilyProtocol {
     match family {
         ProtocolFamily::Expanded => &Expanded,
-        ProtocolFamily::LegacyMini => &Unimplemented,
+        ProtocolFamily::LegacyMini => &LegacyMini,
     }
+}
+
+/// `head` zero padded to [`FEATURE_REPORT_LEN`].
+fn feature_report(head: &[u8]) -> FeatureReport {
+    let mut report = [0; FEATURE_REPORT_LEN];
+    report[..head.len()].copy_from_slice(head);
+    report
+}
+
+/// A Set Sleep Mode Duration report: `id`, `command`, then the seconds.
+fn sleep_duration_report([id, command]: [u8; 2], seconds: u32) -> FeatureReport {
+    let [a, b, c, d] = i32::try_from(seconds).unwrap_or(i32::MAX).to_le_bytes();
+    feature_report(&[id, command, a, b, c, d])
 }
 
 /// Classic, XL, Neo, + and + XL.
 struct Expanded;
 
-/// A documented family with no handler yet: every call fails with a message
-/// and nothing is ever sent to a device.
-struct Unimplemented;
+/// The original Mini. Its feature reports are implemented; its input and image
+/// protocol are not yet, so decoding and image output fail with a message and
+/// nothing is sent (discovery refuses the family until then).
+struct LegacyMini;
 
-impl FamilyProtocol for Unimplemented {
+impl FamilyProtocol for LegacyMini {
     fn decode(&self, model: &DeviceModel, _report: &[u8]) -> Result<Vec<Event>, String> {
         model.ensure_protocol().map(|()| Vec::new())
     }
@@ -83,6 +123,19 @@ impl FamilyProtocol for Unimplemented {
         _jpeg: &[u8],
     ) -> Result<Vec<OutputReport>, String> {
         model.ensure_protocol().map(|()| Vec::new())
+    }
+
+    // https://docs.elgato.com/streamdeck/hid/mini (Setter Feature Reports).
+    fn brightness_report(&self, percent: u8) -> FeatureReport {
+        feature_report(&[0x05, 0x55, 0xAA, 0xD1, 0x01, percent.min(100)])
+    }
+
+    fn show_logo_report(&self) -> FeatureReport {
+        feature_report(&[0x0B, 0x63, 0x00])
+    }
+
+    fn sleep_timer_report(&self, seconds: u32) -> FeatureReport {
+        sleep_duration_report([0x0B, 0xA2], seconds)
     }
 }
 
@@ -98,6 +151,19 @@ impl FamilyProtocol for Expanded {
         jpeg: &[u8],
     ) -> Result<Vec<OutputReport>, String> {
         image_output::encode_expanded_reports(model, target, jpeg)
+    }
+
+    // https://docs.elgato.com/streamdeck/hid/general (Setter Feature Reports).
+    fn brightness_report(&self, percent: u8) -> FeatureReport {
+        feature_report(&[0x03, 0x08, percent.min(100)])
+    }
+
+    fn show_logo_report(&self) -> FeatureReport {
+        feature_report(&[0x03, 0x02])
+    }
+
+    fn sleep_timer_report(&self, seconds: u32) -> FeatureReport {
+        sleep_duration_report([0x03, 0x0D], seconds)
     }
 }
 
@@ -303,6 +369,103 @@ mod tests {
                 end_y: 100
             }]
         );
+    }
+
+    /// `head` zero padded to the 32 bytes of a feature report.
+    fn padded(head: &[u8]) -> [u8; 32] {
+        let mut report = [0; 32];
+        report[..head.len()].copy_from_slice(head);
+        report
+    }
+
+    #[test]
+    fn plus_and_plus_xl_feature_reports_keep_their_golden_bytes() {
+        use crate::device_model::PLUS_XL;
+        for model in [&PLUS, &PLUS_XL] {
+            let family = protocol_for(model.family);
+            // The exact bytes sent before families: report 03, command 08.
+            assert_eq!(
+                family.brightness_report(73),
+                [
+                    0x03, 0x08, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                "{}",
+                model.id
+            );
+            assert_eq!(
+                family.blank_report(),
+                [
+                    0x03, 0x08, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                ]
+            );
+            assert_eq!(family.brightness_report(100), padded(&[0x03, 0x08, 100]));
+            assert_eq!(family.brightness_report(0), family.blank_report());
+            // Elgato's general reference: Show Logo 03 02, Set Sleep Mode
+            // Duration 03 0D with a little-endian INT32 of seconds.
+            assert_eq!(family.show_logo_report(), padded(&[0x03, 0x02]));
+            assert_eq!(
+                family.sleep_timer_report(0),
+                padded(&[0x03, 0x0D, 0, 0, 0, 0])
+            );
+            assert_eq!(
+                family.sleep_timer_report(300),
+                padded(&[0x03, 0x0D, 0x2C, 0x01, 0, 0])
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_mini_feature_reports_follow_elgatos_mini_page() {
+        let family = protocol_for(crate::device_model::MINI.family);
+        assert_eq!(
+            family.brightness_report(73),
+            [
+                0x05, 0x55, 0xAA, 0xD1, 0x01, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]
+        );
+        assert_eq!(
+            family.brightness_report(100),
+            padded(&[0x05, 0x55, 0xAA, 0xD1, 0x01, 100])
+        );
+        // Blanking is brightness 0: 0B A2 only sets the idle timer.
+        assert_eq!(
+            family.blank_report(),
+            padded(&[0x05, 0x55, 0xAA, 0xD1, 0x01, 0])
+        );
+        assert_eq!(family.show_logo_report(), padded(&[0x0B, 0x63, 0x00]));
+        assert_eq!(
+            family.sleep_timer_report(0),
+            padded(&[0x0B, 0xA2, 0, 0, 0, 0])
+        );
+        assert_eq!(
+            family.sleep_timer_report(300),
+            padded(&[0x0B, 0xA2, 0x2C, 0x01, 0, 0])
+        );
+    }
+
+    #[test]
+    fn feature_reports_stay_in_the_documented_ranges() {
+        assert_eq!(FEATURE_REPORT_LEN, 32);
+        let expanded = protocol_for(ProtocolFamily::Expanded);
+        let mini = protocol_for(ProtocolFamily::LegacyMini);
+        for percent in [101, u8::MAX] {
+            assert_eq!(expanded.brightness_report(percent)[2], 100);
+            assert_eq!(mini.brightness_report(percent)[5], 100);
+        }
+        // The duration is an INT32: longer times saturate at i32::MAX.
+        for seconds in [i32::MAX as u32, i32::MAX as u32 + 1, u32::MAX] {
+            assert_eq!(
+                expanded.sleep_timer_report(seconds),
+                padded(&[0x03, 0x0D, 0xFF, 0xFF, 0xFF, 0x7F])
+            );
+            assert_eq!(
+                mini.sleep_timer_report(seconds),
+                padded(&[0x0B, 0xA2, 0xFF, 0xFF, 0xFF, 0x7F])
+            );
+        }
     }
 
     #[test]

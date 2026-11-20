@@ -59,6 +59,58 @@ fn startup_restores_brightness_when_no_control_was_issued() {
     assert_eq!(device.reports.borrow()[0][..3], [0x03, 0x08, 100]);
 }
 
+/// `head` zero padded to the 32 bytes of a feature report.
+fn padded(head: &[u8]) -> Vec<u8> {
+    let mut report = vec![0; 32];
+    report[..head.len()].copy_from_slice(head);
+    report
+}
+
+/// The feature reports controls of `model` write for startup, then
+/// Brightness 37, Sleep and Wake.
+fn control_reports(model: &'static crate::device_model::DeviceModel) -> Vec<Vec<u8>> {
+    let (sender, receiver) = channel();
+    let mut controls = Controls::for_device(
+        DeviceId::from_path("test"),
+        model,
+        receiver,
+        DesiredState::default(),
+    );
+    for action in [
+        DeviceAction::Brightness(37),
+        DeviceAction::Sleep,
+        DeviceAction::Wake,
+    ] {
+        sender.send(action).unwrap();
+    }
+    let device = device(Ok(32));
+    let (events, receiver) = channel();
+    controls.replay(&StopSignal::default(), &events, &device);
+    controls.drain(&StopSignal::default(), &events, Some(&device));
+    assert!(results(receiver).iter().all(|(_, result)| result.is_ok()));
+    device.reports.take()
+}
+
+#[test]
+fn controls_write_the_feature_reports_of_their_model_family() {
+    // Given / When / Then: + and + XL keep their exact bytes.
+    let plus = |level| padded(&[0x03, 0x08, level]);
+    for model in [&crate::device_model::PLUS, &crate::device_model::PLUS_XL] {
+        assert_eq!(
+            control_reports(model),
+            [plus(100), plus(37), plus(0), plus(37)],
+            "{}",
+            model.id
+        );
+    }
+    // The Mini gets its own Set Backlight Brightness report.
+    let mini = |level| padded(&[0x05, 0x55, 0xAA, 0xD1, 0x01, level]);
+    assert_eq!(
+        control_reports(&crate::device_model::MINI),
+        [mini(100), mini(37), mini(0), mini(37)]
+    );
+}
+
 #[test]
 fn disconnected_controls_replay_final_intent_without_reapplying_steps() {
     // Given

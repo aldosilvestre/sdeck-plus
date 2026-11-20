@@ -223,6 +223,34 @@ fn shutdown_blanks_every_key_and_the_window_of_any_expanded_model() {
 }
 
 #[test]
+fn every_expanded_model_gets_the_plus_brightness_sleep_and_blank_feature_reports() {
+    // `03 08 <level>` padded to 32 bytes, as sent to the + before families.
+    let golden = |level: u8| {
+        let mut report = vec![0u8; 32];
+        report[..3].copy_from_slice(&[0x03, 0x08, level]);
+        report
+    };
+    for model in expanded() {
+        let device = SimDevice::new(model);
+        let mut rig = Rig::start(&[&device]);
+        rig.wait_connection(connected(model));
+        rig.controls.send(DeviceAction::Brightness(40)).unwrap();
+        device.wait_until(|device| device.features().last() == Some(&golden(40)));
+        rig.controls.send(DeviceAction::Sleep).unwrap();
+        device.wait_until(|device| device.features().last() == Some(&golden(0)));
+        let before_shutdown = device.features().len();
+        rig.stop();
+        let features = device.features();
+        assert_eq!(features[before_shutdown..], [golden(0)], "{}", model.id);
+        assert!(
+            features.iter().all(|report| *report == golden(report[2])),
+            "{} sent {features:02x?}",
+            model.id
+        );
+    }
+}
+
+#[test]
 fn a_legacy_mini_is_refused_clearly_and_never_driven() {
     let model = DeviceModel::by_id("mini").unwrap();
     assert_eq!(model.family, ProtocolFamily::LegacyMini);

@@ -519,7 +519,7 @@ where
             hub_stop: self.stop.clone(),
             sender: self.sender.clone(),
             artwork: attachment.artwork,
-            controls: Controls::for_device(id, attachment.controls, attachment.desired),
+            controls: Controls::for_device(id, model, attachment.controls, attachment.desired),
             prepare: self.prepare.clone(),
             shared: self.shared.clone(),
             ended: self.ended.clone(),
