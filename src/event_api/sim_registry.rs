@@ -1,13 +1,13 @@
 //! The simulator driven by the registry table instead of one hand-picked
-//! model. These runs do not make a Planned model supported: they prove the
-//! machinery of each protocol family (Expanded, Legacy Mini) works for every
-//! documented shape, so promoting a model later is a table edit plus
-//! verification.
+//! model. They prove the machinery of each protocol family (Expanded, Legacy
+//! Mini) works for every documented shape, Supported or Planned, so promoting
+//! a model is a table edit plus verification. No hardware is involved: the
+//! models without a hardware check are validated by these runs only.
 
 use super::sim_device::{key_report, Rig, SimDevice};
 use super::sim_tests::{connected, is_red, listed, Scratch};
 use super::*;
-use crate::device_model::{ProtocolFamily, Rotation, Support, MINI};
+use crate::device_model::{ProtocolFamily, Rotation, Support, MINI, NEO};
 use crate::layers::Trigger;
 
 /// Expanded-family models, Supported or Planned.
@@ -56,7 +56,8 @@ fn upload(
 }
 
 #[test]
-fn discovery_never_matches_a_planned_model() {
+fn discovery_never_matches_a_planned_model_or_an_unknown_product_id() {
+    // Every registry entry is supported today; a later Planned one is ignored.
     for model in DeviceModel::all()
         .iter()
         .filter(|model| model.support == Support::Planned)
@@ -67,6 +68,12 @@ fn discovery_never_matches_a_planned_model() {
             assert!(supported_devices([listed(VID, *pid, "a")]).is_empty());
             assert_eq!(DeviceModel::by_pid_any(*pid), Some(*model));
         }
+    }
+    // 0x0060 is the original Classic, with a protocol of its own: unknown.
+    for pid in [0x0060, 0x0000, 0xFFFF] {
+        assert_eq!(DeviceModel::by_pid(pid), None, "{pid:04X}");
+        assert_eq!(DeviceModel::by_pid_any(pid), None, "{pid:04X}");
+        assert!(supported_devices([listed(VID, pid, "a")]).is_empty());
     }
     let found = supported_devices(
         [0x0060, 0x009A, 0x0063, 0x00C6]
@@ -79,7 +86,11 @@ fn discovery_never_matches_a_planned_model() {
             .iter()
             .map(|key| (key.path.as_str(), key.model))
             .collect::<Vec<_>>(),
-        [("path3", &crate::device_model::PLUS_XL)]
+        [
+            ("path1", &NEO),
+            ("path2", &MINI),
+            ("path3", &crate::device_model::PLUS_XL)
+        ]
     );
 }
 
@@ -588,6 +599,8 @@ fn only_the_supported_product_ids_are_ever_discovered() {
             0x00C6 => Some("plus-xl"),
             0x006D | 0x0080 | 0x00A5 | 0x00B9 => Some("classic"),
             0x006C | 0x008F | 0x00BA => Some("xl"),
+            0x009A => Some("neo"),
+            0x0063 | 0x0090 | 0x00B3 | 0x00B8 => Some("mini"),
             _ => None,
         };
         let found = supported_devices([listed(VID, pid, "a")])
@@ -597,16 +610,21 @@ fn only_the_supported_product_ids_are_ever_discovered() {
         assert_eq!(DeviceModel::by_pid(pid).map(|model| model.id), expected);
         assert!(supported_devices([listed(VID ^ 1, pid, "a")]).is_empty());
     }
-    for model in DeviceModel::all().iter().filter(|m| !m.is_supported()) {
-        for pid in model.pids {
-            let found = supported_devices([listed(VID, *pid, "a"), listed(VID, 0x0084, "b")]);
-            assert_eq!(
-                found
-                    .iter()
-                    .map(|key| (key.path.as_str(), key.model.id))
-                    .collect::<Vec<_>>(),
-                [("b", "plus")]
-            );
-        }
-    }
+    // While nothing is listed, the message names every model with its ids.
+    assert_eq!(
+        not_found_message(),
+        "Device not found · connect a supported Stream Deck (VID 0FD9 / \
+         Stream Deck + PID 0084, Stream Deck + XL PID 00C6, \
+         Stream Deck Classic PID 006D/0080/00A5/00B9, Stream Deck XL PID 006C/008F/00BA, \
+         Stream Deck Neo PID 009A, Stream Deck Mini PID 0063/0090/00B3/00B8)"
+    );
+    // An unknown product id next to a supported one: only the latter is found.
+    let found = supported_devices([listed(VID, 0x0060, "a"), listed(VID, 0x0084, "b")]);
+    assert_eq!(
+        found
+            .iter()
+            .map(|key| (key.path.as_str(), key.model.id))
+            .collect::<Vec<_>>(),
+        [("b", "plus")]
+    );
 }

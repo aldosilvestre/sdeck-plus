@@ -236,9 +236,13 @@ fn the_neo_window_is_turned_half_way_like_its_keys() {
 }
 
 #[test]
-fn the_expanded_keypads_are_supported_with_the_plus_models() {
+fn every_registry_model_is_supported() {
     let supported: Vec<_> = DeviceModel::supported().map(|model| model.id).collect();
-    assert_eq!(supported, ["plus", "plus-xl", "classic", "xl"]);
+    assert_eq!(
+        supported,
+        ["plus", "plus-xl", "classic", "xl", "neo", "mini"]
+    );
+    assert_eq!(supported.len(), DeviceModel::all().len());
     for model in each() {
         assert_eq!(
             model.is_supported(),

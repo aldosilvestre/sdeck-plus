@@ -174,7 +174,7 @@ fn assert_header_connection_states() {
         "Not connected",
         "status-idle",
         not_connected,
-        "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA",
+        "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA, 009A, 0063, 0090, 00B3, 00B8",
     );
     for (state, last, badge, tone, text, tooltip) in [
         (
@@ -183,7 +183,7 @@ fn assert_header_connection_states() {
             "Not connected",
             "status-idle",
             not_connected,
-            "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA",
+            "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA, 009A, 0063, 0090, 00B3, 00B8",
         ),
         (
             ConnectionState::Unavailable(
@@ -267,6 +267,40 @@ fn assert_header_connection_states() {
             "status-online",
             "Stream Deck Classic connected — keys are live",
             "USB device VID 0FD9 / PID 006D or 0080 or 00A5 or 00B9 · HID input and artwork active",
+        ),
+        (
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::NEO,
+            },
+            None,
+            "Connected",
+            "status-online",
+            "Stream Deck Neo connected — keys, touch buttons and info window are live",
+            "USB device VID 0FD9 / PID 009A · HID input and artwork active",
+        ),
+        (
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::MINI,
+            },
+            None,
+            "Connected",
+            "status-online",
+            "Stream Deck Mini connected — keys are live",
+            "USB device VID 0FD9 / PID 0063 or 0090 or 00B3 or 00B8 · HID input and artwork active",
+        ),
+        (
+            ConnectionState::Disconnected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: &sdeck_plus::device_model::MINI,
+                reason: "HID read ended: gone".into(),
+            },
+            Some(&sdeck_plus::device_model::MINI),
+            "Disconnected",
+            "status-idle",
+            "Stream Deck Mini disconnected — plug it back in",
+            "USB device VID 0FD9 / PID 0063 or 0090 or 00B3 or 00B8",
         ),
     ] {
         assert_eq!(
