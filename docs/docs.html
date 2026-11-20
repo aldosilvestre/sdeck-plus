@@ -362,6 +362,16 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>Validation status</h4>
               <p>Developed and tested on this hardware: the opt-in <a href="#dev-device-checks">real-device checks</a> were run on one Stream Deck +. It is the only model tested on real hardware, and only on its own.</p>
             </article>
+            <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck + plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the eight keys, the touch strip with its four sections and the four dials.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=plus GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
+            </article>
           </div>
         </div>
 
@@ -398,6 +408,16 @@ sudo udevadm control --reload-rules</code></pre>
             <article class="card">
               <h4>Validation status</h4>
               <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck + XL.</p>
+            </article>
+            <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck + XL plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the 36 keys, the touch strip with its six sections and the six dials.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
             </article>
             <article class="card wide">
               <h4>The window with a Stream Deck + XL</h4>
@@ -445,6 +465,16 @@ sudo udevadm control --reload-rules</code></pre>
               <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Classic.</p>
             </article>
             <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck Classic plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the fifteen keys and, under them, the <strong>Background</strong> bar that selects the page's background picture.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=classic GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
+            </article>
+            <article class="card wide">
               <h4>Known limits</h4>
               <ul>
                 <li>Unconfirmed without hardware: how the full-screen picture and the key pictures sent after it combine on the device, whether every firmware revision of the family accepts it, the orientation of Elgato's key layout figure, and the timing.</li>
@@ -490,6 +520,16 @@ sudo udevadm control --reload-rules</code></pre>
               <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck XL.</p>
               <p>Elgato also documents a 1024 × 600 full-screen picture for the XL; the app does not offer a background on it.</p>
             </article>
+            <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck XL plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the 32 keys, with no Dials tab and no touch strip settings.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
+            </article>
           </div>
         </div>
 
@@ -526,6 +566,16 @@ sudo udevadm control --reload-rules</code></pre>
               <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Mini.</p>
               <p>Two details Elgato's page leaves open follow the open-source drivers that run on real Minis (python-elgato-streamdeck and node-elgato-stream-deck): the key number in a picture's header counts from 1, and pictures are transposed (Elgato's page says rotated 90° clockwise).
                  If a real Mini shows its pictures one key off or mirrored, these are the details to correct.</p>
+            </article>
+            <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck Mini plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the six keys, with no Dials tab and no touch strip settings; the simulated Mini receives its key pictures as BMP, like a real one.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=mini GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
             </article>
             <article class="card wide">
               <h4>Known limits</h4>
@@ -576,6 +626,16 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>Validation status</h4>
               <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Neo.</p>
               <p><strong>Known limits:</strong> the info window takes no button text (text is for keys only), and the touch buttons take no picture.</p>
+            </article>
+            <article class="card wide">
+              <h4>Simulate it</h4>
+              <p>Open the real window with a simulated Stream Deck Neo plugged into the real hub (see <a href="#dev-simulated">Simulated devices</a>). The preview shows the eight keys and, under them, the <strong>Info window</strong> between the two round touch buttons.
+                 It runs over scratch folders, so your configuration is never read or changed, and a simulated device has no physical keys to press. Close the window to finish.</p>
+              <div class="code-block">
+<pre><code>SDECK_SIMULATE_MODEL=neo GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
+  tests::simulated_device_tests::open_the_window_with_simulated_devices \
+  -- --ignored --nocapture --test-threads=1</code></pre>
+              </div>
             </article>
           </div>
         </div>
@@ -1227,7 +1287,8 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-simulated">
               <h4>Simulated devices</h4>
               <p>A manual launcher opens the real window over scratch directories, with simulated Stream Decks plugged into the real hub, so no hardware, real data or network is involved. It is ignored by the test suite and runs until you close the window.
-                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (<code>plus</code>, <code>plus-xl</code>, <code>classic</code>, <code>xl</code>, <code>mini</code> or <code>neo</code>; default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.</p>
+                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (<code>plus</code>, <code>plus-xl</code>, <code>classic</code>, <code>xl</code>, <code>mini</code> or <code>neo</code>; default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.
+                 Each model's section above has its own command. The window uses the app's own icons; the keys carry a few demo bindings instead of your configuration, and a simulated device has no physical keys to press.</p>
               <div class="code-block">
 <pre><code>SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
   tests::simulated_device_tests::open_the_window_with_simulated_devices \

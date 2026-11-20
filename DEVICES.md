@@ -65,6 +65,13 @@ SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sde
 `SDECK_SIMULATE_MODEL` is a comma list of supported model ids (`plus`,
 `plus-xl`, `classic`, `xl`, `mini`, `neo`; default `plus-xl`).
 
+One model at a time: `SDECK_SIMULATE_MODEL=plus`, `plus-xl`, `classic` (shows
+the Background bar), `xl`, `mini` (keys receive BMP pictures) or `neo` (shows
+the Info window between the two touch buttons). Several at once, for example
+`SDECK_SIMULATE_MODEL=xl,neo`, also shows the Current selector. The launcher
+uses scratch folders and the app's own icons; simulated devices have no
+physical keys to press.
+
 ## Protocol families
 
 `ProtocolFamily` selects a handler through `protocol::protocol_for`, the single
