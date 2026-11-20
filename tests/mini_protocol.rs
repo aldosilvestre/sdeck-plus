@@ -1,8 +1,8 @@
 //! The Legacy Mini protocol of the Stream Deck Mini, checked byte for byte
 //! against Elgato's Mini page (https://docs.elgato.com/streamdeck/hid/mini):
 //! input report 0x01 with one state byte per key, 1024-byte image reports
-//! with a 16-byte `02 01` header, and 80x80 BMP key pictures turned 90
-//! degrees clockwise. No hardware is involved.
+//! with a 16-byte `02 01` header, and 80x80 BMP key pictures transposed as
+//! the open-source drivers send them. No hardware is involved.
 
 use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
 use sdeck_plus::{
