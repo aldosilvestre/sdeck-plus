@@ -7,6 +7,36 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Stream Deck Classic, XL, Mini and Neo support** (VID `0x0FD9`): the Classic / MK.2 family
+  (PIDs `0x006D`, `0x0080`, `0x00A5`, `0x00B9`; 15 keys), the XL (`0x006C`, `0x008F`, `0x00BA`; 32
+  keys), the Mini (`0x0063`, `0x0090`, `0x00B3`, `0x00B8`; 6 keys) and the Neo (`0x009A`; 8 keys,
+  2 touch buttons and an info window) are detected and driven like the + and + XL, alone or with
+  other models: key pictures, actions, profiles, folders and pages, the editor and a preview of
+  each model. Each keeps its data in `devices/<id>/`. The window hides what a model lacks (Dials
+  tab, touchscreen pages, strip settings), and the editor refuses a dial or the strip by name
+  ("The Stream Deck Classic has no dials."). All four are implemented from Elgato's HID
+  documentation and validated with simulated devices only; **real-hardware validation is
+  pending**, as no unit was available. The original Stream Deck (`0x0060`) is not supported.
+- **Stream Deck Mini protocol:** the Legacy Mini family: its 65-byte input report, 80x80 BMP key
+  pictures in 1024-byte reports with a 16-byte header, and its own brightness report. The key
+  numbering (from 1) and the transposed pictures follow the open-source drivers that run on real
+  Minis, because Elgato's page leaves them open; both are unverified, and whether a Mini keeps up
+  with a scrolling title (about 190 KB/s per key as BMP) is unknown.
+- **Stream Deck Neo touch buttons:** each keypad page gives the two touch buttons their own
+  action (Press only; a touch runs it once), stored as `tb:1` and `tb:2` rows in `layers.conf`.
+  They have no hold action, live information, multi action or picture.
+- **Stream Deck Neo info window:** each keypad page shows its own picture and live information
+  (time and date, now playing, volume, weather, ...) on the 248x58 window, and a running timer's
+  countdown; the picture is the page's strip-background artwork and the reading a `window` row in
+  `layers.conf`. The window runs no action and takes no button text.
+- **Stream Deck Classic background:** a picture per keypad page behind the 15 keys (480x272 JPEG,
+  sent with Update Full Screen Image); a key without a picture of its own shows its part of it.
+  Stored in a new `keypad-background.conf` beside the artwork manifest and carried in bundles.
+  Quitting does not clear it (brightness 0 hides it), and builds made before it refuse to import a
+  Classic bundle that carries a background.
+- **One documentation section per model** (controls, sizes, product ids, validation status and
+  known limits) with its preview image (`preview-classic.png`, `preview-xl.png`,
+  `preview-mini.png`, `preview-neo.png`), linked from the landing page's device cards.
 - **Multi action:** **More actions > System > Multi action** runs several actions from one key
   press or key hold (not dials or the touch strip) in strict order: each step starts only after the
   previous one finished (a command when its process exits, an application once it is launched, a
@@ -38,6 +68,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Connection text for six models:** with nothing connected the header reads "No Stream Deck
+  connected — plug one in" (its tooltip lists every product id); a connected model names only the
+  controls it has ("Stream Deck Classic connected — keys are live"); the not-found message lists
+  each model with all its product ids. The udev rule and the installer cover every supported
+  product id.
+- **Brightness, sleep and blank per protocol family:** the feature reports come from the model's
+  protocol family; the + and + XL send the same bytes as before.
+- **Unknown control kinds are kept:** a `layers.conf` row for a control kind this version does not
+  know (written by a newer version) is now kept unchanged, never run, written back and dropped only
+  with its layer, instead of being removed; a `touchscreen.json` holding one stays untouched with
+  saving disabled.
 - **Undo a removal from its toast only:** Remove binding no longer leaves an **Undo remove**
   button or a "Control configuration removed." status line; the toast alone says it, and its
   **Undo** stays usable for 10 seconds (plain success toasts still close after 5). Selecting another

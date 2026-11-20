@@ -10,7 +10,7 @@ metadata:
 ## Activation contract
 
 Use this skill when the user asks to create, change, debug, validate or install a plugin for
-**sdeck-plus** (the GTK app for the Elgato Stream Deck +). A plugin is an external program plus a
+**sdeck-plus** (the GTK app for the Elgato Stream Deck +, + XL, Classic, XL, Mini and Neo). A plugin is an external program plus a
 `manifest.json`: the app starts it once per key press or dial event, sends one JSON line on stdin
 and reads one JSON line from stdout.
 

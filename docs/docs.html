@@ -14,7 +14,7 @@
 <meta property="og:site_name" content="sdeck-plus">
 <meta property="og:url" content="https://aldosilvestre.github.io/sdeck-plus/docs.html">
 <meta property="og:title" content="sdeck-plus documentation">
-<meta property="og:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.">
+<meta property="og:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck +, + XL, Classic, XL, Mini and Neo on Linux.">
 <meta property="og:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -23,7 +23,7 @@
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="sdeck-plus documentation">
-<meta name="twitter:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.">
+<meta name="twitter:description" content="Install, configure and develop sdeck-plus, the native GTK4 control desk for the Elgato Stream Deck +, + XL, Classic, XL, Mini and Neo on Linux.">
 <meta name="twitter:image" content="https://aldosilvestre.github.io/sdeck-plus/social-card.png">
 <meta name="twitter:image:alt" content="sdeck-plus window with the Stream Deck Plus preview and the binding editor">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -169,10 +169,16 @@
         </li>
         <li><a href="#devices">Supported devices</a>
           <ol>
-            <li><a href="#device-models">Models and validation status</a></li>
+            <li><a href="#device-models">Models at a glance</a></li>
+            <li><a href="#device-plus">Stream Deck +</a></li>
+            <li><a href="#device-plus-xl">Stream Deck + XL</a></li>
+            <li><a href="#device-classic">Stream Deck Classic</a></li>
+            <li><a href="#device-xl">Stream Deck XL</a></li>
+            <li><a href="#device-mini">Stream Deck Mini</a></li>
+            <li><a href="#device-neo">Stream Deck Neo</a></li>
             <li><a href="#device-detection">Detection and several devices</a></li>
             <li><a href="#device-data">Data per model</a></li>
-            <li><a href="#device-registry">Future models</a></li>
+            <li><a href="#device-registry">Adding a model</a></li>
           </ol>
         </li>
         <li><a href="#configuration">Configuration</a>
@@ -270,7 +276,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
                 <li>Rust stable toolchain and Cargo, a C toolchain, <code>pkg-config</code> and <code>glib-compile-resources</code></li>
                 <li>GTK 4.8 or newer and libudev development files</li>
                 <li>A StatusNotifierItem tray (for example, Omarchy's)</li>
-                <li>Stream Deck + or Stream Deck + XL over USB, with permission to open its HID node</li>
+                <li>A supported Stream Deck over USB (+, + XL, Classic, XL, Mini or Neo; see <a href="#devices">Supported devices</a>), with permission to open its HID node</li>
                 <li>Keyboard and mouse-wheel actions need <code>/dev/uinput</code> access</li>
               </ul>
             </article>
@@ -278,7 +284,7 @@ curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/insta
               <h4>Optional tools and device access</h4>
               <p>Optional, per action: <code>xdg-utils</code> (files and websites), <code>wireplumber</code> (<code>wpctl</code>), <code>pipewire</code> (<code>pw-dump</code>),
                  <code>curl</code> (weather), <code>wtype</code> (typing text; <code>wl-clipboard</code> is the fallback), <code>procps-ng</code> (closing processes), <code>mpv</code> (sounds), <code>canberra-gtk-play</code> (timer chime), an MPRIS player (media transport).</p>
-              <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the Stream Deck + (<code>0fd9:0084</code>) and the + XL (<code>0fd9:00c6</code>) with
+              <p>If opening the device is denied, install the repository's udev rule as an administrator. <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/udev/70-sdeck.rules"><code>udev/70-sdeck.rules</code></a> grants your user access to the product ids of every supported model (one line each, listed under <a href="#device-models">Models at a glance</a>) with
                  <code>TAG+="uaccess"</code>:</p>
               <div class="code-block">
 <pre><code>curl -fsSL https://raw.githubusercontent.com/aldosilvestre/sdeck-plus/main/udev/70-sdeck.rules | sudo tee /etc/udev/rules.d/70-sdeck.rules
@@ -294,30 +300,282 @@ sudo udevadm control --reload-rules</code></pre>
       <section class="doc-section" id="devices" aria-labelledby="devices-title">
         <header>
           <h2 id="devices-title">Supported devices</h2>
-          <p>sdeck-plus drives the Elgato Stream Deck + and the Stream Deck + XL, and several can be connected at the same time. Each model has its own window content, stores, editor and previews; the window shows the one you are configuring. Neither the XL nor running several devices at once has been tested on real hardware (see below).</p>
+          <p>sdeck-plus drives six Elgato models: the <a href="#device-plus">Stream Deck +</a>, <a href="#device-plus-xl">Stream Deck + XL</a>, <a href="#device-classic">Stream Deck Classic</a>, <a href="#device-xl">Stream Deck XL</a>,
+             <a href="#device-mini">Stream Deck Mini</a> and <a href="#device-neo">Stream Deck Neo</a>, and several can be connected at the same time. Each model has its own window content, stores, editor and preview; the window shows the one you are configuring
+             and only the controls that model has. Only the Stream Deck + has been tested on real hardware. The other five are implemented from Elgato's HID documentation and validated with a simulated device, and running several devices at once has been validated only with simulated devices.</p>
         </header>
 
         <div class="doc-group" id="device-models" style="--c: var(--fam-media)">
-          <h3>Models and validation status</h3>
+          <h3>Models at a glance</h3>
           <div class="cards">
             <article class="card wide">
               <div class="table-scroll">
                 <table class="ref-table">
-                  <tr><th></th><th>Stream Deck +</th><th>Stream Deck + XL</th></tr>
-                  <tr><th>USB id</th><td><code>0fd9:0084</code></td><td><code>0fd9:00c6</code></td></tr>
-                  <tr><th>Keys</th><td>8 (4 × 2), 120 px, sent unrotated</td><td>36 (9 × 4), 112 px, sent rotated 90° counterclockwise</td></tr>
-                  <tr><th>Dials</th><td>4</td><td>6</td></tr>
-                  <tr><th>Touch strip</th><td>800 × 100, 4 sections of 200 px</td><td>1200 × 100, 6 sections of 200 px, sent rotated 90° counterclockwise</td></tr>
-                  <tr><th>Validation</th><td>Developed and tested on this hardware.</td><td>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending.</td></tr>
+                  <tr><th>Model</th><th>USB product ids (vendor <code>0fd9</code>)</th><th>Keys</th><th>Dials</th><th>Display</th><th>Validation</th></tr>
+                  <tr><th><a href="#device-plus">Stream Deck +</a></th><td><code>0084</code></td><td>8 (4 × 2)</td><td>4</td><td>Touch strip, 4 sections</td><td>Real hardware</td></tr>
+                  <tr><th><a href="#device-plus-xl">Stream Deck + XL</a></th><td><code>00c6</code></td><td>36 (9 × 4)</td><td>6</td><td>Touch strip, 6 sections</td><td>Simulator only</td></tr>
+                  <tr><th><a href="#device-classic">Stream Deck Classic</a></th><td><code>006d</code>, <code>0080</code>, <code>00a5</code>, <code>00b9</code></td><td>15 (5 × 3)</td><td>None</td><td>Background picture behind the keys</td><td>Simulator only</td></tr>
+                  <tr><th><a href="#device-xl">Stream Deck XL</a></th><td><code>006c</code>, <code>008f</code>, <code>00ba</code></td><td>32 (8 × 4)</td><td>None</td><td>None</td><td>Simulator only</td></tr>
+                  <tr><th><a href="#device-mini">Stream Deck Mini</a></th><td><code>0063</code>, <code>0090</code>, <code>00b3</code>, <code>00b8</code></td><td>6 (3 × 2)</td><td>None</td><td>None</td><td>Simulator only</td></tr>
+                  <tr><th><a href="#device-neo">Stream Deck Neo</a></th><td><code>009a</code></td><td>8 (4 × 2) and 2 touch buttons</td><td>None</td><td>Info window, no touch</td><td>Simulator only</td></tr>
                 </table>
               </div>
-              <p>Sizes and rotations follow Elgato's HID documentation for each model (<a href="https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl">Stream Deck + XL</a>). The XL support has not been run on a real
-                 Stream Deck + XL: the simulator checks the report formats against that documentation, not the hardware. Details that the documentation leaves open are separate fields in the registry,
-                 so they can be corrected once a real unit is available.</p>
-              <figure style="margin: 1rem 0 0">
+              <p><strong>Simulator only</strong> means implemented from Elgato's HID documentation and validated with a simulated device: the simulator decodes the model's input reports and captures every report sent to it,
+                 checking its size, image format, rotation and chunk headers, and the brightness, sleep and blank reports. It checks the reports against our reading of the documentation, not against the hardware,
+                 so real-hardware validation is pending. Details the documentation leaves open are separate fields in the registry, so they can be corrected once a real unit is available; each model's section lists what is still unconfirmed.
+                 The previews below are rendered from the real window by the screenshot generator, with no device.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-plus" style="--c: var(--fam-media)">
+          <h3>Stream Deck +</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="426" height="414" src="screenshots/preview-plus.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck +: eight keys in two rows of four, a touch strip with four sections and four dials">
+                <figcaption>The window's preview of the Stream Deck +.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>8 keys</strong> in four columns and two rows, numbered row by row. Each has a press action, an optional two-second hold action, and its own picture, text and live information.</li>
+                <li><strong>4 dials</strong>, each with press, clockwise and counterclockwise actions.</li>
+                <li><strong>A touch strip</strong> with four sections, one above each dial: tap and hold per section, flick and swipes on the whole strip, and touchscreen pages (see <a href="#touch-strip">Touch strip and touchscreen pages</a>).</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product id and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB id</th><td><code>0fd9:0084</code></td></tr>
+                  <tr><th>Key picture</th><td>120 × 120 JPEG, sent unrotated</td></tr>
+                  <tr><th>Touch strip</th><td>800 × 100 JPEG, sections of 200 × 100</td></tr>
+                  <tr><th>Protocol</th><td>Expanded, from <a href="https://docs.elgato.com/streamdeck/hid/stream-deck-plus">Elgato's Stream Deck + page</a></td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/</code>, the original folder (see <a href="#device-data">Data per model</a>)</td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Developed and tested on this hardware: the opt-in <a href="#dev-device-checks">real-device checks</a> were run on one Stream Deck +. It is the only model tested on real hardware, and only on its own.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-plus-xl" style="--c: var(--fam-audio)">
+          <h3>Stream Deck + XL</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="556" height="456" src="screenshots/preview-plus-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck + XL: 36 keys in four rows of nine, a touch strip with six sections and six dials">
+                <figcaption>The window's preview of the Stream Deck + XL.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>36 keys</strong> in nine columns and four rows, numbered row by row, with press and optional hold actions, pictures, text and live information.</li>
+                <li><strong>6 dials</strong>, each with press, clockwise and counterclockwise actions.</li>
+                <li><strong>A touch strip</strong> with six sections, each above its dial, with the same gestures and touchscreen pages as the Stream Deck +.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product id and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB id</th><td><code>0fd9:00c6</code></td></tr>
+                  <tr><th>Key picture</th><td>112 × 112 JPEG, rotated 90° counterclockwise before upload</td></tr>
+                  <tr><th>Touch strip</th><td>1200 × 100 JPEG, sections of 200 × 100, rotated 90° counterclockwise</td></tr>
+                  <tr><th>Protocol</th><td>Expanded, from <a href="https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl">Elgato's Stream Deck + XL page</a></td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/devices/plus-xl/</code></td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck + XL.</p>
+            </article>
+            <article class="card wide">
+              <h4>The window with a Stream Deck + XL</h4>
+              <figure style="margin: 0">
                 <a href="screenshots/main-window-xl.png"><img width="1152" height="916" src="screenshots/main-window-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window configuring the Stream Deck + XL: 36 keys, a touch strip with six sections, six dials and the Dials tab"></a>
                 <figcaption>The window configuring the Stream Deck + XL (rendered by the screenshot generator, with no device).</figcaption>
               </figure>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-classic" style="--c: var(--fam-web)">
+          <h3>Stream Deck Classic</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="348" height="250" src="screenshots/preview-classic.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck Classic: fifteen keys in three rows of five, and the Background bar under them">
+                <figcaption>The window's preview of the Stream Deck Classic. The bar under the keys selects the page's background picture.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>15 keys</strong> in five columns and three rows, numbered row by row, with press and optional hold actions, pictures, text and live information.</li>
+                <li><strong>A background picture</strong> for each keypad page, shown behind the keys: select the <strong>Background</strong> bar under the keys in the preview and choose <strong>Image…</strong> under Appearance (<strong>Background picture</strong>).
+                    <strong>Remove binding</strong> clears it, with an <strong>Undo</strong> in its toast. A key without a picture of its own shows its part of the background, with its icon, text or live information on top; a key's own picture covers it.</li>
+                <li>No dials and no touch strip: the window shows no Dials tab, touchscreen page controls or strip settings for it.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product ids and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB ids</th><td><code>0fd9:006d</code>, <code>0fd9:0080</code>, <code>0fd9:00a5</code>, <code>0fd9:00b9</code>: the revisions Elgato's Classic page lists (the MK.2 family). The original Stream Deck, <code>0fd9:0060</code>, speaks another protocol and is not supported.</td></tr>
+                  <tr><th>Key picture</th><td>72 × 72 JPEG, rotated 180° before upload</td></tr>
+                  <tr><th>Background</th><td>480 × 272 JPEG, rotated 180°, sent whole with Update Full Screen Image (<code>02 08</code>) before the key pictures. Key 1 sits 11 px from the left and 5 px from the top; keys are 72 px with 25 px between them.</td></tr>
+                  <tr><th>Protocol</th><td>Expanded, from <a href="https://docs.elgato.com/streamdeck/hid/stream-deck-classic">Elgato's Stream Deck Classic page</a></td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/devices/classic/</code>; the backgrounds are in <code>keypad-background.conf</code> (see <a href="#data-tray-lifecycle">Data location and files</a>)</td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Classic.</p>
+            </article>
+            <article class="card wide">
+              <h4>Known limits</h4>
+              <ul>
+                <li>Unconfirmed without hardware: how the full-screen picture and the key pictures sent after it combine on the device, whether every firmware revision of the family accepts it, the orientation of Elgato's key layout figure, and the timing.</li>
+                <li>Update Background (<code>02 0D</code>) is not used: it only stores a picture, and the Classic page documents no way to show a stored one.</li>
+                <li>Quitting does not clear the background picture; brightness 0 hides it.</li>
+                <li>Configuration bundles carry the backgrounds. A build made before the background existed refuses to import a Classic bundle that has one; a bundle without one imports as before.</li>
+                <li>A build made before the background existed leaves <code>keypad-background.conf</code> untouched. If such a build deletes a page, that page's background stays in the file, and a new page with the same name shows it.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-xl" style="--c: var(--fam-system)">
+          <h3>Stream Deck XL</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="504" height="262" src="screenshots/preview-xl.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck XL: thirty-two keys in four rows of eight">
+                <figcaption>The window's preview of the Stream Deck XL.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>32 keys</strong> in eight columns and four rows, numbered row by row, with press and optional hold actions, pictures, text and live information.</li>
+                <li>No dials, no touch strip and no background picture: the window shows no Dials tab, touchscreen page controls or strip settings for it, and the XL receives key pictures only.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product ids and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB ids</th><td><code>0fd9:006c</code>, <code>0fd9:008f</code>, <code>0fd9:00ba</code></td></tr>
+                  <tr><th>Key picture</th><td>96 × 96 JPEG, rotated 180° before upload</td></tr>
+                  <tr><th>Protocol</th><td>Expanded, from <a href="https://docs.elgato.com/streamdeck/hid/stream-deck-xl">Elgato's Stream Deck XL page</a></td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/devices/xl/</code></td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck XL.</p>
+              <p>Elgato also documents a 1024 × 600 full-screen picture for the XL; the app does not offer a background on it.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-mini" style="--c: var(--fam-load)">
+          <h3>Stream Deck Mini</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="244" height="158" src="screenshots/preview-mini.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck Mini: six keys in two rows of three">
+                <figcaption>The window's preview of the Stream Deck Mini.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>6 keys</strong> in three columns and two rows, numbered row by row, with press and optional hold actions, pictures, text and live information.</li>
+                <li>No dials and no touch strip: the window shows no Dials tab, touchscreen page controls or strip settings for it.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product ids and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB ids</th><td><code>0fd9:0063</code>, <code>0fd9:0090</code>, <code>0fd9:00b3</code>, <code>0fd9:00b8</code></td></tr>
+                  <tr><th>Key picture</th><td>80 × 80 BMP (24-bit), transposed before upload</td></tr>
+                  <tr><th>Protocol</th><td>Legacy Mini, from <a href="https://docs.elgato.com/streamdeck/hid/mini">Elgato's Stream Deck Mini page</a>: a fixed 65-byte input report (the report id, then one byte per key), key pictures in 1024-byte reports with a 16-byte header, and feature reports of its own for brightness</td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/devices/mini/</code></td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Mini.</p>
+              <p>Two details Elgato's page leaves open follow the open-source drivers that run on real Minis (python-elgato-streamdeck and node-elgato-stream-deck): the key number in a picture's header counts from 1, and pictures are transposed (Elgato's page says rotated 90° clockwise).
+                 If a real Mini shows its pictures one key off or mirrored, these are the details to correct.</p>
+            </article>
+            <article class="card wide">
+              <h4>Known limits</h4>
+              <ul>
+                <li>Unconfirmed without hardware: the key numbering and orientation above, the show-image flag sent only with the last part of a picture, the BMP header details, part numbering from 0, the brightness range (0 to 100 is sent) and the 32-byte feature reports (the python driver sends 17 bytes).</li>
+                <li>A playing title too long for its key scrolls by sending the key's picture again and again; as BMP that is about 190 KB per second per key, and whether a Mini keeps up is unknown.</li>
+                <li>Sleep and Quit set the brightness to 0, as on the other models (the Mini's sleep command only sets an idle timer, which the app does not use), and quitting blanks the keys instead of showing Elgato's logo.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+
+        <div class="doc-group" id="device-neo" style="--c: var(--fam-obs)">
+          <h3>Stream Deck Neo</h3>
+          <div class="cards">
+            <article class="card">
+              <h4>Preview</h4>
+              <figure style="margin: 0">
+                <img width="296" height="208" src="screenshots/preview-neo.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Preview of the Stream Deck Neo: eight keys in two rows of four and, under them, the info window between two round touch buttons">
+                <figcaption>The window's preview of the Stream Deck Neo: the info window sits between the two touch buttons.</figcaption>
+              </figure>
+            </article>
+            <article class="card">
+              <h4>Controls</h4>
+              <ul>
+                <li><strong>8 keys</strong> in four columns and two rows, numbered row by row, with press and optional hold actions, pictures, text and live information.</li>
+                <li><strong>2 touch buttons</strong>, one on each side of the info window, with their own action on each keypad page: select one in the preview (Tab reaches them after the keys and the window) and choose its action with the Action selector.
+                    A touch runs the action once, when it starts. They have no hold action, live information, multi action or picture (Elgato documents no image for them).</li>
+                <li><strong>An info window</strong> without touch that shows each keypad page's own picture and live information, like a section of the + touch strip: select it in the preview, set its picture under Appearance (target <strong>Info window</strong>)
+                    and its reading in the Binding tab with <strong>Show live information on the window</strong> (time and date, now playing, volume, weather and the other sources). A <strong>Start timer</strong> countdown running on the shown page appears there too. The window runs no action.</li>
+                <li>No dials, no touch strip and no touchscreen pages.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Sizes, product id and data</h4>
+              <div class="table-scroll">
+                <table class="ref-table key-table">
+                  <tr><th>USB id</th><td><code>0fd9:009a</code></td></tr>
+                  <tr><th>Key picture</th><td>96 × 96 JPEG, rotated 180° before upload</td></tr>
+                  <tr><th>Info window</th><td>248 × 58 JPEG, rotated 180°, sent whole with Update Window Image (<code>02 0B</code>)</td></tr>
+                  <tr><th>Touch buttons</th><td>Reported after the eight keys in the key input report</td></tr>
+                  <tr><th>Protocol</th><td>Expanded, from <a href="https://docs.elgato.com/streamdeck/hid/stream-deck-neo">Elgato's Stream Deck Neo page</a></td></tr>
+                  <tr><th>Data folder</th><td><code>&lt;data&gt;/sdeck-plus/devices/neo/</code>; the touch buttons are <code>tb:1</code> and <code>tb:2</code> rows and the window's reading a <code>window</code> row in <code>layers.conf</code> (see <a href="#data-tray-lifecycle">Data location and files</a>)</td></tr>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <h4>Validation status</h4>
+              <p>Implemented from Elgato's HID documentation and validated with a simulated device; real-hardware validation is pending. It has not been run on a real Stream Deck Neo.</p>
+              <p><strong>Known limits:</strong> the info window takes no button text (text is for keys only), and the touch buttons take no picture.</p>
             </article>
           </div>
         </div>
@@ -327,8 +585,9 @@ sudo udevadm control --reload-rules</code></pre>
           <div class="cards">
             <article class="card">
               <h4>Detection</h4>
-              <p>The app looks for vendor id <code>0x0FD9</code> with product id <code>0x0084</code> (Stream Deck +) or <code>0x00C6</code> (Stream Deck + XL). Every match is driven, so you can plug in both models, or two of one model.
-                 Other Elgato models are never matched, even if plugged in. The header lists what is connected, for example "Stream Deck + and Stream Deck + XL connected".</p>
+              <p>The app looks for vendor id <code>0x0FD9</code> with the product ids of the six models (listed under <a href="#device-models">Models at a glance</a>). Every match is driven, so you can plug in several models, or two of one model.
+                 Other Elgato products, such as the original Stream Deck (<code>0x0060</code>), are never matched, even if plugged in. The header lists what is connected and names only the controls those models have, for example
+                 "Stream Deck +, Stream Deck Classic and Stream Deck XL connected — keys, dials and touch strip are live" or "Stream Deck Classic connected — keys are live".</p>
             </article>
             <article class="card">
               <h4>Each device runs its own configuration</h4>
@@ -338,7 +597,7 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>The Current selector</h4>
               <p><strong>Current</strong> appears in the header only while two or more different models are connected; choosing a model makes the window show and edit that model. With one model, or none, there is no selector and the window looks the same as with a single device; with no device it shows the last model you used.
                  The selector only chooses what the window edits: every connected device keeps running. Switching never asks about unsaved edits, because the other model keeps its draft.</p>
-              <p>With one model connected the window shows it. When several are, it shows the last model used if it is connected, else the first connected one (Stream Deck +, then + XL). Your choice stays until that model has no device left. The last model shown is remembered for the next start.</p>
+              <p>With one model connected the window shows it. When several are, it shows the last model used if it is connected, else the first connected one in the order Stream Deck +, + XL, Classic, XL, Neo, Mini. Your choice stays until that model has no device left. The last model shown is remembered for the next start.</p>
             </article>
             <article class="card">
               <h4>Two devices of one model</h4>
@@ -351,12 +610,13 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Validation status</h4>
-              <p>Running several devices at once has been validated only with simulated devices, through the real hub into the real window. It has not been tested with two physical Stream Decks, and the Stream Deck + XL has not been tested on real hardware; only the Stream Deck + alone has.</p>
+              <p>Running several devices at once has been validated only with simulated devices, through the real hub into the real window. It has not been tested with two physical Stream Decks. Only the Stream Deck + has been tested on real hardware, and only on its own; the other five models are validated with a simulator (see each model above).</p>
             </article>
             <article class="card wide">
               <h4>Preview of each model</h4>
-              <p>The window draws the shown model: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials.
-                 Control pickers, accessible names and keyboard order describe the same model.</p>
+              <p>The window draws the shown model, as in each model's preview above: the + as eight keys, four dials and four touch sections; the + XL as 36 keys in nine columns and four rows (numbered row by row), six dials and six touch sections aligned with the dials;
+                 the Classic as 15 keys with the Background bar under them; the XL as 32 keys; the Mini as six keys; the Neo as eight keys with the info window between its two touch buttons.
+                 Control pickers, accessible names and keyboard order describe the same model: Tab visits the keys row by row, then the Classic's Background bar or the Neo's info window, then the Neo's touch buttons.</p>
               <figure style="margin: 1rem 0 0">
                 <a href="screenshots/main-window-two-devices.png"><img width="1032" height="732" src="screenshots/main-window-two-devices.png" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Main window with a Stream Deck + and a Stream Deck + XL connected: the header shows the Current selector set to Stream Deck +"></a>
                 <figcaption>Two models connected: the header shows <strong>Current</strong> (simulated devices; not tested on two real units).</figcaption>
@@ -370,25 +630,25 @@ sudo udevadm control --reload-rules</code></pre>
           <div class="cards">
             <article class="card">
               <h4>Separate folders</h4>
-              <p>Each model has its own profiles, pages, bindings, artwork, information and OBS settings. The Stream Deck + keeps <code>$XDG_DATA_HOME/sdeck-plus</code> unchanged;
-                 the Stream Deck + XL uses <code>&lt;data&gt;/sdeck-plus/devices/plus-xl/</code>, a complete independent set of the files listed under <a href="#data-tray-lifecycle">Data, tray and lifecycle</a>.</p>
+              <p>Each model has its own profiles, pages, bindings, artwork, information and OBS settings. <code>&lt;data&gt;</code> is <code>$XDG_DATA_HOME</code>, or <code>~/.local/share</code> when it is unset. The Stream Deck + keeps <code>&lt;data&gt;/sdeck-plus</code> unchanged;
+                 every other model uses <code>&lt;data&gt;/sdeck-plus/devices/&lt;id&gt;/</code> (<code>plus-xl</code>, <code>classic</code>, <code>xl</code>, <code>mini</code> or <code>neo</code>), a complete independent set of the files listed under <a href="#data-tray-lifecycle">Data, tray and lifecycle</a>.</p>
               <p>Shared across models, in <code>$XDG_CONFIG_HOME/sdeck-plus</code>: <code>tray.json</code>, <code>updates.json</code> and <code>device.json</code> (the last model used).</p>
             </article>
             <article class="card">
               <h4>Backups</h4>
-              <p>Export format 5 records the model. Importing a bundle made for the other model is refused with "This configuration is for Stream Deck + XL; connect that model to import it." (or "...for Stream Deck +...").
-                 Import into the + keeps the <code>devices/</code> folder. Format 5 bundles cannot be imported by older versions of sdeck-plus.</p>
+              <p>Export format 5 records the model. Importing a bundle made for another model is refused with a message naming the bundle's model, for example "This configuration is for Stream Deck Classic; connect that model to import it.".
+                 Import into the + keeps the <code>devices/</code> folder. Format 5 bundles cannot be imported by older versions of sdeck-plus, and a Classic bundle that carries a background picture needs a build that knows backgrounds (see <a href="#device-classic">Stream Deck Classic</a>).</p>
             </article>
           </div>
         </div>
 
         <div class="doc-group" id="device-registry" style="--c: var(--fam-load)">
-          <h3>Future models</h3>
+          <h3>Adding a model</h3>
           <div class="cards">
             <article class="card wide">
               <p>Every supported model is one entry in a registry (<code>src/device_model.rs</code>), and the editor, stores, previews and the screenshot generator read it instead of fixed numbers.
-                 The Stream Deck Classic, XL, Neo and Mini are already described there from Elgato's HID pages as <em>planned</em>: they are not supported and discovery never matches them.
-                 To add one, see <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>.</p>
+                 All six entries, each described from Elgato's HID page for the model, are supported. The original Stream Deck (<code>0x0060</code>), the Pedal, the Studio and the Mobile have no entry.
+                 To add a model, see <a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>.</p>
             </article>
           </div>
         </div>
@@ -407,9 +667,9 @@ sudo udevadm control --reload-rules</code></pre>
           <div class="cards">
             <article class="card">
               <h4>Main window and connection status</h4>
-              <p>The header says in plain words whether a supported device is connected (for example "Stream Deck + or Stream Deck + XL not connected — plug one in", or "Stream Deck + XL connected — keys, dials and touch strip are live")
-                 next to a colored <strong>Not connected</strong>, <strong>Unavailable</strong>, <strong>Disconnected</strong> or <strong>Connected</strong> badge;
-                 hover it for the USB IDs (VID <code>0x0FD9</code>; PID <code>0x0084</code> or <code>0x00C6</code>) and technical details. See <a href="#devices">Supported devices</a>.</p>
+              <p>The header says in plain words whether a supported device is connected (for example "No Stream Deck connected — plug one in", "Stream Deck + XL connected — keys, dials and touch strip are live"
+                 or "Stream Deck Neo connected — keys, touch buttons and info window are live") next to a colored <strong>Not connected</strong>, <strong>Unavailable</strong>, <strong>Disconnected</strong> or <strong>Connected</strong> badge;
+                 hover it for the USB IDs (VID <code>0x0FD9</code> and the product ids of every supported model, or of the connected one) and technical details. See <a href="#devices">Supported devices</a>.</p>
               <p>If the device is absent, inaccessible or disconnected, the window stays open, reports the state and retries detection.
                  Touch gestures use Elgato's logical-pixel space of the strip (800 × 100 on the Stream Deck +, 1200 × 100 on the + XL) and are reported after the interaction completes,
                  not as separate contact start and release events. Each dial in the preview shows the action it is assigned to.</p>
@@ -425,7 +685,7 @@ sudo udevadm control --reload-rules</code></pre>
                  Choosing another action replaces the draft already on that control; if the draft is on a different control you are asked before it is discarded. Existing key-to-key dragging still swaps saved settings and artwork.</p>
               <p>The action selector remains available for dials and the touch strip; keys use the Actions catalog:</p>
               <ol>
-                <li>Select a profile tab and page, then click one of the keys (eight on the Stream Deck +, 36 on the + XL), the touch strip or one of the dials (four or six).</li>
+                <li>Select a profile tab and page, then click one of the keys (eight on the Stream Deck + and the Neo, 36 on the + XL, 15 on the Classic, 32 on the XL, six on the Mini), the touch strip or one of the dials (four or six; models without them do not show them).</li>
                 <li>For dials and the touch strip, pick an event valid for that control: dial press, clockwise or counterclockwise; touch tap, hold, flick and directional swipes. A key's Event, Action, Category and More-actions selectors are hidden: choose its action from the Actions catalog, and its own fields and description appear below. Select <strong>Hold 2 seconds</strong> to configure its optional secondary action without replacing the short action.</li>
                 <li>Pick an action and fill only its visible fields. Shortcuts accept a full chord such as <code>CTRL + D</code> or one key with the optional <strong>Ctrl</strong>, <strong>Alt</strong>, <strong>Shift</strong> and <strong>Super</strong> toggles.</li>
                 <li>The three icon buttons at the right end of the editor's heading row (beside <em>Configuring: …</em>) act on the selected control and stay visible while the form below them scrolls: the <strong>floppy disk</strong> (<strong>Save binding</strong>) creates or updates the control event, the <strong>play</strong> button (<strong>Test action</strong>) runs it once, and the <strong>red circled X</strong> (<strong>Remove binding</strong>) clears the whole control: every event of the key, dial or touch area, with its page returns and live information, whichever event is selected. Only a toast confirms it, with an <strong>Undo</strong> action for ten seconds that brings all of it back, even if you selected another control meanwhile; a later Remove or message replaces it. If you changed that control after removing it, Undo refuses and keeps your changes. Hover any of them for a tooltip that explains what it does; results and errors appear in a toast at the top center of the window, never as a line below the plugin buttons.</li>
@@ -623,7 +883,7 @@ sudo udevadm control --reload-rules</code></pre>
                  the microphone (<strong>Microphone volume and mute</strong>, crossed out while muted, or the <strong>Audio input device</strong> name, both with a microphone icon) or <strong>Now playing</strong> (the title and artist with a play icon, greyed with a pause icon while paused, and <em>Nothing playing</em> when no media plays).
                  On a key the icon, value, bar and caption are drawn over the key's own image and always fit; on a touch section they sit on a see-through tile
                  beside the icon, leaving the page-indicator edge free. Only the control showing a value is redrawn, the binding's action still runs, and the
-                 window preview matches the device.</p>
+                 window preview matches the device. The Stream Deck Neo's info window shows a reading too, chosen with <strong>Show live information on the window</strong> (see <a href="#device-neo">Stream Deck Neo</a>).</p>
               <figure>
                 <a href="screenshots/binding-tab.png"><img src="screenshots/binding-tab.png" width="1032" height="982" loading="lazy" decoding="async" style="max-width: 100%; height: auto" alt="Binding tab with the live-information toggle for the selected control"></a>
                 <figcaption>Binding tab with the live-information toggle for the selected control.</figcaption>
@@ -647,6 +907,7 @@ sudo udevadm control --reload-rules</code></pre>
               <p>On the Stream Deck + the strip has four sections, one above each dial (the + XL has six; the numbers below follow the shown model). Choose <strong>Touch</strong>, then control <strong>1</strong> to <strong>4</strong>, and give each section its own
                  <strong>Tap</strong> and <strong>Hold</strong> binding. <strong>Any</strong> keeps the older whole-strip bindings, which still handle taps no section claims.
                  Flick and swipes always apply to the whole strip.</p>
+              <p>The Classic, XL, Mini and Neo have no touch strip and no dials, so the window shows none of this for them; the Neo's info window takes no touch (see <a href="#device-neo">Stream Deck Neo</a>).</p>
               <p>Touch bindings, section information, strip and section images and every dial binding belong to the profile's selected touchscreen page,
                  not to keypad pages or folders: changing a keypad page or opening a folder keeps the touch page.</p>
             </article>
@@ -748,9 +1009,10 @@ sudo udevadm control --reload-rules</code></pre>
             <article class="card wide">
               <h4>Background images</h4>
               <p>For a key, right-click and use <strong>Image…</strong> or <strong>Clear image</strong> in its text/image popover. For the strip and its zones, pick a target in <strong>Artwork target (active layer)</strong> under Appearance, then choose or clear its image. The picker lists the touch-strip
-                 background and each touch zone: five targets on the Stream Deck + (four zones), seven on the + XL (six zones). Clicking a zone selects its target; clicking a dial selects only its binding. PNG, GIF and any format
-                 supported by the installed GdkPixbuf loaders work; GIFs are sent as a still image because the hardware upload format is JPEG.
-                 Images are center-cropped and sent as 120 × 120 (keys), 800 × 100 (strip) or 200 × 100 (zone) JPEGs; the strip background and zones are layered.</p>
+                 background and each touch zone: five targets on the Stream Deck + (four zones), seven on the + XL (six zones); on the Neo it lists only <strong>Info window</strong>, on the Classic only <strong>Background</strong>, and on the XL and Mini nothing.
+                 Clicking a zone selects its target; clicking a dial selects only its binding. PNG, GIF and any format
+                 supported by the installed GdkPixbuf loaders work; GIFs are sent as a still image because the devices take still pictures (JPEG, or BMP on the Mini).
+                 Images are center-cropped to the shown model's sizes, on the Stream Deck + 120 × 120 (keys), 800 × 100 (strip) or 200 × 100 (zone) JPEGs (every model's sizes are under <a href="#devices">Supported devices</a>); the strip background and zones are layered.</p>
               <p>Images are copied into the data directory, so originals can be moved or deleted. Artwork is independent per layer: switching layers replaces the device's
                  whole image state (unassigned keys turn black) and the same state is replayed after reconnecting. Clearing a key sends a black image; clearing strip artwork
                  rebuilds the strip from what remains. A file chooser saves to the target and layer captured when it opened. A failed import keeps the current assignment,
@@ -821,12 +1083,18 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>Data location and files</h4>
               <p>Configuration lives in <code>$XDG_DATA_HOME/sdeck-plus</code>, or <code>$HOME/.local/share/sdeck-plus</code> when it is unset (normally
                  <code>~/.local/share/sdeck-plus</code>): <code>layers.conf</code> (keypad layers and bindings), <code>touchscreen.json</code>, <code>organization.json</code>,
-                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, and <code>button-errors.log</code>. These are the Stream Deck + files; the Stream Deck + XL keeps the same set under
-                 <code>devices/plus-xl/</code> (see <a href="#device-data">Data per model</a>).</p>
+                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, <code>keypad-background.conf</code> (Stream Deck Classic only, see below) and <code>button-errors.log</code>. These are the Stream Deck + files; every other model keeps its own set under
+                 <code>devices/&lt;id&gt;/</code> (see <a href="#device-data">Data per model</a>).</p>
+              <p><strong>Model-specific records.</strong> <code>layers.conf</code> rows are tab-separated, with hex-encoded page names. On the Stream Deck Neo, each touch button is bound like a key, as <code>tb:1</code> or <code>tb:2</code>
+                 (<code>binding &lt;page&gt; tb:1 &lt;action&gt;</code>), and the info window's live information is a <code>window</code> binding whose action is always <code>none</code>, with its <code>info</code> row
+                 (<code>binding &lt;page&gt; window none</code> and <code>info &lt;page&gt; window &lt;source&gt;</code>). On the Stream Deck Classic, each page's background picture is a row of <code>keypad-background.conf</code>, beside the artwork manifest:
+                 the page, <code>touch-strip-background</code> and the copied image, after a version line. The file exists only while a page has a background, and it travels in configuration bundles.</p>
               <p>An unreadable or unsupported <code>layers.conf</code> leaves configuration unavailable with writes disabled; repair it and restart. In a readable file, invalid, conflicting
                  or duplicate records are removed and logged with their reasons in <code>button-errors.log</code>. Removing a layer also removes references to it.
-                 A record of a kind this version does not know (for example an action written by a newer version) is not removed: it is kept unchanged, not run and not shown, written back on every
-                 save and logged once as <code>kept=</code>; it is dropped only when you set that control again or delete its layer. A <code>touchscreen.json</code> holding such an action is left untouched and saving stays disabled until it is readable.</p>
+                 A record this version does not know is not removed: an action of an unknown kind (for example one written by a newer version) and a row for an unknown control kind are kept unchanged, not run and not shown, written back on every
+                 save and logged once as <code>kept=</code>. An unknown action is dropped only when you set that control again or delete its layer; a row of an unknown control kind goes only with its layer.
+                 A <code>touchscreen.json</code> holding an unknown action or control kind is left untouched and saving stays disabled until it is readable.
+                 sdeck-plus 1.0.0 and older remove rows of control kinds they do not know, but they do not drive a Neo, so they never open its folder.</p>
             </article>
             <article class="card">
               <h4>Window under Hyprland</h4>
@@ -848,7 +1116,7 @@ sudo udevadm control --reload-rules</code></pre>
                  missing files do not block import. Put the files (or local symlinks to them) in those folders, or choose replacement files in the editor. Existing copied images in
                  <code>assets</code> can be reused by filename. An existing unreadable or invalid image cancels import rather than discarding its assignment.
                  Import validates first, asks for confirmation, retains previous configuration metadata in a sibling backup, and refreshes the device without running saved actions.
-                 Bundles of the other model are refused (see <a href="#device-data">Data per model</a>). Legacy version-1 to version-4 exports are Stream Deck + bundles and remain importable with their original encoding and file-reference rules.</p>
+                 Bundles of another model are refused (see <a href="#device-data">Data per model</a>). Legacy version-1 to version-4 exports are Stream Deck + bundles and remain importable with their original encoding and file-reference rules.</p>
               <p>This is not general secret redaction: URLs, command text, application arguments, button text and OBS credentials remain verbatim. Review those fields before sharing.</p>
             </article>
             <article class="card">
@@ -897,7 +1165,7 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Quitting and reconnecting</h4>
-              <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black, stops the action worker and app-owned playback,
+              <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black (a Stream Deck Classic's background picture is not cleared; brightness 0 hides it), stops the action worker and app-owned playback,
                  cancels timers and releases the device; a blocked driver call can delay exiting. Independently opened applications stay open.
                  On the next launch brightness returns to 100% and saved artwork is replayed. While running, unplugging and reconnecting retries automatically.</p>
             </article>
@@ -924,10 +1192,11 @@ sudo udevadm control --reload-rules</code></pre>
               <div class="code-block">
 <pre><code>cargo fmt --all -- --check
 cargo test --offline --test device_roots --test device_registry --test device_model --test preview_layout
+cargo test --offline --test mini_protocol --test touch_button --test neo_window --test classic_background --test classic_background_crop
 env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=x11 cargo test --offline
 cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
               </div>
-              <p>The four named test targets cover the model registry, per-model data folders and the preview layout engine for every model. The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
+              <p>The first four named test targets cover the model registry, per-model data folders and the preview layout engine for every model; the next five cover the Mini's protocol, the Neo's touch buttons and info window, and the Classic's background, without hardware. The headless run covers the Rust suites but skips display-dependent GTK bodies. Run native GTK cases separately in a graphical session so each process owns
                  its GTK main thread, for example:</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
@@ -940,7 +1209,8 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-screenshots">
               <h4>Documentation screenshots</h4>
               <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
-                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>, plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (1088 × 668 and 968 × 668; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
+                 change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>
+                 (<code>preview-plus.png</code>, <code>preview-plus-xl.png</code>, <code>preview-classic.png</code>, <code>preview-xl.png</code>, <code>preview-mini.png</code> and <code>preview-neo.png</code>, shown under <a href="#devices">Supported devices</a>), plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (1088 × 668 and 968 × 668; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
   cargo test --offline --bin sdeck-plus \
@@ -957,7 +1227,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             <article class="card wide" id="dev-simulated">
               <h4>Simulated devices</h4>
               <p>A manual launcher opens the real window over scratch directories, with simulated Stream Decks plugged into the real hub, so no hardware, real data or network is involved. It is ignored by the test suite and runs until you close the window.
-                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.</p>
+                 <code>SDECK_SIMULATE_MODEL</code> is a comma-separated list of model ids (<code>plus</code>, <code>plus-xl</code>, <code>classic</code>, <code>xl</code>, <code>mini</code> or <code>neo</code>; default <code>plus-xl</code>); <code>plus,plus-xl</code> connects both and shows the <strong>Current</strong> selector.</p>
               <div class="code-block">
 <pre><code>SDECK_SIMULATE_MODEL=plus,plus-xl GDK_BACKEND=x11 cargo test --offline --bin sdeck-plus \
   tests::simulated_device_tests::open_the_window_with_simulated_devices \
@@ -966,7 +1236,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
             </article>
             <article class="card wide" id="dev-device-checks">
               <h4>Opt-in real-device checks</h4>
-              <p>These need a real device and have been run on a single Stream Deck + only; nothing was run on a Stream Deck + XL or with two devices connected. Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
+              <p>These need a real device and have been run on a single Stream Deck + only; nothing was run on any other model or with two devices connected (<code>verify_streamdeck</code> is written for the Stream Deck +: its <code>--input</code> check waits for dial and touch input). Close other instances first so one HID worker owns the device. <code>--device-controls</code> sends real brightness (50%, relative), sleep and wake reports and leaves
                  brightness at 50%; <code>--input</code> waits up to 60 seconds for a key press, dial rotation and touch gesture; <code>--button-text</code> uploads horizontal and vertical text to key 1.</p>
               <div class="code-block">
 <pre><code>cargo run --offline --example verify_streamdeck -- --device-controls
@@ -1011,6 +1281,7 @@ cargo test --offline --test plugin_sdk</code></pre>
                   <tr><th><code>src/features.rs</code>, <code>src/feature_runtime/multi.rs</code>, <code>src/multi_editor.rs</code>, <code>src/action_form.rs</code></th><td>Multi action: model and validation, the step sequencer, the step list and dialog, and the action form shared by the editor and the step dialog</td></tr>
                   <tr><th><code>src/device_model.rs</code>, <code>src/device_roots.rs</code></th><td>Model registry (<a href="https://github.com/aldosilvestre/sdeck-plus/blob/main/DEVICES.md">DEVICES.md</a>) and each model's data folder</td></tr>
                   <tr><th><code>src/preview_layout.rs</code></th><td>Preview geometry for any registry model</td></tr>
+                  <tr><th><code>src/protocol.rs</code>, <code>src/protocol/legacy_mini.rs</code>, <code>src/image_output.rs</code>, <code>src/image_output/bmp.rs</code></th><td>Protocol families (Expanded and Legacy Mini): input decoding, feature reports, picture encoding (JPEG, or BMP for the Mini) and output reports</td></tr>
                   <tr><th><code>src/config_bundle.rs</code></th><td>Configuration export, image references, validation, backup and restore</td></tr>
                   <tr><th><code>src/info.rs</code>, <code>src/info_render.rs</code></th><td>Live readings and the key/section compositor</td></tr>
                   <tr><th><code>src/desktop_actions/audio_output.rs</code></th><td>Fixed and rotating PipeWire output selection</td></tr>
@@ -1038,7 +1309,7 @@ cargo test --offline --test plugin_sdk</code></pre>
     <div class="footer-grid">
       <div>
         <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
-        <p>Native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.</p>
+        <p>Native GTK4 control desk for the Elgato Stream Deck +, + XL, Classic, XL, Mini and Neo on Linux.</p>
       </div>
       <nav aria-label="Product">
         <h2>Product</h2>
