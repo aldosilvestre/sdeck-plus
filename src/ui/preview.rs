@@ -79,6 +79,7 @@ pub(crate) fn control_of(kind: ControlKind, number: u8) -> Option<ControlRef> {
         (ControlKind::Touch, 0) => Some(ControlRef::Strip),
         (ControlKind::Touch, number) => Some(ControlRef::Zone(number)),
         (ControlKind::TouchButton, number) => Some(ControlRef::TouchButton(number)),
+        (ControlKind::Window, _) => Some(ControlRef::Window),
     }
 }
 
@@ -90,6 +91,7 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
         ControlRef::Strip => (ControlKind::Touch, 0),
         ControlRef::Zone(number) => (ControlKind::Touch, number),
         ControlRef::TouchButton(number) => (ControlKind::TouchButton, number),
+        ControlRef::Window => (ControlKind::Window, 1),
     }
 }
 
@@ -488,8 +490,30 @@ impl PreviewView {
                 let strip_entry = built.controls.len() - strip.zones.len();
                 self.bind_at(&mut built, strip_entry, ControlRef::Strip, button);
             } else {
-                // A plain window: drawn, never selected.
-                overlay.set_child(Some(&background_surface));
+                // An information window (the Neo's): no touch, so no gestures
+                // or sections; it is selected for the page's picture and live
+                // information, which it shows like a touch section.
+                let button = Button::new();
+                button.add_css_class("control-selectable");
+                button.add_css_class("window-surface");
+                if let Some(name) = ControlRef::Window.accessible_name() {
+                    button.update_property(&[gtk::accessible::Property::Label(&name)]);
+                }
+                button.set_child(Some(&background_surface));
+                overlay.set_child(Some(&button));
+                // The window is the Appearance picker's only target, so
+                // selecting it there changes nothing: point Appearance at it.
+                let (picker, artwork) = (self.picker.clone(), self.artwork.clone());
+                button.connect_clicked(move |_| {
+                    picker.set_selected(0);
+                    artwork
+                        .selected_target
+                        .set(ArtworkTarget::TouchStripBackground);
+                    if let Some(editor) = artwork.text_editor.borrow().upgrade() {
+                        editor.load_context(false);
+                    }
+                });
+                self.bind(&mut built, ControlRef::Window, button);
             }
             put_in(&bezel, &overlay, &strip.rect, &strip.bezel);
         }
@@ -575,6 +599,7 @@ impl PreviewView {
                 ControlRef::Dial(number) => format!("Encoder {number} · {text}"),
                 ControlRef::TouchButton(number) => format!("Touch button {number} · {text}"),
                 ControlRef::Strip | ControlRef::Zone(_) => text.to_owned(),
+                ControlRef::Window => format!("Info window · {text}"),
             }
             };
             button.set_tooltip_text(Some(&tooltip(&summary.text())));

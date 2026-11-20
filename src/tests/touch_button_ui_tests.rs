@@ -117,7 +117,7 @@ fn the_neo_preview_draws_two_named_touch_buttons_beside_its_window() {
             .preview
             .control(ControlRef::TouchButton(3))
             .is_none());
-        // The window stays a plain display: no strip control is offered.
+        // The window is no touch strip: no strip control is offered.
         assert!(f.widgets.preview.control(ControlRef::Strip).is_none());
         drop(f);
 

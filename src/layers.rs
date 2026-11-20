@@ -53,6 +53,11 @@ pub enum Trigger {
     /// (the Stream Deck Neo's two), numbered from one. Stored as `tb:<n>`; a
     /// touch runs it once when it starts, and there is no hold.
     TouchButton(u8),
+    /// The information window under the keys of a model whose window takes
+    /// no touch (the Stream Deck Neo's). Stored as `window` on the keypad
+    /// page; no input ever names it, so it runs nothing (its action is always
+    /// `none`) and only carries the page's live information for the window.
+    Window,
 }
 
 impl Trigger {
@@ -904,6 +909,7 @@ fn shows_information(trigger: &Trigger) -> bool {
             | Trigger::EncoderCounterClockwise(_)
             | Trigger::ZoneTap(_)
             | Trigger::ZonePress(_)
+            | Trigger::Window
     )
 }
 fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
@@ -924,6 +930,9 @@ fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
         }
         Trigger::TouchButton(n) if !model.is_valid_touch_button(*n) => {
             Err(invalid("touch button out of range"))
+        }
+        Trigger::Window if !model.has_info_window() => {
+            Err(invalid("this device has no information window"))
         }
         Trigger::TouchTap | Trigger::TouchPress | Trigger::TouchFlick | Trigger::TouchSwipe(_)
             if !model.has_touch() =>
@@ -997,6 +1006,10 @@ pub(crate) fn validate_step_action(a: &Action) -> io::Result<()> {
     validate_action(a)
 }
 fn validate_binding_action(trigger: &Trigger, action: &Action) -> io::Result<()> {
+    // Nothing ever triggers the window: its entry only carries information.
+    if *trigger == Trigger::Window && *action != Action::None {
+        return Err(invalid("the information window runs no action"));
+    }
     if matches!(
         action,
         Action::Feature(crate::features::FeatureAction::Multi { .. })
@@ -1099,12 +1112,13 @@ fn encode_trigger(t: &Trigger) -> String {
         Trigger::ZoneTap(zone) => format!("ztap:{zone}"),
         Trigger::ZonePress(zone) => format!("zpress:{zone}"),
         Trigger::TouchButton(number) => format!("tb:{number}"),
+        Trigger::Window => "window".into(),
     }
 }
 
 /// Control kinds (the part of a trigger before its first `:`) `decode_trigger` reads.
-const KNOWN_TRIGGER_KINDS: [&str; 11] = [
-    "k", "kh", "b", "r", "tap", "press", "flick", "swipe", "ztap", "zpress", "tb",
+const KNOWN_TRIGGER_KINDS: [&str; 12] = [
+    "k", "kh", "b", "r", "tap", "press", "flick", "swipe", "ztap", "zpress", "tb", "window",
 ];
 
 /// Whether `name` is shaped like a kind a newer build could add: 1-32
@@ -1163,6 +1177,7 @@ fn decode_trigger(model: &DeviceModel, s: &str) -> Result<Trigger, String> {
         ["ztap", zone] => Trigger::ZoneTap(zone.parse().map_err(|_| "invalid touch section")?),
         ["zpress", zone] => Trigger::ZonePress(zone.parse().map_err(|_| "invalid touch section")?),
         ["tb", number] => Trigger::TouchButton(number.parse().map_err(|_| "invalid touch button")?),
+        ["window"] => Trigger::Window,
         _ => return Err("invalid trigger".into()),
     };
     validate_trigger(model, &t).map_err(|e| e.to_string())?;

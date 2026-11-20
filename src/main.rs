@@ -931,6 +931,9 @@ fn help_select(model: &sdeck_plus::device_model::DeviceModel) -> String {
     if model.has_touch() {
         parts.push("the touch strip");
     }
+    if model.has_info_window() {
+        parts.push("the info window");
+    }
     if model.touch_buttons > 0 {
         parts.push("a touch button");
     }
@@ -1233,7 +1236,13 @@ fn build_body(
     });
     create_layer.set_sensitive(false);
     // Indexes follow `BindingUi::control_kind`.
-    let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad", "Touch button"]);
+    let control_model = gtk::StringList::new(&[
+        "Button",
+        "Encoder",
+        "Touchpad",
+        "Touch button",
+        "Info window",
+    ]);
     let control_picker = gtk::DropDown::new(Some(control_model.clone()), gtk::Expression::NONE);
     let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
     let control_number_picker =
@@ -1527,7 +1536,8 @@ fn build_body(
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     // Keys are styled from their right-click menu and dials have no artwork,
-    // so only the touch strip and its sections show this section.
+    // so only the touch strip and its sections (or the information window)
+    // show this section.
     appearance.set_visible(false);
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
     let appearance_heading = inspector_heading("Appearance");
@@ -1545,24 +1555,34 @@ fn build_body(
         .control_picker
         .connect_selected_notify(move |picker| {
             if let Some(row) = selector_row_weak.upgrade() {
-                row.set_visible(picker.selected() != 0);
+                // A key takes its action from the catalog; the information
+                // window (4) takes none.
+                row.set_visible(!matches!(picker.selected(), 0 | 4));
             }
             feature_editor.set_pickers_hidden(picker.selected() == 0);
             if let Some(editor) = editor.upgrade() {
                 editor.set_control_available(picker.selected() == 0);
             }
             if let Some(appearance) = appearance_weak.upgrade() {
-                // Only the touch strip and its sections have artwork to set here.
-                appearance.set_visible(picker.selected() == 2);
+                // Only the touch strip and its sections, or the information
+                // window, have artwork to set here.
+                appearance.set_visible(matches!(picker.selected(), 2 | 4));
             }
         });
-    let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
+    let window_model = layers.borrow().model().has_info_window();
+    let artwork_section = gtk::Expander::new(Some(if window_model {
+        "Window picture"
+    } else {
+        "Artwork and touch zones"
+    }));
     artwork_section.set_child(Some(&artwork_content));
     appearance.append(&artwork_section);
     form.append(&appearance);
-    let layer_hint = Label::new(Some(
-        "Touchscreen pages belong to the profile, independently of keypad pages and folders.",
-    ));
+    let layer_hint = Label::new(Some(if window_model {
+        "Each keypad page has its own window picture and live information."
+    } else {
+        "Touchscreen pages belong to the profile, independently of keypad pages and folders."
+    }));
     layer_hint.add_css_class("muted");
     layer_hint.set_xalign(0.0);
     layer_hint.set_wrap(true);
@@ -2631,7 +2651,9 @@ impl BindingUi {
         let dials = usize::from(model.dials);
         let index = match control {
             ControlRef::Key(number) if model.is_valid_key(number) => usize::from(number) - 1,
-            ControlRef::Strip if model.has_strip() => keys,
+            // The strip's slot describes the information window on a model with one.
+            ControlRef::Strip if model.has_touch() => keys,
+            ControlRef::Window if model.has_info_window() => keys,
             ControlRef::Dial(number) if model.is_valid_dial(number) => keys + usize::from(number),
             ControlRef::TouchButton(number) if model.is_valid_touch_button(number) => {
                 keys + dials + usize::from(number)
@@ -2659,6 +2681,8 @@ impl BindingUi {
                 .map(|index| {
                     let (control, number) = if index < keys {
                         (ControlKind::Button, index + 1)
+                    } else if index == keys && model.has_info_window() {
+                        (ControlKind::Window, 1)
                     } else if index == keys {
                         (ControlKind::Touch, 0)
                     } else if index <= keys + dials {
@@ -2718,12 +2742,12 @@ impl BindingUi {
         }
     }
 
-    /// Keys, dials and a tap or hold on one touch section can show information;
-    /// a touch button has no display.
+    /// Keys, dials, a tap or hold on one touch section and the information
+    /// window can show information; a touch button has no display.
     fn info_supported(&self) -> bool {
         match self.control_kind() {
             ControlKind::Button => !self.hold_toggle.is_active(),
-            ControlKind::Encoder => true,
+            ControlKind::Encoder | ControlKind::Window => true,
             ControlKind::TouchButton => false,
             ControlKind::Touch => {
                 matches!(
@@ -2776,6 +2800,14 @@ impl BindingUi {
     fn update_for_control(&self, reset_event: bool) {
         self.hold_toggle
             .set_visible(self.control_kind() == ControlKind::Button);
+        // The window's option names it; every other control keeps its wording.
+        if let Some(label) = descendant_label(self.info_toggle.upcast_ref()) {
+            label.set_text(if self.control_kind() == ControlKind::Window {
+                "Show live information on the window"
+            } else {
+                "Show live information on the key"
+            });
+        }
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
@@ -2801,6 +2833,7 @@ impl BindingUi {
                 .touch_button_numbers()
                 .map(|n| n.to_string())
                 .collect(),
+            ControlKind::Window => vec!["1".to_owned()],
         };
         replace_string_list(&self.control_number_model, &numbers);
         self.control_number_row.set_visible(true);
@@ -2887,6 +2920,17 @@ impl BindingUi {
                 }
                 number
             }
+            ControlKind::Window => {
+                let model = self.model.get();
+                if !model.has_info_window() {
+                    return Err(format!("the {} has no information window", model.name));
+                }
+                let number = number.unwrap_or(1);
+                if number != 1 {
+                    return Err(format!("the {} has one information window", model.name));
+                }
+                number
+            }
         };
         self.apply_control(control, number, reset_event);
         Ok(())
@@ -2899,11 +2943,15 @@ impl BindingUi {
             ControlKind::Encoder => 1,
             ControlKind::Touch => 2,
             ControlKind::TouchButton => 3,
+            ControlKind::Window => 4,
         });
         self.update_for_control(reset_event);
         self.control_number_picker
             .set_selected(u32::from(match control {
-                ControlKind::Button | ControlKind::Encoder | ControlKind::TouchButton => number - 1,
+                ControlKind::Button
+                | ControlKind::Encoder
+                | ControlKind::TouchButton
+                | ControlKind::Window => number - 1,
                 ControlKind::Touch => number,
             }));
     }
@@ -2916,8 +2964,13 @@ impl BindingUi {
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
         action_form::show_guidance(&self.action_guidance, kind);
-        // "Do nothing" needs no explaining on a key, whose selectors are hidden.
-        let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
+        // "Do nothing" needs no explaining on a key or the information
+        // window, whose selectors are hidden.
+        let idle_key = kind == ActionKind::None
+            && matches!(
+                self.control_kind(),
+                ControlKind::Button | ControlKind::Window
+            );
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
         self.feature_editor
@@ -3200,6 +3253,10 @@ impl BindingUi {
         layers: &RefCell<LayerStore>,
     ) -> Result<(String, Trigger, Action), String> {
         let (layer, trigger) = self.selected_layer_and_trigger(layers)?;
+        // The information window runs nothing; its entry carries what it shows.
+        if trigger == Trigger::Window {
+            return Ok((layer, trigger, Action::None));
+        }
         if matches!(self.action_kind(), ActionKind::Plugin) {
             return Ok((
                 layer,
@@ -3295,6 +3352,7 @@ impl BindingUi {
             1 => ControlKind::Encoder,
             2 => ControlKind::Touch,
             3 => ControlKind::TouchButton,
+            4 => ControlKind::Window,
             _ => ControlKind::Button,
         }
     }
@@ -3439,6 +3497,7 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
         ControlKind::TouchButton => {
             format!("Configuring: Touch button {}", number.unwrap_or(1))
         }
+        ControlKind::Window => "Configuring: Info window".into(),
     }
 }
 
@@ -3516,11 +3575,13 @@ fn event_label(event: EventKind) -> &'static str {
         EventKind::TouchSwipeRight => "Swipe right",
         EventKind::TouchSwipeUp => "Swipe up",
         EventKind::TouchSwipeDown => "Swipe down",
+        EventKind::Display => "Display",
     }
 }
 
 fn event_from_label(label: &str) -> EventKind {
     match label {
+        "Display" => EventKind::Display,
         "Clockwise" => EventKind::EncoderClockwise,
         "Counterclockwise" => EventKind::EncoderCounterClockwise,
         "Tap" => EventKind::TouchTap,
@@ -3689,7 +3750,8 @@ struct PreviewTitle {
 }
 
 impl ArtworkUi {
-    /// Keys and touch sections that show live information on `layer`.
+    /// Keys, touch sections and the information window that show live
+    /// information on `layer`.
     fn info_targets(&self, layer: &str) -> Vec<(ArtworkTarget, sdeck_plus::info::InfoSource)> {
         let store = self.layers.borrow();
         let model = store.model();
@@ -3701,7 +3763,13 @@ impl ArtworkUi {
             let source = store.zone_info_source(layer, zone)?;
             Some((ArtworkTarget::EncoderZone(zone), source))
         });
-        keys.chain(zones).collect()
+        // The Neo's window shows the keypad page's own choice.
+        let window = model
+            .has_info_window()
+            .then(|| store.info_source(layer, &Trigger::Window))
+            .flatten()
+            .map(|source| (ArtworkTarget::TouchStripBackground, source));
+        keys.chain(zones).chain(window).collect()
     }
 
     fn info_value(&self, source: sdeck_plus::info::InfoSource) -> sdeck_plus::info::InfoValue {
@@ -3829,6 +3897,10 @@ impl ArtworkUi {
         other.extend(info(|target| {
             matches!(target, ArtworkTarget::EncoderZone(_))
         }));
+        // An information window draws its reading over its own picture.
+        other.extend(info(|target| {
+            *target == ArtworkTarget::TouchStripBackground
+        }));
         for zone in self.indicator_zones() {
             if self.indicated_zone(layer, zone) {
                 other.retain(|command| !matches!(command,
@@ -3917,12 +3989,20 @@ impl ArtworkUi {
             let last = self.layers.borrow().model().zones();
             (zone == 1 && previous, zone == last && next)
         };
-        let section = match target {
-            ArtworkTarget::Keypad(_) => None,
-            ArtworkTarget::EncoderZone(zone) => Some(indicators(zone)),
+        let model = self.layers.borrow().model();
+        let extent = match target {
+            ArtworkTarget::Keypad(_) => {
+                sdeck_plus::info_render::marquee_extent_for(model, value, None)
+            }
+            ArtworkTarget::EncoderZone(zone) => {
+                sdeck_plus::info_render::marquee_extent_for(model, value, Some(indicators(zone)))
+            }
+            ArtworkTarget::TouchStripBackground if model.has_info_window() => {
+                sdeck_plus::info_render::window_marquee_extent(model, value)
+            }
             ArtworkTarget::TouchStripBackground => return,
         };
-        let elapsed = self.preview_marquee_phase(target, value, section, now);
+        let elapsed = self.preview_marquee_phase(target, value, extent, now);
         if let ArtworkTarget::EncoderZone(zone) = target {
             if self.indicated_zone(&layer, zone) {
                 self.paint_touchscreen_zone(&layer, zone, Some(value), elapsed);
@@ -3930,7 +4010,6 @@ impl ArtworkUi {
             }
         }
         let background = self.info_background(&layer, target);
-        let model = self.layers.borrow().model();
         let image = match target {
             ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_for(
                 model,
@@ -3945,7 +4024,14 @@ impl ArtworkUi {
                 false,
                 elapsed,
             ),
-            ArtworkTarget::TouchStripBackground => return,
+            ArtworkTarget::TouchStripBackground => {
+                sdeck_plus::info_render::compose_window_image_for(
+                    model,
+                    value,
+                    background.as_deref(),
+                    elapsed,
+                )
+            }
         };
         match image {
             Ok(image) => {
@@ -3959,17 +4045,16 @@ impl ArtworkUi {
         }
     }
 
-    /// Follow the title `target` now shows: start or keep its marquee (and
+    /// Follow the title `target` now shows, scrolling over `extent` (see
+    /// `info_render::marquee_extent_for`): start or keep its marquee (and
     /// the timer) when it scrolls, forget it otherwise. Returns its phase.
     fn preview_marquee_phase(
         &self,
         target: ArtworkTarget,
         value: &sdeck_plus::info::InfoValue,
-        section: Option<(bool, bool)>,
+        extent: Option<(f64, f64)>,
         now: std::time::Instant,
     ) -> Duration {
-        let model = self.layers.borrow().model();
-        let extent = sdeck_plus::info_render::marquee_extent_for(model, value, section);
         let mut info = self.info.borrow_mut();
         let marquee = &mut info.marquee;
         let Some(extent) = extent else {
@@ -4197,11 +4282,12 @@ impl ArtworkUi {
     /// Repaint the preview; `send` also pushes the pictures to the device.
     fn refresh_with(&self, force: bool, send: bool) {
         let layer = self.layers.borrow().active().to_owned();
+        // The touchscreen page on a touch strip; the keypad page itself for
+        // an information window (the Neo's).
         let touch_owner = self
             .layers
             .borrow()
-            .touchscreen_owner(&layer)
-            .unwrap_or(&layer)
+            .artwork_owner(&layer, ArtworkTarget::TouchStripBackground)
             .to_owned();
         let (previous, next) = self.layers.borrow().touchscreen_navigation(&layer);
         let cache_key = format!("{}:{layer}:{touch_owner}:{previous}:{next}", layer.len());
@@ -4673,7 +4759,7 @@ impl PreviewWiring {
         };
         let names: Vec<String> = ArtworkTarget::touch_for(model)
             .into_iter()
-            .map(touch_target_label)
+            .map(|target| touch_target_label(model, target))
             .collect();
         let shown: Vec<String> = (0..list.n_items())
             .filter_map(|index| list.string(index).map(|name| name.to_string()))
@@ -4693,9 +4779,13 @@ fn replace_page(page: &GtkBox, child: &GtkBox) {
     page.append(child);
 }
 
-fn touch_target_label(target: ArtworkTarget) -> String {
+fn touch_target_label(
+    model: &sdeck_plus::device_model::DeviceModel,
+    target: ArtworkTarget,
+) -> String {
     match target {
         ArtworkTarget::Keypad(key) => format!("Key {key}"),
+        ArtworkTarget::TouchStripBackground if model.has_info_window() => "Info window".into(),
         ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
         ArtworkTarget::EncoderZone(zone) => format!("Touch zone {zone}"),
     }
@@ -4706,10 +4796,11 @@ fn add_artwork_controls(
     window: &ApplicationWindow,
     artwork: &ArtworkUi,
 ) -> gtk::DropDown {
+    let model = artwork.layers.borrow().model();
     let targets = gtk::StringList::new(
-        &ArtworkTarget::touch_for(artwork.layers.borrow().model())
+        &ArtworkTarget::touch_for(model)
             .into_iter()
-            .map(touch_target_label)
+            .map(|target| touch_target_label(model, target))
             .collect::<Vec<_>>()
             .iter()
             .map(String::as_str)
@@ -5299,6 +5390,7 @@ mod tests {
     mod multi_action_editor_tests;
     mod multi_action_runtime_tests;
     mod multimedia_action_tests;
+    mod neo_window_ui_tests;
     mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
@@ -5376,8 +5468,13 @@ mod tests {
             .set_gtk_enable_animations(false);
         let layer_model = gtk::StringList::new(&["Base"]);
         let layer_picker = gtk::DropDown::new(Some(layer_model.clone()), gtk::Expression::NONE);
-        let control_model =
-            gtk::StringList::new(&["Button", "Encoder", "Touchpad", "Touch button"]);
+        let control_model = gtk::StringList::new(&[
+            "Button",
+            "Encoder",
+            "Touchpad",
+            "Touch button",
+            "Info window",
+        ]);
         let control_picker = gtk::DropDown::new(Some(control_model), gtk::Expression::NONE);
         let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
         let control_number_picker =

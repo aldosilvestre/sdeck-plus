@@ -18,6 +18,10 @@ pub enum ControlKind {
     Touch,
     /// A capacitive touch button reported after the keys (the Stream Deck Neo's).
     TouchButton,
+    /// The information window of a model whose window takes no touch (the
+    /// Stream Deck Neo's), number 1: it shows the page's picture and live
+    /// information and runs no action.
+    Window,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +37,8 @@ pub enum EventKind {
     TouchSwipeRight,
     TouchSwipeUp,
     TouchSwipeDown,
+    /// What the information window shows; it is never an input.
+    Display,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,8 +54,9 @@ pub enum ActionKind {
     Plugin,
 }
 
-/// The control kinds `model` has: its keys, plus dials, touch strip and touch
-/// buttons when present.
+/// The control kinds of `model` that run actions: its keys, plus dials, touch
+/// strip and touch buttons when present. An information window
+/// ([`ControlKind::Window`]) only shows things and is not one of them.
 pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     let mut controls = vec![ControlKind::Button];
     if model.dials > 0 {
@@ -65,10 +72,12 @@ pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
 }
 
 /// The events the editor offers for `control`. A touch button has one, its
-/// press (a touch), like a key.
+/// press (a touch), like a key; the information window has only what it
+/// displays.
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
         ControlKind::Button | ControlKind::TouchButton => vec![EventKind::ButtonPress],
+        ControlKind::Window => vec![EventKind::Display],
         ControlKind::Encoder => vec![
             EventKind::EncoderPress,
             EventKind::EncoderClockwise,
@@ -123,6 +132,12 @@ pub fn control_number_error(
             "Touch button {number} does not exist on the {}; its touch buttons are 1..={}.",
             model.name, model.touch_buttons
         )),
+        ControlKind::Window if !model.has_info_window() => {
+            Some(format!("The {} has no information window.", model.name))
+        }
+        ControlKind::Window if number != 1 => {
+            Some(format!("The {} has one information window.", model.name))
+        }
         _ => None,
     }
 }
@@ -156,6 +171,11 @@ pub fn trigger_from_selection_for(
             if model.is_valid_touch_button(control_number) =>
         {
             Ok(Trigger::TouchButton(control_number))
+        }
+        (ControlKind::Window, EventKind::Display)
+            if model.has_info_window() && control_number == 1 =>
+        {
+            Ok(Trigger::Window)
         }
         (ControlKind::Encoder, EventKind::EncoderPress) if model.is_valid_dial(control_number) => {
             Ok(Trigger::EncoderPress(control_number))
@@ -330,7 +350,7 @@ pub fn control_triggers(
                 }).cloned());
             }
         }
-        ControlKind::Touch | ControlKind::TouchButton => {}
+        ControlKind::Touch | ControlKind::TouchButton | ControlKind::Window => {}
     }
     Ok(triggers)
 }
@@ -343,11 +363,19 @@ pub fn control_summary(
     control: ControlKind,
     number: u8,
 ) -> String {
+    // The window runs nothing: it is described by what it shows.
+    if control == ControlKind::Window {
+        return match store.info_source(layer, &Trigger::Window) {
+            Some(source) => format!("Live information: {}", source.label()),
+            None => "No live information".into(),
+        };
+    }
     let sample = match control {
         ControlKind::Touch => Trigger::TouchTap,
         ControlKind::Encoder => Trigger::EncoderPress(number),
         ControlKind::Button => Trigger::KeyPress(number),
         ControlKind::TouchButton => Trigger::TouchButton(number),
+        ControlKind::Window => Trigger::Window,
     };
     let bindings = store
         .binding_layer(layer, &sample)
@@ -582,6 +610,7 @@ fn summary_event_label(event: EventKind) -> &'static str {
         EventKind::TouchSwipeRight => "Swipe right",
         EventKind::TouchSwipeUp => "Swipe up",
         EventKind::TouchSwipeDown => "Swipe down",
+        EventKind::Display => "Display",
     }
 }
 

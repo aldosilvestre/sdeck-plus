@@ -1,4 +1,5 @@
-//! Draws a live information value (icon, bar and text) as a 120x120 key image.
+//! Draws a live information value (icon, bar and text) as a 120x120 key image,
+//! a touch strip section, or an information window (the Stream Deck Neo's).
 
 use crate::{
     binding_icons::{self, BindingIcon},
@@ -63,7 +64,44 @@ pub fn compose_info_image_for(
     elapsed: Duration,
 ) -> Result<Pixbuf, String> {
     let size = key_size(model);
-    compose(value, size, size, background, None, elapsed)
+    compose(value, size, size, background, Shape::Key, elapsed)
+}
+
+/// Compose the information window of `model` (the Stream Deck Neo's 248x58
+/// window): the reading drawn directly over the window's own picture of the
+/// page (transparent without one), its icon on the left and the value, bar
+/// and detail beside it, like a touch section without its tile.
+///
+/// # Errors
+/// A model without an information window, and background decoding, cairo or
+/// surface allocation failures.
+pub fn compose_window_image_for(
+    model: &DeviceModel,
+    value: &InfoValue,
+    background: Option<&Path>,
+    elapsed: Duration,
+) -> Result<Pixbuf, String> {
+    let (width, height) = window_size(model)?;
+    compose(value, width, height, background, Shape::Window, elapsed)
+}
+
+/// [`marquee_extent_for`] in the information window of `model`; `None` also
+/// for a model without one.
+pub fn window_marquee_extent(model: &DeviceModel, value: &InfoValue) -> Option<(f64, f64)> {
+    let (width, height) = window_size(model).ok()?;
+    let headline = window_plan(value, width, height).headline?;
+    Some((headline.scroll?, headline.rect.width))
+}
+
+fn window_size(model: &DeviceModel) -> Result<(i32, i32), String> {
+    if !model.has_info_window() {
+        return Err(format!("the {} has no information window", model.name));
+    }
+    let (width, height) = model.strip_px();
+    Ok((
+        i32::try_from(width).map_err(|error| error.to_string())?,
+        i32::try_from(height).map_err(|error| error.to_string())?,
+    ))
 }
 
 fn key_size(model: &DeviceModel) -> i32 {
@@ -103,7 +141,7 @@ pub fn compose_zone_image_at(
         ZONE_WIDTH,
         ZONE_HEIGHT,
         background,
-        Some((previous, next)),
+        Shape::Zone(previous, next),
         elapsed,
     )
 }
@@ -192,12 +230,23 @@ fn backdrop(width: i32, height: i32, source: Option<&Path>) -> Result<Vec<u8>, S
     Ok(canvas)
 }
 
+/// The kind of picture [`compose`] draws.
+#[derive(Clone, Copy)]
+enum Shape {
+    /// A square key.
+    Key,
+    /// A touch section, with page indicators at its `(previous, next)` edges.
+    Zone(bool, bool),
+    /// An information window: short and wide, with no section tile.
+    Window,
+}
+
 fn compose(
     value: &InfoValue,
     width: i32,
     height: i32,
     background: Option<&Path>,
-    section: Option<(bool, bool)>,
+    shape: Shape,
     elapsed: Duration,
 ) -> Result<Pixbuf, String> {
     let canvas = backdrop(width, height, background)?;
@@ -211,8 +260,8 @@ fn compose(
     .map_err(|error| error.to_string())?;
     {
         let cairo = Context::new(&surface).map_err(|error| error.to_string())?;
-        match section {
-            Some((previous, next)) => {
+        match shape {
+            Shape::Zone(previous, next) => {
                 // Over artwork the tile is lighter so the artwork stays visible.
                 let alpha = if background.is_some() {
                     crate::binding_icons::ZONE_TILE_ARTWORK_ALPHA
@@ -223,7 +272,8 @@ fn compose(
                     draw_parts(&cairo, value, &zone_plan(value, previous, next), elapsed)
                 })
             }
-            None => draw_parts(&cairo, value, &key_plan(value, width), elapsed),
+            Shape::Key => draw_parts(&cairo, value, &key_plan(value, width), elapsed),
+            Shape::Window => draw_parts(&cairo, value, &window_plan(value, width, height), elapsed),
         }
         .map_err(|error| error.to_string())?;
     }
@@ -683,6 +733,55 @@ fn zone_plan(value: &InfoValue, previous: bool, next: bool) -> Plan {
         (x, right - x),
         vertical,
         (26.0, 13.0, 8.0),
+        pango::Alignment::Left,
+    );
+    Plan {
+        icon: Some(icon),
+        headline,
+        bar,
+        details,
+    }
+}
+
+/// Space kept between an information window's edges and its reading.
+const WINDOW_MARGIN: f64 = 6.0;
+
+/// Short wide layout of an information window, the touch section's layout
+/// fitted to the window's size: icon on the left; value, bar and detail
+/// stacked beside it; without an icon the text is centered. Detail lines that
+/// do not fit are left out.
+fn window_plan(value: &InfoValue, width: i32, height: i32) -> Plan {
+    let (width, height) = (f64::from(width), f64::from(height));
+    let (left, right) = (WINDOW_MARGIN, width - WINDOW_MARGIN);
+    let vertical = (3.0, height - 3.0);
+    if value.glyph == Glyph::None {
+        let (headline, bar, details) = text_column(
+            value,
+            (left, right - left),
+            vertical,
+            (26.0, 12.0, 6.0),
+            pango::Alignment::Center,
+        );
+        return Plan {
+            icon: None,
+            headline,
+            bar,
+            details,
+        };
+    }
+    let size = (height - 16.0).clamp(16.0, 42.0);
+    let icon = Rect {
+        x: left + 2.0,
+        y: height / 2.0 - size / 2.0,
+        width: size,
+        height: size,
+    };
+    let x = icon.right() + 10.0;
+    let (headline, bar, details) = text_column(
+        value,
+        (x, right - x),
+        vertical,
+        (22.0, 12.0, 6.0),
         pango::Alignment::Left,
     );
     Plan {

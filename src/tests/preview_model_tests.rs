@@ -60,6 +60,8 @@ pub(super) struct ModelFixture {
     pub(super) artwork: ArtworkUi,
     pub(super) requests: Option<mpsc::Receiver<LayerCommand>>,
     pub(super) commands: mpsc::Sender<LayerCommand>,
+    /// What the window sent towards the device.
+    pub(super) hardware: mpsc::Receiver<ArtworkCommand>,
 }
 
 pub(super) fn model_fixture(
@@ -86,7 +88,7 @@ pub(super) fn model_fixture(
         ArtworkStore::open_at_for_layer_model(root.join("artwork"), Some("Base"), model).unwrap();
     setup(&mut store, &mut images);
     let layers = Rc::new(RefCell::new(store));
-    let (output, _hardware) = mpsc::channel();
+    let (output, hardware) = mpsc::channel();
     let artwork = ArtworkUi {
         store: Rc::new(RefCell::new(Some(images))),
         layers: layers.clone(),
@@ -127,6 +129,7 @@ pub(super) fn model_fixture(
         artwork,
         requests: Some(requests),
         commands,
+        hardware,
     })
 }
 
@@ -207,6 +210,8 @@ pub(super) fn kind_of(button: &Button) -> &'static str {
         "dial"
     } else if button.has_css_class("touch-button") {
         "touch button"
+    } else if button.has_css_class("window-surface") {
+        "window"
     } else {
         "other"
     }

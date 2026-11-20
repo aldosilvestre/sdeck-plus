@@ -497,7 +497,7 @@ impl LayerStore {
                 };
                 let images = ArtworkTarget::all_for(self.model)
                     .into_iter()
-                    .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
+                    .filter(|target| target.follows_touch_page(self.model))
                     .map(|target| artwork.assigned_path_in_layer(&key, target))
                     .collect::<Vec<_>>();
                 let existing = pages
@@ -696,11 +696,14 @@ impl LayerStore {
         self.layers.contains_key(owner)
             || self.touchscreens.all_pages().any(|page| page.name == owner)
     }
+    /// The configuration whose picture `target` shows on keypad page `layer`:
+    /// the page itself for its keys (and for an information window without
+    /// touch), else the profile's selected touchscreen page.
     pub fn artwork_owner<'a>(&'a self, layer: &'a str, target: ArtworkTarget) -> &'a str {
-        if matches!(target, ArtworkTarget::Keypad(_)) {
-            layer
-        } else {
+        if target.follows_touch_page(self.model) {
             self.touchscreen_owner(layer).unwrap_or(layer)
+        } else {
+            layer
         }
     }
 }

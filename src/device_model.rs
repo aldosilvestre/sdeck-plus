@@ -246,7 +246,9 @@ pub static XL: DeviceModel = DeviceModel {
 };
 
 /// Planned. Facts from the Stream Deck Neo page: an information window with no
-/// touch, and two capacitive sensors reported after the keys.
+/// touch, and two capacitive sensors reported after the keys. The page tells
+/// to "Rotate the image 180° before upload" for the keys and for the 248 x 58
+/// window alike (Update Window Image, 0x0B). Validated with the simulator only.
 pub static NEO: DeviceModel = DeviceModel {
     id: "neo",
     name: "Stream Deck Neo",
@@ -260,7 +262,7 @@ pub static NEO: DeviceModel = DeviceModel {
         px: (248, 58),
         zones: 0,
         touch: false,
-        rotation: Rotation::None,
+        rotation: Rotation::Rot180,
         zone_px: (248, 58),
     }),
     ..EXPANDED
@@ -383,6 +385,13 @@ impl DeviceModel {
     /// Whether the strip senses touch (a window such as the Neo's does not).
     pub const fn has_touch(&self) -> bool {
         matches!(self.strip, Some(StripSpec { touch: true, .. }))
+    }
+
+    /// Whether the display under the keys is an information window that
+    /// senses no touch (the Neo's): it shows each page's picture and live
+    /// information, and takes no input.
+    pub const fn has_info_window(&self) -> bool {
+        matches!(self.strip, Some(StripSpec { touch: false, .. }))
     }
 
     /// Touch sections along the strip; 0 without one.

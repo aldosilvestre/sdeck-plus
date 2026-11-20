@@ -1,7 +1,8 @@
 //! The window of every model the app drives shows only the sections of the
 //! controls that model has. A Stream Deck Classic or XL has keys only and the
-//! Neo keys and two touch buttons: their action catalog serves the keys, and
-//! there is no Dials tab, no touchscreen page control, no strip appearance and
+//! Neo keys, two touch buttons and an information window: their action catalog
+//! serves the keys, and there is no Dials tab, no touchscreen page control, no
+//! strip appearance (the Neo's window has its own, see neo_window_ui_tests) and
 //! no text that offers a dial or a touch strip. The Stream Deck + and + XL keep
 //! every section exactly as before. No device is involved: the window runs over
 //! scratch stores and a channel that stands in for the layer worker.
@@ -210,6 +211,11 @@ fn each_model_shows_the_sections_of_the_controls_it_has() {
                 usize::from(model.touch_buttons),
                 "{id}"
             );
+            assert_eq!(
+                count("window"),
+                usize::from(model.has_info_window()),
+                "{id}"
+            );
             assert_eq!(count("other"), 0, "{id}");
             assert_eq!(
                 tab_order(&f.window, &chassis, &buttons),
@@ -340,7 +346,7 @@ fn the_texts_of_each_model_name_only_its_own_controls() {
             (
                 neo(),
                 "New profile: add a profile with its own keys, pages and touch buttons.",
-                "Click a key or a touch button on the preview.",
+                "Click a key, the info window or a touch button on the preview.",
                 "key or touch button",
             ),
             (

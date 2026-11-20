@@ -11,11 +11,12 @@
 //! uses the same rules with 40 px keys on a 46 px pitch and a tighter bottom
 //! margin so its four rows fit the default window.
 //!
-//! A Stream Deck Neo's information window is drawn as a plain, non-interactive
-//! display (a [`StripLayout`] without zones and with `touch == false`); its two
-//! capacitive touch buttons are selectable controls on either side of it,
-//! inside the bezel. A model with touch buttons and no display would show them
-//! as one centred row under its keys.
+//! A Stream Deck Neo's information window is drawn as a display without touch
+//! (a [`StripLayout`] without zones and with `touch == false`); it is selected
+//! as [`ControlRef::Window`] for the page's picture and live information, never
+//! as the touch strip. Its two capacitive touch buttons are selectable controls
+//! on either side of it, inside the bezel. A model with touch buttons and no
+//! display would show them as one centred row under its keys.
 
 use crate::device_model::DeviceModel;
 
@@ -105,6 +106,8 @@ pub enum ControlRef {
     Zone(u8),
     /// One capacitive touch button (the Stream Deck Neo's), left to right.
     TouchButton(u8),
+    /// An information window that takes no touch (the Stream Deck Neo's).
+    Window,
 }
 
 impl ControlRef {
@@ -115,6 +118,7 @@ impl ControlRef {
             Self::Dial(number) => Some(format!("Encoder {number}")),
             Self::Zone(number) => Some(format!("Touch zone {number}")),
             Self::TouchButton(number) => Some(format!("Touch button {number}")),
+            Self::Window => Some("Info window".into()),
             Self::Strip => None,
         }
     }
@@ -229,15 +233,20 @@ impl PreviewLayout {
     }
 
     /// Every control in the order the preview offers them: keys row-major, then
-    /// the strip, its sections, the touch buttons and the dials, as the widgets
-    /// are created.
+    /// the strip and its sections (or the information window), the touch
+    /// buttons and the dials, as the widgets are created.
     pub fn controls(&self) -> Vec<ControlRef> {
         let mut controls: Vec<ControlRef> = (1..=self.keys.len())
             .map(|number| ControlRef::Key(number as u8))
             .collect();
-        if let Some(strip) = self.strip.as_ref().filter(|strip| strip.touch) {
-            controls.push(ControlRef::Strip);
-            controls.extend((1..=strip.zones.len()).map(|number| ControlRef::Zone(number as u8)));
+        match &self.strip {
+            Some(strip) if strip.touch => {
+                controls.push(ControlRef::Strip);
+                controls
+                    .extend((1..=strip.zones.len()).map(|number| ControlRef::Zone(number as u8)));
+            }
+            Some(_) => controls.push(ControlRef::Window),
+            None => {}
         }
         controls.extend(
             (1..=self.touch_buttons.len()).map(|number| ControlRef::TouchButton(number as u8)),
@@ -272,6 +281,11 @@ impl PreviewLayout {
                 .as_ref()
                 .and_then(|rail| rail.dials.get(index(number)?).copied()),
             ControlRef::TouchButton(number) => self.touch_buttons.get(index(number)?).copied(),
+            ControlRef::Window => self
+                .strip
+                .as_ref()
+                .filter(|strip| !strip.touch)
+                .map(|strip| strip.rect),
         }
     }
 

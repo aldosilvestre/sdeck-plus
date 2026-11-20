@@ -218,6 +218,23 @@ fn the_table_matches_the_documented_facts() {
     assert!(!DeviceModel::by_id("classic").unwrap().has_touch());
 }
 
+/// Elgato's Neo page ("Full Window Image"): prepare a 248 x 58 px image,
+/// "Rotate the image 180° before upload", export it as JPEG and send it with
+/// the Update Window Image command (0x0B). Its keys are turned the same way.
+#[test]
+fn the_neo_window_is_turned_half_way_like_its_keys() {
+    let neo = DeviceModel::by_id("neo").unwrap();
+    let strip = neo.strip.expect("the Neo has an information window");
+    assert_eq!(strip.px, (248, 58));
+    assert_eq!((strip.zones, strip.touch), (0, false));
+    assert_eq!(strip.rotation, Rotation::Rot180);
+    assert_eq!(neo.strip_rotation(), Rotation::Rot180);
+    assert_eq!(neo.key_rotation, Rotation::Rot180);
+    // The touch strips keep the rotation they always had.
+    assert_eq!(PLUS.strip_rotation(), Rotation::None);
+    assert_eq!(PLUS_XL.strip_rotation(), Rotation::Ccw90);
+}
+
 #[test]
 fn the_expanded_keypads_are_supported_with_the_plus_models() {
     let supported: Vec<_> = DeviceModel::supported().map(|model| model.id).collect();
