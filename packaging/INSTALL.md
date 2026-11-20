@@ -37,7 +37,8 @@ install -Dm644 LICENSE ~/.local/share/doc/sdeck-plus/LICENSE
 
 ## Device access (once, needs root)
 
-The udev rule lets the logged-in user open the Stream Deck + and Stream Deck + XL:
+The udev rule lets the logged-in user open every supported model: the Stream Deck +, + XL, Classic, XL, Mini
+and Neo (one line per product id):
 
 ```bash
 sudo install -Dm644 70-sdeck.rules /etc/udev/rules.d/70-sdeck.rules

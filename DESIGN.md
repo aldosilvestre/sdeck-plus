@@ -5,8 +5,10 @@
 sdeck-plus is a native hardware configuration desk, not a web dashboard. Ink-toned
 surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview of the shown model: eight keys, a touch
 strip and four circular encoders on the Stream Deck +; 36 keys, a touch strip and
-six encoders on the Stream Deck + XL. Preserve its coordinates, artwork and
-existing functions.
+six encoders on the Stream Deck + XL; 15 keys and a background bar on the
+Classic; 32 keys on the XL; six keys on the Mini; eight keys, an info window and
+two touch buttons on the Neo. Preserve its coordinates, artwork and existing
+functions.
 
 Configuration follows a short path: choose a profile, drag an action from the
 right-hand searchable catalog onto a keypad button, then complete its fields
@@ -33,7 +35,8 @@ shows the row itself. Searching opens every category with matches, hides the
 rest and shows "No actions match your search." when nothing matches; clearing
 restores the categories as the user left them. Every key and every dial of
 the shown model takes a drop (36 keys and 6 dials on the + XL, 8 and 4 on the +,
-15 keys on the Classic and 32 on the XL, which have no dials),
+15 keys on the Classic, 32 on the XL, 6 on the Mini and 8 on the Neo, which have
+no dials),
 and each model's session keeps its own search text and open categories.
 Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
@@ -252,7 +255,8 @@ Use the system GTK font. App title: 20px/700. Inspector title: 18px/700.
 Section labels: 14px/600. Body, controls and field labels: 14px. Supporting
 metadata: 13px. Binding status: 13px/600 primary ink. Existing physical-device
 branding keeps its material typography. The preview-only touch placeholder
-("Touch strip · waiting for input") is 11px/600 mint on black, and each preview
+("Touch strip · waiting for input", or "Info window" in an empty Neo window)
+is 11px/600 mint on black, and each preview
 dial's caption is 10px/600 pale graphite ink; neither carries configuration
 instructions or reaches the physical device.
 Long summaries ellipsize with full tooltips; editable fields preserve the value.
@@ -361,7 +365,8 @@ Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its preview is the key at the shown model's size
-(120px for the +, 112px for the + XL).
+(its key image size: 120px for the +, 112px for the + XL, 72px for the Classic,
+96px for the XL and the Neo, 80px for the Mini).
 
 The fixed-geometry device chassis sits in its preview card: the chassis plus
 a 14px frame (padding and border), 440x428 at 1x for the Stream Deck +. The card is presented through `ScaledBin`
@@ -385,6 +390,10 @@ in preview pixels at 1x:
 |-------|---------|------|-------------|-------|
 | Stream Deck + | 426x414 | 8 (4x2), 60px on a 91x67 pitch | 328x41, 4 sections of 82px | 4 knobs of 46px, 91px pitch |
 | Stream Deck + XL | 556x456 | 36 (9x4), 40px on a 46px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
+| Stream Deck Classic | 348x250 | 15 (5x3), 44px on a 52px pitch | none (a 252x28 Background bar under the keys) | none |
+| Stream Deck XL | 504x262 | 32 (8x4), 44px on a 52px pitch | none | none |
+| Stream Deck Mini | 244x158 | 6 (3x2), 44px on a 52px pitch | none | none |
+| Stream Deck Neo | 296x208 | 8 (4x2), 44px on a 52px pitch | none (a 124x29 info window without touch, between 2 touch buttons of 28px) | none |
 
 The Stream Deck + keeps the geometry it always had, pixel for pixel. Every
 other model of the registry is laid out by the same generic rules (44px keys on
@@ -392,13 +401,18 @@ a 52px pitch, 76px sections, knobs under their sections, a chassis just wide
 enough for its widest row, margins kept whole so it is symmetric); models
 without a strip or dials omit them. The + XL uses those rules with 40px keys on
 a 46px pitch and a 24px bottom margin, so its four rows still fit the window
-(see below). A Neo's information window is drawn where a strip would be, as a
-selectable display of key material (`.window-surface`, named "Info window")
-that takes no touch: it shows the page's picture and live information (see
-"Information window" below). Its two capacitive touch buttons are
+(see below). A Neo's information window is drawn under the keys, where a strip
+would be, as a selectable display of key material (`.window-surface`, named
+"Info window") at half its pixel size, so it keeps the device's 248:58 shape
+(124x29), with no bezel or header line around it: it is its own frame and the
+chassis shows around it. It takes no touch: it shows the page's picture and
+live information (see "Information window" below), and while it shows no
+picture it is captioned "Info window" (11px/600 mint, centred in it). Its two
+capacitive touch buttons are
 round 28px pads of key material with the key's inset edge (`.touch-button`), one
-on each side of the window inside the bezel, 10px from it and vertically centred
-on it; the bezel and chassis widen to hold them (376px wide). They are selectable
+on each side of the window on the chassis, 10px from it and vertically centred
+on it (the odd half pixel downwards, so Tab reaches the window first); pads and
+window span the key row (the Neo chassis is 296x208). They are selectable
 controls that take no picture (Elgato documents none). A model with touch
 buttons and no display would show them as one centred row under its keys.
 The Stream Deck Classic adds a slim **Background** bar under its keys, as wide
@@ -424,9 +438,9 @@ every section unchanged.
   assigning an action." (a touch button takes its action from the Action
   selector).
 - The touchscreen page controls, the strip's Appearance section and the swipe,
-  tap and hold badges never appear (the Neo's window header keeps only its
-  plain "Display" caption, and the Artwork target picker lists nothing on an
-  XL). On the Neo, selecting the window shows its own Appearance
+  tap and hold badges never appear (the Neo's empty window shows only its
+  plain "Info window" caption, and the Artwork target picker lists nothing on
+  an XL). On the Neo, selecting the window shows its own Appearance
   section (the picker lists only "Info window", in a "Window picture" expander
   that says each keypad page has its own picture and live information); on the
   Classic, selecting the background bar shows its own (the picker lists only
@@ -452,10 +466,13 @@ every section unchanged.
 
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
-is the device card alone (426x414 for the +, 556x456 for the + XL) and
-`main-window-xl.png` is the window content configuring the + XL (1088x668: the
-+ XL workspace needs 1088px; no selector: one model). `main-window-two-devices.png`
-(968x668, scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
+is the device card alone, the size of its chassis (426x414 for the +, 556x456
+for the + XL, 348x250 for the Classic, 504x262 for the XL, 244x158 for the Mini,
+296x208 for the Neo) and
+`main-window-xl.png` is the window content configuring the + XL at the default
+1120x884 size (1152x916 with the 16px shell margin; no selector: one model).
+`main-window-two-devices.png` (a 1000x700 window, 1032x732 with the margin,
+scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
 the real hub. They are written by the documentation screenshot generator, which
 iterates `DeviceModel::supported()` for the per-model images, so a model that
 becomes supported gets its image without editing the generator. The + XL images
@@ -975,7 +992,8 @@ two columns fit.
   size of the shown page only. The window shows one session. Automatically
   (until the user picks a model in this run) it shows the last used model when
   that model is connected, else the first connected model in the order Stream
-  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL; this is re-evaluated whenever a device connects or
+  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL, Stream Deck Neo,
+  Stream Deck Mini (the registry's order); this is re-evaluated whenever a device connects or
   is unplugged, so a last used model that connects second is shown as soon as
   it connects, and the other connected model is shown when the shown model's
   last device is unplugged. With no device the window keeps what it shows (the
@@ -987,7 +1005,7 @@ two columns fit.
   and Stream Deck XL connected — keys, dials and touch strip are live" (every
   control any of them has), two units of one model "<model> x2 connected"; models
   are named in the order Stream Deck +, Stream Deck + XL, Stream Deck Classic,
-  Stream Deck XL whichever plugged in first, and with several devices the tooltip of the line starts with the whole
+  Stream Deck XL, Stream Deck Neo, Stream Deck Mini whichever plugged in first, and with several devices the tooltip of the line starts with the whole
   sentence (the line itself may be ellipsized), then the USB ids.
   The **Current selector** sits on the title row, immediately left of Menu: the caption
   "Current" (muted, 12px) and a drop-down named "Current device" with the
@@ -996,7 +1014,8 @@ two columns fit.
   one model it is not in the layout at all (not focusable either), so a
   window with one model looks exactly as it did before the selector existed.
   Its entries are the connected models, plain names, in the same order (Stream
-  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL), and it shows the shown model. Choosing an entry shows
+  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL, Stream Deck Neo,
+  Stream Deck Mini), and it shows the shown model. Choosing an entry shows
   that model's session, rebinds the menu, toasts "Switched to <model>." and
   remembers the model for the next start only once the session opened; it
   never asks about unsaved edits, because the session left behind stays alive

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>sdeck-plus plugin SDK: write a plugin for the Stream Deck + app</title>
+<title>sdeck-plus plugin SDK: write a plugin for the Stream Deck app on Linux</title>
 <meta name="description" content="Write a plugin for sdeck-plus: project layout, manifest.json reference, the one-line JSON protocol, exact limits and environment, security rules, dependency declaration, testing with the validator, installing and a copyable starter template.">
 <link rel="canonical" href="https://aldosilvestre.github.io/sdeck-plus/plugin-sdk.html">
 <meta name="robots" content="index, follow, max-image-preview:large">
@@ -286,7 +286,7 @@ cp manifest.json "$dest/" &amp;&amp; install -m 755 run "$dest/run"</code></pre>
                   <tr><th><code>id</code></th><td>string, required</td><td>Same rule as the plugin id; unique within the plugin. This is what the request's <code>action</code> carries.</td></tr>
                   <tr><th><code>name</code></th><td>string, required</td><td>1-64 printable characters, not blank.</td></tr>
                   <tr><th><code>description</code></th><td>string, optional</td><td>At most 256 characters.</td></tr>
-                  <tr><th><code>controls</code></th><td>array, required</td><td>At least one of <code>key</code>, <code>dial_turn</code>, <code>dial_press</code>, <code>touch</code> (the touch strip). The editor only lets the user assign the action to controls listed here.</td></tr>
+                  <tr><th><code>controls</code></th><td>array, required</td><td>At least one of <code>key</code>, <code>dial_turn</code>, <code>dial_press</code>, <code>touch</code> (the touch strip). The editor only lets the user assign the action to controls listed here. A <code>key</code> action can also be bound to a Stream Deck Neo touch button, which runs it once per touch; the Neo's info window and the Stream Deck Classic's background take no plugin action.</td></tr>
                   <tr><th><code>settings</code></th><td>array, optional</td><td>Default empty; at most 16 fields, unique ids. See below.</td></tr>
                   <tr><th><code>display</code></th><td>string, optional</td><td>The id of a declared <code>values</code> entry this action displays. An unknown id rejects the manifest.</td></tr>
                 </table>
@@ -776,7 +776,7 @@ cargo run --offline --example plugin_validate -- &lt;plugin-dir&gt; --invoke &lt
     <div class="footer-grid">
       <div>
         <a class="brand" href="./"><img src="icon.svg" width="30" height="30" alt="">sdeck-plus</a>
-        <p>Native GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux.</p>
+        <p>Native GTK4 control desk for the Elgato Stream Deck +, + XL, Classic, XL, Mini and Neo on Linux.</p>
       </div>
       <nav aria-label="Product">
         <h2>Product</h2>

@@ -10,13 +10,13 @@ A physical keypad key can have a short action and a separate **Hold 2 seconds** 
 
 The hold action is optional and can be any catalog action, not only cancellation. Selecting an action for the same key keeps the current short/hold mode. Opening or toggling the editor does not create or execute a binding. To edit the short action again, clear **Hold 2 seconds**.
 
-**Remove binding** in hold mode removes only the secondary binding, restoring immediate key-down execution on the next press. Undo restores that binding and its page-return setting. An explicitly saved **None** secondary action is still a configured hold binding; remove it to disable hold recognition.
+**Remove binding** clears the whole key in either mode: the short and the hold action together, with their page-return settings and live information. **Undo** in its toast restores all of it for ten seconds. An explicitly saved **None** secondary action is still a configured hold binding, so the short action keeps running on release rather than on key-down.
 
 ## What stays independent
 
 - Hold actions do not replace the short action's artwork, button text or live-information binding. Cancelling a countdown restores the normal key image.
 - Short and hold actions can each have their own page-return setting.
-- This applies only to the physical keypad keys (eight on the Stream Deck +, 36 on the Stream Deck + XL). Touch-strip hold gestures and dial presses keep their existing behavior.
+- This applies only to the physical keypad keys (eight on the Stream Deck + and the Neo, 36 on the Stream Deck + XL, 15 on the Classic, 32 on the XL, six on the Mini). Touch-strip hold gestures and dial presses keep their existing behavior, and the Neo's touch buttons have no hold action.
 - Swapping keys carries their short actions, hold actions and page-return settings together. Export/import retains both bindings without a configuration migration.
 
 ## Verification
