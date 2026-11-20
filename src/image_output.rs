@@ -1,4 +1,7 @@
-//! Pure artwork preparation and Stream Deck + image-report encoding.
+//! Pure artwork preparation, device image encoding (JPEG, or BMP for the
+//! Legacy Mini) and Expanded-family image-report encoding. The `*_jpeg*`
+//! helpers keep their names for every format: they return the picture in the
+//! format of the model they are given.
 
 use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
 use crate::device_model::{DeviceModel, ImageFormat, Rotation, PLUS};
@@ -10,6 +13,8 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime},
 };
+
+mod bmp;
 
 pub const REPORT_SIZE: usize = 1024;
 
@@ -75,14 +80,14 @@ pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<V
     prepare_jpeg_for(&PLUS, target, source)
 }
 
-/// [`prepare_jpeg`] at the image sizes of `model`.
+/// [`prepare_jpeg`] at the image sizes and in the image format of `model`.
 pub fn prepare_jpeg_for(
     model: &DeviceModel,
     target: ArtworkTarget,
     source: impl AsRef<Path>,
 ) -> Result<Vec<u8>, String> {
     let size = dimensions_for(model, target)?;
-    encode_jpeg(
+    encode_image(
         model,
         Part::of(target),
         &prepare_background(size, source.as_ref())?,
@@ -269,21 +274,17 @@ fn orient(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Pixbuf, Str
     }
 }
 
-fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
-    if model.image_format != ImageFormat::Jpeg {
-        return Err(format!(
-            "{} takes {} images, which are not implemented",
-            model.name,
-            model.image_format.name()
-        ));
-    }
+/// The picture for the display of `part`, oriented and encoded as `model`
+/// takes it: JPEG, or an uncompressed BMP for a Legacy Mini.
+fn encode_image(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
     let image = &orient(model, part, image)?;
-    // Transparency belongs to the preview/overlay. The device takes JPEG, so
-    // flatten only after compositing the overlay onto its existing artwork.
+    // Transparency belongs to the preview/overlay. JPEG and the 24-bit BMP
+    // have no alpha channel, so flatten only after compositing the overlay
+    // onto its existing artwork.
     let flattened;
     let image = if image.has_alpha() {
         flattened = Pixbuf::new(Colorspace::Rgb, false, 8, image.width(), image.height())
-            .ok_or_else(|| "could not allocate JPEG image".to_string())?;
+            .ok_or_else(|| format!("could not allocate {} image", model.image_format.name()))?;
         flattened.fill(0x000000ff);
         image.composite(
             &flattened,
@@ -302,13 +303,18 @@ fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8
     } else {
         image
     };
-    let bytes = image
-        .save_to_bufferv("jpeg", &[("quality", "92")])
-        .map_err(|error| error.to_string())?;
-    if bytes.is_empty() {
-        return Err("JPEG encoder returned an empty image".into());
+    match model.image_format {
+        ImageFormat::Jpeg => {
+            let bytes = image
+                .save_to_bufferv("jpeg", &[("quality", "92")])
+                .map_err(|error| error.to_string())?;
+            if bytes.is_empty() {
+                return Err("JPEG encoder returned an empty image".into());
+            }
+            Ok(bytes)
+        }
+        ImageFormat::Bmp => bmp::encode(image),
     }
-    Ok(bytes)
 }
 
 /// Compose one physical 120x120 keypad image, without initializing GTK.
@@ -446,13 +452,13 @@ pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<V
     prepare_button_jpeg_for(&PLUS, source, text)
 }
 
-/// [`prepare_button_jpeg`] at the key size of `model`.
+/// [`prepare_button_jpeg`] at the key size and in the image format of `model`.
 pub fn prepare_button_jpeg_for(
     model: &DeviceModel,
     source: Option<&Path>,
     text: &ButtonText,
 ) -> Result<Vec<u8>, String> {
-    encode_jpeg(
+    encode_image(
         model,
         Part::Key,
         &compose_button_image_for(model, source, text)?,
@@ -632,9 +638,9 @@ pub fn prepare_touchscreen_zone_jpeg_for(
             InterpType::Nearest,
             255,
         );
-        return encode_jpeg(model, Part::Zone, &section);
+        return encode_image(model, Part::Zone, &section);
     }
-    encode_jpeg(model, Part::Zone, &overlay)
+    encode_image(model, Part::Zone, &overlay)
 }
 
 /// Encode a binding icon picture for a key or touch section that has no
@@ -701,7 +707,7 @@ pub fn prepare_icon_jpeg_over_for(
             match crate::binding_icons::compose_key_image_over_for(
                 model, icon, caption, text, background,
             )? {
-                Some(image) => encode_jpeg(model, Part::Key, &image),
+                Some(image) => encode_image(model, Part::Key, &image),
                 // No free band beside the user's text: the plain text picture.
                 None => prepare_button_jpeg_for(
                     model,
@@ -760,7 +766,7 @@ pub fn prepare_icon_jpeg_over_for(
                 InterpType::Nearest,
                 255,
             );
-            encode_jpeg(model, Part::Zone, &section)
+            encode_image(model, Part::Zone, &section)
         }
         ArtworkTarget::TouchStripBackground => {
             Err("binding icons cannot replace the touch strip background".into())
@@ -806,7 +812,7 @@ pub fn prepare_info_jpeg_for(
 ) -> Result<Vec<u8>, String> {
     let _ = dimensions_for(model, target)?;
     match target {
-        ArtworkTarget::Keypad(_) => encode_jpeg(
+        ArtworkTarget::Keypad(_) => encode_image(
             model,
             Part::Key,
             &crate::info_render::compose_info_image_for(model, value, background, elapsed)?,
@@ -834,9 +840,9 @@ pub fn prepare_info_jpeg_for(
                     InterpType::Nearest,
                     255,
                 );
-                return encode_jpeg(model, Part::Zone, &section);
+                return encode_image(model, Part::Zone, &section);
             }
-            encode_jpeg(model, Part::Zone, &overlay)
+            encode_image(model, Part::Zone, &overlay)
         }
         ArtworkTarget::TouchStripBackground => {
             Err("live information cannot replace the touch strip background".into())
@@ -849,7 +855,7 @@ pub fn prepare_clear_jpeg(target: ArtworkTarget) -> Result<Vec<u8>, String> {
     prepare_clear_jpeg_for(&PLUS, target)
 }
 
-/// [`prepare_clear_jpeg`] at the image sizes of `model`.
+/// [`prepare_clear_jpeg`] at the image sizes and in the image format of `model`.
 pub fn prepare_clear_jpeg_for(
     model: &DeviceModel,
     target: ArtworkTarget,
@@ -860,7 +866,7 @@ pub fn prepare_clear_jpeg_for(
     let image = Pixbuf::new(Colorspace::Rgb, false, 8, width, height)
         .ok_or_else(|| "could not allocate clear image".to_string())?;
     image.fill(0x000000ff);
-    encode_jpeg(model, Part::of(target), &image)
+    encode_image(model, Part::of(target), &image)
 }
 
 /// Encode JPEG bytes into zero-padded, fixed-size output reports for the target.
@@ -885,13 +891,14 @@ pub fn zone_window(model: &DeviceModel, zone: u8) -> (u16, u16, u16, u16) {
 }
 
 /// [`encode_reports`] with the report layout and image sizes of `model`,
-/// through the handler of its protocol family.
+/// through the handler of its protocol family; `image` is encoded in the
+/// model's format (JPEG, or BMP for a Legacy Mini).
 pub fn encode_reports_for(
     model: &DeviceModel,
     target: ArtworkTarget,
-    jpeg: &[u8],
+    image: &[u8],
 ) -> Result<Vec<OutputReport>, String> {
-    crate::protocol::protocol_for(model.family).encode_reports(model, target, jpeg)
+    crate::protocol::protocol_for(model.family).encode_reports(model, target, image)
 }
 
 /// The Expanded family's image reports: 0x02, then 0x07 for a key or

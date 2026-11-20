@@ -1,12 +1,14 @@
 //! The simulator driven by the registry table instead of one hand-picked
 //! model. These runs do not make a Planned model supported: they prove the
-//! Expanded-family machinery works for every documented shape, so promoting a
-//! model later is a table edit plus verification.
+//! machinery of each protocol family (Expanded, Legacy Mini) works for every
+//! documented shape, so promoting a model later is a table edit plus
+//! verification.
 
 use super::sim_device::{key_report, Rig, SimDevice};
 use super::sim_tests::{connected, is_red, listed, Scratch};
 use super::*;
-use crate::device_model::{ProtocolFamily, Rotation, Support};
+use crate::device_model::{ProtocolFamily, Rotation, Support, MINI};
+use crate::layers::Trigger;
 
 /// Expanded-family models, Supported or Planned.
 fn expanded() -> impl Iterator<Item = &'static DeviceModel> {
@@ -250,38 +252,176 @@ fn every_expanded_model_gets_the_plus_brightness_sleep_and_blank_feature_reports
     }
 }
 
+/// Size of an 80x80 24-bit BMP: 54 header bytes and 80 rows of 240 bytes.
+const MINI_BMP_LEN: usize = 54 + 80 * 80 * 3;
+
+/// `05 55 AA D1 01 <level>` padded to 32 bytes (Elgato's Mini page).
+fn mini_brightness(level: u8) -> Vec<u8> {
+    let mut report = vec![0u8; 32];
+    report[..6].copy_from_slice(&[0x05, 0x55, 0xAA, 0xD1, 0x01, level]);
+    report
+}
+
 #[test]
-fn a_legacy_mini_is_refused_clearly_and_never_driven() {
-    let model = DeviceModel::by_id("mini").unwrap();
-    assert_eq!(model.family, ProtocolFamily::LegacyMini);
-    let message = model.ensure_protocol().unwrap_err();
-    assert!(message.contains("Stream Deck Mini") && message.contains("not implemented"));
-
-    let device = SimDevice::new(model);
+fn a_legacy_mini_connects_and_reports_each_of_its_six_keys() {
+    assert_eq!(MINI.family, ProtocolFamily::LegacyMini);
+    assert_eq!(MINI.ensure_protocol(), Ok(()));
+    let device = SimDevice::new(&MINI);
     let mut rig = Rig::start(&[&device]);
-    let reason = rig.wait_event(|event| match event {
-        MonitorEvent::Connection(ConnectionState::Unavailable(reason))
-            if reason.contains("not implemented") =>
-        {
-            Some(reason.clone())
+    rig.wait_connection(connected(&MINI));
+    for index in 0..6 {
+        let report = key_report(&MINI, &[index]);
+        assert_eq!((report.len(), report[0], report[1 + index]), (65, 0x01, 1));
+        device.send(report);
+        let events = rig.inputs(6);
+        for (at, event) in events.iter().enumerate() {
+            assert_eq!(
+                *event,
+                Event::Key {
+                    index: at,
+                    pressed: at == index
+                }
+            );
         }
-        _ => None,
-    });
-    assert_eq!(reason, message);
-    rig.stop();
-    assert!(device.writes().is_empty() && device.features().is_empty());
-    assert!(!rig
-        .seen
-        .iter()
-        .any(|event| *event == MonitorEvent::Connection(connected(model))));
+        assert_eq!(
+            Trigger::from_event_for(&MINI, &events[index]),
+            Some(Trigger::KeyPress(index as u8 + 1))
+        );
+        device.send(key_report(&MINI, &[]));
+        assert!(rig
+            .inputs(6)
+            .iter()
+            .all(|event| matches!(event, Event::Key { pressed: false, .. })));
+    }
+    assert!(!rig.seen.iter().any(|event| matches!(
+        event,
+        MonitorEvent::Connection(ConnectionState::Unavailable(_))
+    )));
+}
 
-    assert!(crate::protocol::try_decode_report_for(model, &[1, 0, 1, 0, 1]).is_err());
-    assert!(crate::protocol::decode_report_for(model, &[1, 0, 1, 0, 1]).is_empty());
-    assert!(image_output::encode_reports_for(model, ArtworkTarget::Keypad(1), &[1]).is_err());
-    let scratch = Scratch::new("registry-mini-image");
-    let path = scratch.marker("picture.png", (80, 80), false);
-    let error = image_output::prepare_jpeg_for(model, ArtworkTarget::Keypad(1), &path).unwrap_err();
-    assert!(error.contains("BMP") && error.contains("not implemented"));
+#[test]
+fn a_legacy_mini_key_upload_is_an_80_square_transposed_bmp() {
+    let image = upload(&MINI, "key", ArtworkTarget::Keypad(6), (80, 80));
+    assert_eq!((image.command, image.slot), (0x01, 5));
+    assert_eq!(image.chunks, 20, "19254 bytes in 1008-byte chunks");
+    assert_eq!(image.jpeg.len(), MINI_BMP_LEN);
+    assert_eq!(image.jpeg[..2], *b"BM");
+    let decoded = image.decode();
+    assert_eq!((decoded.width(), decoded.height()), (80, 80));
+    // Transposed (Ccw90 then a vertical flip), the top-left marker stays at
+    // the top-left; tests/mini_protocol.rs pins every pixel of the transpose.
+    assert!(is_red(&decoded, 8, 8), "marker not at top-left");
+    let (x, y) = marker_at(Rotation::Cw90, (80, 80));
+    assert!(!is_red(&decoded, x, y), "marker turned clockwise");
+}
+
+#[test]
+fn legacy_mini_image_reports_carry_the_header_of_elgatos_mini_page() {
+    let scratch = Scratch::new("registry-mini-headers");
+    let device = SimDevice::new(&MINI);
+    let mut rig = Rig::start(&[&device]);
+    rig.wait_connection(connected(&MINI));
+    let path = scratch.marker("key.png", (80, 80), true);
+    rig.artwork
+        .send(ArtworkCommand::Assign {
+            target: ArtworkTarget::Keypad(2),
+            path: path.clone(),
+        })
+        .unwrap();
+    device.wait_until(|device| device.image_count() == 1);
+    let writes = device.writes();
+    assert_eq!(writes.len(), 20);
+    for (chunk, report) in writes.iter().enumerate() {
+        assert_eq!(report.len(), 1024);
+        let mut header = [0u8; 16];
+        header[..6].copy_from_slice(&[0x02, 0x01, chunk as u8, 0x00, u8::from(chunk == 19), 2]);
+        assert_eq!(report[..16], header, "chunk {chunk}");
+    }
+    // The upload reached the device untouched: the bytes of the encoder.
+    let bmp = image_output::prepare_jpeg_for(&MINI, ArtworkTarget::Keypad(2), &path).unwrap();
+    let expected = image_output::encode_reports_for(&MINI, ArtworkTarget::Keypad(2), &bmp).unwrap();
+    assert_eq!(
+        writes,
+        expected
+            .into_iter()
+            .map(|report| report.0)
+            .collect::<Vec<_>>()
+    );
+    rig.stop();
+}
+
+#[test]
+fn a_legacy_mini_gets_its_own_brightness_and_is_blanked_with_bmp_keys_on_shutdown() {
+    let device = SimDevice::new(&MINI);
+    let mut rig = Rig::start(&[&device]);
+    rig.wait_connection(connected(&MINI));
+    rig.controls.send(DeviceAction::Brightness(40)).unwrap();
+    device.wait_until(|device| device.features().last() == Some(&mini_brightness(40)));
+    rig.controls.send(DeviceAction::Sleep).unwrap();
+    device.wait_until(|device| device.features().last() == Some(&mini_brightness(0)));
+    let before_shutdown = device.features().len();
+    rig.stop();
+    let features = device.features();
+    assert_eq!(features[before_shutdown..], [mini_brightness(0)]);
+    assert!(
+        features
+            .iter()
+            .all(|report| *report == mini_brightness(report[5])),
+        "sent {features:02x?}"
+    );
+    let images = device.images();
+    let mut slots: Vec<_> = images.iter().map(|image| image.slot).collect();
+    slots.sort_unstable();
+    assert_eq!(slots, [0, 1, 2, 3, 4, 5]);
+    let black = image_output::prepare_clear_jpeg_for(&MINI, ArtworkTarget::Keypad(1)).unwrap();
+    for image in &images {
+        assert_eq!(image.command, 0x01);
+        assert_eq!(image.jpeg, black, "key {}", image.slot);
+    }
+}
+
+#[test]
+fn a_mini_and_a_plus_on_one_bus_each_get_their_own_image_format() {
+    let (plus, mini) = (SimDevice::new(&PLUS), SimDevice::new(&MINI));
+    let mut rig = Rig::empty();
+    rig.bus.plug("/dev/hidraw1", &plus);
+    rig.bus.plug("/dev/hidraw2", &mini);
+    for (path, model) in [("/dev/hidraw1", &PLUS), ("/dev/hidraw2", &MINI)] {
+        rig.wait_connection(ConnectionState::Connected {
+            device: DeviceId::from_path(path),
+            model,
+        });
+    }
+    let clear = ArtworkCommand::Clear {
+        target: ArtworkTarget::Keypad(1),
+    };
+    rig.send_artwork(&PLUS, clear.clone());
+    rig.send_artwork(&MINI, clear);
+    plus.wait_until(|device| device.last_key_jpeg(0).is_some());
+    mini.wait_until(|device| device.last_key_jpeg(0).is_some());
+    assert!(plus
+        .writes()
+        .iter()
+        .all(|report| report[..2] == [0x02, 0x07]));
+    assert!(mini
+        .writes()
+        .iter()
+        .all(|report| report[..2] == [0x02, 0x01]));
+    let jpeg = plus.last_key_jpeg(0).unwrap();
+    assert_eq!(jpeg[..2], [0xFF, 0xD8], "the + keeps JPEG");
+    let bmp = mini.last_key_jpeg(0).unwrap();
+    assert_eq!(bmp.len(), MINI_BMP_LEN);
+    assert_eq!(bmp[..2], *b"BM");
+    mini.send(key_report(&MINI, &[3]));
+    let events = rig.inputs_tagged(6);
+    assert!(events.iter().all(
+        |(device, model, _)| (*device, *model) == (DeviceId::from_path("/dev/hidraw2"), &MINI)
+    ));
+    assert!(events.iter().any(|(_, _, event)| *event
+        == Event::Key {
+            index: 3,
+            pressed: true
+        }));
 }
 
 #[test]

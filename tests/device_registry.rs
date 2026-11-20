@@ -175,7 +175,7 @@ const DOCUMENTED: [(
         3,
         2,
         80,
-        Rotation::Cw90,
+        Rotation::Ccw90,
         ImageFormat::Bmp,
         0,
     ),
@@ -198,7 +198,20 @@ fn the_table_matches_the_documented_facts() {
     assert_eq!(neo.strip_px(), (248, 58));
     assert!(neo.has_strip() && !neo.has_touch());
     let mini = DeviceModel::by_id("mini").unwrap();
-    assert_eq!((mini.input_report_len, mini.key_header_len), (65, 16));
+    // Elgato's Mini page: a 65-byte input whose byte 0 is the report id.
+    assert_eq!(
+        (
+            mini.input_report_len,
+            mini.input_header_len,
+            mini.key_header_len
+        ),
+        (65, 1, 16)
+    );
+    // Every family has a handler, so no model is refused for its protocol.
+    for family in [ProtocolFamily::Expanded, ProtocolFamily::LegacyMini] {
+        assert!(family.is_implemented(), "{}", family.name());
+    }
+    assert_eq!(mini.ensure_protocol(), Ok(()));
     assert!(!DeviceModel::by_id("xl").unwrap().has_strip());
     // The Classic LCD takes background images (0x0D), not a window.
     assert!(!DeviceModel::by_id("classic").unwrap().has_strip());
@@ -644,11 +657,16 @@ fn rotations_are_a_bijection_with_the_expected_inverses() {
 }
 
 #[test]
-fn every_expanded_model_clears_every_target_at_its_device_size() {
-    for model in each().filter(|model| model.family == ProtocolFamily::Expanded) {
+fn every_model_clears_every_target_at_its_device_size_and_format() {
+    for model in each() {
         for target in ArtworkTarget::all_for(model) {
             let size = image_output::dimensions_for(model, target).unwrap();
             let jpeg = image_output::prepare_clear_jpeg_for(model, target).unwrap();
+            let magic: &[u8] = match model.image_format {
+                ImageFormat::Jpeg => &[0xFF, 0xD8],
+                ImageFormat::Bmp => b"BM",
+            };
+            assert_eq!(jpeg[..2], *magic, "{} {target:?}", model.id);
             let decoded = Pixbuf::from_read(std::io::Cursor::new(jpeg.clone())).unwrap();
             let rotation = match target {
                 ArtworkTarget::Keypad(_) => model.key_rotation,

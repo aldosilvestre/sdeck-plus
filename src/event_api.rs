@@ -1345,4 +1345,36 @@ mod tests {
         ];
         assert_eq!(blank_features(&crate::device_model::MINI), [mini.to_vec()]);
     }
+
+    #[test]
+    fn shutdown_clears_the_six_mini_keys_with_black_bmp_uploads() {
+        let device = Recorder::default();
+        blank_device(&crate::device_model::MINI, &device);
+        let writes = device.writes.take();
+        // Six keys, each a 19254-byte BMP in twenty 1024-byte `02 01` reports.
+        assert_eq!(writes.len(), 6 * 20);
+        assert!(writes.iter().all(|report| report.len() == 1024));
+        for (key, uploads) in writes.chunks(20).enumerate() {
+            for (chunk, report) in uploads.iter().enumerate() {
+                assert_eq!(
+                    report[..6],
+                    [
+                        0x02,
+                        0x01,
+                        chunk as u8,
+                        0x00,
+                        u8::from(chunk == 19),
+                        key as u8 + 1
+                    ],
+                    "key {key} chunk {chunk}"
+                );
+            }
+        }
+        let black = image_output::prepare_clear_jpeg_for(
+            &crate::device_model::MINI,
+            ArtworkTarget::Keypad(1),
+        )
+        .unwrap();
+        assert_eq!(writes[0][16..70], black[..54]);
+    }
 }
