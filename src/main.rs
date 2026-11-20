@@ -4752,23 +4752,18 @@ fn show_connection_state(
     let every_model = || {
         usb_ids(
             DeviceModel::supported()
-                .map(|model| format!("{:04X}", model.pid()))
+                .map(|model| model.pid_list(", "))
                 .collect::<Vec<_>>()
-                .join(" or "),
+                .join(", "),
         )
     };
     let usb_id = |model: Option<&DeviceModel>| match model {
-        Some(model) => usb_ids(format!("{:04X}", model.pid())),
+        Some(model) => usb_ids(model.pid_list(" or ")),
         None => every_model(),
     };
-    let family = || {
-        DeviceModel::supported()
-            .map(|model| model.name)
-            .collect::<Vec<_>>()
-            .join(" or ")
-    };
     let name = last.map_or("Stream Deck", |model| model.name);
-    let not_connected = format!("{} not connected — plug one in", family());
+    // Six model names do not fit the header: the tooltip lists the ids.
+    let not_connected = "No Stream Deck connected — plug one in".to_owned();
     let (badge, tone, text, hint) = match state {
         ConnectionState::Searching => (
             "Not connected",
@@ -4799,8 +4794,9 @@ fn show_connection_state(
             "Connected",
             "status-online",
             format!(
-                "{} connected — keys, dials and touch strip are live",
-                model.name
+                "{} connected — {} are live",
+                model.name,
+                model.live_controls()
             ),
             format!("{} · HID input and artwork active", usb_id(Some(model))),
         ),
@@ -4856,9 +4852,13 @@ fn show_connected_devices(
     };
     let pids: Vec<String> = grouped
         .iter()
-        .map(|(model, _)| format!("{:04X}", model.pid()))
+        .map(|(model, _)| model.pid_list(" or "))
         .collect();
-    let text = format!("{list} connected — keys, dials and touch strip are live");
+    let connected: Vec<_> = grouped.iter().map(|(model, _)| *model).collect();
+    let text = format!(
+        "{list} connected — {} are live",
+        sdeck_plus::device_model::DeviceModel::live_controls_of(&connected)
+    );
     // The line may be ellipsized: the tooltip carries the whole sentence.
     let hint = format!(
         "{text}\nUSB device VID 0FD9 / PID {} · HID input and artwork active",

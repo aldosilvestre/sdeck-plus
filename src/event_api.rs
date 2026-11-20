@@ -559,10 +559,10 @@ fn supported_devices(listing: impl IntoIterator<Item = Listing>) -> Vec<DeviceKe
 /// The message while no supported device is listed.
 fn not_found_message() -> String {
     let wanted = DeviceModel::supported()
-        .map(|model| format!("{} PID {:04X}", model.name, model.pid()))
+        .map(|model| format!("{} PID {}", model.name, model.pid_list("/")))
         .collect::<Vec<_>>()
-        .join(" or ");
-    format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
+        .join(", ");
+    format!("Device not found · connect a supported Stream Deck (VID 0FD9 / {wanted})")
 }
 
 fn enumerate_devices(stop: &StopSignal) -> Result<Vec<hub::Candidate<hidapi::HidDevice>>, String> {

@@ -274,7 +274,7 @@ fn the_enumeration_order_changes_nothing() {
 fn a_planned_product_id_next_to_a_supported_one_is_never_opened() {
     let (planned, plus) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS));
     let mut rig = Rig::empty();
-    rig.bus.plug_ids("/dev/hidraw1", (VID, 0x006D), &planned);
+    rig.bus.plug_ids("/dev/hidraw1", (VID, 0x009A), &planned);
     rig.bus.plug_ids("/dev/hidraw2", (VID, 0x0084), &plus);
     rig.wait_connection(connected_as("/dev/hidraw2", &PLUS));
     let seen = rig.bus.enumerations();

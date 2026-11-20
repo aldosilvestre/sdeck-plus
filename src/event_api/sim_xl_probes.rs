@@ -12,7 +12,7 @@ use crate::layers::Trigger;
 fn product_ids_select_their_model_and_unknown_ones_are_ignored() {
     assert_eq!(DeviceModel::by_pid(0x0084), Some(&PLUS));
     assert_eq!(DeviceModel::by_pid(0x00C6), Some(&PLUS_XL));
-    assert_eq!(DeviceModel::by_pid(0x0080), None);
+    assert_eq!(DeviceModel::by_pid(0x0060), None);
     // Whichever order the OS lists them in, the path decides.
     for order in [
         [("a", 0x00C6), ("b", 0x0084)],

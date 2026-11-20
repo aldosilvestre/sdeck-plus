@@ -651,7 +651,17 @@ fn run_with_hidraw(nodes: &[(&str, &str)]) -> String {
 
 #[test]
 fn unreadable_stream_deck_nodes_print_the_command_that_installs_the_rule_file() {
-    for id in ["0003:00000FD9:00000084", "0003:00000fd9:000000c6"] {
+    for id in [
+        "0003:00000FD9:00000084",
+        "0003:00000fd9:000000c6",
+        "0003:00000FD9:0000006D",
+        "0003:00000FD9:00000080",
+        "0003:00000FD9:000000A5",
+        "0003:00000FD9:000000B9",
+        "0003:00000FD9:0000006C",
+        "0003:00000FD9:0000008F",
+        "0003:00000FD9:000000BA",
+    ] {
         let out = run_with_hidraw(&[("hidraw-sdeck-fixture", id)]);
         assert!(out.contains("cannot open the Stream Deck at /dev/hidraw-sdeck-fixture"));
         // One command installs the repository's rule file, which covers every model.
@@ -671,7 +681,7 @@ fn unreadable_stream_deck_nodes_print_the_command_that_installs_the_rule_file() 
 
 #[test]
 fn other_hid_devices_get_no_udev_note() {
-    let out = run_with_hidraw(&[("hidraw-sdeck-fixture", "0003:00000FD9:00000080")]);
+    let out = run_with_hidraw(&[("hidraw-sdeck-fixture", "0003:00000FD9:00000060")]);
     assert!(!out.contains("udev"), "{out}");
 }
 

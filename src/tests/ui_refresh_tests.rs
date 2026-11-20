@@ -167,14 +167,14 @@ fn assert_header_connection_states() {
             );
         }
     };
-    let not_connected = "Stream Deck + or Stream Deck + XL not connected — plug one in";
+    let not_connected = "No Stream Deck connected — plug one in";
     let plus = Some(&sdeck_plus::device_model::PLUS);
     // Before the HID worker reports anything, the header already speaks plainly.
     assert_state(
         "Not connected",
         "status-idle",
         not_connected,
-        "VID 0FD9 / PID 0084 or 00C6",
+        "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA",
     );
     for (state, last, badge, tone, text, tooltip) in [
         (
@@ -183,7 +183,7 @@ fn assert_header_connection_states() {
             "Not connected",
             "status-idle",
             not_connected,
-            "VID 0FD9 / PID 0084 or 00C6",
+            "VID 0FD9 / PID 0084, 00C6, 006D, 0080, 00A5, 00B9, 006C, 008F, 00BA",
         ),
         (
             ConnectionState::Unavailable(
@@ -256,6 +256,17 @@ fn assert_header_connection_states() {
             "status-online",
             "Stream Deck + XL connected — keys, dials and touch strip are live",
             "USB device VID 0FD9 / PID 00C6 · HID input and artwork active",
+        ),
+        (
+            ConnectionState::Connected {
+                device: sdeck_plus::event_api::DeviceId::from_path("sim"),
+                model: sdeck_plus::device_model::DeviceModel::by_id("classic").unwrap(),
+            },
+            None,
+            "Connected",
+            "status-online",
+            "Stream Deck Classic connected — keys are live",
+            "USB device VID 0FD9 / PID 006D or 0080 or 00A5 or 00B9 · HID input and artwork active",
         ),
     ] {
         assert_eq!(

@@ -183,7 +183,7 @@ mod tests {
     fn a_planned_model_is_an_unknown_preference_that_is_kept() {
         let dir = scratch();
         let file = dir.join("device.json");
-        let original = br#"{"model":"classic"}"#;
+        let original = br#"{"model":"neo"}"#;
         fs::write(&file, original).unwrap();
         assert!(load_from(&file).is_err());
         assert!(save_to(&file, &PLUS).is_err());
