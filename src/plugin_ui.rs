@@ -34,7 +34,8 @@ pub(crate) fn plugin_control(control: ControlKind, event: EventKind) -> PluginCo
         (ControlKind::Touch, _) => PluginControl::Touch,
         (ControlKind::Encoder, EventKind::EncoderPress) => PluginControl::DialPress,
         (ControlKind::Encoder, _) => PluginControl::DialTurn,
-        (ControlKind::Button, _) => PluginControl::Key,
+        // A touch button runs once per touch, like a key press.
+        (ControlKind::Button | ControlKind::TouchButton, _) => PluginControl::Key,
     }
 }
 

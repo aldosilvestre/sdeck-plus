@@ -465,6 +465,13 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .encoder:hover { background: radial-gradient(circle at 35% 30%, #7b8793, #414b55); }
 .encoder:active { background: radial-gradient(circle at 35% 30%, #505b66, #2b3239); }
 .encoder .control-tile { background: transparent; border: none; }
+/* Capacitive touch buttons (Stream Deck Neo): round pads of key material on the bezel. */
+.touch-button {
+    background: radial-gradient(circle, #1d2228, #08090b);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 2px #515b65;
+}
+.touch-button:hover { background: radial-gradient(circle, #2c343c, #11151a); }
 .control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .key-surface.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .control-pressed {

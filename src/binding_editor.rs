@@ -16,6 +16,8 @@ pub enum ControlKind {
     Button,
     Encoder,
     Touch,
+    /// A capacitive touch button reported after the keys (the Stream Deck Neo's).
+    TouchButton,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +48,8 @@ pub enum ActionKind {
     Plugin,
 }
 
-/// The control kinds `model` has: its keys, plus dials and touch strip when present.
+/// The control kinds `model` has: its keys, plus dials, touch strip and touch
+/// buttons when present.
 pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     let mut controls = vec![ControlKind::Button];
     if model.dials > 0 {
@@ -55,12 +58,17 @@ pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     if model.has_touch() {
         controls.push(ControlKind::Touch);
     }
+    if model.touch_buttons > 0 {
+        controls.push(ControlKind::TouchButton);
+    }
     controls
 }
 
+/// The events the editor offers for `control`. A touch button has one, its
+/// press (a touch), like a key.
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
-        ControlKind::Button => vec![EventKind::ButtonPress],
+        ControlKind::Button | ControlKind::TouchButton => vec![EventKind::ButtonPress],
         ControlKind::Encoder => vec![
             EventKind::EncoderPress,
             EventKind::EncoderClockwise,
@@ -100,6 +108,13 @@ pub fn control_number_error(
             model.name,
             model.zones()
         )),
+        ControlKind::TouchButton if model.touch_buttons == 0 => {
+            Some(format!("The {} has no touch buttons.", model.name))
+        }
+        ControlKind::TouchButton if !model.is_valid_touch_button(number) => Some(format!(
+            "Touch button {number} does not exist on the {}; its touch buttons are 1..={}.",
+            model.name, model.touch_buttons
+        )),
         _ => None,
     }
 }
@@ -128,6 +143,11 @@ pub fn trigger_from_selection_for(
     match (control, event) {
         (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
             Ok(Trigger::KeyPress(control_number))
+        }
+        (ControlKind::TouchButton, EventKind::ButtonPress)
+            if model.is_valid_touch_button(control_number) =>
+        {
+            Ok(Trigger::TouchButton(control_number))
         }
         (ControlKind::Encoder, EventKind::EncoderPress) if model.is_valid_dial(control_number) => {
             Ok(Trigger::EncoderPress(control_number))
@@ -302,7 +322,7 @@ pub fn control_triggers(
                 }).cloned());
             }
         }
-        ControlKind::Touch => {}
+        ControlKind::Touch | ControlKind::TouchButton => {}
     }
     Ok(triggers)
 }
@@ -319,6 +339,7 @@ pub fn control_summary(
         ControlKind::Touch => Trigger::TouchTap,
         ControlKind::Encoder => Trigger::EncoderPress(number),
         ControlKind::Button => Trigger::KeyPress(number),
+        ControlKind::TouchButton => Trigger::TouchButton(number),
     };
     let bindings = store
         .binding_layer(layer, &sample)

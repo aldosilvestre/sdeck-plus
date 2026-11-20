@@ -238,7 +238,35 @@ fn every_model_has_a_sane_deterministic_layout() {
                 + usize::from(model.dials)
                 + usize::from(model.zones())
                 + usize::from(model.has_touch())
+                + usize::from(model.touch_buttons)
         );
+        // Touch buttons sit on the chassis (inside the bezel when there is a
+        // display) and cover no other control or block.
+        assert_eq!(
+            layout.touch_button_count(),
+            usize::from(model.touch_buttons),
+            "{}",
+            model.id
+        );
+        for (index, button) in layout.touch_buttons.iter().enumerate() {
+            assert!(chassis.contains(button), "{}: touch button", model.id);
+            if let Some(strip) = &layout.strip {
+                assert!(strip.bezel.contains(button), "{}", model.id);
+            }
+            for (name, rect) in &blocks {
+                if name != "bezel" {
+                    assert!(
+                        !button.overlaps(rect),
+                        "{}: touch button {} overlaps {name}",
+                        model.id,
+                        index + 1
+                    );
+                }
+            }
+            for other in &layout.touch_buttons[index + 1..] {
+                assert!(!button.overlaps(other), "{}", model.id);
+            }
+        }
     }
 }
 
@@ -280,7 +308,7 @@ fn layouts_are_horizontally_symmetric() {
 }
 
 #[test]
-fn neo_window_is_decoration_without_controls() {
+fn neo_window_is_decoration_and_its_touch_buttons_are_controls() {
     let neo = DeviceModel::by_id("neo").expect("registry lists the Neo");
     let layout = PreviewLayout::for_model(neo);
     let strip = layout.strip.as_ref().expect("the window is drawn");
@@ -292,7 +320,8 @@ fn neo_window_is_decoration_without_controls() {
     assert!(layout
         .controls()
         .iter()
-        .all(|control| matches!(control, ControlRef::Key(_))));
+        .all(|control| matches!(control, ControlRef::Key(_) | ControlRef::TouchButton(_))));
+    assert_eq!(layout.touch_button_count(), 2);
 }
 
 #[test]
