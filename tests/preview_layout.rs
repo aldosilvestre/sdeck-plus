@@ -126,6 +126,9 @@ fn every_rect(layout: &PreviewLayout) -> Vec<(String, Rect)> {
     if let Some(rail) = &layout.dial_rail {
         rects.push(("rail".into(), rail.rail));
     }
+    if let Some(background) = layout.background {
+        rects.push(("background".into(), background));
+    }
     rects
 }
 
@@ -240,6 +243,13 @@ fn every_model_has_a_sane_deterministic_layout() {
                 + usize::from(model.has_touch())
                 + usize::from(model.has_info_window())
                 + usize::from(model.touch_buttons)
+                + usize::from(model.has_keypad_background())
+        );
+        assert_eq!(
+            layout.background.is_some(),
+            model.has_keypad_background(),
+            "{}",
+            model.id
         );
         // Touch buttons sit on the chassis (inside the bezel when there is a
         // display) and cover no other control or block.
@@ -339,6 +349,41 @@ fn neo_window_is_a_selectable_display_between_its_keys_and_touch_buttons() {
         assert!(!layout.has(ControlRef::Window), "{}", model.id);
         assert!(!layout.controls().contains(&ControlRef::Window));
     }
+}
+
+/// The Stream Deck Classic's keypad background (S6) is selected from a slim
+/// "Background" bar under its keys, after them in the order of the controls.
+/// No other model has one, and the XL keeps its size.
+#[test]
+fn the_classic_offers_its_background_as_a_control_under_its_keys() {
+    let classic = DeviceModel::by_id("classic").unwrap();
+    let layout = PreviewLayout::for_model(classic);
+    let bar = layout
+        .background
+        .expect("the Classic shows its background control");
+    // As wide as the keys and 12 px under the last row, like a display.
+    assert_eq!(layout.keys[10], r(48, 142, 44, 44));
+    assert_eq!(bar, r(48, 198, 252, 28));
+    assert_eq!(layout.size, (348, 250));
+    assert_eq!(layout.rect_of(ControlRef::Background), Some(bar));
+    assert_eq!(
+        ControlRef::Background.accessible_name().as_deref(),
+        Some("Background")
+    );
+    let mut expected: Vec<_> = (1..=15).map(ControlRef::Key).collect();
+    expected.push(ControlRef::Background);
+    assert_eq!(layout.controls(), expected);
+    for model in DeviceModel::all()
+        .iter()
+        .filter(|model| model.id != "classic")
+    {
+        let layout = PreviewLayout::for_model(model);
+        assert_eq!(layout.background, None, "{}", model.id);
+        assert!(!layout.has(ControlRef::Background), "{}", model.id);
+        assert!(!layout.controls().contains(&ControlRef::Background));
+    }
+    let xl = PreviewLayout::for_model(DeviceModel::by_id("xl").unwrap());
+    assert_eq!(xl.size, (504, 262));
 }
 
 #[test]

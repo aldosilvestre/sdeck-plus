@@ -226,6 +226,77 @@ fn the_neo_window_is_a_248x58_jpeg_turned_half_way_in_full_window_reports() {
     rig.stop();
 }
 
+/// Elgato's Classic page, "Full LCD Image": a 480 x 272 picture, "rotated
+/// 180° before upload", as JPEG, through Update Full Screen Image: `02 08`, a
+/// reserved byte, the done flag, the UINT16 chunk contents size and the
+/// UINT16 chunk index (little-endian), then the data, in 1024-byte reports.
+/// A key of the page then shows its own 72 px share of that picture.
+#[test]
+fn the_classic_background_is_a_480x272_jpeg_turned_half_way_in_full_screen_reports() {
+    let model = &crate::device_model::CLASSIC;
+    let scratch = Scratch::new("registry-classic-background");
+    // Noise makes the picture take several chunks.
+    let path = scratch.marker("background.png", (480, 272), true);
+    let device = SimDevice::new(model);
+    let mut rig = Rig::start(&[&device]);
+    rig.wait_connection(connected(model));
+    rig.artwork
+        .send(ArtworkCommand::Assign {
+            target: ArtworkTarget::TouchStripBackground,
+            path: path.clone(),
+        })
+        .unwrap();
+    device.wait_until(|device| device.image_count() == 1);
+    let writes = device.writes();
+    let jpeg =
+        image_output::prepare_jpeg_for(model, ArtworkTarget::TouchStripBackground, &path).unwrap();
+    let capacity = 1024 - 8;
+    assert!(writes.len() >= 2, "{} reports", writes.len());
+    assert_eq!(writes.len(), jpeg.len().div_ceil(capacity));
+    for (index, report) in writes.iter().enumerate() {
+        let start = index * capacity;
+        let length = (jpeg.len() - start).min(capacity);
+        let last = index + 1 == writes.len();
+        let mut header = [0x02, 0x08, 0x00, u8::from(last), 0, 0, 0, 0];
+        header[4..6].copy_from_slice(&(length as u16).to_le_bytes());
+        header[6..8].copy_from_slice(&(index as u16).to_le_bytes());
+        assert_eq!(report.len(), 1024, "report {index}");
+        assert_eq!(report[..8], header, "report {index}");
+        assert_eq!(report[8..8 + length], jpeg[start..start + length]);
+        assert!(report[8 + length..].iter().all(|byte| *byte == 0));
+    }
+    let image = device.images().remove(0);
+    assert_eq!((image.command, image.slot, image.window), (0x08, 0, None));
+    assert_eq!(image.jpeg[..2], [0xFF, 0xD8], "JPEG");
+    let decoded = image.decode();
+    assert_eq!((decoded.width(), decoded.height()), (480, 272));
+    // The marker of the source's top-left corner lands at the bottom right.
+    let (x, y) = marker_at(Rotation::Rot180, (480, 272));
+    assert_eq!((x, y), (471, 263));
+    assert!(is_red(&decoded, x, y), "marker not turned half way");
+    assert!(!is_red(&decoded, 8, 8), "marker left at the top left");
+
+    // Key 1 sits 11 px from the left and 5 px from the top of the LCD, so its
+    // share holds the marker, turned with the key.
+    let share = image_output::keypad_background_crop(model, &path, 1).unwrap();
+    rig.artwork
+        .send(ArtworkCommand::Assign {
+            target: ArtworkTarget::Keypad(1),
+            path: share,
+        })
+        .unwrap();
+    device.wait_until(|device| device.image_count() == 2);
+    let key = device.images().remove(1);
+    assert_eq!((key.command, key.slot), (0x07, 0));
+    let decoded = key.decode();
+    assert_eq!((decoded.width(), decoded.height()), (72, 72));
+    // Rows 5..24 and columns 11..24 of the LCD are red: after the half turn
+    // they sit at the key's bottom right.
+    assert!(is_red(&decoded, 64, 59), "the key's share of the marker");
+    assert!(!is_red(&decoded, 8, 8));
+    rig.stop();
+}
+
 /// A long Now playing title scrolls in the Neo's window on the device as it
 /// does on keys and touch sections: after the first picture, the HID owner
 /// sends later frames of it, each a whole 0x0B window.

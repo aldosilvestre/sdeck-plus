@@ -220,7 +220,7 @@ fn a_plus_a_classic_and_an_xl_each_run_their_own_configuration() {
         let help = || help_texts(&pair.registry.menu().help_for_test());
         assert!(help()
             .iter()
-            .any(|text| text == "Click a key on the preview."));
+            .any(|text| text == "Click a key or the background on the preview."));
         assert!(!help().iter().any(|text| text == "Touch strip pages"));
         pair.registry.show(&XL, SwitchReason::Selector);
         assert_eq!(shown_tabs(&pair), ["Actions", "Binding"]);

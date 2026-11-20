@@ -34,6 +34,8 @@ fn expected(control: ControlKind, n: u8) -> BTreeSet<Trigger> {
         ControlKind::Touch => [Trigger::ZoneTap(n), Trigger::ZonePress(n)].into(),
         ControlKind::TouchButton => [Trigger::TouchButton(n)].into(),
         ControlKind::Window => [Trigger::Window].into(),
+        // The keypad background's picture is artwork: it owns no trigger.
+        ControlKind::Background => BTreeSet::new(),
     }
 }
 

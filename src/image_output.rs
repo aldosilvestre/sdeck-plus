@@ -46,6 +46,14 @@ pub fn dimensions_for(
             width: model.strip_px().0,
             height: model.strip_px().1,
         }),
+        // The Stream Deck Classic's keypad background: its whole LCD.
+        ArtworkTarget::TouchStripBackground => match model.keypad_background {
+            Some(background) => Ok(ImageDimensions {
+                width: background.px.0,
+                height: background.px.1,
+            }),
+            None => Err("unsupported artwork target".into()),
+        },
         ArtworkTarget::EncoderZone(n) if model.is_valid_zone(n) => Ok(ImageDimensions {
             width: model.zone_px().0,
             height: model.zone_px().1,
@@ -127,6 +135,111 @@ struct BackgroundKey {
     len: u64,
 }
 
+/// The last component of a path that names a key's share of a keypad
+/// background: `keypad-crop-<W>-<H>-<x>-<y>-<w>-<h>` (see
+/// [`keypad_background_crop`]).
+const CROP_PREFIX: &str = "keypad-crop-";
+
+/// A key's share of a keypad background (the part of the picture under
+/// one-based `key`, see [`DeviceModel::key_on_background`]), as a path that
+/// every picture function of this module takes like a key's own artwork: the
+/// background's own path with one more component naming the part. No file of
+/// that name can exist, since its parent is a file; nothing is written, the
+/// part is cut from the decoded background whenever it is drawn, so icons,
+/// text and live information drawn "over the key's artwork" draw over it.
+/// `None` for a model without a keypad background or a key it lacks.
+pub fn keypad_background_crop(model: &DeviceModel, background: &Path, key: u8) -> Option<PathBuf> {
+    let (width, height) = model.keypad_background?.px;
+    let (x, y, w, h) = model.key_on_background(key)?;
+    Some(background.join(format!("{CROP_PREFIX}{width}-{height}-{x}-{y}-{w}-{h}")))
+}
+
+/// Whether `path` names a key's share of a keypad background.
+pub fn is_keypad_background_crop(path: &Path) -> bool {
+    crop_of(path).is_some()
+}
+
+/// A key's share of a keypad background, as [`keypad_background_crop`]
+/// names it.
+struct Share<'a> {
+    /// The background's own file.
+    background: &'a Path,
+    /// The size the whole background is drawn at.
+    whole: ImageDimensions,
+    /// `(x, y, width, height)` of the part on the drawn background.
+    part: (i32, i32, i32, i32),
+}
+
+/// The share `path` names: a last component in the form
+/// [`keypad_background_crop`] writes, under a parent that is no directory (a
+/// real file cannot have that name).
+fn crop_of(path: &Path) -> Option<Share<'_>> {
+    let part = path.file_name()?.to_str()?.strip_prefix(CROP_PREFIX)?;
+    let numbers = part
+        .split('-')
+        .map(str::parse::<u16>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let [width, height, x, y, w, h] = numbers[..] else {
+        return None;
+    };
+    let within = |start: u16, length: u16, end: u16| {
+        length > 0 && u32::from(start) + u32::from(length) <= u32::from(end)
+    };
+    let fits = within(x, w, width) && within(y, h, height);
+    let background = path.parent()?;
+    if !fits || fs_is_dir(background) {
+        return None;
+    }
+    Some(Share {
+        background,
+        whole: ImageDimensions {
+            width: u32::from(width),
+            height: u32::from(height),
+        },
+        part: (i32::from(x), i32::from(y), i32::from(w), i32::from(h)),
+    })
+}
+
+fn fs_is_dir(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
+}
+
+/// The part of the background `share` names, at `size`.
+fn crop_background(size: ImageDimensions, share: &Share) -> Result<Pixbuf, String> {
+    let (x, y, w, h) = share.part;
+    let picture = resize_background(share.whole, share.background)?;
+    let part = Pixbuf::new(Colorspace::Rgb, picture.has_alpha(), 8, w, h)
+        .ok_or_else(|| "could not allocate a key's share of the background".to_string())?;
+    picture.copy_area(x, y, w, h, &part, 0, 0);
+    if (size.width, size.height) == (w as u32, h as u32) {
+        return Ok(part);
+    }
+    let target_w = i32::try_from(size.width).map_err(|error| error.to_string())?;
+    let target_h = i32::try_from(size.height).map_err(|error| error.to_string())?;
+    part.scale_simple(target_w, target_h, InterpType::Bilinear)
+        .ok_or_else(|| "could not resize a key's share of the background".to_string())
+}
+
+/// A picture for display at its own size: the file, or a key's share of a
+/// keypad background (see [`keypad_background_crop`]) cut from its picture.
+///
+/// # Errors
+/// A picture that cannot be read or decoded.
+pub fn decode_picture(path: &Path) -> Result<Pixbuf, String> {
+    match crop_of(path) {
+        Some(share) => {
+            let (_, _, w, h) = share.part;
+            let size = ImageDimensions {
+                width: w as u32,
+                height: h as u32,
+            };
+            crop_background(size, &share)
+        }
+        None => Pixbuf::from_file(path).map_err(|error| error.to_string()),
+    }
+}
+
 /// Resized pixels with their layout. Pixbufs are not `Send`, and the HID,
 /// information and GTK threads all draw backgrounds, so keep plain bytes.
 struct CachedBackground {
@@ -148,6 +261,9 @@ static BACKGROUNDS: Mutex<Vec<CachedBackground>> = Mutex::new(Vec::new());
 /// [`decode_background`], reusing the last result for an unchanged file.
 /// Callers get their own pixbuf, so drawing on it never touches the cache.
 pub(crate) fn resize_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
+    if let Some(share) = crop_of(source) {
+        return crop_background(size, &share);
+    }
     let metadata = std::fs::metadata(source).map_err(|error| error.to_string())?;
     let key = BackgroundKey {
         path: source.to_path_buf(),
@@ -270,7 +386,18 @@ fn orient(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Pixbuf, Str
                 Ok(turned)
             }
         }
-        Part::Strip | Part::Zone => rotated(image, model.strip_rotation()),
+        Part::Strip => rotated(image, wide_rotation(model)),
+        Part::Zone => rotated(image, model.strip_rotation()),
+    }
+}
+
+/// The rotation of the page's wide picture: the strip's (or window's), else
+/// the keypad background's.
+fn wide_rotation(model: &DeviceModel) -> Rotation {
+    match (model.strip, model.keypad_background) {
+        (Some(strip), _) => strip.rotation,
+        (None, Some(background)) => background.rotation,
+        (None, None) => Rotation::None,
     }
 }
 
@@ -908,8 +1035,10 @@ pub fn encode_reports_for(
     crate::protocol::protocol_for(model.family).encode_reports(model, target, image)
 }
 
-/// The Expanded family's image reports: 0x02, then 0x07 for a key or
-/// 0x0B / 0x0C for the strip window and its sections.
+/// The Expanded family's image reports: 0x02, then 0x07 for a key,
+/// 0x0B / 0x0C for the strip window and its sections, or 0x08 (Update Full
+/// Screen Image) for a keypad background, which Elgato's Classic page lays out
+/// like a key image whose key index byte is reserved (0).
 pub(crate) fn encode_expanded_reports(
     model: &DeviceModel,
     target: ArtworkTarget,
@@ -922,6 +1051,7 @@ pub(crate) fn encode_expanded_reports(
     let report_size = model.image_report_len;
     let (command, header_size) = match target {
         ArtworkTarget::Keypad(_) => (0x07, model.key_header_len),
+        ArtworkTarget::TouchStripBackground if !model.has_strip() => (0x08, model.key_header_len),
         ArtworkTarget::TouchStripBackground => (0x0b, model.key_header_len),
         ArtworkTarget::EncoderZone(_) => (0x0c, model.zone_header_len),
     };

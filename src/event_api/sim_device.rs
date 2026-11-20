@@ -2,7 +2,7 @@
 //! hidden, through `test_support` so binary tests can run the real hub over
 //! it). It scripts 0x01 input reports in the layout of the model's protocol
 //! family, captures every 0x02 output report and feature report, checks each
-//! image chunk header (Expanded `02 07/0B/0C`, Legacy Mini `02 01`),
+//! image chunk header (Expanded `02 07/08/0B/0C`, Legacy Mini `02 01`),
 //! reassembles the JPEG or BMP of each image, and can be unplugged so a
 //! different model is found next. A [`Bus`] lists the devices that are plugged
 //! in right now, and a [`Rig`] runs the real hub over it, so several devices
@@ -90,7 +90,8 @@ impl Device for SimDevice {
 
 /// An image the host uploaded, reassembled from its chunk reports.
 pub struct CapturedImage {
-    /// Expanded: 0x07 key image, 0x0b full window, 0x0c partial window.
+    /// Expanded: 0x07 key image, 0x08 full screen (a Classic's keypad
+    /// background), 0x0b full window, 0x0c partial window.
     /// Legacy Mini: 0x01 key image (Upload Data to Image Memory Bank).
     pub command: u8,
     /// Zero-based key of a key image, otherwise 0.
@@ -254,10 +255,15 @@ impl SimDevice {
     }
 
     /// `(slot, window, last, chunk index, data length, header length)` of an
-    /// Expanded `02 07`, `02 0B` or `02 0C` report.
+    /// Expanded `02 07`, `02 08`, `02 0B` or `02 0C` report. Update Full
+    /// Screen Image (`02 08`) has the key image's layout with its key index
+    /// byte reserved, which must be 0.
     fn expanded_chunk(&self, report: &[u8]) -> ChunkHeader {
+        if report[1] == 0x08 {
+            assert_eq!(report[2], 0, "reserved byte of a full screen image");
+        }
         match report[1] {
-            0x07 | 0x0b => (
+            0x07 | 0x08 | 0x0b => (
                 report[2],
                 None,
                 report[3] == 1,

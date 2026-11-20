@@ -22,7 +22,15 @@ pub enum ControlKind {
     /// Stream Deck Neo's), number 1: it shows the page's picture and live
     /// information and runs no action.
     Window,
+    /// The keypad background of a model that has one (the Stream Deck
+    /// Classic's), number 1: the page's picture behind the keys. It runs no
+    /// action and has no event; its picture is set under Appearance.
+    Background,
 }
+
+/// Why a binding cannot be saved or tested on the keypad background.
+pub const BACKGROUND_RUNS_NOTHING: &str =
+    "The background runs no action; choose its picture under Appearance.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
@@ -56,7 +64,8 @@ pub enum ActionKind {
 
 /// The control kinds of `model` that run actions: its keys, plus dials, touch
 /// strip and touch buttons when present. An information window
-/// ([`ControlKind::Window`]) only shows things and is not one of them.
+/// ([`ControlKind::Window`]) and a keypad background
+/// ([`ControlKind::Background`]) only show things and are not among them.
 pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     let mut controls = vec![ControlKind::Button];
     if model.dials > 0 {
@@ -72,12 +81,12 @@ pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
 }
 
 /// The events the editor offers for `control`. A touch button has one, its
-/// press (a touch), like a key; the information window has only what it
-/// displays.
+/// press (a touch), like a key; the information window and the keypad
+/// background have only what they display.
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
         ControlKind::Button | ControlKind::TouchButton => vec![EventKind::ButtonPress],
-        ControlKind::Window => vec![EventKind::Display],
+        ControlKind::Window | ControlKind::Background => vec![EventKind::Display],
         ControlKind::Encoder => vec![
             EventKind::EncoderPress,
             EventKind::EncoderClockwise,
@@ -138,6 +147,12 @@ pub fn control_number_error(
         ControlKind::Window if number != 1 => {
             Some(format!("The {} has one information window.", model.name))
         }
+        ControlKind::Background if !model.has_keypad_background() => {
+            Some(format!("The {} has no keypad background.", model.name))
+        }
+        ControlKind::Background if number != 1 => {
+            Some(format!("The {} has one keypad background.", model.name))
+        }
         _ => None,
     }
 }
@@ -162,6 +177,10 @@ pub fn trigger_from_selection_for(
     }
     if control == ControlKind::Touch && !model.has_touch() {
         return Err("this device has no touch strip".into());
+    }
+    // The keypad background is a picture: it has no binding.
+    if control == ControlKind::Background {
+        return Err(BACKGROUND_RUNS_NOTHING.into());
     }
     match (control, event) {
         (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
@@ -321,7 +340,8 @@ pub fn action_from_fields(
 
 /// Every trigger one control owns on a layer: its editable events, a key's
 /// hold, and a dial's exact-tick overrides. A touch section owns only its own
-/// tap and hold; the strip (number 0) owns the whole-strip gestures.
+/// tap and hold; the strip (number 0) owns the whole-strip gestures. The
+/// keypad background owns none (its picture is artwork).
 ///
 /// # Errors
 /// A control number outside the hardware range.
@@ -331,6 +351,12 @@ pub fn control_triggers(
     control: ControlKind,
     number: u8,
 ) -> Result<Vec<Trigger>, EditorError> {
+    if control == ControlKind::Background {
+        return match control_number_error(store.model(), control, number) {
+            Some(error) => Err(EditorError(error)),
+            None => Ok(Vec::new()),
+        };
+    }
     let mut triggers = Vec::new();
     for event in events_for_control(control) {
         let trigger = trigger_from_selection_for(store.model(), control, number, event)?;
@@ -350,7 +376,10 @@ pub fn control_triggers(
                 }).cloned());
             }
         }
-        ControlKind::Touch | ControlKind::TouchButton | ControlKind::Window => {}
+        ControlKind::Touch
+        | ControlKind::TouchButton
+        | ControlKind::Window
+        | ControlKind::Background => {}
     }
     Ok(triggers)
 }
@@ -370,12 +399,15 @@ pub fn control_summary(
             None => "No live information".into(),
         };
     }
+    if control == ControlKind::Background {
+        return "Behind every key without a picture of its own".into();
+    }
     let sample = match control {
         ControlKind::Touch => Trigger::TouchTap,
         ControlKind::Encoder => Trigger::EncoderPress(number),
         ControlKind::Button => Trigger::KeyPress(number),
         ControlKind::TouchButton => Trigger::TouchButton(number),
-        ControlKind::Window => Trigger::Window,
+        ControlKind::Window | ControlKind::Background => Trigger::Window,
     };
     let bindings = store
         .binding_layer(layer, &sample)

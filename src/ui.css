@@ -475,6 +475,17 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     box-shadow: inset 0 0 0 2px #515b65;
 }
 .touch-button:hover { background: radial-gradient(circle, #2c343c, #11151a); }
+/* The Stream Deck Classic's keypad background bar: key material holding the
+   page's picture beside its caption. */
+.background-surface {
+    background: #08090b;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px #515b65;
+    padding: 2px 8px;
+}
+.background-surface:hover { background: #11151a; }
+.background-thumbnail { border-radius: 2px; }
+.background-caption { color: #c9d1d9; font-size: 11px; font-weight: 600; }
 .control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .key-surface.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .control-pressed {

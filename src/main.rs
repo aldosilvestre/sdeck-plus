@@ -937,6 +937,9 @@ fn help_select(model: &sdeck_plus::device_model::DeviceModel) -> String {
     if model.touch_buttons > 0 {
         parts.push("a touch button");
     }
+    if model.has_keypad_background() {
+        parts.push("the background");
+    }
     let mut text = format!("Click {} on the preview.", word_list(&parts, "or"));
     if model.dials > 0 {
         text.push_str(" Dials have separate press and rotation events.");
@@ -1242,6 +1245,7 @@ fn build_body(
         "Touchpad",
         "Touch button",
         "Info window",
+        "Background",
     ]);
     let control_picker = gtk::DropDown::new(Some(control_model.clone()), gtk::Expression::NONE);
     let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
@@ -1556,22 +1560,25 @@ fn build_body(
         .connect_selected_notify(move |picker| {
             if let Some(row) = selector_row_weak.upgrade() {
                 // A key takes its action from the catalog; the information
-                // window (4) takes none.
-                row.set_visible(!matches!(picker.selected(), 0 | 4));
+                // window (4) and the keypad background (5) take none.
+                row.set_visible(!matches!(picker.selected(), 0 | 4 | 5));
             }
             feature_editor.set_pickers_hidden(picker.selected() == 0);
             if let Some(editor) = editor.upgrade() {
                 editor.set_control_available(picker.selected() == 0);
             }
             if let Some(appearance) = appearance_weak.upgrade() {
-                // Only the touch strip and its sections, or the information
-                // window, have artwork to set here.
-                appearance.set_visible(matches!(picker.selected(), 2 | 4));
+                // Only the touch strip and its sections, the information
+                // window or the keypad background have artwork to set here.
+                appearance.set_visible(matches!(picker.selected(), 2 | 4 | 5));
             }
         });
     let window_model = layers.borrow().model().has_info_window();
+    let background_model = layers.borrow().model().has_keypad_background();
     let artwork_section = gtk::Expander::new(Some(if window_model {
         "Window picture"
+    } else if background_model {
+        "Background picture"
     } else {
         "Artwork and touch zones"
     }));
@@ -1580,6 +1587,8 @@ fn build_body(
     form.append(&appearance);
     let layer_hint = Label::new(Some(if window_model {
         "Each keypad page has its own window picture and live information."
+    } else if background_model {
+        "Each keypad page has its own background, shown behind every key without a picture of its own."
     } else {
         "Touchscreen pages belong to the profile, independently of keypad pages and folders."
     }));
@@ -1779,6 +1788,12 @@ fn build_body(
         let artwork = artwork.clone();
         let toast = toast.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_control(&layers) {
+            // The keypad background's only configuration is its picture, on
+            // the shown page like Image… and Clear.
+            Ok((_, ControlKind::Background, _)) => {
+                let page = layers.borrow().active().to_owned();
+                remove_keypad_background(&artwork, &ui, &toast, &page);
+            }
             Ok((layer, control, number)) => {
                 // The whole control goes, whichever of its events is selected.
                 let result = {
@@ -2032,6 +2047,98 @@ fn undo_removal(
             }
         }
     })
+}
+
+/// Remove the keypad background of keypad page `layer` (the Stream Deck
+/// Classic's), with the toast's Undo, which puts the same picture back once
+/// unless the page got another background since.
+fn remove_keypad_background(artwork: &ArtworkUi, ui: &BindingUi, toast: &ui::Toast, layer: &str) {
+    let target = ArtworkTarget::TouchStripBackground;
+    let owner = artwork
+        .layers
+        .borrow()
+        .artwork_owner(layer, target)
+        .to_owned();
+    let removed = {
+        let mut store = artwork.store.borrow_mut();
+        let Some(store) = store.as_mut() else {
+            ui.error("Artwork storage is unavailable; repair it and restart.");
+            return;
+        };
+        let Some(path) = store.assigned_path_in_layer(&owner, target) else {
+            ui.report("This page has no background.", false);
+            return;
+        };
+        // The picture's bytes are kept for Undo: clearing deletes the asset.
+        std::fs::read(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                store
+                    .clear_in_layer(&owner, target)
+                    .map(|()| bytes)
+                    .map_err(|error| error.to_string())
+            })
+            .map(|bytes| {
+                let extension = path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                (bytes, extension)
+            })
+    };
+    match removed {
+        Ok((bytes, extension)) => {
+            artwork.refresh(true);
+            ui.status.set_text("");
+            let pending = Cell::new(Some((bytes, extension)));
+            let (artwork, ui) = (artwork.clone(), ui.clone());
+            toast.show_with_action(
+                "Background removed.",
+                "Undo",
+                Rc::new(move || {
+                    let Some((bytes, extension)) = pending.take() else {
+                        return;
+                    };
+                    let restored = {
+                        let mut store = artwork.store.borrow_mut();
+                        match store.as_mut() {
+                            None => Err("Artwork storage is unavailable.".to_owned()),
+                            // Undo never replaces a background chosen since.
+                            Some(store)
+                                if store.assigned_path_in_layer(&owner, target).is_some() =>
+                            {
+                                Err(
+                                    "Cannot undo: the background was changed after it was removed."
+                                        .to_owned(),
+                                )
+                            }
+                            Some(_) if !artwork.layers.borrow().has_configuration_owner(&owner) => {
+                                Err(
+                                    "Could not restore the background: its page no longer exists."
+                                        .to_owned(),
+                                )
+                            }
+                            Some(store) => store
+                                .assign_bytes_in_layer(&owner, target, &bytes, &extension)
+                                .map(|_| ())
+                                .map_err(|error| {
+                                    format!("Could not restore the background: {error}")
+                                }),
+                        }
+                    };
+                    match restored {
+                        Ok(()) => {
+                            artwork.refresh(true);
+                            ui.report("Background restored.", false);
+                        }
+                        Err(error) => ui.error(&error),
+                    }
+                }),
+            );
+        }
+        Err(error) => ui.error(&format!("Could not remove the background: {error}")),
+    }
 }
 
 /// What a model's events are applied to: its editor, the preview that mirrors
@@ -2654,6 +2761,8 @@ impl BindingUi {
             // The strip's slot describes the information window on a model with one.
             ControlRef::Strip if model.has_touch() => keys,
             ControlRef::Window if model.has_info_window() => keys,
+            // The keypad background has no strip beside it to share the slot with.
+            ControlRef::Background if model.has_keypad_background() => keys,
             ControlRef::Dial(number) if model.is_valid_dial(number) => keys + usize::from(number),
             ControlRef::TouchButton(number) if model.is_valid_touch_button(number) => {
                 keys + dials + usize::from(number)
@@ -2683,6 +2792,8 @@ impl BindingUi {
                         (ControlKind::Button, index + 1)
                     } else if index == keys && model.has_info_window() {
                         (ControlKind::Window, 1)
+                    } else if index == keys && model.has_keypad_background() {
+                        (ControlKind::Background, 1)
                     } else if index == keys {
                         (ControlKind::Touch, 0)
                     } else if index <= keys + dials {
@@ -2748,7 +2859,7 @@ impl BindingUi {
         match self.control_kind() {
             ControlKind::Button => !self.hold_toggle.is_active(),
             ControlKind::Encoder | ControlKind::Window => true,
-            ControlKind::TouchButton => false,
+            ControlKind::TouchButton | ControlKind::Background => false,
             ControlKind::Touch => {
                 matches!(
                     self.event_kind(),
@@ -2833,7 +2944,7 @@ impl BindingUi {
                 .touch_button_numbers()
                 .map(|n| n.to_string())
                 .collect(),
-            ControlKind::Window => vec!["1".to_owned()],
+            ControlKind::Window | ControlKind::Background => vec!["1".to_owned()],
         };
         replace_string_list(&self.control_number_model, &numbers);
         self.control_number_row.set_visible(true);
@@ -2931,6 +3042,17 @@ impl BindingUi {
                 }
                 number
             }
+            ControlKind::Background => {
+                let model = self.model.get();
+                if !model.has_keypad_background() {
+                    return Err(format!("the {} has no keypad background", model.name));
+                }
+                let number = number.unwrap_or(1);
+                if number != 1 {
+                    return Err(format!("the {} has one keypad background", model.name));
+                }
+                number
+            }
         };
         self.apply_control(control, number, reset_event);
         Ok(())
@@ -2944,6 +3066,7 @@ impl BindingUi {
             ControlKind::Touch => 2,
             ControlKind::TouchButton => 3,
             ControlKind::Window => 4,
+            ControlKind::Background => 5,
         });
         self.update_for_control(reset_event);
         self.control_number_picker
@@ -2951,7 +3074,8 @@ impl BindingUi {
                 ControlKind::Button
                 | ControlKind::Encoder
                 | ControlKind::TouchButton
-                | ControlKind::Window => number - 1,
+                | ControlKind::Window
+                | ControlKind::Background => number - 1,
                 ControlKind::Touch => number,
             }));
     }
@@ -2964,12 +3088,12 @@ impl BindingUi {
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
         action_form::show_guidance(&self.action_guidance, kind);
-        // "Do nothing" needs no explaining on a key or the information
-        // window, whose selectors are hidden.
+        // "Do nothing" needs no explaining on a key, the information window
+        // or the keypad background, whose selectors are hidden.
         let idle_key = kind == ActionKind::None
             && matches!(
                 self.control_kind(),
-                ControlKind::Button | ControlKind::Window
+                ControlKind::Button | ControlKind::Window | ControlKind::Background
             );
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
@@ -3031,6 +3155,14 @@ impl BindingUi {
         self.feature_editor
             .set_key_trigger(self.control_kind() == ControlKind::Button);
         self.clear_action_fields();
+        // The keypad background has no binding: no action field applies.
+        if self.control_kind() == ControlKind::Background {
+            self.populate_action(&Action::None);
+            self.status
+                .set_text("Choose the page's background under Appearance.");
+            self.mark_clean();
+            return;
+        }
         let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
             Ok(selection) => selection,
             Err(error) if error.contains("does not exist on the") => {
@@ -3353,6 +3485,7 @@ impl BindingUi {
             2 => ControlKind::Touch,
             3 => ControlKind::TouchButton,
             4 => ControlKind::Window,
+            5 => ControlKind::Background,
             _ => ControlKind::Button,
         }
     }
@@ -3498,6 +3631,7 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
             format!("Configuring: Touch button {}", number.unwrap_or(1))
         }
         ControlKind::Window => "Configuring: Info window".into(),
+        ControlKind::Background => "Configuring: Background".into(),
     }
 }
 
@@ -3715,6 +3849,9 @@ struct InfoState {
     marquee: PreviewMarquee,
     countdown: Option<timer_artwork::CountdownArtwork>,
     plugin: feature_runtime::plugin_values::PluginValues,
+    /// Whether the last picture snapshot sent a keypad background (the Stream
+    /// Deck Classic's), which the next page without one must clear.
+    keypad_background_sent: bool,
 }
 
 impl std::ops::Deref for InfoState {
@@ -3790,6 +3927,57 @@ impl ArtworkUi {
             .assigned_path_in_layer(owner, target)
     }
 
+    /// The share of the page's keypad background (the Stream Deck Classic's)
+    /// that a key without artwork of its own shows, as a path the picture
+    /// functions take like artwork (see `image_output::keypad_background_crop`).
+    fn key_backdrop(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        let ArtworkTarget::Keypad(key) = target else {
+            return None;
+        };
+        let model = self.layers.borrow().model();
+        if !model.has_keypad_background() || self.info_background(layer, target).is_some() {
+            return None;
+        }
+        let background = self.info_background(layer, ArtworkTarget::TouchStripBackground)?;
+        sdeck_plus::image_output::keypad_background_crop(model, &background, key)
+    }
+
+    /// What `target` draws over: its own artwork, else a key's share of the
+    /// page's keypad background.
+    fn drawn_background(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        self.info_background(layer, target)
+            .or_else(|| self.key_backdrop(layer, target))
+    }
+
+    /// The keypad background (the Stream Deck Classic's) covers the whole LCD,
+    /// keys included, so it goes before every key of `commands`. A page
+    /// without one clears the device's only after a background was sent, so
+    /// a Classic that never shows one gets key pictures only.
+    fn keypad_background_first(&self, commands: &mut Vec<ArtworkCommand>, send: bool) {
+        let position = commands.iter().position(|command| {
+            matches!(
+                command,
+                ArtworkCommand::Assign {
+                    target: ArtworkTarget::TouchStripBackground,
+                    ..
+                }
+            )
+        });
+        let mut info = self.info.borrow_mut();
+        let command = match position.map(|at| commands.remove(at)) {
+            Some(assign) => assign,
+            None if info.keypad_background_sent => ArtworkCommand::Clear {
+                target: ArtworkTarget::TouchStripBackground,
+            },
+            None => return,
+        };
+        let assigned = matches!(command, ArtworkCommand::Assign { .. });
+        commands.insert(0, command);
+        if send {
+            info.keypad_background_sent = assigned;
+        }
+    }
+
     /// The sections that carry the previous/next page indicators: the first and
     /// the last of the shown model.
     fn indicator_zones(&self) -> Vec<u8> {
@@ -3850,7 +4038,7 @@ impl ArtworkUi {
     ) -> ArtworkCommand {
         ArtworkCommand::ComposeInfo {
             target,
-            path: self.info_background(layer, target),
+            path: self.drawn_background(layer, target),
             strip_path: if matches!(target, ArtworkTarget::EncoderZone(_)) {
                 self.info_background(layer, ArtworkTarget::TouchStripBackground)
             } else {
@@ -4009,7 +4197,7 @@ impl ArtworkUi {
                 return;
             }
         }
-        let background = self.info_background(&layer, target);
+        let background = self.drawn_background(&layer, target);
         let image = match target {
             ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_for(
                 model,
@@ -4306,10 +4494,12 @@ impl ArtworkUi {
                 .map(|(target, picture)| {
                     (
                         picture.clone(),
-                        store.assigned_path_in_layer(
-                            self.layers.borrow().artwork_owner(&layer, *target),
-                            *target,
-                        ),
+                        store
+                            .assigned_path_in_layer(
+                                self.layers.borrow().artwork_owner(&layer, *target),
+                                *target,
+                            )
+                            .or_else(|| self.key_backdrop(&layer, *target)),
                         store.button_text_in_layer(&layer, *target).cloned(),
                         self.control_icon(&layer, *target),
                     )
@@ -4320,8 +4510,11 @@ impl ArtworkUi {
                 desired_artwork_commands_for_owners(store, &layer, &touch_owner),
             )
         };
-        let commands = self.with_info(&layer, commands);
+        let mut commands = self.with_info(&layer, commands);
         let model = self.layers.borrow().model();
+        if model.has_keypad_background() {
+            self.keypad_background_first(&mut commands, send);
+        }
         for (picture, path, text, icon) in paths {
             set_button_picture(model, &picture, path, text.as_ref(), icon.as_ref());
         }
@@ -4376,7 +4569,11 @@ impl ArtworkUi {
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
                 && next,
-            background: artwork.filter(|_| over_artwork),
+            // A key without artwork draws over its share of the page's
+            // keypad background (the Classic's), if any.
+            background: artwork
+                .filter(|_| over_artwork)
+                .or_else(|| self.key_backdrop(layer, target)),
         })
     }
 
@@ -4391,7 +4588,7 @@ impl ArtworkUi {
         target: ArtworkTarget,
         text: &sdeck_plus::button_text::ButtonText,
     ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
-        let path = self.info_background(layer, target);
+        let path = self.drawn_background(layer, target);
         let icon = self.control_icon(layer, target);
         let over_artwork = icon.as_ref().is_some_and(ControlIcon::shown_over_artwork);
         if path.is_none() || over_artwork {
@@ -4431,10 +4628,12 @@ impl ArtworkUi {
                 return;
             };
             (
-                store.assigned_path_in_layer(
-                    self.layers.borrow().artwork_owner(&layer, *target),
-                    *target,
-                ),
+                store
+                    .assigned_path_in_layer(
+                        self.layers.borrow().artwork_owner(&layer, *target),
+                        *target,
+                    )
+                    .or_else(|| self.key_backdrop(&layer, *target)),
                 store.button_text_in_layer(&layer, *target).cloned(),
             )
         };
@@ -4488,7 +4687,8 @@ struct ControlIcon {
     /// A page indicator paints at this section's outer left/right edge.
     previous: bool,
     next: bool,
-    /// The key's own artwork, drawn under the icon instead of black.
+    /// The key's own artwork (or its share of the page's keypad background),
+    /// drawn under the icon instead of black.
     background: Option<std::path::PathBuf>,
 }
 
@@ -4584,6 +4784,20 @@ fn set_button_picture(
 }
 
 fn set_picture_path(picture: &Picture, path: Option<std::path::PathBuf>) {
+    // A key's share of a keypad background is no file: it is cut from the
+    // background's picture.
+    if let Some(share) = path
+        .as_deref()
+        .filter(|path| sdeck_plus::image_output::is_keypad_background_crop(path))
+    {
+        picture.set_filename(None::<&std::path::Path>);
+        match sdeck_plus::image_output::decode_picture(share) {
+            Ok(frame) => picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&frame))),
+            Err(error) => eprintln!("Could not draw a key's share of the background: {error}"),
+        }
+        picture.set_visible(true);
+        return;
+    }
     picture.set_filename(path.as_deref());
     if let Some(path) = &path {
         // Use the same first-frame decoder as the hardware image pipeline.
@@ -4786,6 +5000,7 @@ fn touch_target_label(
     match target {
         ArtworkTarget::Keypad(key) => format!("Key {key}"),
         ArtworkTarget::TouchStripBackground if model.has_info_window() => "Info window".into(),
+        ArtworkTarget::TouchStripBackground if model.has_keypad_background() => "Background".into(),
         ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
         ArtworkTarget::EncoderZone(zone) => format!("Touch zone {zone}"),
     }
@@ -4936,24 +5151,40 @@ fn desired_artwork_commands_for_owners(
     layer: &str,
     touch_owner: &str,
 ) -> Vec<ArtworkCommand> {
-    let mut commands = store
-        .model()
-        .key_numbers()
-        .map(|key| {
-            let target = ArtworkTarget::Keypad(key);
-            if let Some(text) = store.button_text_in_layer(layer, target) {
-                return ArtworkCommand::ComposeButton {
-                    key,
-                    path: store.assigned_path_in_layer(layer, target),
-                    text: text.clone(),
-                };
-            }
-            match store.assigned_path_in_layer(layer, target) {
-                Some(path) => ArtworkCommand::Assign { target, path },
-                None => ArtworkCommand::Clear { target },
-            }
-        })
-        .collect::<Vec<_>>();
+    let model = store.model();
+    // The page's keypad background (the Stream Deck Classic's): sent whole,
+    // and each key without artwork of its own shows its share of it. A page
+    // without one plans none (see `ArtworkUi::keypad_background_first`).
+    let background = model
+        .has_keypad_background()
+        .then(|| store.assigned_path_in_layer(touch_owner, ArtworkTarget::TouchStripBackground))
+        .flatten();
+    let mut commands = Vec::new();
+    if let Some(path) = &background {
+        commands.push(ArtworkCommand::Assign {
+            target: ArtworkTarget::TouchStripBackground,
+            path: path.clone(),
+        });
+    }
+    commands.extend(model.key_numbers().map(|key| {
+        let target = ArtworkTarget::Keypad(key);
+        let path = store.assigned_path_in_layer(layer, target).or_else(|| {
+            background.as_deref().and_then(|background| {
+                sdeck_plus::image_output::keypad_background_crop(model, background, key)
+            })
+        });
+        if let Some(text) = store.button_text_in_layer(layer, target) {
+            return ArtworkCommand::ComposeButton {
+                key,
+                path,
+                text: text.clone(),
+            };
+        }
+        match path {
+            Some(path) => ArtworkCommand::Assign { target, path },
+            None => ArtworkCommand::Clear { target },
+        }
+    }));
     commands.extend(touch_strip_commands(store, touch_owner));
     commands
 }
@@ -5368,6 +5599,7 @@ mod tests {
     mod button_text_popup_tests;
     mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
+    mod classic_background_ui_tests;
     mod configuration_transfer_tests;
     mod confirm_menu_tests;
     mod control_feedback_tests;

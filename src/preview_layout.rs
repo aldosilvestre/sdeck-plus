@@ -17,6 +17,10 @@
 //! as the touch strip. Its two capacitive touch buttons are selectable controls
 //! on either side of it, inside the bezel. A model with touch buttons and no
 //! display would show them as one centred row under its keys.
+//!
+//! A Stream Deck Classic's keypad background (the picture behind its keys) is
+//! selected from a slim bar as wide as the keys, under them
+//! ([`ControlRef::Background`]); the keys themselves show their share of it.
 
 use crate::device_model::DeviceModel;
 
@@ -50,6 +54,8 @@ const MIN_WIDTH: i32 = 240;
 /// Side of a touch button, and the gap that separates it from its neighbour.
 const TOUCH_BUTTON_PX: i32 = 28;
 const TOUCH_BUTTON_GAP: i32 = 10;
+/// Height of the keypad background bar.
+const BACKGROUND_BAR_H: i32 = 28;
 
 /// An axis-aligned rectangle in preview pixels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,6 +114,9 @@ pub enum ControlRef {
     TouchButton(u8),
     /// An information window that takes no touch (the Stream Deck Neo's).
     Window,
+    /// The picture behind the keys (the Stream Deck Classic's keypad
+    /// background), selected from a bar under them.
+    Background,
 }
 
 impl ControlRef {
@@ -119,6 +128,7 @@ impl ControlRef {
             Self::Zone(number) => Some(format!("Touch zone {number}")),
             Self::TouchButton(number) => Some(format!("Touch button {number}")),
             Self::Window => Some("Info window".into()),
+            Self::Background => Some("Background".into()),
             Self::Strip => None,
         }
     }
@@ -166,6 +176,8 @@ pub struct PreviewLayout {
     pub dial_rail: Option<DialLayout>,
     /// Touch buttons left to right: element `n - 1` is touch button `n`.
     pub touch_buttons: Vec<Rect>,
+    /// The bar that selects the keypad background, when the model has one.
+    pub background: Option<Rect>,
 }
 
 /// How one family of models is drawn.
@@ -233,12 +245,15 @@ impl PreviewLayout {
     }
 
     /// Every control in the order the preview offers them: keys row-major, then
-    /// the strip and its sections (or the information window), the touch
-    /// buttons and the dials, as the widgets are created.
+    /// the keypad background, the strip and its sections (or the information
+    /// window), the touch buttons and the dials, as the widgets are created.
     pub fn controls(&self) -> Vec<ControlRef> {
         let mut controls: Vec<ControlRef> = (1..=self.keys.len())
             .map(|number| ControlRef::Key(number as u8))
             .collect();
+        if self.background.is_some() {
+            controls.push(ControlRef::Background);
+        }
         match &self.strip {
             Some(strip) if strip.touch => {
                 controls.push(ControlRef::Strip);
@@ -286,6 +301,7 @@ impl PreviewLayout {
                 .as_ref()
                 .filter(|strip| !strip.touch)
                 .map(|strip| strip.rect),
+            ControlRef::Background => self.background,
         }
     }
 
@@ -389,6 +405,12 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
         Some(last) => last.bottom(),
         None => BRAND_Y + BRAND_H,
     };
+    // The keypad background's bar: as wide as the keys, under them.
+    let background = model.has_keypad_background().then(|| {
+        let bar = Rect::new(key_x0, bottom + KEY_TO_BEZEL, keys_w, BACKGROUND_BAR_H);
+        bottom = bar.bottom();
+        bar
+    });
 
     let strip = has_strip.then(|| {
         let bezel = Rect::new(side_x, bottom + KEY_TO_BEZEL, bezel_w, BEZEL_H);
@@ -525,5 +547,6 @@ fn build(model: &DeviceModel, metrics: &Metrics) -> PreviewLayout {
         strip,
         dial_rail,
         touch_buttons: touch_button_rects,
+        background,
     }
 }
