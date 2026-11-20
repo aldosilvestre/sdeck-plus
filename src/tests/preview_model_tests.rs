@@ -189,14 +189,14 @@ pub(super) fn render_preview(
 }
 
 /// Selectable controls of `chassis` in widget (and so Tab) order.
-fn controls_of(chassis: &gtk::Widget) -> Vec<Button> {
+pub(super) fn controls_of(chassis: &gtk::Widget) -> Vec<Button> {
     descendants_of::<Button>(chassis)
         .into_iter()
         .filter(|button| button.has_css_class("control-selectable"))
         .collect()
 }
 
-fn kind_of(button: &Button) -> &'static str {
+pub(super) fn kind_of(button: &Button) -> &'static str {
     if button.has_css_class("key-surface") {
         "key"
     } else if button.has_css_class("strip-zone") {
@@ -205,12 +205,17 @@ fn kind_of(button: &Button) -> &'static str {
         "strip"
     } else if button.has_css_class("encoder") {
         "dial"
+    } else if button.has_css_class("touch-button") {
+        "touch button"
     } else {
         "other"
     }
 }
 
-fn bounds_in(widget: &impl IsA<gtk::Widget>, chassis: &gtk::Widget) -> (i32, i32, i32, i32) {
+pub(super) fn bounds_in(
+    widget: &impl IsA<gtk::Widget>,
+    chassis: &gtk::Widget,
+) -> (i32, i32, i32, i32) {
     let bounds = widget.compute_bounds(chassis).expect("bounds");
     (
         bounds.x().round() as i32,
@@ -220,7 +225,7 @@ fn bounds_in(widget: &impl IsA<gtk::Widget>, chassis: &gtk::Widget) -> (i32, i32
     )
 }
 
-fn chassis_of(root: &gtk::Widget) -> gtk::Widget {
+pub(super) fn chassis_of(root: &gtk::Widget) -> gtk::Widget {
     class_of(root, "hardware-chassis")
 }
 
@@ -238,7 +243,7 @@ fn shape(buttons: &[Button]) -> Vec<(&'static str, usize)> {
 }
 
 /// The controls Tab visits inside the chassis, from its start.
-fn tab_order(
+pub(super) fn tab_order(
     window: &ApplicationWindow,
     chassis: &gtk::Widget,
     controls: &[Button],

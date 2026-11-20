@@ -26,7 +26,7 @@ pub(super) struct PageControls {
 }
 
 impl PageControls {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(model: &sdeck_plus::device_model::DeviceModel) -> Self {
         let root = GtkBox::new(Orientation::Horizontal, 8);
         let navigation_group = GtkBox::new(Orientation::Horizontal, 4);
         navigation_group.add_css_class("page-navigation");
@@ -50,7 +50,7 @@ impl PageControls {
             button.set_valign(gtk::Align::Center);
             navigation_group.append(button);
         }
-        let folder_panel = FolderPanel::new();
+        let folder_panel = FolderPanel::new(model);
         let folders = folder_panel.root.clone();
         let panel = ui::form_popover("Page folders", Some("Group pages into folders."), &folders);
         let folder_count = gtk::Label::new(Some("0"));

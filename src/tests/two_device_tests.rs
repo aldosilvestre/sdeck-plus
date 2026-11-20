@@ -28,7 +28,7 @@ pub(super) const XL_PATH: &str = "/dev/hidraw2";
 pub(super) struct Pair {
     pub(super) base: PathBuf,
     pub(super) roots: SessionRoots,
-    app: gtk::Application,
+    pub(super) app: gtk::Application,
     pub(super) window: ApplicationWindow,
     pub(super) registry: Rc<ModelSession>,
     pub(super) bus: SimBus,
@@ -195,7 +195,11 @@ impl Pair {
 /// Run the main loop until `done` holds for `device`, within a bounded time.
 /// The window's polling only runs while the loop does, and it is what turns a
 /// device's input into actions and a session's snapshot into pictures.
-fn wait_device(what: &str, device: &SimDevice, mut done: impl FnMut(&SimDevice) -> bool) {
+pub(super) fn wait_device(
+    what: &str,
+    device: &SimDevice,
+    mut done: impl FnMut(&SimDevice) -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(20);
     let context = glib::MainContext::default();
     while !done(device) {
@@ -204,20 +208,20 @@ fn wait_device(what: &str, device: &SimDevice, mut done: impl FnMut(&SimDevice) 
     }
 }
 
-fn active(runtime: &FeatureRuntime) -> String {
+pub(super) fn active(runtime: &FeatureRuntime) -> String {
     runtime.layers().borrow().active().to_owned()
 }
 
-fn reset(runtime: &FeatureRuntime) {
+pub(super) fn reset(runtime: &FeatureRuntime) {
     runtime.layers().borrow_mut().select("Base");
 }
 
-fn tap_key(device: &SimDevice, model: &DeviceModel, index: usize) {
+pub(super) fn tap_key(device: &SimDevice, model: &DeviceModel, index: usize) {
     device.send(key_report(model, &[index]));
     device.send(key_report(model, &[]));
 }
 
-fn wait_layer(what: &str, runtime: &FeatureRuntime, layer: &'static str) {
+pub(super) fn wait_layer(what: &str, runtime: &FeatureRuntime, layer: &'static str) {
     let runtime = runtime.clone();
     wait_until(what, move || active(&runtime) == layer);
 }
@@ -238,7 +242,7 @@ fn is_red(image: &Pixbuf, x: i32, y: i32) -> bool {
     pixel[0] > 180 && pixel[1] < 90 && pixel[2] < 90
 }
 
-fn decode(jpeg: Vec<u8>) -> Pixbuf {
+pub(super) fn decode(jpeg: Vec<u8>) -> Pixbuf {
     Pixbuf::from_read(std::io::Cursor::new(jpeg)).unwrap()
 }
 

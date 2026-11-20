@@ -18,7 +18,8 @@ catalog assignment; save them or discard them through control selection first.
 Existing key-to-key MOVE dragging still swaps saved settings and artwork;
 catalog COPY dragging has a distinct payload type and cyan target outline.
 The right-hand panel is one card with three segmented tabs: **Actions**, **Dials**
-and **Binding** (checked tab uses the selected-tab surface). Dials lists presets
+and **Binding** (checked tab uses the selected-tab surface; a model without dials
+has no Dials tab, see "Models without dials or a touch strip"). Dials lists presets
 (Volume, Brightness, Tracks, Scroll, Pages) as two-line rows; dropping one on a
 dial, or clicking it with a dial selected, binds every event it lists in one
 validated, atomic save without executing anything and without touching the
@@ -31,7 +32,8 @@ action icon in a bordered tile and a drag grip that brightens on hover; dragging
 shows the row itself. Searching opens every category with matches, hides the
 rest and shows "No actions match your search." when nothing matches; clearing
 restores the categories as the user left them. Every key and every dial of
-the shown model takes a drop (36 keys and 6 dials on the + XL, 8 and 4 on the +),
+the shown model takes a drop (36 keys and 6 dials on the + XL, 8 and 4 on the +,
+15 keys on the Classic and 32 on the XL, which have no dials),
 and each model's session keeps its own search text and open categories.
 Dropping a catalog action on a dial opens a small popover beside it offering
 Turn clockwise, Turn counterclockwise and Press; only the chosen event is
@@ -397,6 +399,38 @@ on each side of the window inside the bezel, 10px from it and vertically centred
 on it; the bezel and chassis widen to hold them (376px wide). They are selectable
 controls that take no picture (Elgato documents none). A model with touch
 buttons and no display would show them as one centred row under its keys.
+
+**Models without dials or a touch strip.** The Stream Deck Classic (15 keys,
+5x3) and XL (32 keys, 8x4) have keys only, and the Neo keys, two touch buttons
+and an information window without touch. Their session shows the sections of
+the controls the model has and nothing else: no section is left empty,
+disabled or broken in place of one the model lacks, and the + and + XL keep
+every section unchanged.
+- The preview draws only the model's controls (keys, the Neo's window and touch
+  buttons); Tab visits the keys row-major, then the touch buttons.
+- The side panel shows **Actions** and **Binding**; the Dials tab and its
+  presets are not there. The catalog serves every key as on the + (drop, click
+  with a key selected, parameter-free actions save on drop); its rows read
+  "Drag <action> onto a key, or click to assign to the selected control.", and
+  clicking one while a touch button is selected says "Select a key before
+  assigning an action." (a touch button takes its action from the Action
+  selector).
+- The touchscreen page controls, the strip's Appearance section and the swipe,
+  tap and hold badges never appear (the Neo's window header keeps only its
+  plain "Display" caption, and the Artwork target picker lists nothing on a
+  Classic or an XL). The editor refuses a dial or the strip by name ("the
+  Stream Deck Classic has no dials", "the Stream Deck Classic has no touch
+  strip") and stays on the control it was on.
+- Texts name only what the model has: New profile reads "New profile: add a
+  profile with its own keys and pages." ("keys, pages and touch buttons" on the
+  Neo), the live-information tooltip has no dial or section sentence, the page
+  folders link "to selected key" ("key or touch button" on the Neo), and the
+  window's setup help, which follows the shown model, reads "Click a key on the
+  preview." without the Touch strip pages step.
+- Nothing is sent for a display the model lacks: a Classic or an XL receives
+  key pictures only, so no picture can fail and overwrite the status line.
+  Connected with a + (or any other model), each keeps its own session as
+  described under "Device model".
 
 **Preview images.** The documentation shows one image per supported model,
 rendered from the real preview widget with no device: `preview-<model id>.png`
@@ -870,16 +904,19 @@ two columns fit.
   size of the shown page only. The window shows one session. Automatically
   (until the user picks a model in this run) it shows the last used model when
   that model is connected, else the first connected model in the order Stream
-  Deck +, Stream Deck + XL; this is re-evaluated whenever a device connects or
+  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL; this is re-evaluated whenever a device connects or
   is unplugged, so a last used model that connects second is shown as soon as
   it connects, and the other connected model is shown when the shown model's
   last device is unplugged. With no device the window keeps what it shows (the
   last used model; the XL cannot be shown without a device). The header lists
   what is connected: one model reads exactly "<model> connected — keys, dials
-  and touch strip are live", two models "Stream Deck + and Stream Deck + XL
-  connected — ...", two units of one model "<model> x2 connected"; models
-  are named in the order Stream Deck +, Stream Deck + XL whichever plugged in
-  first, and with several devices the tooltip of the line starts with the whole
+  and touch strip are live", naming only the controls that model has ("Stream
+  Deck Classic connected — keys are live"), two models "Stream Deck + and
+  Stream Deck + XL connected — ...", three "Stream Deck +, Stream Deck Classic
+  and Stream Deck XL connected — keys, dials and touch strip are live" (every
+  control any of them has), two units of one model "<model> x2 connected"; models
+  are named in the order Stream Deck +, Stream Deck + XL, Stream Deck Classic,
+  Stream Deck XL whichever plugged in first, and with several devices the tooltip of the line starts with the whole
   sentence (the line itself may be ellipsized), then the USB ids.
   The **Current selector** sits on the title row, immediately left of Menu: the caption
   "Current" (muted, 12px) and a drop-down named "Current device" with the
@@ -887,8 +924,8 @@ two columns fit.
   or more distinct models are connected; with none, one, or several units of
   one model it is not in the layout at all (not focusable either), so a
   window with one model looks exactly as it did before the selector existed.
-  Its entries are the connected models, plain names, in the order Stream Deck
-  +, Stream Deck + XL, and it shows the shown model. Choosing an entry shows
+  Its entries are the connected models, plain names, in the same order (Stream
+  Deck +, Stream Deck + XL, Stream Deck Classic, Stream Deck XL), and it shows the shown model. Choosing an entry shows
   that model's session, rebinds the menu, toasts "Switched to <model>." and
   remembers the model for the next start only once the session opened; it
   never asks about unsaved edits, because the session left behind stays alive
@@ -900,8 +937,9 @@ two columns fit.
   connected, with a persistent error, nothing is sent to that device and it is
   not offered in the selector. The menu's import and export, OBS and Test
   action act on the shown session; the focused application reaches every
-  session. Each preview's brand line reads "STREAM DECK +" or "STREAM DECK +
-  XL".
+  session. Each preview's brand line is the model's name in capitals ("STREAM
+  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC"), and the setup help
+  follows the shown model.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
