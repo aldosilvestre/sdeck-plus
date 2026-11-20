@@ -440,6 +440,8 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 /* The Stream Deck Neo's information window: selectable, slightly lit on hover. */
 .window-surface { border-radius: 2px; }
 .window-surface:hover { background: #11151a; }
+/* The empty window's "Info window" caption lets the window's own surface show. */
+.window-surface .touch-display { background: transparent; }
 .hardware-bezel { border-radius: 2px; }
 .hardware-rail {
     background: linear-gradient(180deg, #22282e, #343c44);
