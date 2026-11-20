@@ -67,7 +67,7 @@ fn discovery_never_matches_a_planned_model() {
         }
     }
     let found = supported_devices(
-        [0x006D, 0x009A, 0x0063, 0x00C6]
+        [0x0060, 0x009A, 0x0063, 0x00C6]
             .into_iter()
             .enumerate()
             .map(|(at, pid)| listed(VID, pid, &format!("path{at}"))),
@@ -257,11 +257,13 @@ fn a_legacy_mini_is_refused_clearly_and_never_driven() {
 }
 
 #[test]
-fn only_the_two_supported_product_ids_are_ever_discovered() {
+fn only_the_supported_product_ids_are_ever_discovered() {
     for pid in 0..=u16::MAX {
         let expected = match pid {
             0x0084 => Some("plus"),
             0x00C6 => Some("plus-xl"),
+            0x006D | 0x0080 | 0x00A5 | 0x00B9 => Some("classic"),
+            0x006C | 0x008F | 0x00BA => Some("xl"),
             _ => None,
         };
         let found = supported_devices([listed(VID, pid, "a")])

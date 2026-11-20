@@ -588,8 +588,13 @@ fn previews_render_to_images_for_every_supported_model_without_a_device() {
             }
             sizes.push((model.id, rendered.width, rendered.height, rendered.hash()));
         }
-        assert_eq!(sizes.len(), 2);
-        assert_ne!(sizes[0].3, sizes[1].3, "each model draws its own preview");
+        assert_eq!(sizes.len(), DeviceModel::supported().count());
+        let hashes: std::collections::BTreeSet<_> = sizes.iter().map(|size| size.3).collect();
+        assert_eq!(
+            hashes.len(),
+            sizes.len(),
+            "each model draws its own preview"
+        );
         assert!(
             sizes[1].1 > sizes[0].1,
             "the XL+ preview is wider than the +"

@@ -386,13 +386,14 @@ if (( ${#missing_tools[@]} > 0 )); then
     printf '  - %s\n' "${missing_tools[@]}"
 fi
 
-# Stream Deck + (0084) and Stream Deck + XL (00C6), as the kernel prints them.
+# Supported product ids, as the kernel prints them: Stream Deck + (0084),
+# + XL (00C6), Classic (006D 0080 00A5 00B9) and XL (006C 008F 00BA).
 hidraw_root=/sys/class/hidraw
 if [[ ${SDECK_PLUS_INSTALL_TEST:-} == 1 ]]; then
     hidraw_root=${SDECK_PLUS_HIDRAW_ROOT:-$hidraw_root}
 fi
 for uevent in "$hidraw_root"/hidraw*/device/uevent; do
-    if [[ -r $uevent ]] && grep -qiE '^HID_ID=[0-9A-F]*:00000FD9:0000(0084|00C6)$' "$uevent"; then
+    if [[ -r $uevent ]] && grep -qiE '^HID_ID=[0-9A-F]*:00000FD9:0000(0084|00C6|006D|0080|00A5|00B9|006C|008F|00BA)$' "$uevent"; then
         node=${uevent#"$hidraw_root"/}
         node="/dev/${node%/device/uevent}"
         if [[ ! -r $node || ! -w $node ]]; then

@@ -584,7 +584,7 @@ fn the_header_without_a_device_names_no_preview() {
         assert!(found.iter().all(|text| !text.contains("Preview")));
         assert!(found
             .iter()
-            .any(|text| text == "Stream Deck + or Stream Deck + XL not connected — plug one in"));
+            .any(|text| text == "No Stream Deck connected — plug one in"));
         assert_eq!(
             header_label(&harness.window, "status").text(),
             "Not connected"

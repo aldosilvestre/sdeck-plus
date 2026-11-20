@@ -804,7 +804,7 @@ fn the_header_uses_the_connected_models_own_wording() {
             return;
         };
         let detail = header_label(&harness.window, "muted");
-        assert!(detail.text().contains("Stream Deck + or Stream Deck + XL"));
+        assert!(detail.text().contains("No Stream Deck connected"));
         harness.connect(&PLUS_XL);
         harness.wait_for_model(&PLUS_XL);
         let shown = detail.clone();

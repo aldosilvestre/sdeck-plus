@@ -211,11 +211,14 @@ const EXPANDED: DeviceModel = DeviceModel {
     zone_header_len: 16,
 };
 
-/// Planned. Facts from the Stream Deck Classic page. Its 480x272 LCD takes
+/// Facts from the Stream Deck Classic page (the MK.2 family; PID 0x0060, the
+/// original with its own protocol, is not included). Its 480x272 LCD takes
 /// background images (command 0x02 0x0D), not a window, so no strip is modelled.
+/// Validated with the simulator only.
 pub static CLASSIC: DeviceModel = DeviceModel {
     id: "classic",
     name: "Stream Deck Classic",
+    support: Support::Supported,
     pids: &[0x006D, 0x0080, 0x00A5, 0x00B9],
     doc_url: "https://docs.elgato.com/streamdeck/hid/stream-deck-classic",
     key_cols: 5,
@@ -224,10 +227,11 @@ pub static CLASSIC: DeviceModel = DeviceModel {
     ..EXPANDED
 };
 
-/// Planned. Facts from the Stream Deck XL page.
+/// Facts from the Stream Deck XL page. Validated with the simulator only.
 pub static XL: DeviceModel = DeviceModel {
     id: "xl",
     name: "Stream Deck XL",
+    support: Support::Supported,
     pids: &[0x006C, 0x008F, 0x00BA],
     doc_url: "https://docs.elgato.com/streamdeck/hid/stream-deck-xl",
     key_cols: 8,
@@ -446,5 +450,44 @@ impl DeviceModel {
 
     pub fn is_last_zone(&self, zone: u8) -> bool {
         zone == self.zones()
+    }
+
+    /// The controls that respond while the model is connected, in plain words
+    /// ("keys, dials and touch strip").
+    pub fn live_controls(&self) -> String {
+        Self::live_controls_of(&[self])
+    }
+
+    /// [`Self::live_controls`] for several connected models: every control
+    /// any of them has, in a fixed order.
+    pub fn live_controls_of(models: &[&DeviceModel]) -> String {
+        let any = |test: fn(&DeviceModel) -> bool| models.iter().any(|model| test(model));
+        let parts: Vec<&str> = [
+            ("keys", true),
+            ("dials", any(|model| model.dials > 0)),
+            ("touch buttons", any(|model| model.touch_buttons > 0)),
+            ("touch strip", any(|model| model.has_touch())),
+            (
+                "info window",
+                any(|model| model.has_strip() && !model.has_touch()),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| present.then_some(name))
+        .collect();
+        match parts.as_slice() {
+            [only] => (*only).to_owned(),
+            [first @ .., last] => format!("{} and {last}", first.join(", ")),
+            [] => String::new(),
+        }
+    }
+
+    /// Every product id of the model as hexadecimal, joined by `separator`.
+    pub fn pid_list(&self, separator: &str) -> String {
+        self.pids
+            .iter()
+            .map(|pid| format!("{pid:04X}"))
+            .collect::<Vec<_>>()
+            .join(separator)
     }
 }

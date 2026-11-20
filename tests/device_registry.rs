@@ -206,9 +206,9 @@ fn the_table_matches_the_documented_facts() {
 }
 
 #[test]
-fn exactly_the_plus_and_the_plus_xl_are_supported_today() {
+fn the_expanded_keypads_are_supported_with_the_plus_models() {
     let supported: Vec<_> = DeviceModel::supported().map(|model| model.id).collect();
-    assert_eq!(supported, ["plus", "plus-xl"]);
+    assert_eq!(supported, ["plus", "plus-xl", "classic", "xl"]);
     for model in each() {
         assert_eq!(
             model.is_supported(),
