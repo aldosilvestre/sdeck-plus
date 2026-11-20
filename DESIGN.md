@@ -401,6 +401,11 @@ on each side of the window inside the bezel, 10px from it and vertically centred
 on it; the bezel and chassis widen to hold them (376px wide). They are selectable
 controls that take no picture (Elgato documents none). A model with touch
 buttons and no display would show them as one centred row under its keys.
+The Stream Deck Classic adds a slim **Background** bar under its keys, as wide
+as them and 12px below the last row (252x28, key material with the key's inset
+edge, `.background-surface`): the page's background picture (42x24, cover) and
+the caption "Background" (11px/600). It is a selectable control named
+"Background" (see "Keypad background" below); the Classic chassis is 348x250.
 
 **Models without dials or a touch strip.** The Stream Deck Classic (15 keys,
 5x3) and XL (32 keys, 8x4) have keys only, and the Neo keys, two touch buttons
@@ -408,9 +413,9 @@ and an information window without touch. Their session shows the sections of
 the controls the model has and nothing else: no section is left empty,
 disabled or broken in place of one the model lacks, and the + and + XL keep
 every section unchanged.
-- The preview draws only the model's controls (keys, the Neo's window and touch
-  buttons); Tab visits the keys row-major, then the Neo's window, then the
-  touch buttons.
+- The preview draws only the model's controls (keys, the Classic's background
+  bar, the Neo's window and touch buttons); Tab visits the keys row-major, then
+  the Classic's background bar or the Neo's window, then the touch buttons.
 - The side panel shows **Actions** and **Binding**; the Dials tab and its
   presets are not there. The catalog serves every key as on the + (drop, click
   with a key selected, parameter-free actions save on drop); its rows read
@@ -420,10 +425,14 @@ every section unchanged.
   selector).
 - The touchscreen page controls, the strip's Appearance section and the swipe,
   tap and hold badges never appear (the Neo's window header keeps only its
-  plain "Display" caption, and the Artwork target picker lists nothing on a
-  Classic or an XL). On the Neo, selecting the window shows its own Appearance
+  plain "Display" caption, and the Artwork target picker lists nothing on an
+  XL). On the Neo, selecting the window shows its own Appearance
   section (the picker lists only "Info window", in a "Window picture" expander
-  that says each keypad page has its own picture and live information). The
+  that says each keypad page has its own picture and live information); on the
+  Classic, selecting the background bar shows its own (the picker lists only
+  "Background", in a "Background picture" expander that says each keypad page
+  has its own background, shown behind every key without a picture of its
+  own). The
   editor refuses a dial or the strip by name ("the Stream Deck Classic has no
   dials", "the Stream Deck Classic has no touch strip") and stays on the
   control it was on.
@@ -432,10 +441,12 @@ every section unchanged.
   Neo), the live-information tooltip has no dial or section sentence, the page
   folders link "to selected key" ("key or touch button" on the Neo), and the
   window's setup help, which follows the shown model, reads "Click a key on the
-  preview." ("Click a key, the info window or a touch button on the preview."
-  on the Neo) without the Touch strip pages step.
-- Nothing is sent for a display the model lacks: a Classic or an XL receives
-  key pictures only, so no picture can fail and overwrite the status line.
+  preview." ("Click a key or the background on the preview." on the Classic,
+  "Click a key, the info window or a touch button on the preview." on the Neo)
+  without the Touch strip pages step.
+- Nothing is sent for a display the model lacks: an XL receives key pictures
+  only, and so does a Classic until one of its pages has a background (see
+  "Keypad background"), so no picture can fail and overwrite the status line.
   Connected with a + (or any other model), each keeps its own session as
   described under "Device model".
 
@@ -724,6 +735,35 @@ two columns fit.
   row in layers.conf; the Neo has no touchscreen pages to follow. The device
   gets the whole window (Update Window Image 0x0B) as a JPEG turned 180°, as
   Elgato's Neo page says; this is validated with the simulator only.
+- **Keypad background** (Stream Deck Classic, 480x272, the LCD behind its 15
+  keys): each keypad page can have its own background picture, which follows
+  the shown page and profile like the Neo's window picture. Selecting the
+  Background bar under the keys heads the editor "Configuring: Background" and
+  shows no Event or Action selector, no hold check, no page return and no live
+  information ("Live information is not available for this control event.");
+  Save binding and Test action say "The background runs no action; choose its
+  picture under Appearance.". Its Appearance section ("Background picture"
+  expander, target "Background") sets it with Image… and Clear, on the active
+  keypad page. Remove clears it with the toast "Background removed." and an
+  Undo that puts the same picture back once; Undo refuses with "Cannot undo: the
+  background was changed after it was removed." when the page got another
+  background since, and Remove on a page without one says "This page has no
+  background.". The background shows behind every key without a picture of its
+  own: such a key shows its share of the background (Elgato's "Unit Pixel
+  Layout": 72px keys 25px apart, key 1 at 11,5), with its binding icon, button
+  text or live information drawn over that share as over its own artwork; a
+  key's own artwork covers it. Preview and device draw the same pixels. The
+  bar's tooltip reads "Background · Behind every key without a picture of its
+  own". The device gets the whole picture first (Update Full Screen Image
+  `02 08`, 480x272 JPEG turned 180°, as Elgato's Classic page describes a Full
+  LCD Image), then every key; a page without a background clears the LCD to
+  black once after one was shown, and a Classic whose pages never had one
+  gets key pictures only. Stored per keypad page as the page's
+  `touch-strip-background` artwork, in `keypad-background.conf` beside
+  artwork.conf (which keeps exactly the rows older readers accept; the file
+  exists only while a page has a background and travels in bundles). No other
+  model offers it (Elgato documents a full LCD image for the XL too; it is not
+  offered there). Validated with the simulator only.
 - **More actions:** each feature action's icon comes from the same mapping as
   saved controls (derived from a representative action). Category rows use
   System `application`, Multimedia `play-pause`, Organization `folder`, Device
@@ -777,7 +817,8 @@ two columns fit.
 - **Artwork targets:** every row of the Artwork target menu starts with a
   26x22 mini map of the shown model's keys over its strip sections (eight keys
   over four sections on the +, the 9x4 grid over six sections on the + XL, at the
-  same overall size; the Neo's one target reads "Info window"), soft-filled
+  same overall size; the Neo's one target reads "Info window", the Classic's
+  "Background"), soft-filled
   and outlined at half ink with its target filled (the whole strip row for the background),
   and menu rows end with the target's assigned action icon (key press; section
   tap, then hold), refreshed whenever the menu opens.
@@ -1068,9 +1109,10 @@ Preview controls are named after the device's own numbering: keys "Button 1"
 through "Button N" (row-major), dials "Encoder 1" through "Encoder N", and
 touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
 is the shown model's count (36 keys, 6 dials and 6 sections for the + XL; the
-+ keeps 8, 4 and 4), the Neo's window "Info window", and touch buttons "Touch
-button 1" and "Touch button 2" (the Neo's, left to right). Tab visits the keys
-row-major, then the touch strip and its sections (or the Neo's window), the
++ keeps 8, 4 and 4), the Classic's background bar "Background", the Neo's
+window "Info window", and touch buttons "Touch button 1" and "Touch button 2"
+(the Neo's, left to right). Tab visits the keys row-major, then the Classic's
+background bar, the touch strip and its sections (or the Neo's window), the
 touch buttons and the dials; Space or Enter selects the focused control, and any
 key of the shown model can be dragged onto another to swap them. Every model's
 session uses this order and these names.

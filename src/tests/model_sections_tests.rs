@@ -216,6 +216,11 @@ fn each_model_shows_the_sections_of_the_controls_it_has() {
                 usize::from(model.has_info_window()),
                 "{id}"
             );
+            assert_eq!(
+                count("background"),
+                usize::from(model.has_keypad_background()),
+                "{id}"
+            );
             assert_eq!(count("other"), 0, "{id}");
             assert_eq!(
                 tab_order(&f.window, &chassis, &buttons),
@@ -254,11 +259,13 @@ fn each_model_shows_the_sections_of_the_controls_it_has() {
                 assert!(takes_catalog_drops(widget), "{id}");
             }
             // Only the model's displays hold pictures, and the Appearance picker
-            // lists only its strip and sections (none on a Classic or an XL).
+            // lists only its strip and sections (the Classic its keypad
+            // background, the XL nothing).
             assert_eq!(
                 f.artwork.pictures.borrow().len(),
                 usize::from(model.keys())
                     + usize::from(model.has_strip())
+                    + usize::from(model.has_keypad_background())
                     + usize::from(model.zones()),
                 "{id}"
             );
@@ -334,7 +341,7 @@ fn the_texts_of_each_model_name_only_its_own_controls() {
             (
                 &CLASSIC,
                 "New profile: add a profile with its own keys and pages.",
-                "Click a key on the preview.",
+                "Click a key or the background on the preview.",
                 "key",
             ),
             (

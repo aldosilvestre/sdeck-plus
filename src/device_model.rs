@@ -26,7 +26,8 @@ pub enum Rotation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProtocolFamily {
     /// Classic, XL, Neo, + and + XL: 0x01 input commands, 0x02 image reports
-    /// (0x07 key, 0x0B/0x0C window) and 0x03 feature reports.
+    /// (0x07 key, 0x0B/0x0C window, 0x08 full screen for a keypad background)
+    /// and 0x03 feature reports.
     Expanded,
     /// The original Mini: a fixed 65-byte input report (report id 0x01, then
     /// one state byte per key, no command byte), BMP key images in 1024-byte
@@ -76,6 +77,22 @@ impl ImageFormat {
     }
 }
 
+/// A picture that covers the whole LCD behind the keys (Elgato's "Full LCD
+/// Image", sent with Update Full Screen Image `02 08`). Each key shows its
+/// own picture over its part of the LCD; a key without one shows the part of
+/// this picture under it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeypadBackground {
+    /// Size (width, height) of the LCD picture in pixels.
+    pub px: (u32, u32),
+    /// Rotation applied before upload.
+    pub rotation: Rotation,
+    /// Top-left corner of key 1 on the LCD, in the upright picture.
+    pub first_key: (u32, u32),
+    /// Distance from one key to the next (the key plus the gap), across and down.
+    pub pitch: (u32, u32),
+}
+
 /// The wide display under the keys: a touch strip, or a plain window.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StripSpec {
@@ -115,6 +132,9 @@ pub struct DeviceModel {
     pub image_format: ImageFormat,
     /// The display under the keys, if the model has one.
     pub strip: Option<StripSpec>,
+    /// The picture behind the keys, if the application offers one for the
+    /// model (see [`KeypadBackground`]).
+    pub keypad_background: Option<KeypadBackground>,
     /// Whether partial-window image headers swap x/y when rotated.
     pub partial_window_axis_swap: bool,
     pub input_report_len: usize,
@@ -151,6 +171,7 @@ pub static PLUS: DeviceModel = DeviceModel {
         rotation: Rotation::None,
         zone_px: (200, 100),
     }),
+    keypad_background: None,
     partial_window_axis_swap: false,
     input_report_len: 64,
     input_header_len: 4,
@@ -182,6 +203,7 @@ pub static PLUS_XL: DeviceModel = DeviceModel {
         rotation: Rotation::Ccw90,
         zone_px: (200, 100),
     }),
+    keypad_background: None,
     partial_window_axis_swap: false,
     input_report_len: 64,
     input_header_len: 4,
@@ -208,6 +230,7 @@ const EXPANDED: DeviceModel = DeviceModel {
     key_flip_y: false,
     image_format: ImageFormat::Jpeg,
     strip: None,
+    keypad_background: None,
     partial_window_axis_swap: false,
     input_report_len: 64,
     input_header_len: 4,
@@ -217,9 +240,16 @@ const EXPANDED: DeviceModel = DeviceModel {
 };
 
 /// Facts from the Stream Deck Classic page (the MK.2 family; PID 0x0060, the
-/// original with its own protocol, is not included). Its 480x272 LCD takes
-/// background images (command 0x02 0x0D), not a window, so no strip is modelled.
-/// Validated with the simulator only.
+/// original with its own protocol, is not included; the page says every PID
+/// of the family shares one command set). Its keys sit on one 480x272 LCD,
+/// which is not a window, so no strip is modelled. The keypad background is
+/// the page's "Full LCD Image": 480 x 272, "Rotate the image 180° before
+/// upload", JPEG, sent with Update Full Screen Image (`02 08`). The page also
+/// lists Update Background (`02 0D`), which only stores a picture at an index;
+/// it documents no way to show a stored one on the Classic (Show Background
+/// by Index, `03 13`, is on the XL page only), so it is not used. Key 1 sits
+/// 11 px from the left and 5 px from the top, keys 72 px with 25 px between
+/// them ("Unit Pixel Layout"). Validated with the simulator only.
 pub static CLASSIC: DeviceModel = DeviceModel {
     id: "classic",
     name: "Stream Deck Classic",
@@ -229,10 +259,18 @@ pub static CLASSIC: DeviceModel = DeviceModel {
     key_cols: 5,
     key_rows: 3,
     key_px: 72,
+    keypad_background: Some(KeypadBackground {
+        px: (480, 272),
+        rotation: Rotation::Rot180,
+        first_key: (11, 5),
+        pitch: (97, 97),
+    }),
     ..EXPANDED
 };
 
 /// Facts from the Stream Deck XL page. Validated with the simulator only.
+/// Elgato documents a 1024 x 600 Full LCD Image for it too; the application
+/// offers a keypad background on the Classic only.
 pub static XL: DeviceModel = DeviceModel {
     id: "xl",
     name: "Stream Deck XL",
@@ -392,6 +430,32 @@ impl DeviceModel {
     /// information, and takes no input.
     pub const fn has_info_window(&self) -> bool {
         matches!(self.strip, Some(StripSpec { touch: false, .. }))
+    }
+
+    /// Whether each page can show a picture behind the keys (the Classic's).
+    pub const fn has_keypad_background(&self) -> bool {
+        self.keypad_background.is_some()
+    }
+
+    /// Where one-based `key` sits on the keypad background, as `(x, y, width,
+    /// height)` in the upright picture; `None` without a background or for a
+    /// key the model lacks.
+    pub fn key_on_background(&self, key: u8) -> Option<(u32, u32, u32, u32)> {
+        let background = self.keypad_background?;
+        if !self.is_valid_key(key) {
+            return None;
+        }
+        let index = u32::from(key - 1);
+        let (column, row) = (
+            index % u32::from(self.key_cols),
+            index / u32::from(self.key_cols),
+        );
+        Some((
+            background.first_key.0 + column * background.pitch.0,
+            background.first_key.1 + row * background.pitch.1,
+            self.key_px,
+            self.key_px,
+        ))
     }
 
     /// Touch sections along the strip; 0 without one.

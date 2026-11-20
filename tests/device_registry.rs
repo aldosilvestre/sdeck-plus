@@ -352,7 +352,8 @@ fn counts_ranges_and_geometry_agree_with_the_accessors() {
 fn artwork_targets_follow_the_shape_of_every_model() {
     for model in each() {
         let all = ArtworkTarget::all_for(model);
-        let strip = usize::from(model.has_strip());
+        // The strip, the Neo's window or the Classic's keypad background.
+        let strip = usize::from(model.has_strip() || model.has_keypad_background());
         assert_eq!(
             all.len(),
             usize::from(model.keys()) + strip + usize::from(model.zones()),
@@ -384,11 +385,11 @@ fn artwork_targets_follow_the_shape_of_every_model() {
         }
         assert_eq!(
             ArtworkTarget::TouchStripBackground.is_valid_for(model),
-            model.has_strip()
+            strip == 1
         );
         assert_eq!(
             image_output::dimensions_for(model, ArtworkTarget::TouchStripBackground).is_ok(),
-            model.has_strip()
+            strip == 1
         );
     }
 }
@@ -501,7 +502,7 @@ fn every_model_artwork_store_accepts_its_targets_and_rejects_the_rest() {
                 model.id
             );
         }
-        if !model.has_strip() {
+        if !model.has_strip() && !model.has_keypad_background() {
             assert!(store
                 .assign_in_layer("Base", ArtworkTarget::TouchStripBackground, &image)
                 .is_err());

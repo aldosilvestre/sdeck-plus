@@ -80,6 +80,7 @@ pub(crate) fn control_of(kind: ControlKind, number: u8) -> Option<ControlRef> {
         (ControlKind::Touch, number) => Some(ControlRef::Zone(number)),
         (ControlKind::TouchButton, number) => Some(ControlRef::TouchButton(number)),
         (ControlKind::Window, _) => Some(ControlRef::Window),
+        (ControlKind::Background, _) => Some(ControlRef::Background),
     }
 }
 
@@ -92,6 +93,7 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
         ControlRef::Zone(number) => (ControlKind::Touch, number),
         ControlRef::TouchButton(number) => (ControlKind::TouchButton, number),
         ControlRef::Window => (ControlKind::Window, 1),
+        ControlRef::Background => (ControlKind::Background, 1),
     }
 }
 
@@ -424,6 +426,51 @@ impl PreviewView {
             self.bind(&mut built, ControlRef::Key(number), key);
         }
 
+        if let Some(rect) = &layout.background {
+            // The keypad background (the Classic's): a bar under the keys
+            // with the page's picture beside its caption. The keys show their
+            // share of the picture; the bar selects it for Appearance.
+            let bar = Button::new();
+            bar.add_css_class("control-selectable");
+            bar.add_css_class("background-surface");
+            if let Some(name) = ControlRef::Background.accessible_name() {
+                bar.update_property(&[gtk::accessible::Property::Label(&name)]);
+            }
+            bar.set_size_request(rect.w, rect.h);
+            let content = GtkBox::new(Orientation::Horizontal, 8);
+            let thumbnail = artwork_picture();
+            thumbnail.add_css_class("background-thumbnail");
+            thumbnail.set_hexpand(false);
+            // The LCD's 480:272 shape at the bar's height.
+            thumbnail.set_size_request(42, 24);
+            thumbnail.set_visible(false);
+            let caption = Label::new(Some("Background"));
+            caption.add_css_class("background-caption");
+            caption.set_xalign(0.0);
+            content.append(&thumbnail);
+            content.append(&caption);
+            bar.set_child(Some(&content));
+            put(&chassis, &bar, rect);
+            register_picture(
+                &self.artwork,
+                ArtworkTarget::TouchStripBackground,
+                &thumbnail,
+            );
+            // The background is the Appearance picker's only target, so
+            // selecting it there changes nothing: point Appearance at it.
+            let (picker, artwork) = (self.picker.clone(), self.artwork.clone());
+            bar.connect_clicked(move |_| {
+                picker.set_selected(0);
+                artwork
+                    .selected_target
+                    .set(ArtworkTarget::TouchStripBackground);
+                if let Some(editor) = artwork.text_editor.borrow().upgrade() {
+                    editor.load_context(false);
+                }
+            });
+            self.bind(&mut built, ControlRef::Background, bar);
+        }
+
         if let Some(strip) = &layout.strip {
             let bezel = gtk::Fixed::new();
             bezel.add_css_class("hardware-bezel");
@@ -600,6 +647,7 @@ impl PreviewView {
                 ControlRef::TouchButton(number) => format!("Touch button {number} · {text}"),
                 ControlRef::Strip | ControlRef::Zone(_) => text.to_owned(),
                 ControlRef::Window => format!("Info window · {text}"),
+                ControlRef::Background => format!("Background · {text}"),
             }
             };
             button.set_tooltip_text(Some(&tooltip(&summary.text())));

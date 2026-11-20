@@ -212,6 +212,8 @@ pub(super) fn kind_of(button: &Button) -> &'static str {
         "touch button"
     } else if button.has_css_class("window-surface") {
         "window"
+    } else if button.has_css_class("background-surface") {
+        "background"
     } else {
         "other"
     }

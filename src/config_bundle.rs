@@ -7,6 +7,9 @@
 //! file targets use ./imagenes/<name>, ./sonidos/<name>, ./archivos/<name>.
 //! Original directories and file contents are not exported. Legacy v1-v3
 //! bundles remain importable. Commands, arguments and credentials are verbatim.
+//! A Stream Deck Classic's keypad backgrounds travel in their own
+//! `keypad-background.conf`, only when a page has one, with portable
+//! references like artwork.conf.
 //! Limits are 192 MiB encoded, 128 MiB decoded, 32 MiB per asset/media file,
 //! 4 MiB per configuration file, and 4096 entries. Credentials are included;
 //! bundles and installed files are owner-only, and staging directories are 0700.
@@ -17,7 +20,7 @@ use crate::{
     device_roots::{self, DEVICES_DIR},
     features::FeatureAction,
     layers::{Action, LayerStore},
-    local_artwork::ArtworkStore,
+    local_artwork::{ArtworkStore, KEYPAD_BACKGROUND_FILE},
     obs::ObsConfig,
     organization::Organization,
 };
@@ -32,13 +35,14 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-const CONFIGS: [&str; 6] = [
+const CONFIGS: [&str; 7] = [
     "layers.conf",
     "organization.json",
     "artwork.conf",
     "obs.json",
     "info.json",
     "touchscreen.json",
+    KEYPAD_BACKGROUND_FILE,
 ];
 /// Version written by [`export_for`]; it added the `model` field.
 const FORMAT_VERSION: u32 = 5;
@@ -507,8 +511,10 @@ pub fn export_for(root: &Path, destination: &Path, model: &'static DeviceModel) 
                 Err(error) => return Err(error),
             }
         }
-        if let Some(manifest) = files.get_mut("artwork.conf") {
-            *manifest = portable_artwork(manifest)?;
+        for name in ["artwork.conf", KEYPAD_BACKGROUND_FILE] {
+            if let Some(manifest) = files.get_mut(name) {
+                *manifest = portable_artwork(manifest)?;
+            }
         }
         materialize(&stage, &files)?;
         let mut layers = validate(&stage, model)?;
@@ -657,7 +663,10 @@ pub fn import_for(
     let mut files = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for entry in bundle.files {
+        // Only a model with a keypad background has keypad backgrounds.
+        let foreign = entry.path == KEYPAD_BACKGROUND_FILE && !model.has_keypad_background();
         if !allowed(&entry.path)
+            || foreign
             || !seen.insert(entry.path.clone())
             || (bundle.version >= 3 && !CONFIGS.contains(&entry.path.as_str()))
         {
