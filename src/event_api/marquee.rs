@@ -54,6 +54,12 @@ fn extent(model: &DeviceModel, command: &ArtworkCommand) -> Option<(f64, f64)> {
             value,
             ..
         } => info_render::marquee_extent_for(model, value, Some((false, false))),
+        // The information window of a model without touch (the Neo's).
+        ArtworkCommand::ComposeInfo {
+            target: ArtworkTarget::TouchStripBackground,
+            value,
+            ..
+        } => info_render::window_marquee_extent(model, value),
         ArtworkCommand::ComposeTouchscreenZone {
             zone,
             value: Some(value),

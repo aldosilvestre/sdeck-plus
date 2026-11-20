@@ -844,6 +844,13 @@ pub fn prepare_info_jpeg_for(
             }
             encode_image(model, Part::Zone, &overlay)
         }
+        // An information window (the Neo's) shows the page's reading over
+        // its own picture, sent whole like its background.
+        ArtworkTarget::TouchStripBackground if model.has_info_window() => encode_image(
+            model,
+            Part::Strip,
+            &crate::info_render::compose_window_image_for(model, value, background, elapsed)?,
+        ),
         ArtworkTarget::TouchStripBackground => {
             Err("live information cannot replace the touch strip background".into())
         }

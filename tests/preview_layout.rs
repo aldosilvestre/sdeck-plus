@@ -238,6 +238,7 @@ fn every_model_has_a_sane_deterministic_layout() {
                 + usize::from(model.dials)
                 + usize::from(model.zones())
                 + usize::from(model.has_touch())
+                + usize::from(model.has_info_window())
                 + usize::from(model.touch_buttons)
         );
         // Touch buttons sit on the chassis (inside the bezel when there is a
@@ -308,20 +309,36 @@ fn layouts_are_horizontally_symmetric() {
 }
 
 #[test]
-fn neo_window_is_decoration_and_its_touch_buttons_are_controls() {
+fn neo_window_is_a_selectable_display_between_its_keys_and_touch_buttons() {
     let neo = DeviceModel::by_id("neo").expect("registry lists the Neo");
     let layout = PreviewLayout::for_model(neo);
     let strip = layout.strip.as_ref().expect("the window is drawn");
     assert!(!strip.touch && strip.zones.is_empty());
-    assert!(
-        !layout.has(ControlRef::Strip),
-        "a plain window cannot be selected"
+    // The window is no touch strip: it is selected for its picture and
+    // information, never for touch gestures.
+    assert!(!layout.has(ControlRef::Strip));
+    assert_eq!(layout.rect_of(ControlRef::Window), Some(strip.rect));
+    assert_eq!(
+        ControlRef::Window.accessible_name().as_deref(),
+        Some("Info window")
     );
-    assert!(layout
-        .controls()
-        .iter()
-        .all(|control| matches!(control, ControlRef::Key(_) | ControlRef::TouchButton(_))));
+    let mut expected: Vec<_> = (1..=8).map(ControlRef::Key).collect();
+    expected.extend([
+        ControlRef::Window,
+        ControlRef::TouchButton(1),
+        ControlRef::TouchButton(2),
+    ]);
+    assert_eq!(layout.controls(), expected);
     assert_eq!(layout.touch_button_count(), 2);
+    // Models with a touch strip, or no display, have no window control.
+    for model in [&PLUS, &PLUS_XL]
+        .into_iter()
+        .chain(["classic", "xl"].map(|id| DeviceModel::by_id(id).unwrap()))
+    {
+        let layout = PreviewLayout::for_model(model);
+        assert!(!layout.has(ControlRef::Window), "{}", model.id);
+        assert!(!layout.controls().contains(&ControlRef::Window));
+    }
 }
 
 #[test]

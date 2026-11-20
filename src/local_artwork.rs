@@ -69,6 +69,19 @@ impl ArtworkTarget {
             .collect()
     }
 
+    /// Whether the profile's touchscreen page, rather than the keypad page,
+    /// owns this destination's picture on `model`: a touch strip and its
+    /// sections do; keys, and an information window that takes no touch (the
+    /// Stream Deck Neo's, which has no touch pages to follow), belong to the
+    /// keypad page.
+    pub fn follows_touch_page(self, model: &DeviceModel) -> bool {
+        match self {
+            Self::Keypad(_) => false,
+            Self::TouchStripBackground => !model.has_info_window(),
+            Self::EncoderZone(_) => true,
+        }
+    }
+
     /// Whether `model` has this destination.
     pub fn is_valid_for(self, model: &DeviceModel) -> bool {
         match self {
@@ -377,7 +390,7 @@ impl ArtworkStore {
             self.check_mutation(to)?;
             for target in ArtworkTarget::all_for(self.model)
                 .into_iter()
-                .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
+                .filter(|target| target.follows_touch_page(self.model))
             {
                 if let Some(name) = self.assignments.get(&(from.clone(), target)) {
                     next.insert((to.clone(), target), name.clone());

@@ -392,8 +392,10 @@ a 52px pitch, 76px sections, knobs under their sections, a chassis just wide
 enough for its widest row, margins kept whole so it is symmetric); models
 without a strip or dials omit them. The + XL uses those rules with 40px keys on
 a 46px pitch and a 24px bottom margin, so its four rows still fit the window
-(see below). A Neo's information window is drawn as a
-plain display that cannot be selected. Its two capacitive touch buttons are
+(see below). A Neo's information window is drawn where a strip would be, as a
+selectable display of key material (`.window-surface`, named "Info window")
+that takes no touch: it shows the page's picture and live information (see
+"Information window" below). Its two capacitive touch buttons are
 round 28px pads of key material with the key's inset edge (`.touch-button`), one
 on each side of the window inside the bezel, 10px from it and vertically centred
 on it; the bezel and chassis widen to hold them (376px wide). They are selectable
@@ -407,7 +409,8 @@ the controls the model has and nothing else: no section is left empty,
 disabled or broken in place of one the model lacks, and the + and + XL keep
 every section unchanged.
 - The preview draws only the model's controls (keys, the Neo's window and touch
-  buttons); Tab visits the keys row-major, then the touch buttons.
+  buttons); Tab visits the keys row-major, then the Neo's window, then the
+  touch buttons.
 - The side panel shows **Actions** and **Binding**; the Dials tab and its
   presets are not there. The catalog serves every key as on the + (drop, click
   with a key selected, parameter-free actions save on drop); its rows read
@@ -418,15 +421,19 @@ every section unchanged.
 - The touchscreen page controls, the strip's Appearance section and the swipe,
   tap and hold badges never appear (the Neo's window header keeps only its
   plain "Display" caption, and the Artwork target picker lists nothing on a
-  Classic or an XL). The editor refuses a dial or the strip by name ("the
-  Stream Deck Classic has no dials", "the Stream Deck Classic has no touch
-  strip") and stays on the control it was on.
+  Classic or an XL). On the Neo, selecting the window shows its own Appearance
+  section (the picker lists only "Info window", in a "Window picture" expander
+  that says each keypad page has its own picture and live information). The
+  editor refuses a dial or the strip by name ("the Stream Deck Classic has no
+  dials", "the Stream Deck Classic has no touch strip") and stays on the
+  control it was on.
 - Texts name only what the model has: New profile reads "New profile: add a
   profile with its own keys and pages." ("keys, pages and touch buttons" on the
   Neo), the live-information tooltip has no dial or section sentence, the page
   folders link "to selected key" ("key or touch button" on the Neo), and the
   window's setup help, which follows the shown model, reads "Click a key on the
-  preview." without the Touch strip pages step.
+  preview." ("Click a key, the info window or a touch button on the preview."
+  on the Neo) without the Touch strip pages step.
 - Nothing is sent for a display the model lacks: a Classic or an XL receives
   key pictures only, so no picture can fail and overwrite the status line.
   Connected with a + (or any other model), each keeps its own session as
@@ -696,6 +703,27 @@ two columns fit.
   starts: the held state the device repeats and the release run nothing, and
   there is no hold action. The preview pad's tooltip reads "Touch button N ·
   Press: <action>". Models without touch buttons offer none.
+- **Information window** (Stream Deck Neo, 248x58, no touch): each keypad page
+  shows its own content there, like a section of the + touch strip, and the
+  window follows the shown page and profile. Selecting the window on the
+  preview heads the editor "Configuring: Info window" and shows no Event or
+  Action selector, no hold check and no page return: it runs nothing. Its
+  Appearance section sets the page's window picture (target "Info window";
+  Image… and Clear act on the active keypad page), and the Binding tab's "Show
+  live information on the window" (any live-information source: time and date,
+  now playing, volume, weather, ...) is saved with Save binding and cleared by
+  Remove (with Undo). The reading is drawn by `info_render` over the window's
+  picture without a section tile: icon on the left (42px), a 22px value, bar
+  and detail beside it, or a centred 26px value with no icon (time and date);
+  a long playing title scrolls as on keys. While a Start timer counts down on
+  the shown page, the window shows its countdown too, then returns to its
+  picture and reading. The preview tooltip reads "Info window · Live
+  information: <source>" or "Info window · No live information". Stored per
+  keypad page: the picture as the page's `touch-strip-background` artwork, the
+  reading as a `window` entry (always `none`, it runs nothing) with its `info`
+  row in layers.conf; the Neo has no touchscreen pages to follow. The device
+  gets the whole window (Update Window Image 0x0B) as a JPEG turned 180°, as
+  Elgato's Neo page says; this is validated with the simulator only.
 - **More actions:** each feature action's icon comes from the same mapping as
   saved controls (derived from a representative action). Category rows use
   System `application`, Multimedia `play-pause`, Organization `folder`, Device
@@ -749,7 +777,7 @@ two columns fit.
 - **Artwork targets:** every row of the Artwork target menu starts with a
   26x22 mini map of the shown model's keys over its strip sections (eight keys
   over four sections on the +, the 9x4 grid over six sections on the + XL, at the
-  same overall size), soft-filled
+  same overall size; the Neo's one target reads "Info window"), soft-filled
   and outlined at half ink with its target filled (the whole strip row for the background),
   and menu rows end with the target's assigned action icon (key press; section
   tap, then hold), refreshed whenever the menu opens.
@@ -765,10 +793,12 @@ two columns fit.
   pages by name) and a seconds field. It is off by
   default, saved with the binding, and applies once after the action runs.
 - **Live information option:** in the sidebar's Binding tab, a "Show live information
-  on the key" check button reveals a labeled source selector, plus a location
-  field only for Weather. Keys, dials and a tap or hold on one touch section; the
-  picture is drawn by `info_render` directly over the key's own artwork (120x120)
-  or the touch section's (200x100, icon left, value/bar/detail right), never on
+  on the key" check button ("on the window" for the Neo's information window)
+  reveals a labeled source selector, plus a location field only for Weather.
+  Keys, dials, a tap or hold on one touch section and the Neo's information
+  window; the picture is drawn by `info_render` directly over the key's own
+  artwork (120x120), the touch section's (200x100, icon left, value/bar/detail
+  right) or the window's (248x58, the same layout without the tile), never on
   a solid background of its own. Icons and text carry the soft drop shadow
   for legibility and the bar a translucent track. Icon colors
   follow the palette: cyan audio, amber light, violet load that turns amber at
@@ -1038,9 +1068,10 @@ Preview controls are named after the device's own numbering: keys "Button 1"
 through "Button N" (row-major), dials "Encoder 1" through "Encoder N", and
 touch sections with the tooltip "Touch zone 1" through "Touch zone N", where N
 is the shown model's count (36 keys, 6 dials and 6 sections for the + XL; the
-+ keeps 8, 4 and 4), and touch buttons "Touch button 1" and "Touch button 2"
-(the Neo's, left to right). Tab visits the keys row-major, then the touch strip,
-its sections, the touch buttons and the dials; Space or Enter selects the focused control, and any
++ keeps 8, 4 and 4), the Neo's window "Info window", and touch buttons "Touch
+button 1" and "Touch button 2" (the Neo's, left to right). Tab visits the keys
+row-major, then the touch strip and its sections (or the Neo's window), the
+touch buttons and the dials; Space or Enter selects the focused control, and any
 key of the shown model can be dragged onto another to swap them. Every model's
 session uses this order and these names.
 

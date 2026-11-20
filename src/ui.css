@@ -436,7 +436,10 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     box-shadow: inset 0 1px alpha(#ffffff, 0.18), inset 0 -1px alpha(#000000, 0.45);
 }
 .hardware-brand { color: #e1e6eb; font-size: 13px; font-weight: 800; }
-.hardware-bezel, .key-surface, .strip-surface, .touch-display { background: #08090b; }
+.hardware-bezel, .key-surface, .strip-surface, .window-surface, .touch-display { background: #08090b; }
+/* The Stream Deck Neo's information window: selectable, slightly lit on hover. */
+.window-surface { border-radius: 2px; }
+.window-surface:hover { background: #11151a; }
 .hardware-bezel { border-radius: 2px; }
 .hardware-rail {
     background: linear-gradient(180deg, #22282e, #343c44);

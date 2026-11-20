@@ -501,7 +501,12 @@ fn the_neo_preview_draws_its_touch_buttons_beside_the_window() {
     let layout = PreviewLayout::for_model(neo());
     let controls = layout.controls();
     let mut expected: Vec<_> = (1..=8).map(ControlRef::Key).collect();
-    expected.extend([ControlRef::TouchButton(1), ControlRef::TouchButton(2)]);
+    // The window (selected for its picture and live information) comes first.
+    expected.extend([
+        ControlRef::Window,
+        ControlRef::TouchButton(1),
+        ControlRef::TouchButton(2),
+    ]);
     assert_eq!(controls, expected);
     assert_eq!(layout.touch_button_count(), 2);
     let strip = layout.strip.as_ref().expect("the Neo's window");

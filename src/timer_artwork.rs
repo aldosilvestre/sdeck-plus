@@ -37,6 +37,21 @@ impl ArtworkUi {
         ))
     }
 
+    /// Every picture of the countdown on `layer`: its key, then the
+    /// information window of a model that has one (the Neo's).
+    fn countdown_pictures(&self, layer: &str) -> Vec<(ArtworkTarget, InfoValue)> {
+        let Some((key, value)) = self.countdown_picture(layer) else {
+            return Vec::new();
+        };
+        let window = self
+            .layers
+            .borrow()
+            .model()
+            .has_info_window()
+            .then(|| (ArtworkTarget::TouchStripBackground, value.clone()));
+        std::iter::once((key, value)).chain(window).collect()
+    }
+
     pub(crate) fn start_key_countdown(&self, layer: String, key: u8, seconds: u32) {
         self.info.borrow_mut().countdown = Some(CountdownArtwork {
             layer,
@@ -71,7 +86,7 @@ impl ArtworkUi {
 
     fn draw_countdown(&self) {
         let layer = self.layers.borrow().active().to_owned();
-        if let Some((target, value)) = self.countdown_picture(&layer) {
+        for (target, value) in self.countdown_pictures(&layer) {
             self.paint_info_preview(target, &value);
             let _ = self
                 .output
@@ -80,8 +95,9 @@ impl ArtworkUi {
     }
 
     pub(crate) fn countdown_shows(&self, layer: &str, target: ArtworkTarget) -> bool {
-        self.countdown_picture(layer)
-            .is_some_and(|(shown, _)| shown == target)
+        self.countdown_pictures(layer)
+            .iter()
+            .any(|(shown, _)| *shown == target)
     }
 
     pub(crate) fn with_countdown(
@@ -89,7 +105,7 @@ impl ArtworkUi {
         layer: &str,
         mut commands: Vec<ArtworkCommand>,
     ) -> Vec<ArtworkCommand> {
-        if let Some((target, value)) = self.countdown_picture(layer) {
+        for (target, value) in self.countdown_pictures(layer) {
             commands.retain(|command| match command {
                 ArtworkCommand::Assign { target: shown, .. }
                 | ArtworkCommand::Clear { target: shown }
@@ -104,7 +120,7 @@ impl ArtworkUi {
     }
 
     pub(crate) fn paint_countdown_preview(&self, layer: &str) {
-        if let Some((target, value)) = self.countdown_picture(layer) {
+        for (target, value) in self.countdown_pictures(layer) {
             self.paint_info_preview(target, &value);
         }
     }

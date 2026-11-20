@@ -175,6 +175,91 @@ fn every_expanded_window_is_uploaded_at_its_size_and_rotation() {
     }
 }
 
+/// Elgato's Neo page, "Full Window Image": a 248 x 58 picture, "rotated
+/// 180° before upload", as JPEG, through Update Window Image: `02 0B`, a
+/// reserved byte, the done flag, the UINT16 chunk size and the UINT16 chunk
+/// index (little-endian), then the data, in 1024-byte reports.
+#[test]
+fn the_neo_window_is_a_248x58_jpeg_turned_half_way_in_full_window_reports() {
+    let model = DeviceModel::by_id("neo").unwrap();
+    let scratch = Scratch::new("registry-neo-window");
+    // Noise makes the picture take several chunks.
+    let path = scratch.marker("window.png", (248, 58), true);
+    let device = SimDevice::new(model);
+    let mut rig = Rig::start(&[&device]);
+    rig.wait_connection(connected(model));
+    rig.artwork
+        .send(ArtworkCommand::Assign {
+            target: ArtworkTarget::TouchStripBackground,
+            path: path.clone(),
+        })
+        .unwrap();
+    device.wait_until(|device| device.image_count() == 1);
+    let writes = device.writes();
+    let jpeg =
+        image_output::prepare_jpeg_for(model, ArtworkTarget::TouchStripBackground, &path).unwrap();
+    let capacity = 1024 - 8;
+    assert!(writes.len() >= 2, "{} reports", writes.len());
+    assert_eq!(writes.len(), jpeg.len().div_ceil(capacity));
+    for (index, report) in writes.iter().enumerate() {
+        let start = index * capacity;
+        let length = (jpeg.len() - start).min(capacity);
+        let last = index + 1 == writes.len();
+        let mut header = [0x02, 0x0B, 0x00, u8::from(last), 0, 0, 0, 0];
+        header[4..6].copy_from_slice(&(length as u16).to_le_bytes());
+        header[6..8].copy_from_slice(&(index as u16).to_le_bytes());
+        assert_eq!(report.len(), 1024, "report {index}");
+        assert_eq!(report[..8], header, "report {index}");
+        assert_eq!(report[8..8 + length], jpeg[start..start + length]);
+        assert!(report[8 + length..].iter().all(|byte| *byte == 0));
+    }
+    let image = device.images().remove(0);
+    assert_eq!((image.command, image.slot, image.window), (0x0b, 0, None));
+    assert_eq!(image.jpeg[..2], [0xFF, 0xD8], "JPEG");
+    let decoded = image.decode();
+    assert_eq!((decoded.width(), decoded.height()), (248, 58));
+    // The marker of the source's top-left corner lands at the bottom right.
+    let (x, y) = marker_at(Rotation::Rot180, (248, 58));
+    assert_eq!((x, y), (239, 49));
+    assert!(is_red(&decoded, x, y), "marker not turned half way");
+    assert!(!is_red(&decoded, 8, 8), "marker left at the top left");
+    rig.stop();
+}
+
+/// A long Now playing title scrolls in the Neo's window on the device as it
+/// does on keys and touch sections: after the first picture, the HID owner
+/// sends later frames of it, each a whole 0x0B window.
+#[test]
+fn a_long_playing_title_scrolls_in_the_neo_window() {
+    use crate::info::{Glyph, InfoValue};
+    let model = DeviceModel::by_id("neo").unwrap();
+    let device = SimDevice::new(model);
+    let mut rig = Rig::start(&[&device]);
+    rig.wait_connection(connected(model));
+    let value = InfoValue {
+        detail: "Queen".into(),
+        ..InfoValue::text(Glyph::Play, "Bohemian Rhapsody (Remastered 2011)")
+    };
+    rig.artwork
+        .send(ArtworkCommand::ComposeInfo {
+            target: ArtworkTarget::TouchStripBackground,
+            path: None,
+            strip_path: None,
+            value,
+        })
+        .unwrap();
+    device.wait_until(|device| device.image_count() >= 3);
+    let images = device.images();
+    assert!(images.iter().all(|image| image.command == 0x0b));
+    assert_ne!(
+        images[0].jpeg, images[2].jpeg,
+        "later frames move the title"
+    );
+    let decoded = images[2].decode();
+    assert_eq!((decoded.width(), decoded.height()), (248, 58));
+    rig.stop();
+}
+
 #[test]
 fn every_touch_section_is_uploaded_to_its_window() {
     for model in expanded().filter(|model| model.has_touch()) {
