@@ -20,6 +20,6 @@ pkgbase = sdeck-plus
 	optdepends = curl: weather information
 	options = !lto
 	source = sdeck-plus-1.1.0.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.1.0.tar.gz
-	sha256sums = 63c59dcf75ab3edbb209db11e354966bef46e885118ef4e67e4f3f1c1e4d2c8d
+	sha256sums = 8cd8b2fe7f0fc9726cbc6e4b487d859f1977c6f86429edac56b6b462befd4046
 
 pkgname = sdeck-plus
