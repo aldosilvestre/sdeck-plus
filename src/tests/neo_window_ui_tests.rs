@@ -5,7 +5,7 @@
 //! the page's picture with its reading, follow page changes and a running
 //! timer. No device is involved: the window runs over scratch stores, and
 //! channels stand in for the layer worker and the device.
-use super::preview_model_tests::{class_of, model_fixture, ModelFixture};
+use super::preview_model_tests::{bounds_in, class_of, model_fixture, ModelFixture};
 use super::*;
 use sdeck_plus::{
     binding_editor::ControlKind,
@@ -264,6 +264,49 @@ fn the_neo_window_is_selected_like_a_control_and_saves_its_information_per_page(
             targets.string(0).unwrap().as_str(),
             "Touch strip background"
         );
+    });
+}
+
+/// An empty window names itself "Info window", inside the window, on its
+/// caption line; the caption gives way as soon as the window shows a picture.
+#[test]
+fn an_empty_window_is_captioned_info_window_until_it_shows_a_picture() {
+    run_gtk_test(|| {
+        let Some(f) = model_fixture("window-caption", neo(), |_, _| {}) else {
+            return;
+        };
+        let layout = PreviewLayout::for_model(neo());
+        let strip = layout.strip.as_ref().unwrap();
+        let chassis = class_of(f.widgets.root.upcast_ref(), "hardware-chassis");
+        let window = control(&f, ControlRef::Window);
+        let caption = f.widgets.preview.touch_status().clone();
+        assert_eq!(caption.text(), "Info window");
+        assert!(caption.is_ancestor(&window), "the caption is in the window");
+        assert!(caption.is_mapped());
+        assert_eq!(
+            bounds_in(&caption, &chassis),
+            (
+                strip.header.x,
+                strip.header.y,
+                strip.header.w,
+                strip.header.h
+            )
+        );
+        assert_eq!(window_preview(&f), None);
+        drop(f);
+
+        let red = picture(0xff0000ff);
+        let Some(f) = model_fixture("window-caption-picture", neo(), |_, images| {
+            images.assign_in_layer("Base", WINDOW, &red).unwrap();
+        }) else {
+            let _ = std::fs::remove_file(&red);
+            return;
+        };
+        f.artwork.refresh(true);
+        assert_eq!(window_preview(&f), Some((248, 58)));
+        assert!(!f.widgets.preview.touch_status().is_visible());
+        drop(f);
+        let _ = std::fs::remove_file(&red);
     });
 }
 

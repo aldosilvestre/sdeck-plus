@@ -1,11 +1,12 @@
 //! The window of every model the app drives shows only the sections of the
-//! controls that model has. A Stream Deck Classic or XL has keys only and the
-//! Neo keys, two touch buttons and an information window: their action catalog
-//! serves the keys, and there is no Dials tab, no touchscreen page control, no
-//! strip appearance (the Neo's window has its own, see neo_window_ui_tests) and
-//! no text that offers a dial or a touch strip. The Stream Deck + and + XL keep
-//! every section exactly as before. No device is involved: the window runs over
-//! scratch stores and a channel that stands in for the layer worker.
+//! controls that model has. A Stream Deck Classic, XL or Mini has keys only and
+//! the Neo keys, two touch buttons and an information window: their action
+//! catalog serves the keys, and there is no Dials tab, no touchscreen page
+//! control, no strip appearance (the Neo's window has its own, see
+//! neo_window_ui_tests) and no text that offers a dial or a touch strip. The
+//! Stream Deck + and + XL keep every section exactly as before. No device is
+//! involved: the window runs over scratch stores and a channel that stands in
+//! for the layer worker.
 use super::action_catalog_tests::collect_catalog_buttons;
 use super::preview_model_tests::{
     bounds_in, chassis_of, class_of, controls_of, descendants_of, kind_of, model_fixture,
@@ -15,7 +16,7 @@ use super::*;
 use sdeck_plus::{
     binding_editor::ControlKind,
     desktop_actions::{DesktopAction, MediaCommand},
-    device_model::{DeviceModel, CLASSIC, PLUS, PLUS_XL, XL},
+    device_model::{DeviceModel, CLASSIC, MINI, PLUS, PLUS_XL, XL},
     features::FeatureAction,
     preview_layout::{ControlRef, PreviewLayout},
 };
@@ -24,14 +25,9 @@ fn neo() -> &'static DeviceModel {
     DeviceModel::by_id("neo").unwrap()
 }
 
-/// Every model the window is built for: the supported ones, and the Neo,
-/// whose touch buttons and window the preview already draws.
+/// Every model the window is built for: the supported ones.
 fn window_models() -> Vec<&'static DeviceModel> {
-    DeviceModel::all()
-        .iter()
-        .copied()
-        .filter(|model| model.is_supported() || model.id == "neo")
-        .collect()
+    DeviceModel::supported().collect()
 }
 
 /// The profile's touch pages, as every session opens them (models without a
@@ -178,7 +174,7 @@ const PLUS_INFO_TOOLTIP: &str = "Replaces the image with a live picture, such as
 fn each_model_shows_the_sections_of_the_controls_it_has() {
     run_gtk_test(|| {
         let models = window_models();
-        for wanted in [&PLUS, &PLUS_XL, &CLASSIC, &XL, neo()] {
+        for wanted in [&PLUS, &PLUS_XL, &CLASSIC, &XL, neo(), &MINI] {
             assert!(models.contains(&wanted), "{} is covered", wanted.id);
         }
         for model in models {
@@ -351,6 +347,12 @@ fn the_texts_of_each_model_name_only_its_own_controls() {
                 "key",
             ),
             (
+                &MINI,
+                "New profile: add a profile with its own keys and pages.",
+                "Click a key on the preview.",
+                "key",
+            ),
+            (
                 neo(),
                 "New profile: add a profile with its own keys, pages and touch buttons.",
                 "Click a key, the info window or a touch button on the preview.",
@@ -409,7 +411,7 @@ fn the_texts_of_each_model_name_only_its_own_controls() {
 #[test]
 fn the_catalog_assigns_actions_to_every_key_of_a_model_without_dials() {
     run_gtk_test(|| {
-        for model in [&CLASSIC, &XL, neo()] {
+        for model in [&CLASSIC, &XL, neo(), &MINI] {
             let Some(f) = model_fixture("keys-catalog", model, |_, _| {}) else {
                 return;
             };
@@ -460,7 +462,7 @@ fn the_catalog_assigns_actions_to_every_key_of_a_model_without_dials() {
 #[test]
 fn the_editor_refuses_dials_and_a_touch_strip_on_a_model_without_them() {
     run_gtk_test(|| {
-        for model in [&CLASSIC, &XL, neo()] {
+        for model in [&CLASSIC, &XL, neo(), &MINI] {
             let Some(f) = model_fixture("refuse", model, with_touch_pages) else {
                 return;
             };

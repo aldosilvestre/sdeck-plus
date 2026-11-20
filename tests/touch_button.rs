@@ -513,13 +513,20 @@ fn the_neo_preview_draws_its_touch_buttons_beside_the_window() {
     assert!(!strip.touch);
     let left = layout.rect_of(ControlRef::TouchButton(1)).unwrap();
     let right = layout.rect_of(ControlRef::TouchButton(2)).unwrap();
-    // One on each side of the window, inside its bezel, vertically centred on it.
-    assert!(left.right() <= strip.rect.x && right.x >= strip.rect.right());
+    // One on each side of the window, 10 px from it and vertically centred on
+    // it, on the chassis: the window is its own frame, so no black bezel runs
+    // behind the pads.
+    assert_eq!(left.right() + 10, strip.rect.x);
+    assert_eq!(right.x, strip.rect.right() + 10);
+    assert_eq!(strip.bezel, strip.rect);
     for rect in [left, right] {
-        assert!(strip.bezel.contains(&rect), "{rect:?}");
+        assert!(!rect.overlaps(&strip.bezel), "{rect:?}");
         assert!(!rect.overlaps(&strip.rect));
         assert!(rect.w >= MIN_HIT_PX && rect.h >= MIN_HIT_PX);
-        assert_eq!(rect.y + rect.h / 2, strip.rect.y + strip.rect.h / 2);
+        // Centred to the half pixel; an odd half pixel goes downwards, so
+        // Tab (ordered by vertical centres) reaches the window first.
+        let offset = (2 * rect.y + rect.h) - (2 * strip.rect.y + strip.rect.h);
+        assert!((0..=1).contains(&offset), "{rect:?}");
         assert!(layout.chassis().contains(&rect));
         assert!(layout.keys.iter().all(|key| !key.overlaps(&rect)));
     }

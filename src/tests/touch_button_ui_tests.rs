@@ -5,7 +5,9 @@
 //! device is involved: the window runs over scratch stores and a channel
 //! that stands in for the layer worker.
 use super::action_catalog_tests::collect_catalog_buttons;
-use super::preview_model_tests::{class_of, descendants_of, model_fixture, ModelFixture};
+use super::preview_model_tests::{
+    bounds_in, class_of, descendants_of, model_fixture, ModelFixture,
+};
 use super::*;
 use sdeck_plus::{
     binding_editor::ControlKind,
@@ -141,6 +143,82 @@ fn the_neo_preview_draws_two_named_touch_buttons_beside_its_window() {
                 model.id
             );
         }
+    });
+}
+
+/// The window is drawn as its own 248:58 display between the two pads, on
+/// the chassis: no black frame of key material runs behind the pads, so they
+/// never look as if they sat on the window.
+#[test]
+fn the_neo_window_sits_between_its_touch_buttons_with_no_frame_behind_them() {
+    run_gtk_test(|| {
+        let Some(f) = model_fixture("tb-window", neo(), |_, _| {}) else {
+            return;
+        };
+        let layout = PreviewLayout::for_model(neo());
+        let chassis = class_of(f.widgets.root.upcast_ref(), "hardware-chassis");
+        let window = control(&f, ControlRef::Window);
+        let frames: Vec<gtk::Widget> = descendants_of::<gtk::Widget>(&chassis)
+            .into_iter()
+            .filter(|widget| widget.has_css_class("hardware-bezel"))
+            .collect();
+        for number in 1..=2u8 {
+            let pad = control(&f, ControlRef::TouchButton(number))
+                .compute_bounds(&chassis)
+                .unwrap();
+            assert!(
+                pad.intersection(&window.compute_bounds(&chassis).unwrap())
+                    .is_none(),
+                "touch button {number} overlaps the window"
+            );
+            for frame in &frames {
+                assert!(
+                    pad.intersection(&frame.compute_bounds(&chassis).unwrap())
+                        .is_none(),
+                    "touch button {number} sits on a black frame"
+                );
+            }
+        }
+        // The window widget is drawn exactly at its 248:58 layout rectangle.
+        let rect = layout.rect_of(ControlRef::Window).unwrap();
+        assert_eq!(rect.w * 58, rect.h * 248, "248x58-proportioned");
+        assert_eq!(
+            bounds_in(&window, &chassis),
+            (rect.x, rect.y, rect.w, rect.h)
+        );
+
+        // On screen: the chassis shows between, around and above the pads
+        // and the window; only the window is the display's black.
+        let pixels = rendered_pixels(&f.window, &chassis);
+        let width = chassis.width();
+        let at = |x: i32, y: i32| {
+            let index = (y * width + x) as usize * 4;
+            // Premultiplied BGRA on little-endian hosts.
+            [pixels[index + 2], pixels[index + 1], pixels[index]]
+        };
+        let black = |pixel: [u8; 3]| {
+            pixel
+                .iter()
+                .zip([0x08, 0x09, 0x0b])
+                .all(|(channel, wanted)| channel.abs_diff(wanted) <= 4)
+        };
+        let (left, right) = (layout.touch_buttons[0], layout.touch_buttons[1]);
+        let middle = rect.y + rect.h / 2;
+        for (what, x, y) in [
+            ("between pad 1 and the window", left.right() + 5, middle),
+            ("between the window and pad 2", right.x - 5, middle),
+            ("left of pad 1", left.x - 5, middle),
+            ("right of pad 2", right.right() + 5, middle),
+            ("above the window", rect.x + rect.w / 2, rect.y - 4),
+            ("under the window", rect.x + rect.w / 2, rect.bottom() + 4),
+        ] {
+            assert!(!black(at(x, y)), "{what}: {:?}", at(x, y));
+        }
+        assert!(
+            black(at(rect.x + 4, rect.y + 4)),
+            "{:?}",
+            at(rect.x + 4, rect.y + 4)
+        );
     });
 }
 

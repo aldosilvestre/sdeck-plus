@@ -8,7 +8,8 @@
 //! The table describes every model Elgato documents, but only the entries whose
 //! [`Support`] is [`Support::Supported`] are ever detected or driven. A
 //! [`Support::Planned`] entry is data only: promoting it is a table edit plus
-//! verification (see `DEVICES.md`).
+//! verification (see `DEVICES.md`). Every entry is supported today; the
+//! Classic, XL, Neo and Mini are validated with the simulator only.
 
 use std::ops::RangeInclusive;
 
@@ -212,7 +213,8 @@ pub static PLUS_XL: DeviceModel = DeviceModel {
     zone_header_len: 16,
 };
 
-/// Shared by the planned Expanded models, which differ only in their facts.
+/// Shared by the keypad models (Classic, XL, Neo, Mini), which differ only in
+/// their facts. A new entry built from it starts out Planned.
 const EXPANDED: DeviceModel = DeviceModel {
     id: "",
     name: "",
@@ -283,13 +285,15 @@ pub static XL: DeviceModel = DeviceModel {
     ..EXPANDED
 };
 
-/// Planned. Facts from the Stream Deck Neo page: an information window with no
-/// touch, and two capacitive sensors reported after the keys. The page tells
-/// to "Rotate the image 180° before upload" for the keys and for the 248 x 58
-/// window alike (Update Window Image, 0x0B). Validated with the simulator only.
+/// Facts from the Stream Deck Neo page: an information window with no touch,
+/// and two capacitive sensors reported after the keys. The page tells to
+/// "Rotate the image 180° before upload" for the keys and for the 248 x 58
+/// window alike (Update Window Image, 0x0B). Validated with the simulator
+/// only.
 pub static NEO: DeviceModel = DeviceModel {
     id: "neo",
     name: "Stream Deck Neo",
+    support: Support::Supported,
     pids: &[0x009A],
     doc_url: "https://docs.elgato.com/streamdeck/hid/stream-deck-neo",
     key_cols: 4,
@@ -306,22 +310,22 @@ pub static NEO: DeviceModel = DeviceModel {
     ..EXPANDED
 };
 
-/// Planned. Facts from the Stream Deck Mini page: the Legacy Mini protocol
-/// (implemented and validated with the simulator only, not yet offered),
-/// 80x80 BMP keys rotated 90 degrees clockwise, 16-byte output header and a
-/// fixed 65-byte input report whose byte 0 is the report id, with no command
-/// byte.
+/// Facts from the Stream Deck Mini page: the Legacy Mini protocol, 80x80 BMP
+/// keys, 16-byte output header and a fixed 65-byte input report whose byte 0
+/// is the report id, with no command byte. Validated with the simulator only.
 ///
-/// The orientation follows the open-source drivers that run on real Minis
-/// (python-elgato-streamdeck, node-elgato-stream-deck): they transpose the
-/// key, which is `Ccw90` with `key_flip_y`. Elgato's page says "rotated 90
-/// degrees clockwise" without a flip; UNVERIFIED on our side (no hardware).
-/// If a real Mini shows its pictures mirrored, `Cw90` without a flip is the
-/// correction.
+/// The key index (one-based on the wire, `protocol::MINI_KEY_INDEX_BASE`) and
+/// the orientation follow the open-source drivers that run on real Minis
+/// (python-elgato-streamdeck, node-elgato-stream-deck): they send key + 1 and
+/// transpose the key picture, which is `Ccw90` with `key_flip_y`. Elgato's
+/// page says "rotated 90 degrees clockwise" without a flip and only shows a
+/// 0-5 layout figure; UNVERIFIED on our side (no hardware). If a real Mini
+/// shows its pictures mirrored, `Cw90` without a flip is the correction.
 pub static MINI: DeviceModel = DeviceModel {
     id: "mini",
     name: "Stream Deck Mini",
     family: ProtocolFamily::LegacyMini,
+    support: Support::Supported,
     pids: &[0x0063, 0x0090, 0x00B3, 0x00B8],
     doc_url: "https://docs.elgato.com/streamdeck/hid/mini",
     key_cols: 3,

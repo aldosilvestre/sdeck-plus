@@ -314,7 +314,7 @@ desktop_temporary="$desktop_file.tmp.$$"
         '[Desktop Entry]' \
         'Type=Application' \
         'Name=sdeck-plus' \
-        'Comment=Configure an Elgato Stream Deck + on Linux'
+        'Comment=Configure Elgato Stream Deck devices on Linux'
     # GIO validates the first executable before expanding filename field codes.
     printf 'Exec=/usr/bin/env %s\n' "$exec_path"
     printf '%s\n' \
@@ -387,13 +387,14 @@ if (( ${#missing_tools[@]} > 0 )); then
 fi
 
 # Supported product ids, as the kernel prints them: Stream Deck + (0084),
-# + XL (00C6), Classic (006D 0080 00A5 00B9) and XL (006C 008F 00BA).
+# + XL (00C6), Classic (006D 0080 00A5 00B9), XL (006C 008F 00BA),
+# Neo (009A) and Mini (0063 0090 00B3 00B8).
 hidraw_root=/sys/class/hidraw
 if [[ ${SDECK_PLUS_INSTALL_TEST:-} == 1 ]]; then
     hidraw_root=${SDECK_PLUS_HIDRAW_ROOT:-$hidraw_root}
 fi
 for uevent in "$hidraw_root"/hidraw*/device/uevent; do
-    if [[ -r $uevent ]] && grep -qiE '^HID_ID=[0-9A-F]*:00000FD9:0000(0084|00C6|006D|0080|00A5|00B9|006C|008F|00BA)$' "$uevent"; then
+    if [[ -r $uevent ]] && grep -qiE '^HID_ID=[0-9A-F]*:00000FD9:0000(0084|00C6|006D|0080|00A5|00B9|006C|008F|00BA|009A|0063|0090|00B3|00B8)$' "$uevent"; then
         node=${uevent#"$hidraw_root"/}
         node="/dev/${node%/device/uevent}"
         if [[ ! -r $node || ! -w $node ]]; then

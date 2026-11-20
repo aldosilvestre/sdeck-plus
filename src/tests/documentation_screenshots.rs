@@ -972,17 +972,19 @@ fn capture_model_previews(directory: &std::path::Path) {
             for (key, action) in [(3, media(Mute)), (6, media(Next))] {
                 store.bind("Base", Trigger::KeyPress(key), action).unwrap();
             }
-            // The "Volume" dial preset on the first dial.
-            for (trigger, action) in [
-                (Trigger::EncoderClockwise(1), media(VolumeUp)),
-                (Trigger::EncoderCounterClockwise(1), media(VolumeDown)),
-                (Trigger::EncoderPress(1), media(Mute)),
-                (
-                    Trigger::ZoneTap(2),
-                    Action::Feature(FeatureAction::Obs(ObsAction::Scene("Camera".into()))),
-                ),
-            ] {
-                store.bind("Base", trigger, action).unwrap();
+            // The "Volume" dial preset on the first dial, on models with dials.
+            if model.dials > 0 {
+                for (trigger, action) in [
+                    (Trigger::EncoderClockwise(1), media(VolumeUp)),
+                    (Trigger::EncoderCounterClockwise(1), media(VolumeDown)),
+                    (Trigger::EncoderPress(1), media(Mute)),
+                ] {
+                    store.bind("Base", trigger, action).unwrap();
+                }
+            }
+            if model.has_touch() {
+                let scene = Action::Feature(FeatureAction::Obs(ObsAction::Scene("Camera".into())));
+                store.bind("Base", Trigger::ZoneTap(2), scene).unwrap();
             }
             configured.set(true);
         }) else {

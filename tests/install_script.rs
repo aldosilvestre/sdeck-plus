@@ -219,6 +219,13 @@ printf 'binary' > "$dir/test-host/release/sdeck-plus"
             fs::read_to_string(self.path("data/applications/dev.streamdeck.EventMonitor.desktop"))
                 .unwrap();
         assert!(desktop.contains("Exec=/usr/bin/env \""));
+        // The launcher names no single model: every supported one is driven.
+        assert!(
+            desktop
+                .lines()
+                .any(|line| line == "Comment=Configure Elgato Stream Deck devices on Linux"),
+            "{desktop}"
+        );
         assert!(
             desktop.contains("prefix with %% \\\\$ spaces/bin/sdeck-plus\"\n"),
             "{desktop}"
@@ -661,6 +668,11 @@ fn unreadable_stream_deck_nodes_print_the_command_that_installs_the_rule_file() 
         "0003:00000FD9:0000006C",
         "0003:00000FD9:0000008F",
         "0003:00000FD9:000000BA",
+        "0003:00000FD9:0000009A",
+        "0003:00000FD9:00000063",
+        "0003:00000FD9:00000090",
+        "0003:00000FD9:000000B3",
+        "0003:00000fd9:000000b8",
     ] {
         let out = run_with_hidraw(&[("hidraw-sdeck-fixture", id)]);
         assert!(out.contains("cannot open the Stream Deck at /dev/hidraw-sdeck-fixture"));
