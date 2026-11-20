@@ -548,6 +548,7 @@ fn build_ui_in(
             detail: header.connection_detail.clone(),
             selector: header.selector.clone(),
             menu: header.configuration_menu.clone(),
+            help: header.setup_help.clone(),
         },
         stack,
         window.upcast_ref(),
@@ -799,6 +800,7 @@ struct Header {
     connection_detail: Label,
     selector: ModelSelector,
     configuration_menu: configuration_menu::ConfigurationMenu,
+    setup_help: SetupHelp,
     update_panel: RefCell<Option<update_check::Panel>>,
     #[cfg(test)]
     help_menu: gtk::MenuButton,
@@ -827,17 +829,26 @@ fn build_header(window: &ApplicationWindow) -> Header {
     title_row.append(&status);
     let selector = ModelSelector::new();
     let help_body = GtkBox::new(Orientation::Vertical, 16);
+    let mut steps = Vec::new();
     for (icon, title, explanation) in [
-        ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Drag an action from the right onto a key or a dial (a dial asks for clockwise, counterclockwise or press). Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected control, or use the Action selector for any control."),
+        ("input-gaming-symbolic", "1. Select a control", HELP_SELECT),
+        ("preferences-system-symbolic", "2. Configure an action", HELP_CONFIGURE),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
         ("view-grid-symbolic", "Touch strip pages", "Touchscreen pages belong to the profile. Select the touch strip to add or choose a Touch page. Swiping left or right changes page unless you bind those swipes to something else."),
     ] {
         let step = GtkBox::new(Orientation::Vertical, 8);
         step.append(&ui::section_heading(icon, title));
-        step.append(&ui::helper(explanation));
+        let text = ui::helper(explanation);
+        step.append(&text);
         help_body.append(&step);
+        steps.push((step, text));
     }
+    // The steps that name controls follow the shown model (see `SetupHelp::follow`).
+    let setup_help = SetupHelp {
+        select: steps[0].1.clone(),
+        configure: steps[1].1.clone(),
+        touch_pages: steps[3].0.clone(),
+    };
     let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
@@ -870,9 +881,104 @@ fn build_header(window: &ApplicationWindow) -> Header {
         connection_detail,
         selector,
         configuration_menu,
+        setup_help,
         update_panel: RefCell::new(Some(update_panel)),
         #[cfg(test)]
         help_menu,
+    }
+}
+
+/// Setup help, step 1, for a model with dials and a touch strip.
+const HELP_SELECT: &str = "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events.";
+/// Setup help, step 2, for a model with dials.
+const HELP_CONFIGURE: &str = "Drag an action from the right onto a key or a dial (a dial asks for clockwise, counterclockwise or press). Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected control, or use the Action selector for any control.";
+
+/// The steps of the setup help that name the shown model's controls.
+#[derive(Clone)]
+struct SetupHelp {
+    select: Label,
+    configure: Label,
+    /// The touch strip pages step, shown only for a model with a touch strip.
+    touch_pages: GtkBox,
+}
+
+impl SetupHelp {
+    /// Describe only the controls `model` has; the Stream Deck + text is unchanged.
+    fn follow(&self, model: &sdeck_plus::device_model::DeviceModel) {
+        self.select.set_text(&help_select(model));
+        self.configure.set_text(&help_configure(model));
+        self.touch_pages.set_visible(model.has_touch());
+    }
+}
+
+/// `parts` as a sentence lists them: "a", "a <conjunction> b", "a, b <conjunction> c".
+fn word_list(parts: &[&str], conjunction: &str) -> String {
+    match parts {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [first @ .., last] => format!("{} {conjunction} {last}", first.join(", ")),
+    }
+}
+
+fn help_select(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    if model.dials > 0 && model.has_touch() {
+        return HELP_SELECT.to_owned();
+    }
+    let mut parts = vec!["a key"];
+    if model.dials > 0 {
+        parts.push("a dial");
+    }
+    if model.has_touch() {
+        parts.push("the touch strip");
+    }
+    if model.touch_buttons > 0 {
+        parts.push("a touch button");
+    }
+    let mut text = format!("Click {} on the preview.", word_list(&parts, "or"));
+    if model.dials > 0 {
+        text.push_str(" Dials have separate press and rotation events.");
+    }
+    text
+}
+
+fn help_configure(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    if model.dials > 0 {
+        return HELP_CONFIGURE.to_owned();
+    }
+    let mut text = "Drag an action from the right onto a key. Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected key.".to_owned();
+    if model.has_touch() || model.touch_buttons > 0 {
+        text.push_str(" Use the Action selector for any other control.");
+    }
+    text
+}
+
+/// The New profile tooltip, naming what a profile of `model` holds.
+fn new_profile_tooltip(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    let mut parts = vec!["keys"];
+    if model.dials > 0 {
+        parts.push("dials");
+    }
+    parts.push("pages");
+    if model.has_touch() {
+        parts.push("touch strip");
+    }
+    if model.touch_buttons > 0 {
+        parts.push("touch buttons");
+    }
+    format!(
+        "New profile: add a profile with its own {}.",
+        word_list(&parts, "and")
+    )
+}
+
+/// The live-information tooltip: only a model with dials and a touch strip
+/// draws a dial's or a touch section's information on a section.
+fn info_tooltip(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    const WHAT: &str = "Replaces the image with a live picture, such as the volume or the time.";
+    if model.dials > 0 && model.has_touch() {
+        format!("{WHAT} Dials, and a tap or hold on a touch section, draw it on that section.")
+    } else {
+        WHAT.to_owned()
     }
 }
 
@@ -951,6 +1057,7 @@ fn build_widgets(
 ) -> MonitorWidgets {
     let toast = ui::Toast::new();
     let header = build_header(&window);
+    header.setup_help.follow(layers.borrow().model());
     let shell = shell_box();
     let body = build_body(
         window,
@@ -1290,9 +1397,9 @@ fn build_body(
     new_profile.set_halign(gtk::Align::End);
     new_profile.set_valign(gtk::Align::Center);
     {
-        let what = "New profile: add a profile with its own keys, dials, pages and touch strip.";
-        new_profile.set_tooltip_text(Some(what));
-        new_profile.update_property(&[gtk::accessible::Property::Description(what)]);
+        let what = new_profile_tooltip(layers.borrow().model());
+        new_profile.set_tooltip_text(Some(&what));
+        new_profile.update_property(&[gtk::accessible::Property::Description(&what)]);
     }
     {
         // The only New profile control.
@@ -1755,7 +1862,9 @@ fn build_body(
     let actions_page = GtkBox::new(Orientation::Vertical, 0);
     let dials_page = GtkBox::new(Orientation::Vertical, 0);
     tabs.add_titled(&actions_page, Some("actions"), "Actions");
-    tabs.add_titled(&dials_page, Some("dials"), "Dials");
+    let dials_tab = tabs.add_titled(&dials_page, Some("dials"), "Dials");
+    // Only a model with dials has a Dials tab (and presets to fill it).
+    dials_tab.set_visible(layers.borrow().model().dials > 0);
     {
         let wiring = PreviewWiring {
             ui: binding_ui.clone(),
@@ -2314,9 +2423,8 @@ impl BindingUi {
             label.set_wrap(true);
             label.set_xalign(0.0);
         }
-        info_toggle.set_tooltip_text(Some(
-            "Replaces the image with a live picture, such as the volume or the time. Dials, and a tap or hold on a touch section, draw it on that section.",
-        ));
+        // `set_model` names the controls of the model the editor describes.
+        info_toggle.set_tooltip_text(Some(&info_tooltip(&sdeck_plus::device_model::PLUS)));
         let labels: Vec<&str> = sdeck_plus::info::InfoSource::ALL
             .iter()
             .map(|source| source.label())
@@ -2493,6 +2601,8 @@ impl BindingUi {
     /// Make the summaries, dial captions and control numbers describe `model`.
     fn set_model(&self, model: &'static sdeck_plus::device_model::DeviceModel) {
         self.model.set(model);
+        self.info_toggle
+            .set_tooltip_text(Some(&info_tooltip(model)));
         self.summaries.set_shown(usize::from(
             model.keys() + 1 + model.dials + model.touch_buttons,
         ));
@@ -2736,6 +2846,10 @@ impl BindingUi {
                 number
             }
             ControlKind::Encoder => {
+                let model = self.model.get();
+                if model.dials == 0 {
+                    return Err(format!("the {} has no dials", model.name));
+                }
                 let number = number.ok_or_else(|| "Select an encoder number.".to_string())?;
                 if !self.model.get().is_valid_dial(number) {
                     return Err(format!(
@@ -2746,6 +2860,10 @@ impl BindingUi {
                 number
             }
             ControlKind::Touch => {
+                let model = self.model.get();
+                if !model.has_touch() {
+                    return Err(format!("the {} has no touch strip", model.name));
+                }
                 let number = number.unwrap_or(0);
                 if number > self.model.get().zones() {
                     return Err(format!(
@@ -4513,7 +4631,8 @@ impl PreviewWiring {
                 }),
             );
         }
-        self.follow_model(view.model());
+        let model = view.model();
+        self.follow_model(model);
         // Every key and dial of the model takes catalog and preset drops.
         if let Some(widgets) = view.catalog_widgets() {
             replace_page(
@@ -4527,17 +4646,19 @@ impl PreviewWiring {
                     &self.save,
                 ),
             );
-            replace_page(
-                &self.dials_page,
-                &dial_presets::connect(
-                    widgets,
-                    &self.ui,
-                    &self.layers,
-                    &self.heading,
-                    &self.runtime,
-                    &self.artwork,
-                ),
-            );
+            if model.dials > 0 {
+                replace_page(
+                    &self.dials_page,
+                    &dial_presets::connect(
+                        widgets,
+                        &self.ui,
+                        &self.layers,
+                        &self.heading,
+                        &self.runtime,
+                        &self.artwork,
+                    ),
+                );
+            }
         }
     }
 
@@ -4746,8 +4867,13 @@ fn desired_artwork_commands_for_owners(
     commands
 }
 
+/// The strip (or the Neo's window) and its sections; nothing for a model
+/// without such a display, whose device would refuse the picture.
 fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand> {
     let mut commands = Vec::new();
+    if !store.model().has_strip() {
+        return commands;
+    }
     let background = store.assigned_path_in_layer(layer, ArtworkTarget::TouchStripBackground);
     match background {
         Some(path) => commands.push(ArtworkCommand::Assign {
@@ -5165,6 +5291,8 @@ mod tests {
     mod key_hold_integration_tests;
     mod key_hold_ui_tests;
     mod live_info_tests;
+    mod mixed_model_tests;
+    mod model_sections_tests;
     mod model_selector_tests;
     mod model_session_tests;
     mod multi_action_catalog_tests;
@@ -9694,6 +9822,39 @@ mod tests {
                 target: ArtworkTarget::TouchStripBackground
             }
         ));
+    }
+
+    #[test]
+    fn an_empty_plan_clears_only_the_displays_each_model_has() {
+        use sdeck_plus::device_model::{DeviceModel, CLASSIC, PLUS_XL, XL};
+        let neo = DeviceModel::by_id("neo").unwrap();
+        // The + XL clears its strip and the Neo its window; a Classic or XL has neither.
+        for (model, display) in [
+            (&PLUS_XL, true),
+            (&CLASSIC, false),
+            (&XL, false),
+            (neo, true),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("t7-empty-{}-{}", model.id, std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let store = ArtworkStore::open_at_for_layer_model(&root, Some("Base"), model).unwrap();
+            let commands = desired_artwork_commands(&store, "Empty");
+            let targets: Vec<ArtworkTarget> = commands
+                .iter()
+                .map(|command| match command {
+                    ArtworkCommand::Clear { target } => *target,
+                    other => panic!("{}: unexpected {other:?}", model.id),
+                })
+                .collect();
+            let expected: Vec<ArtworkTarget> = model
+                .key_numbers()
+                .map(ArtworkTarget::Keypad)
+                .chain(display.then_some(ArtworkTarget::TouchStripBackground))
+                .collect();
+            assert_eq!(targets, expected, "{}", model.id);
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]

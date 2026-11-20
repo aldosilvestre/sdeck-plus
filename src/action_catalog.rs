@@ -77,8 +77,8 @@ pub(crate) fn connect(
         let layers = layers.clone();
         let heading = heading.clone();
         let keys: Vec<_> = keys.iter().map(ObjectExt::downgrade).collect();
-        // The first dial's widget follows the strip, after every key.
-        let dial_offset = usize::from(ui.model.get().keys()) + 1;
+        // The first dial's widget follows every key, and the strip when there is one.
+        let dial_offset = preview::first_dial_widget(ui.model.get());
         let save = save.downgrade();
         let confirm_ui = ui.clone();
         let confirm_keys = keys.clone();
@@ -393,7 +393,7 @@ pub(crate) fn connect(
     }
     for (index, dial) in keys
         .iter()
-        .skip(usize::from(model.keys()) + 1)
+        .skip(preview::first_dial_widget(model))
         .take(usize::from(model.dials))
         .enumerate()
     {
@@ -480,6 +480,8 @@ struct Section {
     revealer: gtk::Revealer,
     chevron: gtk::Image,
     rows: Vec<(Button, String)>,
+    /// What the rows can be dropped on (see [`drop_targets`]).
+    targets: &'static str,
     /// What each plugin row and the Multi action row need (enabled, controls), to dim the
     /// ones the selected control cannot take; `None` for rows that fit every control.
     fit: Vec<Option<(bool, Vec<PluginControl>)>>,
@@ -566,6 +568,7 @@ impl Section {
             revealer,
             chevron,
             rows,
+            targets: drop_targets(ui.model.get()),
             fit,
             expanded: Rc::new(Cell::new(expanded)),
         };
@@ -606,9 +609,7 @@ impl Section {
             } else if !fits {
                 "This action does not support the selected control.".to_owned()
             } else {
-                format!(
-                    "Drag {label} onto a key or dial, or click to assign to the selected control."
-                )
+                row_tooltip(label, self.targets)
             }));
         }
     }
@@ -719,7 +720,7 @@ fn add_row(
         &label,
         subtitle,
         icon,
-        &format!("Drag {label} onto a key or dial, or click to assign to the selected control."),
+        &row_tooltip(&label, drop_targets(ui.model.get())),
     );
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY)
@@ -749,11 +750,26 @@ fn add_row(
             (ControlKind::Encoder, Some(index)) if index < usize::from(model.dials) => {
                 assign(action.clone(), Target::Dial(index, ui.event_kind()));
             }
-            _ => ui.error("Select a key or a dial before assigning an action."),
+            _ if model.dials > 0 => ui.error("Select a key or a dial before assigning an action."),
+            _ => ui.error("Select a key before assigning an action."),
         }
     });
     list.append(&row);
     (row, label)
+}
+
+/// What a catalog action can be dropped on: the keys of every model, and the
+/// dials of a model that has them.
+fn drop_targets(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
+    if model.dials > 0 {
+        "a key or dial"
+    } else {
+        "a key"
+    }
+}
+
+fn row_tooltip(label: &str, targets: &str) -> String {
+    format!("Drag {label} onto {targets}, or click to assign to the selected control.")
 }
 
 /// A frameless, draggable catalog row: icon tile, title, optional subtitle and grip.

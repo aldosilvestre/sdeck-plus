@@ -87,13 +87,21 @@ pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
 }
 
 /// Why `number` is no control of `model`, in the editor's words; `None` when
-/// the model has it (the strip, number 0, is always a valid touch selection).
+/// the model has it (the strip, number 0, is a valid touch selection on every
+/// model with a touch strip). A model without dials or a touch strip refuses
+/// them by name.
 pub fn control_number_error(
     model: &DeviceModel,
     control: ControlKind,
     number: u8,
 ) -> Option<String> {
     match control {
+        ControlKind::Encoder if model.dials == 0 => {
+            Some(format!("The {} has no dials.", model.name))
+        }
+        ControlKind::Touch if !model.has_touch() => {
+            Some(format!("The {} has no touch strip.", model.name))
+        }
         ControlKind::Button if !model.is_valid_key(number) => Some(format!(
             "Button {number} does not exist on the {}; its buttons are 1..={}.",
             model.name,
@@ -538,9 +546,13 @@ impl GestureBinding {
 
 /// Swipe left/right, tap and hold of the whole strip on `layer`'s touch page,
 /// in that order. Unbound swipes report their default paging; explicit
-/// `None` bindings and unassigned taps or holds are omitted.
+/// `None` bindings and unassigned taps or holds are omitted. A model without
+/// a touch strip has none.
 pub fn strip_gestures(store: &LayerStore, layer: &str) -> Vec<GestureBinding> {
     use crate::binding_icons::BindingIcon;
+    if !store.model().has_touch() {
+        return Vec::new();
+    }
     StripGesture::ALL
         .into_iter()
         .filter_map(|gesture| {
@@ -910,6 +922,64 @@ mod tests {
         assert_eq!(
             control_number_error(&PLUS, ControlKind::Touch, 5).unwrap(),
             "Touch section 5 does not exist on the Stream Deck +; its sections are 1..=4 (0 is the whole strip)."
+        );
+    }
+
+    #[test]
+    fn models_without_dials_or_a_touch_strip_refuse_them_by_name() {
+        use crate::device_model::{DeviceModel, CLASSIC, XL};
+        let neo = DeviceModel::by_id("neo").unwrap();
+        for model in [&CLASSIC, &XL, neo] {
+            for number in [0, 1] {
+                assert_eq!(
+                    control_number_error(model, ControlKind::Touch, number),
+                    Some(format!("The {} has no touch strip.", model.name)),
+                    "{} section {number}",
+                    model.id
+                );
+            }
+            for number in [0, 1, 4] {
+                assert_eq!(
+                    control_number_error(model, ControlKind::Encoder, number),
+                    Some(format!("The {} has no dials.", model.name)),
+                    "{} dial {number}",
+                    model.id
+                );
+            }
+            assert!(control_number_error(model, ControlKind::Button, model.keys()).is_none());
+            assert!(trigger_from_selection_for(
+                model,
+                ControlKind::Touch,
+                0,
+                EventKind::TouchSwipeLeft
+            )
+            .is_err());
+        }
+        // Only a touch strip has gestures: no swipe badge offers paging the
+        // Neo's window or a Classic cannot do.
+        let (path, _) = temp_store();
+        for model in [&CLASSIC, &XL, neo] {
+            let root = path.join(model.id);
+            let store = LayerStore::open_at_model(&root, model).unwrap();
+            assert_eq!(strip_gestures(&store, "Base"), Vec::new(), "{}", model.id);
+        }
+        let plus = LayerStore::open_at_model(path.join("plus"), &PLUS).unwrap();
+        assert_eq!(
+            strip_gestures(&plus, "Base")
+                .iter()
+                .map(|gesture| (gesture.gesture, gesture.default))
+                .collect::<Vec<_>>(),
+            [
+                (StripGesture::SwipeLeft, true),
+                (StripGesture::SwipeRight, true)
+            ]
+        );
+        let _ = fs::remove_dir_all(&path);
+        // The Stream Deck + keeps its messages.
+        assert!(control_number_error(&PLUS, ControlKind::Touch, 0).is_none());
+        assert_eq!(
+            control_number_error(&PLUS, ControlKind::Encoder, 5).unwrap(),
+            "Encoder 5 does not exist on the Stream Deck +; its encoders are 1..=4."
         );
     }
 

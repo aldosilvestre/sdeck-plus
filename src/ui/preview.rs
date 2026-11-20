@@ -93,6 +93,12 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
     }
 }
 
+/// Where the first dial sits in [`PreviewView::catalog_widgets`]: after every
+/// key, and after the touch strip when the model has one.
+pub(crate) fn first_dial_widget(model: &DeviceModel) -> usize {
+    usize::from(model.keys()) + usize::from(model.has_touch())
+}
+
 /// The status line's text before any input arrives.
 pub(crate) const TOUCH_PLACEHOLDER: &str = "Touch strip · waiting for input";
 
@@ -279,22 +285,19 @@ impl PreviewView {
             .map_or_else(Vec::new, |built| built.dial_labels.clone())
     }
 
-    /// Every key, the strip, every dial and every section of the shown model,
-    /// in the order the action catalog and the dial presets address them.
-    /// `None` for a model without a strip or dials, which they do not serve.
+    /// Every key, the touch strip, every dial and every section the shown model
+    /// has, in the order the action catalog and the dial presets address them
+    /// (the dials start at [`first_dial_widget`]). A model without a strip or
+    /// dials still offers its keys. `None` only for a model without keys.
     pub(crate) fn catalog_widgets(&self) -> Option<Rc<Vec<gtk::Widget>>> {
         let layout = self.layout();
-        if layout.key_count() == 0
-            || !layout.has(ControlRef::Strip)
-            || layout.dial_count() == 0
-            || layout.zone_count() == 0
-        {
+        if layout.key_count() == 0 {
             return None;
         }
         let number = |count: usize| 1..=count as u8;
         let controls = number(layout.key_count())
             .map(ControlRef::Key)
-            .chain([ControlRef::Strip])
+            .chain(layout.has(ControlRef::Strip).then_some(ControlRef::Strip))
             .chain(number(layout.dial_count()).map(ControlRef::Dial))
             .chain(number(layout.zone_count()).map(ControlRef::Zone))
             .map(|control| self.control(control))

@@ -374,7 +374,7 @@ impl FeatureRuntime {
         timer_status.set_xalign(0.0);
         timer_status.add_css_class("muted");
         timer_status.set_visible(false);
-        let page_controls = page_controls::PageControls::new();
+        let page_controls = page_controls::PageControls::new(layers.borrow().model());
         let organization_management = GtkBox::new(Orientation::Vertical, 12);
         let legacy_picker = crate::labeled("Page (organization unavailable)", &ui.layer_picker);
         legacy_picker.set_visible(false);
