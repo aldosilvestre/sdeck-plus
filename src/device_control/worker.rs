@@ -1,11 +1,16 @@
 //! Controls use a separate FIFO but the same HID worker and cancellation gate.
 
 use super::{Device, DeviceId, MonitorEvent, StopSignal};
-use crate::device_control::{DesiredState, DeviceAction};
+use crate::{
+    device_control::{DesiredState, DeviceAction},
+    device_model::DeviceModel,
+};
 use std::sync::mpsc::{Receiver, Sender};
 
 pub(super) struct Controls {
     device: DeviceId,
+    /// Its protocol family decides the bytes of every feature report.
+    model: &'static DeviceModel,
     commands: Receiver<DeviceAction>,
     desired: DesiredState,
 }
@@ -15,6 +20,7 @@ impl Controls {
     pub(super) fn new(commands: Receiver<DeviceAction>) -> Self {
         Self::for_device(
             DeviceId::from_path("test"),
+            &crate::device_model::PLUS,
             commands,
             DesiredState::default(),
         )
@@ -23,11 +29,13 @@ impl Controls {
     /// The controls of one device, starting from what its model last asked for.
     pub(super) fn for_device(
         device: DeviceId,
+        model: &'static DeviceModel,
         commands: Receiver<DeviceAction>,
         desired: DesiredState,
     ) -> Self {
         Self {
             device,
+            model,
             commands,
             desired,
         }
@@ -85,7 +93,7 @@ impl Controls {
         if !stop.live() {
             return Err("HID control cancelled".into());
         }
-        let report = self.desired.report();
+        let report = self.desired.report(self.model.family);
         let written = device
             .write_feature(&report)
             .map_err(|error| format!("HID feature write failed: {error}"))?;
