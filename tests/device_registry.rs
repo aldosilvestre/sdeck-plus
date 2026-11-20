@@ -175,7 +175,7 @@ const DOCUMENTED: [(
         3,
         2,
         80,
-        Rotation::Cw90,
+        Rotation::Ccw90,
         ImageFormat::Bmp,
         0,
     ),
@@ -198,17 +198,51 @@ fn the_table_matches_the_documented_facts() {
     assert_eq!(neo.strip_px(), (248, 58));
     assert!(neo.has_strip() && !neo.has_touch());
     let mini = DeviceModel::by_id("mini").unwrap();
-    assert_eq!((mini.input_report_len, mini.key_header_len), (65, 16));
+    // Elgato's Mini page: a 65-byte input whose byte 0 is the report id.
+    assert_eq!(
+        (
+            mini.input_report_len,
+            mini.input_header_len,
+            mini.key_header_len
+        ),
+        (65, 1, 16)
+    );
+    // Every family has a handler, so no model is refused for its protocol.
+    for family in [ProtocolFamily::Expanded, ProtocolFamily::LegacyMini] {
+        assert!(family.is_implemented(), "{}", family.name());
+    }
+    assert_eq!(mini.ensure_protocol(), Ok(()));
     assert!(!DeviceModel::by_id("xl").unwrap().has_strip());
     // The Classic LCD takes background images (0x0D), not a window.
     assert!(!DeviceModel::by_id("classic").unwrap().has_strip());
     assert!(!DeviceModel::by_id("classic").unwrap().has_touch());
 }
 
+/// Elgato's Neo page ("Full Window Image"): prepare a 248 x 58 px image,
+/// "Rotate the image 180° before upload", export it as JPEG and send it with
+/// the Update Window Image command (0x0B). Its keys are turned the same way.
 #[test]
-fn exactly_the_plus_and_the_plus_xl_are_supported_today() {
+fn the_neo_window_is_turned_half_way_like_its_keys() {
+    let neo = DeviceModel::by_id("neo").unwrap();
+    let strip = neo.strip.expect("the Neo has an information window");
+    assert_eq!(strip.px, (248, 58));
+    assert_eq!((strip.zones, strip.touch), (0, false));
+    assert_eq!(strip.rotation, Rotation::Rot180);
+    assert_eq!(neo.strip_rotation(), Rotation::Rot180);
+    assert_eq!(neo.key_rotation, Rotation::Rot180);
+    // The touch strips keep the rotation they always had.
+    assert_eq!(PLUS.strip_rotation(), Rotation::None);
+    assert_eq!(PLUS_XL.strip_rotation(), Rotation::Ccw90);
+}
+
+#[test]
+fn every_registry_model_is_supported() {
     let supported: Vec<_> = DeviceModel::supported().map(|model| model.id).collect();
-    assert_eq!(supported, ["plus", "plus-xl"]);
+    assert_eq!(
+        supported,
+        ["plus", "plus-xl", "classic", "xl", "neo", "mini"]
+    );
+    assert_eq!(supported.len(), DeviceModel::all().len());
     for model in each() {
         assert_eq!(
             model.is_supported(),
@@ -322,7 +356,8 @@ fn counts_ranges_and_geometry_agree_with_the_accessors() {
 fn artwork_targets_follow_the_shape_of_every_model() {
     for model in each() {
         let all = ArtworkTarget::all_for(model);
-        let strip = usize::from(model.has_strip());
+        // The strip, the Neo's window or the Classic's keypad background.
+        let strip = usize::from(model.has_strip() || model.has_keypad_background());
         assert_eq!(
             all.len(),
             usize::from(model.keys()) + strip + usize::from(model.zones()),
@@ -354,11 +389,11 @@ fn artwork_targets_follow_the_shape_of_every_model() {
         }
         assert_eq!(
             ArtworkTarget::TouchStripBackground.is_valid_for(model),
-            model.has_strip()
+            strip == 1
         );
         assert_eq!(
             image_output::dimensions_for(model, ArtworkTarget::TouchStripBackground).is_ok(),
-            model.has_strip()
+            strip == 1
         );
     }
 }
@@ -471,7 +506,7 @@ fn every_model_artwork_store_accepts_its_targets_and_rejects_the_rest() {
                 model.id
             );
         }
-        if !model.has_strip() {
+        if !model.has_strip() && !model.has_keypad_background() {
             assert!(store
                 .assign_in_layer("Base", ArtworkTarget::TouchStripBackground, &image)
                 .is_err());
@@ -644,11 +679,16 @@ fn rotations_are_a_bijection_with_the_expected_inverses() {
 }
 
 #[test]
-fn every_expanded_model_clears_every_target_at_its_device_size() {
-    for model in each().filter(|model| model.family == ProtocolFamily::Expanded) {
+fn every_model_clears_every_target_at_its_device_size_and_format() {
+    for model in each() {
         for target in ArtworkTarget::all_for(model) {
             let size = image_output::dimensions_for(model, target).unwrap();
             let jpeg = image_output::prepare_clear_jpeg_for(model, target).unwrap();
+            let magic: &[u8] = match model.image_format {
+                ImageFormat::Jpeg => &[0xFF, 0xD8],
+                ImageFormat::Bmp => b"BM",
+            };
+            assert_eq!(jpeg[..2], *magic, "{} {target:?}", model.id);
             let decoded = Pixbuf::from_read(std::io::Cursor::new(jpeg.clone())).unwrap();
             let rotation = match target {
                 ArtworkTarget::Keypad(_) => model.key_rotation,

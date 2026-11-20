@@ -1,5 +1,9 @@
 //! Device intent, independent of artwork snapshots and HID ownership.
 
+use crate::{
+    device_model::ProtocolFamily,
+    protocol::{protocol_for, FeatureReport},
+};
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -72,14 +76,11 @@ impl DesiredState {
         Ok(())
     }
 
-    pub(crate) fn report(&self) -> [u8; 32] {
-        // StreamDeckPlus.set_brightness in python-elgato-streamdeck:
-        // https://github.com/abcminiuser/python-elgato-streamdeck/blob/master/src/StreamDeck/Devices/StreamDeckPlus.py
-        let mut report = [0; 32];
-        report[0] = 0x03;
-        report[1] = 0x08;
-        report[2] = if self.sleeping { 0 } else { self.brightness };
-        report
+    /// The feature report that applies this intent to a device of `family`:
+    /// the remembered brightness, or 0 while asleep.
+    pub(crate) fn report(&self, family: ProtocolFamily) -> FeatureReport {
+        let level = if self.sleeping { 0 } else { self.brightness };
+        protocol_for(family).brightness_report(level)
     }
 }
 

@@ -479,11 +479,56 @@ fn model_tables_describe_both_devices() {
 fn models_are_found_by_pid_and_id() {
     assert_eq!(DeviceModel::by_pid(0x0084), Some(&PLUS));
     assert_eq!(DeviceModel::by_pid(0x00C6), Some(&PLUS_XL));
-    assert_eq!(DeviceModel::by_pid(0x0080), None);
+    assert_eq!(
+        DeviceModel::by_pid(0x0080).map(|model| model.id),
+        Some("classic")
+    );
+    assert_eq!(
+        DeviceModel::by_pid(0x008F).map(|model| model.id),
+        Some("xl")
+    );
+    assert_eq!(
+        DeviceModel::by_pid(0x009A).map(|model| model.id),
+        Some("neo")
+    );
+    for pid in [0x0063, 0x0090, 0x00B3, 0x00B8] {
+        assert_eq!(
+            DeviceModel::by_pid(pid).map(|model| model.id),
+            Some("mini"),
+            "{pid:04X}"
+        );
+    }
+    // The original Classic speaks a protocol of its own and stays unknown.
+    assert_eq!(DeviceModel::by_pid(0x0060), None);
     assert_eq!(DeviceModel::by_id("plus-xl"), Some(&PLUS_XL));
     assert_eq!(DeviceModel::by_id("XL"), None);
     assert_eq!(DeviceModel::default_model(), &PLUS);
-    assert_eq!(DeviceModel::supported().count(), 2);
+    assert_eq!(DeviceModel::supported().count(), 6);
+}
+
+#[test]
+fn live_controls_name_only_what_the_models_have() {
+    let by_id = |id| DeviceModel::by_id(id).unwrap();
+    assert_eq!(PLUS.live_controls(), "keys, dials and touch strip");
+    assert_eq!(by_id("classic").live_controls(), "keys");
+    assert_eq!(by_id("xl").live_controls(), "keys");
+    assert_eq!(by_id("mini").live_controls(), "keys");
+    assert_eq!(
+        DeviceModel::live_controls_of(&[by_id("mini"), by_id("neo")]),
+        "keys, touch buttons and info window"
+    );
+    assert_eq!(
+        by_id("neo").live_controls(),
+        "keys, touch buttons and info window"
+    );
+    assert_eq!(
+        DeviceModel::live_controls_of(&[by_id("xl"), &PLUS_XL]),
+        "keys, dials and touch strip"
+    );
+    assert_eq!(
+        DeviceModel::live_controls_of(&[by_id("classic"), by_id("xl")]),
+        "keys"
+    );
 }
 
 #[test]

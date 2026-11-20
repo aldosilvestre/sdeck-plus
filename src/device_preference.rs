@@ -180,13 +180,35 @@ mod tests {
     }
 
     #[test]
-    fn a_planned_model_is_an_unknown_preference_that_is_kept() {
+    fn a_model_the_registry_does_not_know_is_an_unknown_preference_that_is_kept() {
         let dir = scratch();
         let file = dir.join("device.json");
-        let original = br#"{"model":"classic"}"#;
+        // The original Classic (PID 0x0060) is out of scope: no registry entry.
+        let original = br#"{"model":"original-classic"}"#;
         fs::write(&file, original).unwrap();
         assert!(load_from(&file).is_err());
         assert!(save_to(&file, &PLUS).is_err());
         assert_eq!(fs::read(&file).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn every_supported_model_round_trips_including_the_neo_and_the_mini() {
+        let ids: Vec<_> = DeviceModel::supported().map(|model| model.id).collect();
+        assert!(ids.contains(&"neo") && ids.contains(&"mini"), "{ids:?}");
+        for model in DeviceModel::supported() {
+            let root = scratch();
+            let path = root.join("device.json");
+            fs::write(&path, format!("{{\"model\":\"{}\"}}", model.id)).unwrap();
+            assert_eq!(load_from(&path).unwrap().id, model.id);
+            save_to(&path, &PLUS_XL).unwrap();
+            save_to(&path, model).unwrap();
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                format!("{{\"model\":\"{}\"}}\n", model.id).as_bytes()
+            );
+            assert_eq!(load_from(&path).unwrap(), model);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }

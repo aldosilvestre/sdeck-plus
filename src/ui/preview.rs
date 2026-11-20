@@ -78,6 +78,9 @@ pub(crate) fn control_of(kind: ControlKind, number: u8) -> Option<ControlRef> {
         (ControlKind::Encoder, number) => Some(ControlRef::Dial(number)),
         (ControlKind::Touch, 0) => Some(ControlRef::Strip),
         (ControlKind::Touch, number) => Some(ControlRef::Zone(number)),
+        (ControlKind::TouchButton, number) => Some(ControlRef::TouchButton(number)),
+        (ControlKind::Window, _) => Some(ControlRef::Window),
+        (ControlKind::Background, _) => Some(ControlRef::Background),
     }
 }
 
@@ -88,17 +91,26 @@ pub(crate) fn kind_and_number(control: ControlRef) -> (ControlKind, u8) {
         ControlRef::Dial(number) => (ControlKind::Encoder, number),
         ControlRef::Strip => (ControlKind::Touch, 0),
         ControlRef::Zone(number) => (ControlKind::Touch, number),
+        ControlRef::TouchButton(number) => (ControlKind::TouchButton, number),
+        ControlRef::Window => (ControlKind::Window, 1),
+        ControlRef::Background => (ControlKind::Background, 1),
     }
+}
+
+/// Where the first dial sits in [`PreviewView::catalog_widgets`]: after every
+/// key, and after the touch strip when the model has one.
+pub(crate) fn first_dial_widget(model: &DeviceModel) -> usize {
+    usize::from(model.keys()) + usize::from(model.has_touch())
 }
 
 /// The status line's text before any input arrives.
 pub(crate) const TOUCH_PLACEHOLDER: &str = "Touch strip · waiting for input";
 
 /// [`TOUCH_PLACEHOLDER`] for a touch strip; a display that takes no touch has
-/// nothing to wait for.
+/// nothing to wait for: while it is empty it shows the control's name.
 fn placeholder(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
     match model.strip {
-        Some(strip) if !strip.touch => "Display",
+        Some(strip) if !strip.touch => "Info window",
         _ => TOUCH_PLACEHOLDER,
     }
 }
@@ -112,6 +124,8 @@ struct Built {
     dial_labels: Vec<Label>,
     /// Handlers on captions that outlive this subtree.
     handlers: Vec<(glib::WeakRef<Label>, glib::SignalHandlerId)>,
+    /// Property bindings onto widgets that outlive this subtree.
+    bindings: Vec<glib::Binding>,
 }
 
 impl Drop for Built {
@@ -120,6 +134,9 @@ impl Drop for Built {
             if let Some(label) = label.upgrade() {
                 label.disconnect(handler);
             }
+        }
+        for binding in self.bindings.drain(..) {
+            binding.unbind();
         }
     }
 }
@@ -277,22 +294,19 @@ impl PreviewView {
             .map_or_else(Vec::new, |built| built.dial_labels.clone())
     }
 
-    /// Every key, the strip, every dial and every section of the shown model,
-    /// in the order the action catalog and the dial presets address them.
-    /// `None` for a model without a strip or dials, which they do not serve.
+    /// Every key, the touch strip, every dial and every section the shown model
+    /// has, in the order the action catalog and the dial presets address them
+    /// (the dials start at [`first_dial_widget`]). A model without a strip or
+    /// dials still offers its keys. `None` only for a model without keys.
     pub(crate) fn catalog_widgets(&self) -> Option<Rc<Vec<gtk::Widget>>> {
         let layout = self.layout();
-        if layout.key_count() == 0
-            || !layout.has(ControlRef::Strip)
-            || layout.dial_count() == 0
-            || layout.zone_count() == 0
-        {
+        if layout.key_count() == 0 {
             return None;
         }
         let number = |count: usize| 1..=count as u8;
         let controls = number(layout.key_count())
             .map(ControlRef::Key)
-            .chain([ControlRef::Strip])
+            .chain(layout.has(ControlRef::Strip).then_some(ControlRef::Strip))
             .chain(number(layout.dial_count()).map(ControlRef::Dial))
             .chain(number(layout.zone_count()).map(ControlRef::Zone))
             .map(|control| self.control(control))
@@ -372,6 +386,7 @@ impl PreviewView {
             key_labels: Vec::new(),
             dial_labels: Vec::new(),
             handlers: Vec::new(),
+            bindings: Vec::new(),
         };
         let brand = Label::new(Some(&layout.brand));
         brand.add_css_class("hardware-brand");
@@ -417,17 +432,68 @@ impl PreviewView {
             self.bind(&mut built, ControlRef::Key(number), key);
         }
 
+        if let Some(rect) = &layout.background {
+            // The keypad background (the Classic's): a bar under the keys
+            // with the page's picture beside its caption. The keys show their
+            // share of the picture; the bar selects it for Appearance.
+            let bar = Button::new();
+            bar.add_css_class("control-selectable");
+            bar.add_css_class("background-surface");
+            if let Some(name) = ControlRef::Background.accessible_name() {
+                bar.update_property(&[gtk::accessible::Property::Label(&name)]);
+            }
+            bar.set_size_request(rect.w, rect.h);
+            let content = GtkBox::new(Orientation::Horizontal, 8);
+            let thumbnail = artwork_picture();
+            thumbnail.add_css_class("background-thumbnail");
+            thumbnail.set_hexpand(false);
+            // The LCD's 480:272 shape at the bar's height.
+            thumbnail.set_size_request(42, 24);
+            thumbnail.set_visible(false);
+            let caption = Label::new(Some("Background"));
+            caption.add_css_class("background-caption");
+            caption.set_xalign(0.0);
+            content.append(&thumbnail);
+            content.append(&caption);
+            bar.set_child(Some(&content));
+            put(&chassis, &bar, rect);
+            register_picture(
+                &self.artwork,
+                ArtworkTarget::TouchStripBackground,
+                &thumbnail,
+            );
+            // The background is the Appearance picker's only target, so
+            // selecting it there changes nothing: point Appearance at it.
+            let (picker, artwork) = (self.picker.clone(), self.artwork.clone());
+            bar.connect_clicked(move |_| {
+                picker.set_selected(0);
+                artwork
+                    .selected_target
+                    .set(ArtworkTarget::TouchStripBackground);
+                if let Some(editor) = artwork.text_editor.borrow().upgrade() {
+                    editor.load_context(false);
+                }
+            });
+            self.bind(&mut built, ControlRef::Background, bar);
+        }
+
         if let Some(strip) = &layout.strip {
-            let bezel = gtk::Fixed::new();
-            bezel.add_css_class("hardware-bezel");
-            bezel.set_size_request(strip.bezel.w, strip.bezel.h);
-            put(&chassis, &bezel, &strip.bezel);
-            // The live status and the strip's gesture badges share the header line.
-            let header = GtkBox::new(Orientation::Horizontal, 6);
-            header.set_size_request(strip.header.w, strip.header.h);
-            header.append(&self.touch_status);
-            header.append(&self.ui.gesture_badges);
-            put_in(&bezel, &header, &strip.header, &strip.bezel);
+            // A touch strip sits in a black bezel under its header line. An
+            // information window is its own frame: it goes straight onto the
+            // chassis, so the touch buttons beside it sit on the chassis too.
+            let bezel = strip.touch.then(|| {
+                let bezel = gtk::Fixed::new();
+                bezel.add_css_class("hardware-bezel");
+                bezel.set_size_request(strip.bezel.w, strip.bezel.h);
+                put(&chassis, &bezel, &strip.bezel);
+                // The live status and the strip's gesture badges share the header line.
+                let header = GtkBox::new(Orientation::Horizontal, 6);
+                header.set_size_request(strip.header.w, strip.header.h);
+                header.append(&self.touch_status);
+                header.append(&self.ui.gesture_badges);
+                put_in(&bezel, &header, &strip.header, &strip.bezel);
+                bezel
+            });
 
             let overlay = gtk::Overlay::new();
             overlay.set_size_request(strip.rect.w, strip.rect.h);
@@ -483,10 +549,61 @@ impl PreviewView {
                 let strip_entry = built.controls.len() - strip.zones.len();
                 self.bind_at(&mut built, strip_entry, ControlRef::Strip, button);
             } else {
-                // A plain window: drawn, never selected.
-                overlay.set_child(Some(&background_surface));
+                // An information window (the Neo's): no touch, so no gestures
+                // or sections; it is selected for the page's picture and live
+                // information, which it shows like a touch section.
+                let button = Button::new();
+                button.add_css_class("control-selectable");
+                button.add_css_class("window-surface");
+                if let Some(name) = ControlRef::Window.accessible_name() {
+                    button.update_property(&[gtk::accessible::Property::Label(&name)]);
+                }
+                // While it shows no picture, the empty window names itself on
+                // its caption line (the live status of a touch strip).
+                self.touch_status.set_valign(gtk::Align::Center);
+                background_surface.set_child(Some(&self.touch_status));
+                built.bindings.push(
+                    background
+                        .bind_property("visible", &self.touch_status, "visible")
+                        .invert_boolean()
+                        .sync_create()
+                        .build(),
+                );
+                button.set_child(Some(&background_surface));
+                overlay.set_child(Some(&button));
+                // The window is the Appearance picker's only target, so
+                // selecting it there changes nothing: point Appearance at it.
+                let (picker, artwork) = (self.picker.clone(), self.artwork.clone());
+                button.connect_clicked(move |_| {
+                    picker.set_selected(0);
+                    artwork
+                        .selected_target
+                        .set(ArtworkTarget::TouchStripBackground);
+                    if let Some(editor) = artwork.text_editor.borrow().upgrade() {
+                        editor.load_context(false);
+                    }
+                });
+                self.bind(&mut built, ControlRef::Window, button);
             }
-            put_in(&bezel, &overlay, &strip.rect, &strip.bezel);
+            match &bezel {
+                Some(bezel) => put_in(bezel, &overlay, &strip.rect, &strip.bezel),
+                None => put(&chassis, &overlay, &strip.rect),
+            }
+        }
+
+        // Capacitive touch buttons: selectable like keys, but they take no
+        // picture (Elgato documents none), so they hold no artwork.
+        for (index, rect) in layout.touch_buttons.iter().enumerate() {
+            let number = (index + 1) as u8;
+            let button = Button::new();
+            button.add_css_class("control-selectable");
+            button.add_css_class("touch-button");
+            if let Some(name) = ControlRef::TouchButton(number).accessible_name() {
+                button.update_property(&[gtk::accessible::Property::Label(&name)]);
+            }
+            button.set_size_request(rect.w, rect.h);
+            put(&chassis, &button, rect);
+            self.bind(&mut built, ControlRef::TouchButton(number), button);
         }
 
         if let Some(dials) = &layout.dial_rail {
@@ -553,7 +670,10 @@ impl PreviewView {
                     "Button {number} · {text}\nDrag onto another key to swap saved settings and artwork."
                 ),
                 ControlRef::Dial(number) => format!("Encoder {number} · {text}"),
+                ControlRef::TouchButton(number) => format!("Touch button {number} · {text}"),
                 ControlRef::Strip | ControlRef::Zone(_) => text.to_owned(),
+                ControlRef::Window => format!("Info window · {text}"),
+                ControlRef::Background => format!("Background · {text}"),
             }
             };
             button.set_tooltip_text(Some(&tooltip(&summary.text())));
@@ -585,9 +705,10 @@ mod placeholder_tests {
     use sdeck_plus::device_model::{NEO, PLUS, PLUS_XL};
 
     #[test]
-    fn touch_strips_keep_their_caption_and_a_display_without_touch_is_neutral() {
+    fn touch_strips_keep_their_caption_and_an_empty_info_window_names_itself() {
         assert_eq!(placeholder(&PLUS), "Touch strip · waiting for input");
         assert_eq!(placeholder(&PLUS_XL), "Touch strip · waiting for input");
-        assert_eq!(placeholder(&NEO), "Display");
+        // The control's name everywhere else (heading, Appearance, tooltip).
+        assert_eq!(placeholder(&NEO), "Info window");
     }
 }

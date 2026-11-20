@@ -12,6 +12,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const CONFIG_VERSION: &str = "streamdeck-artwork-v1";
 const LAYER_VERSION: &str = "streamdeck-artwork-v2";
 const TEXT_VERSION: &str = "streamdeck-artwork-v3";
+
+/// Where a model with a keypad background (the Stream Deck Classic) keeps
+/// each keypad page's background, beside artwork.conf. Readers of
+/// artwork.conf that do not know the background refuse its row for such a
+/// model, so the rows live here: `<hex layer>\ttouch-strip-background\t<asset>`
+/// after a version line, like artwork.conf v3. The file exists only while a
+/// page has a background.
+pub const KEYPAD_BACKGROUND_FILE: &str = "keypad-background.conf";
+const BACKGROUND_VERSION: &str = "streamdeck-keypad-background-v1";
 type Assignments = HashMap<(String, ArtworkTarget), String>;
 type ButtonTexts = HashMap<(String, ArtworkTarget), ButtonText>;
 type LoadedArtwork = (Assignments, ButtonTexts, bool, Vec<String>);
@@ -20,6 +29,9 @@ type LoadedArtwork = (Assignments, ButtonTexts, bool, Vec<String>);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ArtworkTarget {
     Keypad(u8),
+    /// The page's wide picture: the touch strip background, the Stream Deck
+    /// Neo's information window, or the Stream Deck Classic's keypad
+    /// background (the LCD behind its keys).
     TouchStripBackground,
     EncoderZone(u8),
 }
@@ -59,23 +71,46 @@ impl ArtworkTarget {
             .collect()
     }
 
-    /// The Appearance picker destinations of `model`: the strip, then its sections.
+    /// The Appearance picker destinations of `model`: the strip (or the
+    /// window, or the keypad background), then its sections.
     pub fn touch_for(model: &DeviceModel) -> Vec<Self> {
-        model
-            .has_strip()
+        Self::TouchStripBackground
+            .is_valid_for(model)
             .then_some(Self::TouchStripBackground)
             .into_iter()
             .chain(model.zone_numbers().map(Self::EncoderZone))
             .collect()
     }
 
+    /// Whether the profile's touchscreen page, rather than the keypad page,
+    /// owns this destination's picture on `model`: a touch strip and its
+    /// sections do; keys, and an information window that takes no touch (the
+    /// Stream Deck Neo's, which has no touch pages to follow), belong to the
+    /// keypad page, and so does the keypad background (the Stream Deck
+    /// Classic's).
+    pub fn follows_touch_page(self, model: &DeviceModel) -> bool {
+        match self {
+            Self::Keypad(_) => false,
+            Self::TouchStripBackground => {
+                !model.has_info_window() && !model.has_keypad_background()
+            }
+            Self::EncoderZone(_) => true,
+        }
+    }
+
     /// Whether `model` has this destination.
     pub fn is_valid_for(self, model: &DeviceModel) -> bool {
         match self {
             Self::Keypad(n) => model.is_valid_key(n),
-            Self::TouchStripBackground => model.has_strip(),
+            Self::TouchStripBackground => model.has_strip() || model.has_keypad_background(),
             Self::EncoderZone(n) => model.is_valid_zone(n),
         }
+    }
+
+    /// Whether `model` keeps this destination in [`KEYPAD_BACKGROUND_FILE`]
+    /// rather than artwork.conf: the keypad background.
+    fn kept_apart(self, model: &DeviceModel) -> bool {
+        self == Self::TouchStripBackground && model.has_keypad_background()
     }
 
     /// Stable stored name, empty when `model` has no such destination.
@@ -169,9 +204,16 @@ impl ArtworkStore {
             load_assignments(&root, true, model)?;
         fs::create_dir_all(root.join("assets"))?;
         if legacy {
+            // A keypad background row always names its page.
             assignments = assignments
                 .into_iter()
-                .map(|((_, target), name)| ((active_layer.to_owned(), target), name))
+                .map(|((layer, target), name)| {
+                    if target.kept_apart(model) {
+                        ((layer, target), name)
+                    } else {
+                        ((active_layer.to_owned(), target), name)
+                    }
+                })
                 .collect();
             persist(&root, &assignments, &button_texts, false, model)?;
         }
@@ -263,6 +305,40 @@ impl ArtworkStore {
         target: ArtworkTarget,
         source: impl AsRef<Path>,
     ) -> io::Result<PathBuf> {
+        self.check_assignable(layer, target)?;
+        let source = source.as_ref();
+        Pixbuf::from_file(source).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let extension = plain_extension(source.extension().and_then(|s| s.to_str()));
+        self.adopt(layer, target, extension, |output| {
+            let mut input = fs::File::open(source)?;
+            io::copy(&mut input, output)?;
+            Ok(())
+        })
+    }
+
+    /// [`Self::assign_in_layer`] for a picture held in memory: `bytes` must
+    /// decode, and become a new owned asset (the Undo of a removed keypad
+    /// background puts its picture back this way). `extension` names the
+    /// asset's type when it is a plain word, else the asset ends in `.img`.
+    ///
+    /// # Errors
+    /// The same as [`Self::assign_in_layer`]; nothing changes on failure.
+    pub fn assign_bytes_in_layer(
+        &mut self,
+        layer: &str,
+        target: ArtworkTarget,
+        bytes: &[u8],
+        extension: &str,
+    ) -> io::Result<PathBuf> {
+        self.check_assignable(layer, target)?;
+        Pixbuf::from_read(io::Cursor::new(bytes.to_vec()))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        self.adopt(layer, target, plain_extension(Some(extension)), |output| {
+            output.write_all(bytes)
+        })
+    }
+
+    fn check_assignable(&self, layer: &str, target: ArtworkTarget) -> io::Result<()> {
         self.check_mutation(layer)?;
         if target.id_in(self.model).is_empty() {
             return Err(io::Error::new(
@@ -270,15 +346,29 @@ impl ArtworkStore {
                 "unsupported artwork target",
             ));
         }
-        let source = source.as_ref();
-        Pixbuf::from_file(source).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let extension = source
-            .extension()
-            .and_then(|s| s.to_str())
-            .filter(|s| {
-                !s.is_empty() && s.len() <= 12 && s.bytes().all(|byte| byte.is_ascii_alphanumeric())
-            })
-            .unwrap_or("img");
+        self.check_background(target)
+    }
+
+    /// A keypad background belongs to a page, so it needs layer-aware storage.
+    fn check_background(&self, target: ArtworkTarget) -> io::Result<()> {
+        if self.legacy && target.kept_apart(self.model) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "a keypad background requires layer-aware migration",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Copy a decoded picture into a new owned asset with `copy`, then switch
+    /// the assignment; on any failure the previous assignment stays.
+    fn adopt(
+        &mut self,
+        layer: &str,
+        target: ArtworkTarget,
+        extension: &str,
+        copy: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    ) -> io::Result<PathBuf> {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -292,8 +382,7 @@ impl ArtworkStore {
             .create_new(true)
             .open(&destination)?;
         let copied = (|| {
-            let mut input = fs::File::open(source)?;
-            io::copy(&mut input, &mut output)?;
+            copy(&mut output)?;
             output.sync_all()
         })();
         if let Err(error) = copied {
@@ -315,6 +404,7 @@ impl ArtworkStore {
 
     pub fn clear_in_layer(&mut self, layer: &str, target: ArtworkTarget) -> io::Result<()> {
         self.check_mutation(layer)?;
+        self.check_background(target)?;
         let mut next = self.assignments.clone();
         next.remove(&(layer.to_owned(), target));
         self.commit(next)
@@ -377,7 +467,7 @@ impl ArtworkStore {
             self.check_mutation(to)?;
             for target in ArtworkTarget::all_for(self.model)
                 .into_iter()
-                .filter(|target| !matches!(target, ArtworkTarget::Keypad(_)))
+                .filter(|target| target.follows_touch_page(self.model))
             {
                 if let Some(name) = self.assignments.get(&(from.clone(), target)) {
                     next.insert((to.clone(), target), name.clone());
@@ -423,7 +513,33 @@ impl ArtworkStore {
     }
 
     fn commit_with_text(&mut self, next: Assignments, texts: ButtonTexts) -> io::Result<()> {
-        persist(&self.root, &next, &texts, self.legacy, self.model)?;
+        // A keypad background lives in its own file: a change of it alone
+        // leaves artwork.conf untouched, every other change rewrites
+        // artwork.conf as it always did.
+        let model = self.model;
+        let apart = |assignments: &Assignments, wanted: bool| -> Assignments {
+            assignments
+                .iter()
+                .filter(|((_, target), _)| target.kept_apart(model) == wanted)
+                .map(|(key, name)| (key.clone(), name.clone()))
+                .collect()
+        };
+        let backgrounds_changed = apart(&self.assignments, true) != apart(&next, true);
+        let others_changed = !backgrounds_changed
+            || apart(&self.assignments, false) != apart(&next, false)
+            || texts != self.button_texts;
+        if backgrounds_changed {
+            persist_backgrounds(&self.root, &next, model)?;
+        }
+        if others_changed {
+            if let Err(error) = persist(&self.root, &next, &texts, self.legacy, model) {
+                if backgrounds_changed {
+                    // Best effort: put the previous backgrounds back.
+                    let _ = persist_backgrounds(&self.root, &self.assignments, model);
+                }
+                return Err(error);
+            }
+        }
         self.button_texts = texts;
         let old = std::mem::replace(&mut self.assignments, next);
         for name in old.values() {
@@ -436,6 +552,15 @@ impl ArtworkStore {
         }
         Ok(())
     }
+}
+
+/// `extension` when it is a short plain word, else `img`.
+fn plain_extension(extension: Option<&str>) -> &str {
+    extension
+        .filter(|s| {
+            !s.is_empty() && s.len() <= 12 && s.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+        .unwrap_or("img")
 }
 
 fn artwork_path(root: &Path, name: &str) -> PathBuf {
@@ -465,7 +590,115 @@ fn default_root() -> io::Result<PathBuf> {
     Ok(base.join("sdeck-plus"))
 }
 
+/// artwork.conf, plus [`KEYPAD_BACKGROUND_FILE`] for a model that keeps its
+/// keypad backgrounds there. An invalid background file is refused like an
+/// invalid artwork.conf (strict), or reported and disables every write.
 fn load_assignments(root: &Path, strict: bool, model: &DeviceModel) -> io::Result<LoadedArtwork> {
+    let (mut assignments, texts, legacy, mut diagnostics) = load_artwork_conf(root, strict, model)?;
+    if model.has_keypad_background() {
+        match load_backgrounds(root, strict, model, &mut diagnostics)? {
+            Ok(backgrounds) => assignments.extend(backgrounds),
+            Err(message) if strict => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, message))
+            }
+            Err(message) => diagnostics.push(message.into()),
+        }
+    }
+    Ok((assignments, texts, legacy, diagnostics))
+}
+
+/// The rows of [`KEYPAD_BACKGROUND_FILE`], or why the file is invalid. A
+/// missing asset is skipped with a diagnostic when not `strict`, as in
+/// artwork.conf.
+fn load_backgrounds(
+    root: &Path,
+    strict: bool,
+    model: &DeviceModel,
+    diagnostics: &mut Vec<String>,
+) -> io::Result<Result<Assignments, &'static str>> {
+    let text = match fs::read_to_string(root.join(KEYPAD_BACKGROUND_FILE)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Ok(HashMap::new())),
+        Err(error) => return Err(error),
+    };
+    let mut lines = text.lines();
+    if lines.next() != Some(BACKGROUND_VERSION) {
+        return Ok(Err("unsupported keypad background version"));
+    }
+    let mut result = HashMap::new();
+    for line in lines {
+        let [layer, id, name] = line.split('\t').collect::<Vec<_>>()[..] else {
+            return Ok(Err("malformed keypad background row"));
+        };
+        let Some(layer) = decode_layer(layer) else {
+            return Ok(Err("invalid encoded layer name"));
+        };
+        let Some(target) =
+            ArtworkTarget::from_id_in(model, id).filter(|target| target.kept_apart(model))
+        else {
+            return Ok(Err("unknown keypad background target"));
+        };
+        if unsafe_asset_name(name) {
+            return Ok(Err("unsafe artwork asset path"));
+        }
+        let key = (layer, target);
+        if result.contains_key(&key) {
+            return Ok(Err("duplicate keypad background"));
+        }
+        match check_asset(root, strict, id, name)? {
+            Asset::Keep => {
+                result.insert(key, name.to_owned());
+            }
+            Asset::Ignore(diagnostic) => diagnostics.push(diagnostic),
+            Asset::Invalid(message) => return Ok(Err(message)),
+        }
+    }
+    Ok(Ok(result))
+}
+
+/// Whether an assignment row's asset name could leave the asset folders.
+fn unsafe_asset_name(name: &str) -> bool {
+    let leaf = name.strip_prefix("./imagenes/").unwrap_or(name);
+    leaf.is_empty()
+        || leaf.starts_with('.')
+        || leaf.contains(['/', '\\', '\t', '\n', '\r'])
+        || Path::new(leaf).components().count() != 1
+}
+
+/// What loading does with a row's asset.
+enum Asset {
+    Keep,
+    /// Skipped, with this diagnostic (lenient loading only).
+    Ignore(String),
+    /// The configuration is invalid.
+    Invalid(&'static str),
+}
+
+/// Check the asset `name` of a row for `id`, as artwork.conf rows are checked.
+fn check_asset(root: &Path, strict: bool, id: &str, name: &str) -> io::Result<Asset> {
+    let portable = name.starts_with("./imagenes/");
+    let path = artwork_path(root, name);
+    if portable && !path.try_exists()? {
+        return Ok(Asset::Keep);
+    }
+    if !fs::metadata(&path).is_ok_and(|metadata| metadata.is_file())
+        || (!portable && fs::symlink_metadata(&path)?.file_type().is_symlink())
+    {
+        if strict {
+            return Ok(Asset::Invalid("missing or non-regular artwork asset"));
+        }
+        return Ok(Asset::Ignore(format!(
+            "Artwork asset for {id} is missing; assignment ignored"
+        )));
+    }
+    if strict {
+        Pixbuf::from_file(&path)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    }
+    Ok(Asset::Keep)
+}
+
+fn load_artwork_conf(root: &Path, strict: bool, model: &DeviceModel) -> io::Result<LoadedArtwork> {
     let text = match fs::read_to_string(root.join("artwork.conf")) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -521,43 +754,27 @@ fn load_assignments(root: &Path, strict: bool, model: &DeviceModel) -> io::Resul
             }
             _ => return invalid_config(strict, "malformed artwork row"),
         };
-        let Some(target) = ArtworkTarget::from_id_in(model, id) else {
+        // A keypad background row belongs in its own file: here it is
+        // refused, as readers that do not know the background refuse it.
+        let Some(target) =
+            ArtworkTarget::from_id_in(model, id).filter(|target| !target.kept_apart(model))
+        else {
             return invalid_config(strict, "unknown artwork target");
         };
-        let portable = name.starts_with("./imagenes/");
-        let leaf = name.strip_prefix("./imagenes/").unwrap_or(name);
-        if leaf.is_empty()
-            || leaf.starts_with('.')
-            || leaf.contains(['/', '\\', '\t', '\n', '\r'])
-            || Path::new(leaf).components().count() != 1
-        {
+        if unsafe_asset_name(name) {
             return invalid_config(strict, "unsafe artwork asset path");
         }
         let key = (layer, target);
         if result.contains_key(&key) {
             return invalid_config(strict, "duplicate artwork assignment");
         }
-        let path = artwork_path(root, name);
-        if portable && !path.try_exists()? {
-            result.insert(key, name.to_owned());
-            continue;
-        }
-        if !fs::metadata(&path).is_ok_and(|metadata| metadata.is_file())
-            || (!portable && fs::symlink_metadata(&path)?.file_type().is_symlink())
-        {
-            if strict {
-                return invalid_config(true, "missing or non-regular artwork asset");
+        match check_asset(root, strict, id, name)? {
+            Asset::Keep => {
+                result.insert(key, name.to_owned());
             }
-            diagnostics.push(format!(
-                "Artwork asset for {id} is missing; assignment ignored"
-            ));
-            continue;
+            Asset::Ignore(diagnostic) => diagnostics.push(diagnostic),
+            Asset::Invalid(message) => return invalid_config(true, message),
         }
-        if strict {
-            Pixbuf::from_file(&path)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        }
-        result.insert(key, name.to_owned());
     }
     Ok((result, button_texts, legacy, diagnostics))
 }
@@ -597,7 +814,10 @@ fn persist(
     legacy: bool,
     model: &DeviceModel,
 ) -> io::Result<()> {
-    let mut rows: Vec<_> = assignments.iter().collect();
+    let mut rows: Vec<_> = assignments
+        .iter()
+        .filter(|((_, target), _)| !target.kept_apart(model))
+        .collect();
     rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id_in(model)));
     let version = if legacy { CONFIG_VERSION } else { TEXT_VERSION };
     let mut text = format!("{version}\n");
@@ -618,7 +838,41 @@ fn persist(
             target.id_in(model)
         ));
     }
-    let temp = root.join("artwork.conf.tmp");
+    replace_file(root, "artwork.conf", &text)
+}
+
+/// Write [`KEYPAD_BACKGROUND_FILE`] with the keypad backgrounds among
+/// `assignments`, or remove it when there are none.
+fn persist_backgrounds(
+    root: &Path,
+    assignments: &Assignments,
+    model: &DeviceModel,
+) -> io::Result<()> {
+    let mut rows: Vec<_> = assignments
+        .iter()
+        .filter(|((_, target), _)| target.kept_apart(model))
+        .collect();
+    if rows.is_empty() {
+        return match fs::remove_file(root.join(KEYPAD_BACKGROUND_FILE)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        };
+    }
+    rows.sort_by_key(|((layer, target), _)| (layer.as_str(), target.id_in(model)));
+    let mut text = format!("{BACKGROUND_VERSION}\n");
+    for ((layer, target), name) in rows {
+        text.push_str(&format!(
+            "{}\t{}\t{name}\n",
+            encode_layer(layer),
+            target.id_in(model)
+        ));
+    }
+    replace_file(root, KEYPAD_BACKGROUND_FILE, &text)
+}
+
+/// Atomically replace `root/name` with `text` through `name.tmp`.
+fn replace_file(root: &Path, name: &str, text: &str) -> io::Result<()> {
+    let temp = root.join(format!("{name}.tmp"));
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -626,7 +880,7 @@ fn persist(
     let result = (|| {
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
-        fs::rename(&temp, root.join("artwork.conf"))
+        fs::rename(&temp, root.join(name))
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);

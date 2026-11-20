@@ -31,10 +31,15 @@ separation is not sandboxing, so enable only plugins you trust.";
 /// The plugin control an event of `kind` on `control` maps to.
 pub(crate) fn plugin_control(control: ControlKind, event: EventKind) -> PluginControl {
     match (control, event) {
-        (ControlKind::Touch, _) => PluginControl::Touch,
+        // The information window and the keypad background take no action
+        // (the editor offers none there); they read as a touch strip.
+        (ControlKind::Touch | ControlKind::Window | ControlKind::Background, _) => {
+            PluginControl::Touch
+        }
         (ControlKind::Encoder, EventKind::EncoderPress) => PluginControl::DialPress,
         (ControlKind::Encoder, _) => PluginControl::DialTurn,
-        (ControlKind::Button, _) => PluginControl::Key,
+        // A touch button runs once per touch, like a key press.
+        (ControlKind::Button | ControlKind::TouchButton, _) => PluginControl::Key,
     }
 }
 

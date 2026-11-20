@@ -436,7 +436,12 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
     box-shadow: inset 0 1px alpha(#ffffff, 0.18), inset 0 -1px alpha(#000000, 0.45);
 }
 .hardware-brand { color: #e1e6eb; font-size: 13px; font-weight: 800; }
-.hardware-bezel, .key-surface, .strip-surface, .touch-display { background: #08090b; }
+.hardware-bezel, .key-surface, .strip-surface, .window-surface, .touch-display { background: #08090b; }
+/* The Stream Deck Neo's information window: selectable, slightly lit on hover. */
+.window-surface { border-radius: 2px; }
+.window-surface:hover { background: #11151a; }
+/* The empty window's "Info window" caption lets the window's own surface show. */
+.window-surface .touch-display { background: transparent; }
 .hardware-bezel { border-radius: 2px; }
 .hardware-rail {
     background: linear-gradient(180deg, #22282e, #343c44);
@@ -465,6 +470,24 @@ label.feedback-success { background-color: alpha(@desk_success, 0.16); }
 .encoder:hover { background: radial-gradient(circle at 35% 30%, #7b8793, #414b55); }
 .encoder:active { background: radial-gradient(circle at 35% 30%, #505b66, #2b3239); }
 .encoder .control-tile { background: transparent; border: none; }
+/* Capacitive touch buttons (Stream Deck Neo): round pads of key material on the bezel. */
+.touch-button {
+    background: radial-gradient(circle, #1d2228, #08090b);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 2px #515b65;
+}
+.touch-button:hover { background: radial-gradient(circle, #2c343c, #11151a); }
+/* The Stream Deck Classic's keypad background bar: key material holding the
+   page's picture beside its caption. */
+.background-surface {
+    background: #08090b;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px #515b65;
+    padding: 2px 8px;
+}
+.background-surface:hover { background: #11151a; }
+.background-thumbnail { border-radius: 2px; }
+.background-caption { color: #c9d1d9; font-size: 11px; font-weight: 600; }
 .control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .key-surface.control-selected { box-shadow: 0 0 0 2px @desk_ring_gap, 0 0 0 5px @desk_ring; }
 .control-pressed {

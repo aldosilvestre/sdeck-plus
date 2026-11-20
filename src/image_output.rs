@@ -1,4 +1,7 @@
-//! Pure artwork preparation and Stream Deck + image-report encoding.
+//! Pure artwork preparation, device image encoding (JPEG, or BMP for the
+//! Legacy Mini) and Expanded-family image-report encoding. The `*_jpeg*`
+//! helpers keep their names for every format: they return the picture in the
+//! format of the model they are given.
 
 use crate::button_text::{ButtonText, HorizontalAlignment, TextOrientation, VerticalAlignment};
 use crate::device_model::{DeviceModel, ImageFormat, Rotation, PLUS};
@@ -10,6 +13,8 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime},
 };
+
+mod bmp;
 
 pub const REPORT_SIZE: usize = 1024;
 
@@ -41,6 +46,14 @@ pub fn dimensions_for(
             width: model.strip_px().0,
             height: model.strip_px().1,
         }),
+        // The Stream Deck Classic's keypad background: its whole LCD.
+        ArtworkTarget::TouchStripBackground => match model.keypad_background {
+            Some(background) => Ok(ImageDimensions {
+                width: background.px.0,
+                height: background.px.1,
+            }),
+            None => Err("unsupported artwork target".into()),
+        },
         ArtworkTarget::EncoderZone(n) if model.is_valid_zone(n) => Ok(ImageDimensions {
             width: model.zone_px().0,
             height: model.zone_px().1,
@@ -75,14 +88,14 @@ pub fn prepare_jpeg(target: ArtworkTarget, source: impl AsRef<Path>) -> Result<V
     prepare_jpeg_for(&PLUS, target, source)
 }
 
-/// [`prepare_jpeg`] at the image sizes of `model`.
+/// [`prepare_jpeg`] at the image sizes and in the image format of `model`.
 pub fn prepare_jpeg_for(
     model: &DeviceModel,
     target: ArtworkTarget,
     source: impl AsRef<Path>,
 ) -> Result<Vec<u8>, String> {
     let size = dimensions_for(model, target)?;
-    encode_jpeg(
+    encode_image(
         model,
         Part::of(target),
         &prepare_background(size, source.as_ref())?,
@@ -122,6 +135,111 @@ struct BackgroundKey {
     len: u64,
 }
 
+/// The last component of a path that names a key's share of a keypad
+/// background: `keypad-crop-<W>-<H>-<x>-<y>-<w>-<h>` (see
+/// [`keypad_background_crop`]).
+const CROP_PREFIX: &str = "keypad-crop-";
+
+/// A key's share of a keypad background (the part of the picture under
+/// one-based `key`, see [`DeviceModel::key_on_background`]), as a path that
+/// every picture function of this module takes like a key's own artwork: the
+/// background's own path with one more component naming the part. No file of
+/// that name can exist, since its parent is a file; nothing is written, the
+/// part is cut from the decoded background whenever it is drawn, so icons,
+/// text and live information drawn "over the key's artwork" draw over it.
+/// `None` for a model without a keypad background or a key it lacks.
+pub fn keypad_background_crop(model: &DeviceModel, background: &Path, key: u8) -> Option<PathBuf> {
+    let (width, height) = model.keypad_background?.px;
+    let (x, y, w, h) = model.key_on_background(key)?;
+    Some(background.join(format!("{CROP_PREFIX}{width}-{height}-{x}-{y}-{w}-{h}")))
+}
+
+/// Whether `path` names a key's share of a keypad background.
+pub fn is_keypad_background_crop(path: &Path) -> bool {
+    crop_of(path).is_some()
+}
+
+/// A key's share of a keypad background, as [`keypad_background_crop`]
+/// names it.
+struct Share<'a> {
+    /// The background's own file.
+    background: &'a Path,
+    /// The size the whole background is drawn at.
+    whole: ImageDimensions,
+    /// `(x, y, width, height)` of the part on the drawn background.
+    part: (i32, i32, i32, i32),
+}
+
+/// The share `path` names: a last component in the form
+/// [`keypad_background_crop`] writes, under a parent that is no directory (a
+/// real file cannot have that name).
+fn crop_of(path: &Path) -> Option<Share<'_>> {
+    let part = path.file_name()?.to_str()?.strip_prefix(CROP_PREFIX)?;
+    let numbers = part
+        .split('-')
+        .map(str::parse::<u16>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let [width, height, x, y, w, h] = numbers[..] else {
+        return None;
+    };
+    let within = |start: u16, length: u16, end: u16| {
+        length > 0 && u32::from(start) + u32::from(length) <= u32::from(end)
+    };
+    let fits = within(x, w, width) && within(y, h, height);
+    let background = path.parent()?;
+    if !fits || fs_is_dir(background) {
+        return None;
+    }
+    Some(Share {
+        background,
+        whole: ImageDimensions {
+            width: u32::from(width),
+            height: u32::from(height),
+        },
+        part: (i32::from(x), i32::from(y), i32::from(w), i32::from(h)),
+    })
+}
+
+fn fs_is_dir(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
+}
+
+/// The part of the background `share` names, at `size`.
+fn crop_background(size: ImageDimensions, share: &Share) -> Result<Pixbuf, String> {
+    let (x, y, w, h) = share.part;
+    let picture = resize_background(share.whole, share.background)?;
+    let part = Pixbuf::new(Colorspace::Rgb, picture.has_alpha(), 8, w, h)
+        .ok_or_else(|| "could not allocate a key's share of the background".to_string())?;
+    picture.copy_area(x, y, w, h, &part, 0, 0);
+    if (size.width, size.height) == (w as u32, h as u32) {
+        return Ok(part);
+    }
+    let target_w = i32::try_from(size.width).map_err(|error| error.to_string())?;
+    let target_h = i32::try_from(size.height).map_err(|error| error.to_string())?;
+    part.scale_simple(target_w, target_h, InterpType::Bilinear)
+        .ok_or_else(|| "could not resize a key's share of the background".to_string())
+}
+
+/// A picture for display at its own size: the file, or a key's share of a
+/// keypad background (see [`keypad_background_crop`]) cut from its picture.
+///
+/// # Errors
+/// A picture that cannot be read or decoded.
+pub fn decode_picture(path: &Path) -> Result<Pixbuf, String> {
+    match crop_of(path) {
+        Some(share) => {
+            let (_, _, w, h) = share.part;
+            let size = ImageDimensions {
+                width: w as u32,
+                height: h as u32,
+            };
+            crop_background(size, &share)
+        }
+        None => Pixbuf::from_file(path).map_err(|error| error.to_string()),
+    }
+}
+
 /// Resized pixels with their layout. Pixbufs are not `Send`, and the HID,
 /// information and GTK threads all draw backgrounds, so keep plain bytes.
 struct CachedBackground {
@@ -143,6 +261,9 @@ static BACKGROUNDS: Mutex<Vec<CachedBackground>> = Mutex::new(Vec::new());
 /// [`decode_background`], reusing the last result for an unchanged file.
 /// Callers get their own pixbuf, so drawing on it never touches the cache.
 pub(crate) fn resize_background(size: ImageDimensions, source: &Path) -> Result<Pixbuf, String> {
+    if let Some(share) = crop_of(source) {
+        return crop_background(size, &share);
+    }
     let metadata = std::fs::metadata(source).map_err(|error| error.to_string())?;
     let key = BackgroundKey {
         path: source.to_path_buf(),
@@ -265,25 +386,32 @@ fn orient(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Pixbuf, Str
                 Ok(turned)
             }
         }
-        Part::Strip | Part::Zone => rotated(image, model.strip_rotation()),
+        Part::Strip => rotated(image, wide_rotation(model)),
+        Part::Zone => rotated(image, model.strip_rotation()),
     }
 }
 
-fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
-    if model.image_format != ImageFormat::Jpeg {
-        return Err(format!(
-            "{} takes {} images, which are not implemented",
-            model.name,
-            model.image_format.name()
-        ));
+/// The rotation of the page's wide picture: the strip's (or window's), else
+/// the keypad background's.
+fn wide_rotation(model: &DeviceModel) -> Rotation {
+    match (model.strip, model.keypad_background) {
+        (Some(strip), _) => strip.rotation,
+        (None, Some(background)) => background.rotation,
+        (None, None) => Rotation::None,
     }
+}
+
+/// The picture for the display of `part`, oriented and encoded as `model`
+/// takes it: JPEG, or an uncompressed BMP for a Legacy Mini.
+fn encode_image(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8>, String> {
     let image = &orient(model, part, image)?;
-    // Transparency belongs to the preview/overlay. The device takes JPEG, so
-    // flatten only after compositing the overlay onto its existing artwork.
+    // Transparency belongs to the preview/overlay. JPEG and the 24-bit BMP
+    // have no alpha channel, so flatten only after compositing the overlay
+    // onto its existing artwork.
     let flattened;
     let image = if image.has_alpha() {
         flattened = Pixbuf::new(Colorspace::Rgb, false, 8, image.width(), image.height())
-            .ok_or_else(|| "could not allocate JPEG image".to_string())?;
+            .ok_or_else(|| format!("could not allocate {} image", model.image_format.name()))?;
         flattened.fill(0x000000ff);
         image.composite(
             &flattened,
@@ -302,13 +430,18 @@ fn encode_jpeg(model: &DeviceModel, part: Part, image: &Pixbuf) -> Result<Vec<u8
     } else {
         image
     };
-    let bytes = image
-        .save_to_bufferv("jpeg", &[("quality", "92")])
-        .map_err(|error| error.to_string())?;
-    if bytes.is_empty() {
-        return Err("JPEG encoder returned an empty image".into());
+    match model.image_format {
+        ImageFormat::Jpeg => {
+            let bytes = image
+                .save_to_bufferv("jpeg", &[("quality", "92")])
+                .map_err(|error| error.to_string())?;
+            if bytes.is_empty() {
+                return Err("JPEG encoder returned an empty image".into());
+            }
+            Ok(bytes)
+        }
+        ImageFormat::Bmp => bmp::encode(image),
     }
-    Ok(bytes)
 }
 
 /// Compose one physical 120x120 keypad image, without initializing GTK.
@@ -446,13 +579,13 @@ pub fn prepare_button_jpeg(source: Option<&Path>, text: &ButtonText) -> Result<V
     prepare_button_jpeg_for(&PLUS, source, text)
 }
 
-/// [`prepare_button_jpeg`] at the key size of `model`.
+/// [`prepare_button_jpeg`] at the key size and in the image format of `model`.
 pub fn prepare_button_jpeg_for(
     model: &DeviceModel,
     source: Option<&Path>,
     text: &ButtonText,
 ) -> Result<Vec<u8>, String> {
-    encode_jpeg(
+    encode_image(
         model,
         Part::Key,
         &compose_button_image_for(model, source, text)?,
@@ -632,9 +765,9 @@ pub fn prepare_touchscreen_zone_jpeg_for(
             InterpType::Nearest,
             255,
         );
-        return encode_jpeg(model, Part::Zone, &section);
+        return encode_image(model, Part::Zone, &section);
     }
-    encode_jpeg(model, Part::Zone, &overlay)
+    encode_image(model, Part::Zone, &overlay)
 }
 
 /// Encode a binding icon picture for a key or touch section that has no
@@ -701,7 +834,7 @@ pub fn prepare_icon_jpeg_over_for(
             match crate::binding_icons::compose_key_image_over_for(
                 model, icon, caption, text, background,
             )? {
-                Some(image) => encode_jpeg(model, Part::Key, &image),
+                Some(image) => encode_image(model, Part::Key, &image),
                 // No free band beside the user's text: the plain text picture.
                 None => prepare_button_jpeg_for(
                     model,
@@ -760,7 +893,7 @@ pub fn prepare_icon_jpeg_over_for(
                 InterpType::Nearest,
                 255,
             );
-            encode_jpeg(model, Part::Zone, &section)
+            encode_image(model, Part::Zone, &section)
         }
         ArtworkTarget::TouchStripBackground => {
             Err("binding icons cannot replace the touch strip background".into())
@@ -806,7 +939,7 @@ pub fn prepare_info_jpeg_for(
 ) -> Result<Vec<u8>, String> {
     let _ = dimensions_for(model, target)?;
     match target {
-        ArtworkTarget::Keypad(_) => encode_jpeg(
+        ArtworkTarget::Keypad(_) => encode_image(
             model,
             Part::Key,
             &crate::info_render::compose_info_image_for(model, value, background, elapsed)?,
@@ -834,10 +967,17 @@ pub fn prepare_info_jpeg_for(
                     InterpType::Nearest,
                     255,
                 );
-                return encode_jpeg(model, Part::Zone, &section);
+                return encode_image(model, Part::Zone, &section);
             }
-            encode_jpeg(model, Part::Zone, &overlay)
+            encode_image(model, Part::Zone, &overlay)
         }
+        // An information window (the Neo's) shows the page's reading over
+        // its own picture, sent whole like its background.
+        ArtworkTarget::TouchStripBackground if model.has_info_window() => encode_image(
+            model,
+            Part::Strip,
+            &crate::info_render::compose_window_image_for(model, value, background, elapsed)?,
+        ),
         ArtworkTarget::TouchStripBackground => {
             Err("live information cannot replace the touch strip background".into())
         }
@@ -849,7 +989,7 @@ pub fn prepare_clear_jpeg(target: ArtworkTarget) -> Result<Vec<u8>, String> {
     prepare_clear_jpeg_for(&PLUS, target)
 }
 
-/// [`prepare_clear_jpeg`] at the image sizes of `model`.
+/// [`prepare_clear_jpeg`] at the image sizes and in the image format of `model`.
 pub fn prepare_clear_jpeg_for(
     model: &DeviceModel,
     target: ArtworkTarget,
@@ -860,7 +1000,7 @@ pub fn prepare_clear_jpeg_for(
     let image = Pixbuf::new(Colorspace::Rgb, false, 8, width, height)
         .ok_or_else(|| "could not allocate clear image".to_string())?;
     image.fill(0x000000ff);
-    encode_jpeg(model, Part::of(target), &image)
+    encode_image(model, Part::of(target), &image)
 }
 
 /// Encode JPEG bytes into zero-padded, fixed-size output reports for the target.
@@ -885,17 +1025,20 @@ pub fn zone_window(model: &DeviceModel, zone: u8) -> (u16, u16, u16, u16) {
 }
 
 /// [`encode_reports`] with the report layout and image sizes of `model`,
-/// through the handler of its protocol family.
+/// through the handler of its protocol family; `image` is encoded in the
+/// model's format (JPEG, or BMP for a Legacy Mini).
 pub fn encode_reports_for(
     model: &DeviceModel,
     target: ArtworkTarget,
-    jpeg: &[u8],
+    image: &[u8],
 ) -> Result<Vec<OutputReport>, String> {
-    crate::protocol::protocol_for(model.family).encode_reports(model, target, jpeg)
+    crate::protocol::protocol_for(model.family).encode_reports(model, target, image)
 }
 
-/// The Expanded family's image reports: 0x02, then 0x07 for a key or
-/// 0x0B / 0x0C for the strip window and its sections.
+/// The Expanded family's image reports: 0x02, then 0x07 for a key,
+/// 0x0B / 0x0C for the strip window and its sections, or 0x08 (Update Full
+/// Screen Image) for a keypad background, which Elgato's Classic page lays out
+/// like a key image whose key index byte is reserved (0).
 pub(crate) fn encode_expanded_reports(
     model: &DeviceModel,
     target: ArtworkTarget,
@@ -908,6 +1051,7 @@ pub(crate) fn encode_expanded_reports(
     let report_size = model.image_report_len;
     let (command, header_size) = match target {
         ArtworkTarget::Keypad(_) => (0x07, model.key_header_len),
+        ArtworkTarget::TouchStripBackground if !model.has_strip() => (0x08, model.key_header_len),
         ArtworkTarget::TouchStripBackground => (0x0b, model.key_header_len),
         ArtworkTarget::EncoderZone(_) => (0x0c, model.zone_header_len),
     };

@@ -296,6 +296,8 @@ pub(crate) struct FeatureRuntime {
     pub(crate) status: Label,
     pub(crate) timer_status: Label,
     key_hold: Rc<RefCell<sdeck_plus::key_hold::KeyHoldRecognizer>>,
+    /// Touches of the model's touch buttons, which run once per touch.
+    touch_buttons: Rc<RefCell<sdeck_plus::layers::TouchButtonPresses>>,
     key_epoch: Instant,
     /// Tests move the key clock forward instead of waiting out a hold.
     #[cfg(test)]
@@ -372,7 +374,7 @@ impl FeatureRuntime {
         timer_status.set_xalign(0.0);
         timer_status.add_css_class("muted");
         timer_status.set_visible(false);
-        let page_controls = page_controls::PageControls::new();
+        let page_controls = page_controls::PageControls::new(layers.borrow().model());
         let organization_management = GtkBox::new(Orientation::Vertical, 12);
         let legacy_picker = crate::labeled("Page (organization unavailable)", &ui.layer_picker);
         legacy_picker.set_visible(false);
@@ -446,6 +448,9 @@ impl FeatureRuntime {
         let key_hold = Rc::new(RefCell::new(sdeck_plus::key_hold::KeyHoldRecognizer::new(
             layers.borrow().model(),
         )));
+        let touch_buttons = Rc::new(RefCell::new(sdeck_plus::layers::TouchButtonPresses::new(
+            layers.borrow().model(),
+        )));
         let runtime = Self {
             layers,
             organization: Rc::new(RefCell::new(Some(organization))),
@@ -463,6 +468,7 @@ impl FeatureRuntime {
             status,
             timer_status,
             key_hold,
+            touch_buttons,
             key_epoch: Instant::now(),
             #[cfg(test)]
             key_skew: Rc::default(),
@@ -1351,6 +1357,25 @@ impl FeatureRuntime {
             return;
         }
         if let sdeck_plus::protocol::Event::Key { index, pressed } = event {
+            // A touch button (an index after the keys) runs its own binding once
+            // per touch, when the touch starts; it has no hold.
+            if self
+                .layers
+                .borrow()
+                .model()
+                .touch_button_at(*index)
+                .is_some()
+            {
+                let started = self.touch_buttons.borrow_mut().update(*index, *pressed);
+                if started.is_some() {
+                    if let Some((identity, action, page_return)) =
+                        crate::matching_binding(&self.layers, event)
+                    {
+                        self.execute_with_return(identity, action, page_return);
+                    }
+                }
+                return;
+            }
             let dispatches = self.key_hold.borrow_mut().update(
                 &self.layers.borrow(),
                 *index,

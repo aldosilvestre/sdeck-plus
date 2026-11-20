@@ -548,6 +548,7 @@ fn build_ui_in(
             detail: header.connection_detail.clone(),
             selector: header.selector.clone(),
             menu: header.configuration_menu.clone(),
+            help: header.setup_help.clone(),
         },
         stack,
         window.upcast_ref(),
@@ -799,6 +800,7 @@ struct Header {
     connection_detail: Label,
     selector: ModelSelector,
     configuration_menu: configuration_menu::ConfigurationMenu,
+    setup_help: SetupHelp,
     update_panel: RefCell<Option<update_check::Panel>>,
     #[cfg(test)]
     help_menu: gtk::MenuButton,
@@ -827,17 +829,26 @@ fn build_header(window: &ApplicationWindow) -> Header {
     title_row.append(&status);
     let selector = ModelSelector::new();
     let help_body = GtkBox::new(Orientation::Vertical, 16);
+    let mut steps = Vec::new();
     for (icon, title, explanation) in [
-        ("input-gaming-symbolic", "1. Select a control", "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events."),
-        ("preferences-system-symbolic", "2. Configure an action", "Drag an action from the right onto a key or a dial (a dial asks for clockwise, counterclockwise or press). Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected control, or use the Action selector for any control."),
+        ("input-gaming-symbolic", "1. Select a control", HELP_SELECT),
+        ("preferences-system-symbolic", "2. Configure an action", HELP_CONFIGURE),
         ("document-save-symbolic", "3. Save or test", "Save binding stores your configuration. Test action runs it immediately. Artwork is configured separately."),
         ("view-grid-symbolic", "Touch strip pages", "Touchscreen pages belong to the profile. Select the touch strip to add or choose a Touch page. Swiping left or right changes page unless you bind those swipes to something else."),
     ] {
         let step = GtkBox::new(Orientation::Vertical, 8);
         step.append(&ui::section_heading(icon, title));
-        step.append(&ui::helper(explanation));
+        let text = ui::helper(explanation);
+        step.append(&text);
         help_body.append(&step);
+        steps.push((step, text));
     }
+    // The steps that name controls follow the shown model (see `SetupHelp::follow`).
+    let setup_help = SetupHelp {
+        select: steps[0].1.clone(),
+        configure: steps[1].1.clone(),
+        touch_pages: steps[3].0.clone(),
+    };
     let configuration_menu = configuration_menu::ConfigurationMenu::new(window, &help_body);
     let update_panel = update_check::Panel::new();
     configuration_menu.add_updates(&update_panel.body);
@@ -870,9 +881,110 @@ fn build_header(window: &ApplicationWindow) -> Header {
         connection_detail,
         selector,
         configuration_menu,
+        setup_help,
         update_panel: RefCell::new(Some(update_panel)),
         #[cfg(test)]
         help_menu,
+    }
+}
+
+/// Setup help, step 1, for a model with dials and a touch strip.
+const HELP_SELECT: &str = "Click a key, dial or the touch strip on the preview. Dials have separate press and rotation events.";
+/// Setup help, step 2, for a model with dials.
+const HELP_CONFIGURE: &str = "Drag an action from the right onto a key or a dial (a dial asks for clockwise, counterclockwise or press). Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected control, or use the Action selector for any control.";
+
+/// The steps of the setup help that name the shown model's controls.
+#[derive(Clone)]
+struct SetupHelp {
+    select: Label,
+    configure: Label,
+    /// The touch strip pages step, shown only for a model with a touch strip.
+    touch_pages: GtkBox,
+}
+
+impl SetupHelp {
+    /// Describe only the controls `model` has; the Stream Deck + text is unchanged.
+    fn follow(&self, model: &sdeck_plus::device_model::DeviceModel) {
+        self.select.set_text(&help_select(model));
+        self.configure.set_text(&help_configure(model));
+        self.touch_pages.set_visible(model.has_touch());
+    }
+}
+
+/// `parts` as a sentence lists them: "a", "a <conjunction> b", "a, b <conjunction> c".
+fn word_list(parts: &[&str], conjunction: &str) -> String {
+    match parts {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [first @ .., last] => format!("{} {conjunction} {last}", first.join(", ")),
+    }
+}
+
+fn help_select(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    if model.dials > 0 && model.has_touch() {
+        return HELP_SELECT.to_owned();
+    }
+    let mut parts = vec!["a key"];
+    if model.dials > 0 {
+        parts.push("a dial");
+    }
+    if model.has_touch() {
+        parts.push("the touch strip");
+    }
+    if model.has_info_window() {
+        parts.push("the info window");
+    }
+    if model.touch_buttons > 0 {
+        parts.push("a touch button");
+    }
+    if model.has_keypad_background() {
+        parts.push("the background");
+    }
+    let mut text = format!("Click {} on the preview.", word_list(&parts, "or"));
+    if model.dials > 0 {
+        text.push_str(" Dials have separate press and rotation events.");
+    }
+    text
+}
+
+fn help_configure(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    if model.dials > 0 {
+        return HELP_CONFIGURE.to_owned();
+    }
+    let mut text = "Drag an action from the right onto a key. Actions without parameters save on drop; otherwise complete the settings below and Save binding. You can also click a catalog action for the selected key.".to_owned();
+    if model.has_touch() || model.touch_buttons > 0 {
+        text.push_str(" Use the Action selector for any other control.");
+    }
+    text
+}
+
+/// The New profile tooltip, naming what a profile of `model` holds.
+fn new_profile_tooltip(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    let mut parts = vec!["keys"];
+    if model.dials > 0 {
+        parts.push("dials");
+    }
+    parts.push("pages");
+    if model.has_touch() {
+        parts.push("touch strip");
+    }
+    if model.touch_buttons > 0 {
+        parts.push("touch buttons");
+    }
+    format!(
+        "New profile: add a profile with its own {}.",
+        word_list(&parts, "and")
+    )
+}
+
+/// The live-information tooltip: only a model with dials and a touch strip
+/// draws a dial's or a touch section's information on a section.
+fn info_tooltip(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    const WHAT: &str = "Replaces the image with a live picture, such as the volume or the time.";
+    if model.dials > 0 && model.has_touch() {
+        format!("{WHAT} Dials, and a tap or hold on a touch section, draw it on that section.")
+    } else {
+        WHAT.to_owned()
     }
 }
 
@@ -951,6 +1063,7 @@ fn build_widgets(
 ) -> MonitorWidgets {
     let toast = ui::Toast::new();
     let header = build_header(&window);
+    header.setup_help.follow(layers.borrow().model());
     let shell = shell_box();
     let body = build_body(
         window,
@@ -1125,7 +1238,15 @@ fn build_body(
         }
     });
     create_layer.set_sensitive(false);
-    let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad"]);
+    // Indexes follow `BindingUi::control_kind`.
+    let control_model = gtk::StringList::new(&[
+        "Button",
+        "Encoder",
+        "Touchpad",
+        "Touch button",
+        "Info window",
+        "Background",
+    ]);
     let control_picker = gtk::DropDown::new(Some(control_model.clone()), gtk::Expression::NONE);
     let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
     let control_number_picker =
@@ -1289,9 +1410,9 @@ fn build_body(
     new_profile.set_halign(gtk::Align::End);
     new_profile.set_valign(gtk::Align::Center);
     {
-        let what = "New profile: add a profile with its own keys, dials, pages and touch strip.";
-        new_profile.set_tooltip_text(Some(what));
-        new_profile.update_property(&[gtk::accessible::Property::Description(what)]);
+        let what = new_profile_tooltip(layers.borrow().model());
+        new_profile.set_tooltip_text(Some(&what));
+        new_profile.update_property(&[gtk::accessible::Property::Description(&what)]);
     }
     {
         // The only New profile control.
@@ -1419,7 +1540,8 @@ fn build_body(
     let appearance = GtkBox::new(Orientation::Vertical, 4);
     appearance.add_css_class("appearance-section");
     // Keys are styled from their right-click menu and dials have no artwork,
-    // so only the touch strip and its sections show this section.
+    // so only the touch strip and its sections (or the information window)
+    // show this section.
     appearance.set_visible(false);
     appearance.append(&gtk::Separator::new(Orientation::Horizontal));
     let appearance_heading = inspector_heading("Appearance");
@@ -1437,24 +1559,39 @@ fn build_body(
         .control_picker
         .connect_selected_notify(move |picker| {
             if let Some(row) = selector_row_weak.upgrade() {
-                row.set_visible(picker.selected() != 0);
+                // A key takes its action from the catalog; the information
+                // window (4) and the keypad background (5) take none.
+                row.set_visible(!matches!(picker.selected(), 0 | 4 | 5));
             }
             feature_editor.set_pickers_hidden(picker.selected() == 0);
             if let Some(editor) = editor.upgrade() {
                 editor.set_control_available(picker.selected() == 0);
             }
             if let Some(appearance) = appearance_weak.upgrade() {
-                // Only the touch strip and its sections have artwork to set here.
-                appearance.set_visible(picker.selected() == 2);
+                // Only the touch strip and its sections, the information
+                // window or the keypad background have artwork to set here.
+                appearance.set_visible(matches!(picker.selected(), 2 | 4 | 5));
             }
         });
-    let artwork_section = gtk::Expander::new(Some("Artwork and touch zones"));
+    let window_model = layers.borrow().model().has_info_window();
+    let background_model = layers.borrow().model().has_keypad_background();
+    let artwork_section = gtk::Expander::new(Some(if window_model {
+        "Window picture"
+    } else if background_model {
+        "Background picture"
+    } else {
+        "Artwork and touch zones"
+    }));
     artwork_section.set_child(Some(&artwork_content));
     appearance.append(&artwork_section);
     form.append(&appearance);
-    let layer_hint = Label::new(Some(
-        "Touchscreen pages belong to the profile, independently of keypad pages and folders.",
-    ));
+    let layer_hint = Label::new(Some(if window_model {
+        "Each keypad page has its own window picture and live information."
+    } else if background_model {
+        "Each keypad page has its own background, shown behind every key without a picture of its own."
+    } else {
+        "Touchscreen pages belong to the profile, independently of keypad pages and folders."
+    }));
     layer_hint.add_css_class("muted");
     layer_hint.set_xalign(0.0);
     layer_hint.set_wrap(true);
@@ -1651,6 +1788,12 @@ fn build_body(
         let artwork = artwork.clone();
         let toast = toast.clone();
         remove_binding.connect_clicked(move |_| match ui.selected_layer_and_control(&layers) {
+            // The keypad background's only configuration is its picture, on
+            // the shown page like Image… and Clear.
+            Ok((_, ControlKind::Background, _)) => {
+                let page = layers.borrow().active().to_owned();
+                remove_keypad_background(&artwork, &ui, &toast, &page);
+            }
             Ok((layer, control, number)) => {
                 // The whole control goes, whichever of its events is selected.
                 let result = {
@@ -1754,7 +1897,9 @@ fn build_body(
     let actions_page = GtkBox::new(Orientation::Vertical, 0);
     let dials_page = GtkBox::new(Orientation::Vertical, 0);
     tabs.add_titled(&actions_page, Some("actions"), "Actions");
-    tabs.add_titled(&dials_page, Some("dials"), "Dials");
+    let dials_tab = tabs.add_titled(&dials_page, Some("dials"), "Dials");
+    // Only a model with dials has a Dials tab (and presets to fill it).
+    dials_tab.set_visible(layers.borrow().model().dials > 0);
     {
         let wiring = PreviewWiring {
             ui: binding_ui.clone(),
@@ -1904,6 +2049,98 @@ fn undo_removal(
     })
 }
 
+/// Remove the keypad background of keypad page `layer` (the Stream Deck
+/// Classic's), with the toast's Undo, which puts the same picture back once
+/// unless the page got another background since.
+fn remove_keypad_background(artwork: &ArtworkUi, ui: &BindingUi, toast: &ui::Toast, layer: &str) {
+    let target = ArtworkTarget::TouchStripBackground;
+    let owner = artwork
+        .layers
+        .borrow()
+        .artwork_owner(layer, target)
+        .to_owned();
+    let removed = {
+        let mut store = artwork.store.borrow_mut();
+        let Some(store) = store.as_mut() else {
+            ui.error("Artwork storage is unavailable; repair it and restart.");
+            return;
+        };
+        let Some(path) = store.assigned_path_in_layer(&owner, target) else {
+            ui.report("This page has no background.", false);
+            return;
+        };
+        // The picture's bytes are kept for Undo: clearing deletes the asset.
+        std::fs::read(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                store
+                    .clear_in_layer(&owner, target)
+                    .map(|()| bytes)
+                    .map_err(|error| error.to_string())
+            })
+            .map(|bytes| {
+                let extension = path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                (bytes, extension)
+            })
+    };
+    match removed {
+        Ok((bytes, extension)) => {
+            artwork.refresh(true);
+            ui.status.set_text("");
+            let pending = Cell::new(Some((bytes, extension)));
+            let (artwork, ui) = (artwork.clone(), ui.clone());
+            toast.show_with_action(
+                "Background removed.",
+                "Undo",
+                Rc::new(move || {
+                    let Some((bytes, extension)) = pending.take() else {
+                        return;
+                    };
+                    let restored = {
+                        let mut store = artwork.store.borrow_mut();
+                        match store.as_mut() {
+                            None => Err("Artwork storage is unavailable.".to_owned()),
+                            // Undo never replaces a background chosen since.
+                            Some(store)
+                                if store.assigned_path_in_layer(&owner, target).is_some() =>
+                            {
+                                Err(
+                                    "Cannot undo: the background was changed after it was removed."
+                                        .to_owned(),
+                                )
+                            }
+                            Some(_) if !artwork.layers.borrow().has_configuration_owner(&owner) => {
+                                Err(
+                                    "Could not restore the background: its page no longer exists."
+                                        .to_owned(),
+                                )
+                            }
+                            Some(store) => store
+                                .assign_bytes_in_layer(&owner, target, &bytes, &extension)
+                                .map(|_| ())
+                                .map_err(|error| {
+                                    format!("Could not restore the background: {error}")
+                                }),
+                        }
+                    };
+                    match restored {
+                        Ok(()) => {
+                            artwork.refresh(true);
+                            ui.report("Background restored.", false);
+                        }
+                        Err(error) => ui.error(&error),
+                    }
+                }),
+            );
+        }
+        Err(error) => ui.error(&format!("Could not remove the background: {error}")),
+    }
+}
+
 /// What a model's events are applied to: its editor, the preview that mirrors
 /// the device, and the window's connection labels.
 struct EventSurface {
@@ -2015,7 +2252,12 @@ impl EventSurface {
                             ));
                             set_active(&label, pressed);
                         }
-                        if let Some(widget) = control_at(preview, ControlRef::Key, index) {
+                        // A touch button is reported as an index after the keys.
+                        let widget = match preview.model().touch_button_at(index) {
+                            Some(number) => preview.control(ControlRef::TouchButton(number)),
+                            None => control_at(preview, ControlRef::Key, index),
+                        };
+                        if let Some(widget) = widget {
                             set_pressed(&widget, pressed);
                         }
                     }
@@ -2308,9 +2550,8 @@ impl BindingUi {
             label.set_wrap(true);
             label.set_xalign(0.0);
         }
-        info_toggle.set_tooltip_text(Some(
-            "Replaces the image with a live picture, such as the volume or the time. Dials, and a tap or hold on a touch section, draw it on that section.",
-        ));
+        // `set_model` names the controls of the model the editor describes.
+        info_toggle.set_tooltip_text(Some(&info_tooltip(&sdeck_plus::device_model::PLUS)));
         let labels: Vec<&str> = sdeck_plus::info::InfoSource::ALL
             .iter()
             .map(|source| source.label())
@@ -2395,7 +2636,9 @@ impl BindingUi {
             info_location_row,
             model: Rc::new(Cell::new(&sdeck_plus::device_model::PLUS)),
             summaries: preview::ModelSlots::new(
-                (0..preview::widest(|model| model.keys() + 1 + model.dials))
+                (0..preview::widest(|model| {
+                    model.keys() + 1 + model.dials + model.touch_buttons
+                }))
                     .map(|_| {
                         let label = Label::new(None);
                         label.add_css_class("muted");
@@ -2485,8 +2728,11 @@ impl BindingUi {
     /// Make the summaries, dial captions and control numbers describe `model`.
     fn set_model(&self, model: &'static sdeck_plus::device_model::DeviceModel) {
         self.model.set(model);
-        self.summaries
-            .set_shown(usize::from(model.keys() + 1 + model.dials));
+        self.info_toggle
+            .set_tooltip_text(Some(&info_tooltip(model)));
+        self.summaries.set_shown(usize::from(
+            model.keys() + 1 + model.dials + model.touch_buttons,
+        ));
         self.dial_legends.set_shown(usize::from(model.dials));
         self.dial_icons.set_shown(usize::from(model.dials));
         // Slots of a wider model stay empty until a model uses them again.
@@ -2508,10 +2754,19 @@ impl BindingUi {
         use sdeck_plus::preview_layout::ControlRef;
         let model = self.model.get();
         let keys = usize::from(model.keys());
+        // Keys, the strip, the dials, then the touch buttons.
+        let dials = usize::from(model.dials);
         let index = match control {
             ControlRef::Key(number) if model.is_valid_key(number) => usize::from(number) - 1,
-            ControlRef::Strip if model.has_strip() => keys,
+            // The strip's slot describes the information window on a model with one.
+            ControlRef::Strip if model.has_touch() => keys,
+            ControlRef::Window if model.has_info_window() => keys,
+            // The keypad background has no strip beside it to share the slot with.
+            ControlRef::Background if model.has_keypad_background() => keys,
             ControlRef::Dial(number) if model.is_valid_dial(number) => keys + usize::from(number),
+            ControlRef::TouchButton(number) if model.is_valid_touch_button(number) => {
+                keys + dials + usize::from(number)
+            }
             _ => return None,
         };
         self.summaries.get(index)
@@ -2530,14 +2785,21 @@ impl BindingUi {
                 .unwrap_or_else(|| store.active().to_owned());
             let model = self.model.get();
             let keys = usize::from(model.keys());
-            let summaries = (0..keys + 1 + usize::from(model.dials))
+            let dials = usize::from(model.dials);
+            let summaries = (0..keys + 1 + dials + usize::from(model.touch_buttons))
                 .map(|index| {
                     let (control, number) = if index < keys {
                         (ControlKind::Button, index + 1)
+                    } else if index == keys && model.has_info_window() {
+                        (ControlKind::Window, 1)
+                    } else if index == keys && model.has_keypad_background() {
+                        (ControlKind::Background, 1)
                     } else if index == keys {
                         (ControlKind::Touch, 0)
-                    } else {
+                    } else if index <= keys + dials {
                         (ControlKind::Encoder, index - keys)
+                    } else {
+                        (ControlKind::TouchButton, index - keys - dials)
                     };
                     control_summary(&store, &layer, control, number as u8)
                 })
@@ -2591,11 +2853,13 @@ impl BindingUi {
         }
     }
 
-    /// Keys, dials and a tap or hold on one touch section can show information.
+    /// Keys, dials, a tap or hold on one touch section and the information
+    /// window can show information; a touch button has no display.
     fn info_supported(&self) -> bool {
         match self.control_kind() {
             ControlKind::Button => !self.hold_toggle.is_active(),
-            ControlKind::Encoder => true,
+            ControlKind::Encoder | ControlKind::Window => true,
+            ControlKind::TouchButton | ControlKind::Background => false,
             ControlKind::Touch => {
                 matches!(
                     self.event_kind(),
@@ -2647,6 +2911,14 @@ impl BindingUi {
     fn update_for_control(&self, reset_event: bool) {
         self.hold_toggle
             .set_visible(self.control_kind() == ControlKind::Button);
+        // The window's option names it; every other control keeps its wording.
+        if let Some(label) = descendant_label(self.info_toggle.upcast_ref()) {
+            label.set_text(if self.control_kind() == ControlKind::Window {
+                "Show live information on the window"
+            } else {
+                "Show live information on the key"
+            });
+        }
         let previous_event = dropdown_value(&self.event_model, self.event_picker.selected());
         let control = self.control_kind();
         let numbers: Vec<String> = match control {
@@ -2666,6 +2938,13 @@ impl BindingUi {
             ControlKind::Touch => std::iter::once("Any".to_owned())
                 .chain(self.model.get().zone_numbers().map(|n| n.to_string()))
                 .collect(),
+            ControlKind::TouchButton => self
+                .model
+                .get()
+                .touch_button_numbers()
+                .map(|n| n.to_string())
+                .collect(),
+            ControlKind::Window | ControlKind::Background => vec!["1".to_owned()],
         };
         replace_string_list(&self.control_number_model, &numbers);
         self.control_number_row.set_visible(true);
@@ -2711,6 +2990,10 @@ impl BindingUi {
                 number
             }
             ControlKind::Encoder => {
+                let model = self.model.get();
+                if model.dials == 0 {
+                    return Err(format!("the {} has no dials", model.name));
+                }
                 let number = number.ok_or_else(|| "Select an encoder number.".to_string())?;
                 if !self.model.get().is_valid_dial(number) {
                     return Err(format!(
@@ -2721,12 +3004,52 @@ impl BindingUi {
                 number
             }
             ControlKind::Touch => {
+                let model = self.model.get();
+                if !model.has_touch() {
+                    return Err(format!("the {} has no touch strip", model.name));
+                }
                 let number = number.unwrap_or(0);
                 if number > self.model.get().zones() {
                     return Err(format!(
                         "touch section must be 0 (whole strip) through {}",
                         self.model.get().zones()
                     ));
+                }
+                number
+            }
+            ControlKind::TouchButton => {
+                let model = self.model.get();
+                if model.touch_buttons == 0 {
+                    return Err(format!("the {} has no touch buttons", model.name));
+                }
+                let number = number.ok_or_else(|| "Select a touch button number.".to_string())?;
+                if !model.is_valid_touch_button(number) {
+                    return Err(format!(
+                        "touch button number must be 1 through {}",
+                        model.touch_buttons
+                    ));
+                }
+                number
+            }
+            ControlKind::Window => {
+                let model = self.model.get();
+                if !model.has_info_window() {
+                    return Err(format!("the {} has no information window", model.name));
+                }
+                let number = number.unwrap_or(1);
+                if number != 1 {
+                    return Err(format!("the {} has one information window", model.name));
+                }
+                number
+            }
+            ControlKind::Background => {
+                let model = self.model.get();
+                if !model.has_keypad_background() {
+                    return Err(format!("the {} has no keypad background", model.name));
+                }
+                let number = number.unwrap_or(1);
+                if number != 1 {
+                    return Err(format!("the {} has one keypad background", model.name));
                 }
                 number
             }
@@ -2741,11 +3064,18 @@ impl BindingUi {
             ControlKind::Button => 0,
             ControlKind::Encoder => 1,
             ControlKind::Touch => 2,
+            ControlKind::TouchButton => 3,
+            ControlKind::Window => 4,
+            ControlKind::Background => 5,
         });
         self.update_for_control(reset_event);
         self.control_number_picker
             .set_selected(u32::from(match control {
-                ControlKind::Button | ControlKind::Encoder => number - 1,
+                ControlKind::Button
+                | ControlKind::Encoder
+                | ControlKind::TouchButton
+                | ControlKind::Window
+                | ControlKind::Background => number - 1,
                 ControlKind::Touch => number,
             }));
     }
@@ -2758,8 +3088,13 @@ impl BindingUi {
         self.feature_editor
             .show_direct_sound(self.action_picker.selected() == 6);
         action_form::show_guidance(&self.action_guidance, kind);
-        // "Do nothing" needs no explaining on a key, whose selectors are hidden.
-        let idle_key = kind == ActionKind::None && self.control_kind() == ControlKind::Button;
+        // "Do nothing" needs no explaining on a key, the information window
+        // or the keypad background, whose selectors are hidden.
+        let idle_key = kind == ActionKind::None
+            && matches!(
+                self.control_kind(),
+                ControlKind::Button | ControlKind::Window | ControlKind::Background
+            );
         self.action_guidance
             .set_visible(!matches!(kind, ActionKind::Extended | ActionKind::Plugin) && !idle_key);
         self.feature_editor
@@ -2820,6 +3155,14 @@ impl BindingUi {
         self.feature_editor
             .set_key_trigger(self.control_kind() == ControlKind::Button);
         self.clear_action_fields();
+        // The keypad background has no binding: no action field applies.
+        if self.control_kind() == ControlKind::Background {
+            self.populate_action(&Action::None);
+            self.status
+                .set_text("Choose the page's background under Appearance.");
+            self.mark_clean();
+            return;
+        }
         let (layer, trigger) = match self.selected_layer_and_trigger(layers) {
             Ok(selection) => selection,
             Err(error) if error.contains("does not exist on the") => {
@@ -3042,6 +3385,10 @@ impl BindingUi {
         layers: &RefCell<LayerStore>,
     ) -> Result<(String, Trigger, Action), String> {
         let (layer, trigger) = self.selected_layer_and_trigger(layers)?;
+        // The information window runs nothing; its entry carries what it shows.
+        if trigger == Trigger::Window {
+            return Ok((layer, trigger, Action::None));
+        }
         if matches!(self.action_kind(), ActionKind::Plugin) {
             return Ok((
                 layer,
@@ -3136,6 +3483,9 @@ impl BindingUi {
         match self.control_picker.selected() {
             1 => ControlKind::Encoder,
             2 => ControlKind::Touch,
+            3 => ControlKind::TouchButton,
+            4 => ControlKind::Window,
+            5 => ControlKind::Background,
             _ => ControlKind::Button,
         }
     }
@@ -3277,6 +3627,11 @@ fn control_heading(control: ControlKind, number: Option<u8>) -> String {
             Some(zone @ 1..) => format!("Configuring: Touchpad section {zone}"),
             _ => "Configuring: Touchpad".into(),
         },
+        ControlKind::TouchButton => {
+            format!("Configuring: Touch button {}", number.unwrap_or(1))
+        }
+        ControlKind::Window => "Configuring: Info window".into(),
+        ControlKind::Background => "Configuring: Background".into(),
     }
 }
 
@@ -3354,11 +3709,13 @@ fn event_label(event: EventKind) -> &'static str {
         EventKind::TouchSwipeRight => "Swipe right",
         EventKind::TouchSwipeUp => "Swipe up",
         EventKind::TouchSwipeDown => "Swipe down",
+        EventKind::Display => "Display",
     }
 }
 
 fn event_from_label(label: &str) -> EventKind {
     match label {
+        "Display" => EventKind::Display,
         "Clockwise" => EventKind::EncoderClockwise,
         "Counterclockwise" => EventKind::EncoderCounterClockwise,
         "Tap" => EventKind::TouchTap,
@@ -3492,6 +3849,9 @@ struct InfoState {
     marquee: PreviewMarquee,
     countdown: Option<timer_artwork::CountdownArtwork>,
     plugin: feature_runtime::plugin_values::PluginValues,
+    /// Whether the last picture snapshot sent a keypad background (the Stream
+    /// Deck Classic's), which the next page without one must clear.
+    keypad_background_sent: bool,
 }
 
 impl std::ops::Deref for InfoState {
@@ -3527,7 +3887,8 @@ struct PreviewTitle {
 }
 
 impl ArtworkUi {
-    /// Keys and touch sections that show live information on `layer`.
+    /// Keys, touch sections and the information window that show live
+    /// information on `layer`.
     fn info_targets(&self, layer: &str) -> Vec<(ArtworkTarget, sdeck_plus::info::InfoSource)> {
         let store = self.layers.borrow();
         let model = store.model();
@@ -3539,7 +3900,13 @@ impl ArtworkUi {
             let source = store.zone_info_source(layer, zone)?;
             Some((ArtworkTarget::EncoderZone(zone), source))
         });
-        keys.chain(zones).collect()
+        // The Neo's window shows the keypad page's own choice.
+        let window = model
+            .has_info_window()
+            .then(|| store.info_source(layer, &Trigger::Window))
+            .flatten()
+            .map(|source| (ArtworkTarget::TouchStripBackground, source));
+        keys.chain(zones).chain(window).collect()
     }
 
     fn info_value(&self, source: sdeck_plus::info::InfoSource) -> sdeck_plus::info::InfoValue {
@@ -3558,6 +3925,57 @@ impl ArtworkUi {
             .borrow()
             .as_ref()?
             .assigned_path_in_layer(owner, target)
+    }
+
+    /// The share of the page's keypad background (the Stream Deck Classic's)
+    /// that a key without artwork of its own shows, as a path the picture
+    /// functions take like artwork (see `image_output::keypad_background_crop`).
+    fn key_backdrop(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        let ArtworkTarget::Keypad(key) = target else {
+            return None;
+        };
+        let model = self.layers.borrow().model();
+        if !model.has_keypad_background() || self.info_background(layer, target).is_some() {
+            return None;
+        }
+        let background = self.info_background(layer, ArtworkTarget::TouchStripBackground)?;
+        sdeck_plus::image_output::keypad_background_crop(model, &background, key)
+    }
+
+    /// What `target` draws over: its own artwork, else a key's share of the
+    /// page's keypad background.
+    fn drawn_background(&self, layer: &str, target: ArtworkTarget) -> Option<std::path::PathBuf> {
+        self.info_background(layer, target)
+            .or_else(|| self.key_backdrop(layer, target))
+    }
+
+    /// The keypad background (the Stream Deck Classic's) covers the whole LCD,
+    /// keys included, so it goes before every key of `commands`. A page
+    /// without one clears the device's only after a background was sent, so
+    /// a Classic that never shows one gets key pictures only.
+    fn keypad_background_first(&self, commands: &mut Vec<ArtworkCommand>, send: bool) {
+        let position = commands.iter().position(|command| {
+            matches!(
+                command,
+                ArtworkCommand::Assign {
+                    target: ArtworkTarget::TouchStripBackground,
+                    ..
+                }
+            )
+        });
+        let mut info = self.info.borrow_mut();
+        let command = match position.map(|at| commands.remove(at)) {
+            Some(assign) => assign,
+            None if info.keypad_background_sent => ArtworkCommand::Clear {
+                target: ArtworkTarget::TouchStripBackground,
+            },
+            None => return,
+        };
+        let assigned = matches!(command, ArtworkCommand::Assign { .. });
+        commands.insert(0, command);
+        if send {
+            info.keypad_background_sent = assigned;
+        }
     }
 
     /// The sections that carry the previous/next page indicators: the first and
@@ -3620,7 +4038,7 @@ impl ArtworkUi {
     ) -> ArtworkCommand {
         ArtworkCommand::ComposeInfo {
             target,
-            path: self.info_background(layer, target),
+            path: self.drawn_background(layer, target),
             strip_path: if matches!(target, ArtworkTarget::EncoderZone(_)) {
                 self.info_background(layer, ArtworkTarget::TouchStripBackground)
             } else {
@@ -3666,6 +4084,10 @@ impl ArtworkUi {
         other.extend(touch);
         other.extend(info(|target| {
             matches!(target, ArtworkTarget::EncoderZone(_))
+        }));
+        // An information window draws its reading over its own picture.
+        other.extend(info(|target| {
+            *target == ArtworkTarget::TouchStripBackground
         }));
         for zone in self.indicator_zones() {
             if self.indicated_zone(layer, zone) {
@@ -3755,20 +4177,27 @@ impl ArtworkUi {
             let last = self.layers.borrow().model().zones();
             (zone == 1 && previous, zone == last && next)
         };
-        let section = match target {
-            ArtworkTarget::Keypad(_) => None,
-            ArtworkTarget::EncoderZone(zone) => Some(indicators(zone)),
+        let model = self.layers.borrow().model();
+        let extent = match target {
+            ArtworkTarget::Keypad(_) => {
+                sdeck_plus::info_render::marquee_extent_for(model, value, None)
+            }
+            ArtworkTarget::EncoderZone(zone) => {
+                sdeck_plus::info_render::marquee_extent_for(model, value, Some(indicators(zone)))
+            }
+            ArtworkTarget::TouchStripBackground if model.has_info_window() => {
+                sdeck_plus::info_render::window_marquee_extent(model, value)
+            }
             ArtworkTarget::TouchStripBackground => return,
         };
-        let elapsed = self.preview_marquee_phase(target, value, section, now);
+        let elapsed = self.preview_marquee_phase(target, value, extent, now);
         if let ArtworkTarget::EncoderZone(zone) = target {
             if self.indicated_zone(&layer, zone) {
                 self.paint_touchscreen_zone(&layer, zone, Some(value), elapsed);
                 return;
             }
         }
-        let background = self.info_background(&layer, target);
-        let model = self.layers.borrow().model();
+        let background = self.drawn_background(&layer, target);
         let image = match target {
             ArtworkTarget::Keypad(_) => sdeck_plus::info_render::compose_info_image_for(
                 model,
@@ -3783,7 +4212,14 @@ impl ArtworkUi {
                 false,
                 elapsed,
             ),
-            ArtworkTarget::TouchStripBackground => return,
+            ArtworkTarget::TouchStripBackground => {
+                sdeck_plus::info_render::compose_window_image_for(
+                    model,
+                    value,
+                    background.as_deref(),
+                    elapsed,
+                )
+            }
         };
         match image {
             Ok(image) => {
@@ -3797,17 +4233,16 @@ impl ArtworkUi {
         }
     }
 
-    /// Follow the title `target` now shows: start or keep its marquee (and
+    /// Follow the title `target` now shows, scrolling over `extent` (see
+    /// `info_render::marquee_extent_for`): start or keep its marquee (and
     /// the timer) when it scrolls, forget it otherwise. Returns its phase.
     fn preview_marquee_phase(
         &self,
         target: ArtworkTarget,
         value: &sdeck_plus::info::InfoValue,
-        section: Option<(bool, bool)>,
+        extent: Option<(f64, f64)>,
         now: std::time::Instant,
     ) -> Duration {
-        let model = self.layers.borrow().model();
-        let extent = sdeck_plus::info_render::marquee_extent_for(model, value, section);
         let mut info = self.info.borrow_mut();
         let marquee = &mut info.marquee;
         let Some(extent) = extent else {
@@ -4035,11 +4470,12 @@ impl ArtworkUi {
     /// Repaint the preview; `send` also pushes the pictures to the device.
     fn refresh_with(&self, force: bool, send: bool) {
         let layer = self.layers.borrow().active().to_owned();
+        // The touchscreen page on a touch strip; the keypad page itself for
+        // an information window (the Neo's).
         let touch_owner = self
             .layers
             .borrow()
-            .touchscreen_owner(&layer)
-            .unwrap_or(&layer)
+            .artwork_owner(&layer, ArtworkTarget::TouchStripBackground)
             .to_owned();
         let (previous, next) = self.layers.borrow().touchscreen_navigation(&layer);
         let cache_key = format!("{}:{layer}:{touch_owner}:{previous}:{next}", layer.len());
@@ -4058,10 +4494,12 @@ impl ArtworkUi {
                 .map(|(target, picture)| {
                     (
                         picture.clone(),
-                        store.assigned_path_in_layer(
-                            self.layers.borrow().artwork_owner(&layer, *target),
-                            *target,
-                        ),
+                        store
+                            .assigned_path_in_layer(
+                                self.layers.borrow().artwork_owner(&layer, *target),
+                                *target,
+                            )
+                            .or_else(|| self.key_backdrop(&layer, *target)),
                         store.button_text_in_layer(&layer, *target).cloned(),
                         self.control_icon(&layer, *target),
                     )
@@ -4072,8 +4510,11 @@ impl ArtworkUi {
                 desired_artwork_commands_for_owners(store, &layer, &touch_owner),
             )
         };
-        let commands = self.with_info(&layer, commands);
+        let mut commands = self.with_info(&layer, commands);
         let model = self.layers.borrow().model();
+        if model.has_keypad_background() {
+            self.keypad_background_first(&mut commands, send);
+        }
         for (picture, path, text, icon) in paths {
             set_button_picture(model, &picture, path, text.as_ref(), icon.as_ref());
         }
@@ -4128,7 +4569,11 @@ impl ArtworkUi {
             previous: target == ArtworkTarget::EncoderZone(1) && previous,
             next: target == ArtworkTarget::EncoderZone(self.layers.borrow().model().zones())
                 && next,
-            background: artwork.filter(|_| over_artwork),
+            // A key without artwork draws over its share of the page's
+            // keypad background (the Classic's), if any.
+            background: artwork
+                .filter(|_| over_artwork)
+                .or_else(|| self.key_backdrop(layer, target)),
         })
     }
 
@@ -4143,7 +4588,7 @@ impl ArtworkUi {
         target: ArtworkTarget,
         text: &sdeck_plus::button_text::ButtonText,
     ) -> Result<(gtk::gdk_pixbuf::Pixbuf, bool), String> {
-        let path = self.info_background(layer, target);
+        let path = self.drawn_background(layer, target);
         let icon = self.control_icon(layer, target);
         let over_artwork = icon.as_ref().is_some_and(ControlIcon::shown_over_artwork);
         if path.is_none() || over_artwork {
@@ -4183,10 +4628,12 @@ impl ArtworkUi {
                 return;
             };
             (
-                store.assigned_path_in_layer(
-                    self.layers.borrow().artwork_owner(&layer, *target),
-                    *target,
-                ),
+                store
+                    .assigned_path_in_layer(
+                        self.layers.borrow().artwork_owner(&layer, *target),
+                        *target,
+                    )
+                    .or_else(|| self.key_backdrop(&layer, *target)),
                 store.button_text_in_layer(&layer, *target).cloned(),
             )
         };
@@ -4240,7 +4687,8 @@ struct ControlIcon {
     /// A page indicator paints at this section's outer left/right edge.
     previous: bool,
     next: bool,
-    /// The key's own artwork, drawn under the icon instead of black.
+    /// The key's own artwork (or its share of the page's keypad background),
+    /// drawn under the icon instead of black.
     background: Option<std::path::PathBuf>,
 }
 
@@ -4336,6 +4784,20 @@ fn set_button_picture(
 }
 
 fn set_picture_path(picture: &Picture, path: Option<std::path::PathBuf>) {
+    // A key's share of a keypad background is no file: it is cut from the
+    // background's picture.
+    if let Some(share) = path
+        .as_deref()
+        .filter(|path| sdeck_plus::image_output::is_keypad_background_crop(path))
+    {
+        picture.set_filename(None::<&std::path::Path>);
+        match sdeck_plus::image_output::decode_picture(share) {
+            Ok(frame) => picture.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&frame))),
+            Err(error) => eprintln!("Could not draw a key's share of the background: {error}"),
+        }
+        picture.set_visible(true);
+        return;
+    }
     picture.set_filename(path.as_deref());
     if let Some(path) = &path {
         // Use the same first-frame decoder as the hardware image pipeline.
@@ -4469,7 +4931,8 @@ impl PreviewWiring {
                 }),
             );
         }
-        self.follow_model(view.model());
+        let model = view.model();
+        self.follow_model(model);
         // Every key and dial of the model takes catalog and preset drops.
         if let Some(widgets) = view.catalog_widgets() {
             replace_page(
@@ -4483,17 +4946,19 @@ impl PreviewWiring {
                     &self.save,
                 ),
             );
-            replace_page(
-                &self.dials_page,
-                &dial_presets::connect(
-                    widgets,
-                    &self.ui,
-                    &self.layers,
-                    &self.heading,
-                    &self.runtime,
-                    &self.artwork,
-                ),
-            );
+            if model.dials > 0 {
+                replace_page(
+                    &self.dials_page,
+                    &dial_presets::connect(
+                        widgets,
+                        &self.ui,
+                        &self.layers,
+                        &self.heading,
+                        &self.runtime,
+                        &self.artwork,
+                    ),
+                );
+            }
         }
     }
 
@@ -4508,7 +4973,7 @@ impl PreviewWiring {
         };
         let names: Vec<String> = ArtworkTarget::touch_for(model)
             .into_iter()
-            .map(touch_target_label)
+            .map(|target| touch_target_label(model, target))
             .collect();
         let shown: Vec<String> = (0..list.n_items())
             .filter_map(|index| list.string(index).map(|name| name.to_string()))
@@ -4528,9 +4993,14 @@ fn replace_page(page: &GtkBox, child: &GtkBox) {
     page.append(child);
 }
 
-fn touch_target_label(target: ArtworkTarget) -> String {
+fn touch_target_label(
+    model: &sdeck_plus::device_model::DeviceModel,
+    target: ArtworkTarget,
+) -> String {
     match target {
         ArtworkTarget::Keypad(key) => format!("Key {key}"),
+        ArtworkTarget::TouchStripBackground if model.has_info_window() => "Info window".into(),
+        ArtworkTarget::TouchStripBackground if model.has_keypad_background() => "Background".into(),
         ArtworkTarget::TouchStripBackground => "Touch strip background".into(),
         ArtworkTarget::EncoderZone(zone) => format!("Touch zone {zone}"),
     }
@@ -4541,10 +5011,11 @@ fn add_artwork_controls(
     window: &ApplicationWindow,
     artwork: &ArtworkUi,
 ) -> gtk::DropDown {
+    let model = artwork.layers.borrow().model();
     let targets = gtk::StringList::new(
-        &ArtworkTarget::touch_for(artwork.layers.borrow().model())
+        &ArtworkTarget::touch_for(model)
             .into_iter()
-            .map(touch_target_label)
+            .map(|target| touch_target_label(model, target))
             .collect::<Vec<_>>()
             .iter()
             .map(String::as_str)
@@ -4680,30 +5151,51 @@ fn desired_artwork_commands_for_owners(
     layer: &str,
     touch_owner: &str,
 ) -> Vec<ArtworkCommand> {
-    let mut commands = store
-        .model()
-        .key_numbers()
-        .map(|key| {
-            let target = ArtworkTarget::Keypad(key);
-            if let Some(text) = store.button_text_in_layer(layer, target) {
-                return ArtworkCommand::ComposeButton {
-                    key,
-                    path: store.assigned_path_in_layer(layer, target),
-                    text: text.clone(),
-                };
-            }
-            match store.assigned_path_in_layer(layer, target) {
-                Some(path) => ArtworkCommand::Assign { target, path },
-                None => ArtworkCommand::Clear { target },
-            }
-        })
-        .collect::<Vec<_>>();
+    let model = store.model();
+    // The page's keypad background (the Stream Deck Classic's): sent whole,
+    // and each key without artwork of its own shows its share of it. A page
+    // without one plans none (see `ArtworkUi::keypad_background_first`).
+    let background = model
+        .has_keypad_background()
+        .then(|| store.assigned_path_in_layer(touch_owner, ArtworkTarget::TouchStripBackground))
+        .flatten();
+    let mut commands = Vec::new();
+    if let Some(path) = &background {
+        commands.push(ArtworkCommand::Assign {
+            target: ArtworkTarget::TouchStripBackground,
+            path: path.clone(),
+        });
+    }
+    commands.extend(model.key_numbers().map(|key| {
+        let target = ArtworkTarget::Keypad(key);
+        let path = store.assigned_path_in_layer(layer, target).or_else(|| {
+            background.as_deref().and_then(|background| {
+                sdeck_plus::image_output::keypad_background_crop(model, background, key)
+            })
+        });
+        if let Some(text) = store.button_text_in_layer(layer, target) {
+            return ArtworkCommand::ComposeButton {
+                key,
+                path,
+                text: text.clone(),
+            };
+        }
+        match path {
+            Some(path) => ArtworkCommand::Assign { target, path },
+            None => ArtworkCommand::Clear { target },
+        }
+    }));
     commands.extend(touch_strip_commands(store, touch_owner));
     commands
 }
 
+/// The strip (or the Neo's window) and its sections; nothing for a model
+/// without such a display, whose device would refuse the picture.
 fn touch_strip_commands(store: &ArtworkStore, layer: &str) -> Vec<ArtworkCommand> {
     let mut commands = Vec::new();
+    if !store.model().has_strip() {
+        return commands;
+    }
     let background = store.assigned_path_in_layer(layer, ArtworkTarget::TouchStripBackground);
     match background {
         Some(path) => commands.push(ArtworkCommand::Assign {
@@ -4752,23 +5244,18 @@ fn show_connection_state(
     let every_model = || {
         usb_ids(
             DeviceModel::supported()
-                .map(|model| format!("{:04X}", model.pid()))
+                .map(|model| model.pid_list(", "))
                 .collect::<Vec<_>>()
-                .join(" or "),
+                .join(", "),
         )
     };
     let usb_id = |model: Option<&DeviceModel>| match model {
-        Some(model) => usb_ids(format!("{:04X}", model.pid())),
+        Some(model) => usb_ids(model.pid_list(" or ")),
         None => every_model(),
     };
-    let family = || {
-        DeviceModel::supported()
-            .map(|model| model.name)
-            .collect::<Vec<_>>()
-            .join(" or ")
-    };
     let name = last.map_or("Stream Deck", |model| model.name);
-    let not_connected = format!("{} not connected — plug one in", family());
+    // Six model names do not fit the header: the tooltip lists the ids.
+    let not_connected = "No Stream Deck connected — plug one in".to_owned();
     let (badge, tone, text, hint) = match state {
         ConnectionState::Searching => (
             "Not connected",
@@ -4799,8 +5286,9 @@ fn show_connection_state(
             "Connected",
             "status-online",
             format!(
-                "{} connected — keys, dials and touch strip are live",
-                model.name
+                "{} connected — {} are live",
+                model.name,
+                model.live_controls()
             ),
             format!("{} · HID input and artwork active", usb_id(Some(model))),
         ),
@@ -4856,9 +5344,13 @@ fn show_connected_devices(
     };
     let pids: Vec<String> = grouped
         .iter()
-        .map(|(model, _)| format!("{:04X}", model.pid()))
+        .map(|(model, _)| model.pid_list(" or "))
         .collect();
-    let text = format!("{list} connected — keys, dials and touch strip are live");
+    let connected: Vec<_> = grouped.iter().map(|(model, _)| *model).collect();
+    let text = format!(
+        "{list} connected — {} are live",
+        sdeck_plus::device_model::DeviceModel::live_controls_of(&connected)
+    );
     // The line may be ellipsized: the tooltip carries the whole sentence.
     let hint = format!(
         "{text}\nUSB device VID 0FD9 / PID {} · HID input and artwork active",
@@ -5107,6 +5599,7 @@ mod tests {
     mod button_text_popup_tests;
     mod catalog_beside_preview_tests;
     mod catalog_overwrite_tests;
+    mod classic_background_ui_tests;
     mod configuration_transfer_tests;
     mod confirm_menu_tests;
     mod control_feedback_tests;
@@ -5121,12 +5614,15 @@ mod tests {
     mod key_hold_integration_tests;
     mod key_hold_ui_tests;
     mod live_info_tests;
+    mod mixed_model_tests;
+    mod model_sections_tests;
     mod model_selector_tests;
     mod model_session_tests;
     mod multi_action_catalog_tests;
     mod multi_action_editor_tests;
     mod multi_action_runtime_tests;
     mod multimedia_action_tests;
+    mod neo_window_ui_tests;
     mod organize_popover_tests;
     mod page_return_tests;
     mod page_ui_tests;
@@ -5147,6 +5643,7 @@ mod tests {
     mod simulated_device_tests;
     mod timer_countdown_tests;
     mod timer_notification_tests;
+    mod touch_button_ui_tests;
     mod touchscreen_tests;
     mod tray_startup;
     mod two_device_tests;
@@ -5203,7 +5700,13 @@ mod tests {
             .set_gtk_enable_animations(false);
         let layer_model = gtk::StringList::new(&["Base"]);
         let layer_picker = gtk::DropDown::new(Some(layer_model.clone()), gtk::Expression::NONE);
-        let control_model = gtk::StringList::new(&["Button", "Encoder", "Touchpad"]);
+        let control_model = gtk::StringList::new(&[
+            "Button",
+            "Encoder",
+            "Touchpad",
+            "Touch button",
+            "Info window",
+        ]);
         let control_picker = gtk::DropDown::new(Some(control_model), gtk::Expression::NONE);
         let control_number_model = gtk::StringList::new(&["1", "2", "3", "4", "5", "6", "7", "8"]);
         let control_number_picker =
@@ -9648,6 +10151,39 @@ mod tests {
                 target: ArtworkTarget::TouchStripBackground
             }
         ));
+    }
+
+    #[test]
+    fn an_empty_plan_clears_only_the_displays_each_model_has() {
+        use sdeck_plus::device_model::{DeviceModel, CLASSIC, PLUS_XL, XL};
+        let neo = DeviceModel::by_id("neo").unwrap();
+        // The + XL clears its strip and the Neo its window; a Classic or XL has neither.
+        for (model, display) in [
+            (&PLUS_XL, true),
+            (&CLASSIC, false),
+            (&XL, false),
+            (neo, true),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("t7-empty-{}-{}", model.id, std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let store = ArtworkStore::open_at_for_layer_model(&root, Some("Base"), model).unwrap();
+            let commands = desired_artwork_commands(&store, "Empty");
+            let targets: Vec<ArtworkTarget> = commands
+                .iter()
+                .map(|command| match command {
+                    ArtworkCommand::Clear { target } => *target,
+                    other => panic!("{}: unexpected {other:?}", model.id),
+                })
+                .collect();
+            let expected: Vec<ArtworkTarget> = model
+                .key_numbers()
+                .map(ArtworkTarget::Keypad)
+                .chain(display.then_some(ArtworkTarget::TouchStripBackground))
+                .collect();
+            assert_eq!(targets, expected, "{}", model.id);
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]

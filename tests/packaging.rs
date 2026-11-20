@@ -115,9 +115,8 @@ fn desktop_file_matches_the_application_identity() {
 }
 
 #[test]
-fn descriptions_name_both_supported_models() {
-    let description =
-        "GTK4 control desk for the Elgato Stream Deck + and Stream Deck + XL on Linux";
+fn descriptions_name_stream_deck_devices_generically() {
+    let description = "GTK4 control desk for Elgato Stream Deck devices on Linux";
     let manifest = read("Cargo.toml");
     assert!(manifest.contains(&format!("description = \"{description}\"")));
     for (package, suffix) in [("sdeck-plus", ""), ("sdeck-plus-git", " (git version)")] {
@@ -129,9 +128,9 @@ fn descriptions_name_both_supported_models() {
         assert_eq!(srcinfo_values(&srcinfo(package), "pkgdesc"), [expected]);
     }
     let desktop = read("packaging/dev.streamdeck.EventMonitor.desktop");
-    assert!(desktop.lines().any(|line| {
-        line == "Comment=Configure an Elgato Stream Deck + or Stream Deck + XL on Linux"
-    }));
+    assert!(desktop
+        .lines()
+        .any(|line| { line == "Comment=Configure Elgato Stream Deck devices on Linux" }));
 }
 
 #[test]

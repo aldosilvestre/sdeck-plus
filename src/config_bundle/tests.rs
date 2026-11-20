@@ -355,6 +355,11 @@ fn roundtrip_preserves_all_stores_and_relocates_deduplicated_audio() {
     );
     assert_private(&destination, 0o700);
     for name in CONFIGS {
+        // Only a Stream Deck Classic keeps keypad backgrounds.
+        if name == KEYPAD_BACKGROUND_FILE {
+            assert!(!destination.join(name).exists());
+            continue;
+        }
         assert_private(&destination.join(name), 0o600);
     }
     for dir in ["assets", "media"] {

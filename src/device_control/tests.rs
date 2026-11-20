@@ -1,4 +1,5 @@
 use super::*;
+use crate::device_model::{MINI, PLUS, PLUS_XL};
 
 #[test]
 fn feature_report_matches_plus_protocol_when_brightness_is_set() {
@@ -6,14 +7,37 @@ fn feature_report_matches_plus_protocol_when_brightness_is_set() {
     let mut state = DesiredState::default();
     // When
     state.apply(&DeviceAction::Brightness(73)).unwrap();
-    // Then: report ID, command, percentage, and 29 zero bytes.
-    assert_eq!(
-        state.report(),
-        [
-            0x03, 0x08, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0,
-        ]
-    );
+    // Then: report ID, command, percentage, and 29 zero bytes, on + and + XL.
+    for model in [&PLUS, &PLUS_XL] {
+        assert_eq!(
+            state.report(model.family),
+            [
+                0x03, 0x08, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0,
+            ],
+            "{}",
+            model.id
+        );
+    }
+}
+
+#[test]
+fn legacy_mini_intent_uses_the_mini_brightness_report() {
+    // Given
+    let mut state = DesiredState::default();
+    let mini = |level: u8| {
+        let mut report = [0u8; 32];
+        report[..6].copy_from_slice(&[0x05, 0x55, 0xAA, 0xD1, 0x01, level]);
+        report
+    };
+    assert_eq!(state.report(MINI.family), mini(100));
+    // When / Then: the same intent, in the Mini's own bytes.
+    state.apply(&DeviceAction::Brightness(73)).unwrap();
+    assert_eq!(state.report(MINI.family), mini(73));
+    state.apply(&DeviceAction::Sleep).unwrap();
+    assert_eq!(state.report(MINI.family), mini(0));
+    state.apply(&DeviceAction::Wake).unwrap();
+    assert_eq!(state.report(MINI.family), mini(73));
 }
 
 #[test]
@@ -25,7 +49,7 @@ fn adjustment_clamps_when_steps_cross_percentage_bounds() {
         // When
         state.apply(&DeviceAction::AdjustBrightness(step)).unwrap();
         // Then
-        assert_eq!(state.report()[2], expected);
+        assert_eq!(state.report(PLUS.family)[2], expected);
     }
 }
 
@@ -37,11 +61,11 @@ fn wake_restores_when_sleep_is_repeated_and_brightness_changes_asleep() {
     state.apply(&DeviceAction::Sleep).unwrap();
     state.apply(&DeviceAction::Sleep).unwrap();
     state.apply(&DeviceAction::AdjustBrightness(8)).unwrap();
-    assert_eq!(state.report()[2], 0);
+    assert_eq!(state.report(PLUS.family)[2], 0);
     // When
     state.apply(&DeviceAction::Wake).unwrap();
     // Then
-    assert_eq!(state.report()[2], 50);
+    assert_eq!(state.report(PLUS.family)[2], 50);
 }
 
 #[test]
@@ -53,7 +77,7 @@ fn zero_is_restored_when_waking_from_explicit_zero_brightness() {
     // When
     state.apply(&DeviceAction::Wake).unwrap();
     // Then
-    assert_eq!(state.report()[2], 0);
+    assert_eq!(state.report(PLUS.family)[2], 0);
 }
 
 #[test]
@@ -65,7 +89,7 @@ fn invalid_absolute_brightness_preserves_previous_intent() {
     let error = state.apply(&DeviceAction::Brightness(101)).unwrap_err();
     // Then
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-    assert_eq!(state.report()[2], 23);
+    assert_eq!(state.report(PLUS.family)[2], 23);
     assert_eq!(state.action, Some(DeviceAction::Brightness(23)));
 }
 
@@ -77,7 +101,7 @@ fn relative_adjustment_uses_baseline_when_no_absolute_level_was_requested() {
     // When
     state.apply(&DeviceAction::AdjustBrightness(-5)).unwrap();
     // Then
-    assert_eq!(state.report()[2], 95);
+    assert_eq!(state.report(PLUS.family)[2], 95);
 }
 
 #[test]

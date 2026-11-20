@@ -246,6 +246,8 @@ pub(crate) struct SharedHeader {
     pub(crate) detail: Label,
     pub(crate) selector: crate::ModelSelector,
     pub(crate) menu: crate::configuration_menu::ConfigurationMenu,
+    /// The setup help's steps that name the shown model's controls.
+    pub(crate) help: crate::SetupHelp,
 }
 
 /// The registry: which sessions exist, which one the window shows and which
@@ -293,6 +295,7 @@ impl ModelSession {
         stack.add_named(&first.root, Some(shown.id));
         stack.set_visible_child(&first.root);
         header.menu.bind(first.runtime.clone());
+        header.help.follow(shown);
         let registry = Rc::new(Self {
             roots,
             header,
@@ -658,6 +661,7 @@ impl ModelSession {
         self.stack.set_visible_child(&session.root);
         self.shown.set(model);
         self.header.menu.bind(session.runtime.clone());
+        self.header.help.follow(model);
         self.apply_read_only();
         // Remembered only once the session really opened.
         if let Err(error) = device_preference::save_to(&self.roots.preference, model) {

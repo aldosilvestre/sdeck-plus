@@ -275,6 +275,182 @@ fn touchscreen_store_with_an_unknown_action_stays_untouched_and_unwritable() {
     assert_eq!(fixture.read("layers.conf"), layers);
 }
 
+/// Rows of a control kind (trigger) this build does not know, as a newer build
+/// with another control would write them: a binding, its page return and its
+/// information, around known rows of the same layer.
+fn unknown_control_rows() -> String {
+    format!(
+        "{HEADER}layer\t{BASE}\nbinding\t{BASE}\tk:1\tcommand:72756e\n\
+         binding\t{BASE}\tpedal:2\tcommand:72756e\npagereturn\t{BASE}\tpedal:2\t{BASE}\t5\n\
+         info\t{BASE}\tpedal:2\tclock\nbinding\t{BASE}\tdial-ring:1:x\tfuture-v9:00\n\
+         layer\t{OTHER}\nbinding\t{OTHER}\tpedal:2\temit:61\n"
+    )
+}
+
+#[test]
+fn rows_of_an_unknown_control_kind_survive_load_and_every_save_byte_identically() {
+    let fixture = Fixture::new();
+    fixture.write("layers.conf", &unknown_control_rows());
+
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+
+    assert!(store.diagnostics().is_empty());
+    assert_eq!(store.layers()["Base"].bindings.len(), 1);
+    assert!(store.layers()["Other"].bindings.is_empty());
+    assert_eq!(store.conflicts().len(), 5);
+    assert!(store.conflicts().iter().all(|conflict| conflict.kept));
+    assert_eq!(fixture.read("layers.conf"), unknown_control_rows());
+    store.persist().unwrap();
+    assert_eq!(fixture.read("layers.conf"), unknown_control_rows());
+    // Edits of known controls, even removing every binding, keep them.
+    store.unbind("Base", &Trigger::KeyPress(1)).unwrap();
+    store
+        .bind("Base", Trigger::KeyPress(2), Action::Emit("b".into()))
+        .unwrap();
+    store.persist().unwrap();
+    let expected = unknown_control_rows().replacen(
+        &format!("binding\t{BASE}\tk:1\tcommand:72756e\n"),
+        &format!("binding\t{BASE}\tk:2\temit:62\n"),
+        1,
+    );
+    assert_eq!(fixture.read("layers.conf"), expected);
+    let reopened = LayerStore::open_at(&fixture.0).unwrap();
+    assert_eq!(reopened.conflicts().len(), 5);
+    assert!(reopened.conflicts().iter().all(|conflict| conflict.kept));
+}
+
+#[test]
+fn unknown_control_rows_are_logged_as_kept_once_and_go_only_with_their_layer() {
+    let fixture = Fixture::new();
+    fixture.write("layers.conf", &unknown_control_rows());
+    LayerStore::open_at(&fixture.0).unwrap();
+    let mut log = fixture.log();
+    log.sort();
+    let mut expected = vec![
+        format!("ERROR\tprofile=\"Base\"\tcontrol=pedal:2\treason=unknown control kind 'pedal'\tkept=binding\t{BASE}\tpedal:2\tcommand:72756e"),
+        format!("ERROR\tprofile=\"Base\"\tcontrol=pedal:2\treason=unknown control kind 'pedal'\tkept=pagereturn\t{BASE}\tpedal:2\t{BASE}\t5"),
+        format!("ERROR\tprofile=\"Base\"\tcontrol=pedal:2\treason=unknown control kind 'pedal'\tkept=info\t{BASE}\tpedal:2\tclock"),
+        format!("ERROR\tprofile=\"Base\"\tcontrol=dial-ring:1:x\treason=unknown control kind 'dial-ring'\tkept=binding\t{BASE}\tdial-ring:1:x\tfuture-v9:00"),
+        format!("ERROR\tprofile=\"Other\"\tcontrol=pedal:2\treason=unknown control kind 'pedal'\tkept=binding\t{OTHER}\tpedal:2\temit:61"),
+    ];
+    expected.sort();
+    assert_eq!(log, expected);
+    LayerStore::open_at(&fixture.0).unwrap();
+    assert_eq!(fixture.log().len(), 5);
+
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+    assert!(store.remove("Other").unwrap());
+    store.persist().unwrap();
+    let expected = unknown_control_rows()
+        .replace(&format!("layer\t{OTHER}\n"), "")
+        .replace(&format!("binding\t{OTHER}\tpedal:2\temit:61\n"), "");
+    assert_eq!(fixture.read("layers.conf"), expected);
+}
+
+#[test]
+fn malformed_known_controls_and_unnamed_kinds_are_still_removed() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "layers.conf",
+        &format!(
+            "{HEADER}layer\t{BASE}\nbinding\t{BASE}\tk:x\temit:61\nbinding\t{BASE}\tPedal:2\temit:61\n\
+             binding\t{BASE}\t:2\temit:61\nbinding\t{BASE}\tswipe:diagonal\temit:61\n\
+             pagereturn\t{BASE}\tpedal:9\t{BASE}\t5\nbinding\t{BASE}\tpedal:2\temit:61\n\
+             binding\t{BASE}\tpedal:2\temit:62\n"
+        ),
+    );
+    let store = LayerStore::open_at(&fixture.0).unwrap();
+    // k:x, Pedal:2, :2, swipe:diagonal, the return without a binding and the
+    // duplicate are removed; the first pedal:2 binding is kept.
+    assert_eq!(store.conflicts().iter().filter(|c| !c.kept).count(), 6);
+    assert_eq!(store.conflicts().iter().filter(|c| c.kept).count(), 1);
+    assert_eq!(
+        fixture.read("layers.conf"),
+        format!("{HEADER}layer\t{BASE}\nbinding\t{BASE}\tpedal:2\temit:61\n")
+    );
+}
+
+#[test]
+fn every_control_this_build_writes_is_a_known_kind() {
+    use super::{encode_trigger, unknown_trigger_kind, SwipeDirection};
+    for trigger in [
+        Trigger::KeyPress(1),
+        Trigger::KeyHold(1),
+        Trigger::EncoderPress(1),
+        Trigger::Rotation(1, -2),
+        Trigger::EncoderClockwise(1),
+        Trigger::EncoderCounterClockwise(1),
+        Trigger::TouchTap,
+        Trigger::TouchPress,
+        Trigger::TouchFlick,
+        Trigger::TouchSwipe(SwipeDirection::Up),
+        Trigger::ZoneTap(1),
+        Trigger::ZonePress(1),
+        Trigger::TouchButton(1),
+    ] {
+        assert_eq!(
+            unknown_trigger_kind(&encode_trigger(&trigger)),
+            None,
+            "{trigger:?}"
+        );
+    }
+    assert_eq!(
+        unknown_trigger_kind("pedal:1").as_deref(),
+        Some("unknown control kind 'pedal'")
+    );
+    assert_eq!(unknown_trigger_kind("Pedal:1"), None);
+}
+
+#[test]
+fn touchscreen_store_with_an_unknown_control_kind_stays_untouched_and_unwritable() {
+    let fixture = Fixture::new();
+    let layers = canonical();
+    fixture.write("layers.conf", &layers);
+    let touch = serde_json::json!({"version":2,"profiles":[{"name":"Base","selected":0,"pages":[
+        {"owner":"@touchscreen:1","bindings":[{"trigger":"pedal:1","action":"emit:61"}]}]}]})
+    .to_string();
+    fixture.write("touchscreen.json", &touch);
+
+    let mut store = LayerStore::open_at(&fixture.0).unwrap();
+
+    assert_eq!(store.diagnostics().len(), 1);
+    assert!(
+        store.diagnostics()[0].contains("binding pedal:1 uses a control this build cannot read")
+            && store.diagnostics()[0].contains("unknown control kind 'pedal'")
+            && store.diagnostics()[0].contains("saving is disabled"),
+        "{:?}",
+        store.diagnostics()
+    );
+    store
+        .bind("Base", Trigger::KeyPress(2), Action::Emit("b".into()))
+        .unwrap();
+    assert!(store.persist().is_err());
+    assert_eq!(fixture.read("touchscreen.json"), touch);
+    assert_eq!(fixture.read("layers.conf"), layers);
+}
+
+#[test]
+fn bundles_carry_rows_of_an_unknown_control_kind() {
+    use std::os::unix::fs::DirBuilderExt;
+    let fixture = Fixture::new();
+    let private = |name: &str| {
+        let path = fixture.0.join(name);
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        path
+    };
+    let (source, target) = (private("source"), private("target"));
+    fs::write(source.join("layers.conf"), unknown_control_rows()).unwrap();
+    let bundle = fixture.0.join("out.sdeck-plus.json");
+
+    crate::config_bundle::export(&source, &bundle).unwrap();
+    crate::config_bundle::import(&bundle, &target).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(target.join("layers.conf")).unwrap(),
+        unknown_control_rows()
+    );
+}
+
 #[test]
 fn bundles_carry_unknown_rows_through_export_and_import() {
     use std::os::unix::fs::DirBuilderExt;

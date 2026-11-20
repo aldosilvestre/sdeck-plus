@@ -13,7 +13,10 @@ and never install per-user files.
 
 ## Why the package ships a udev rule
 
-`udev/70-sdeck.rules` grants the logged-in user access to the Stream Deck + (`0fd9:0084`) and the Stream Deck + XL (`0fd9:00c6`) through `uaccess`.
+`udev/70-sdeck.rules` grants the logged-in user access to every supported model through `uaccess`: the Stream Deck +
+(`0fd9:0084`), + XL (`0fd9:00c6`), Classic (`0fd9:006d`, `0080`, `00a5`, `00b9`), XL (`0fd9:006c`, `008f`, `00ba`),
+Neo (`0fd9:009a`) and Mini (`0fd9:0063`, `0090`, `00b3`, `00b8`). Only the Stream Deck + has been tested on real
+hardware; the + XL, Classic, XL, Neo and Mini are validated with a simulator only.
 The app itself never changes permissions, so the package installs the rule to `/usr/lib/udev/rules.d/70-sdeck.rules`.
 
 ## Why `options=('!lto')`

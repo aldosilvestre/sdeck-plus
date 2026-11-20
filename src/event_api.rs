@@ -2,8 +2,11 @@
 //! External transports can be attached behind this API in a later phase.
 
 use crate::{
-    device_control::DeviceAction, device_model::DeviceModel, image_output,
-    local_artwork::ArtworkTarget, protocol::Event,
+    device_control::DeviceAction,
+    device_model::DeviceModel,
+    image_output,
+    local_artwork::ArtworkTarget,
+    protocol::{protocol_for, Event, FEATURE_REPORT_LEN},
 };
 use std::{
     fmt,
@@ -559,10 +562,10 @@ fn supported_devices(listing: impl IntoIterator<Item = Listing>) -> Vec<DeviceKe
 /// The message while no supported device is listed.
 fn not_found_message() -> String {
     let wanted = DeviceModel::supported()
-        .map(|model| format!("{} PID {:04X}", model.name, model.pid()))
+        .map(|model| format!("{} PID {}", model.name, model.pid_list("/")))
         .collect::<Vec<_>>()
-        .join(" or ");
-    format!("Device not found · connect a Stream Deck + or + XL (VID 0FD9 / {wanted})")
+        .join(", ");
+    format!("Device not found · connect a supported Stream Deck (VID 0FD9 / {wanted})")
 }
 
 fn enumerate_devices(stop: &StopSignal) -> Result<Vec<hub::Candidate<hidapi::HidDevice>>, String> {
@@ -813,12 +816,13 @@ fn send_marquee_frames(
 }
 
 fn blank_device(model: &DeviceModel, device: &impl Device) {
-    let mut sleep = [0; 32];
-    sleep[0] = 0x03;
-    sleep[1] = 0x08;
-    match device.write_feature(&sleep) {
-        Ok(32) => {}
-        Ok(size) => eprintln!("HID shutdown brightness write was short: {size} of 32 bytes"),
+    // The family's own report: brightness 0 (`03 08 00` on Expanded models).
+    let blank = protocol_for(model.family).blank_report();
+    match device.write_feature(&blank) {
+        Ok(FEATURE_REPORT_LEN) => {}
+        Ok(size) => eprintln!(
+            "HID shutdown brightness write was short: {size} of {FEATURE_REPORT_LEN} bytes"
+        ),
         Err(error) => eprintln!("Could not turn off Stream Deck displays: {error}"),
     }
     // Clearing the full strip also replaces all the overlaid touch zones.
@@ -1273,17 +1277,21 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorder(std::cell::RefCell<Vec<Vec<u8>>>);
+    struct Recorder {
+        writes: std::cell::RefCell<Vec<Vec<u8>>>,
+        features: std::cell::RefCell<Vec<Vec<u8>>>,
+    }
 
     impl Device for Recorder {
         fn read(&self, _: &mut [u8]) -> Result<usize, String> {
             Ok(0)
         }
         fn write(&self, report: &[u8]) -> Result<usize, String> {
-            self.0.borrow_mut().push(report.to_vec());
+            self.writes.borrow_mut().push(report.to_vec());
             Ok(report.len())
         }
         fn write_feature(&self, report: &[u8]) -> Result<usize, String> {
+            self.features.borrow_mut().push(report.to_vec());
             Ok(report.len())
         }
     }
@@ -1291,7 +1299,7 @@ mod tests {
     fn cleared_commands(model: &DeviceModel) -> (usize, Vec<u8>) {
         let device = Recorder::default();
         blank_device(model, &device);
-        let writes = device.0.borrow();
+        let writes = device.writes.borrow();
         let keys = writes
             .iter()
             .filter(|report| report[1] == 0x07 && report[3] == 1)
@@ -1311,5 +1319,62 @@ mod tests {
         let (strips, keys) = cleared_commands(&crate::device_model::PLUS_XL);
         assert_eq!(keys, (0..36).collect::<Vec<u8>>());
         assert!(strips >= 1);
+    }
+
+    /// The feature reports `blank_device` sends to a device of `model`.
+    fn blank_features(model: &DeviceModel) -> Vec<Vec<u8>> {
+        let device = Recorder::default();
+        blank_device(model, &device);
+        device.features.take()
+    }
+
+    #[test]
+    fn shutdown_turns_the_displays_off_with_the_feature_report_of_the_model_family() {
+        // Stream Deck + and + XL: exactly the 32 bytes sent before families.
+        let plus = [
+            0x03, 0x08, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0,
+        ];
+        for model in [&PLUS, &crate::device_model::PLUS_XL] {
+            assert_eq!(blank_features(model), [plus.to_vec()], "{}", model.id);
+        }
+        // Legacy Mini: Set Backlight Brightness 0, never its sleep timer.
+        let mini = [
+            0x05, 0x55, 0xAA, 0xD1, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(blank_features(&crate::device_model::MINI), [mini.to_vec()]);
+    }
+
+    #[test]
+    fn shutdown_clears_the_six_mini_keys_with_black_bmp_uploads() {
+        let device = Recorder::default();
+        blank_device(&crate::device_model::MINI, &device);
+        let writes = device.writes.take();
+        // Six keys, each a 19254-byte BMP in twenty 1024-byte `02 01` reports.
+        assert_eq!(writes.len(), 6 * 20);
+        assert!(writes.iter().all(|report| report.len() == 1024));
+        for (key, uploads) in writes.chunks(20).enumerate() {
+            for (chunk, report) in uploads.iter().enumerate() {
+                assert_eq!(
+                    report[..6],
+                    [
+                        0x02,
+                        0x01,
+                        chunk as u8,
+                        0x00,
+                        u8::from(chunk == 19),
+                        key as u8 + 1
+                    ],
+                    "key {key} chunk {chunk}"
+                );
+            }
+        }
+        let black = image_output::prepare_clear_jpeg_for(
+            &crate::device_model::MINI,
+            ArtworkTarget::Keypad(1),
+        )
+        .unwrap();
+        assert_eq!(writes[0][16..70], black[..54]);
     }
 }

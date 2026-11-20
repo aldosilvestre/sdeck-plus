@@ -212,6 +212,8 @@ Stdout is one line, with a `value` object on success (or the `ok:false` form abo
 - **Form**: choosing an action opens the generic "Plugin action" form generated from the
   manifest fields (text, bounded integer, boolean). Only actions whose `controls` include the
   selected control (key, dial turn, dial press, touch strip) can be assigned; others are dimmed.
+  A Stream Deck Neo touch button takes `key` actions (run once per touch); the Neo's info window
+  and the Stream Deck Classic's background take no plugin action.
 - **Storage**: a binding is the feature action `{"Plugin":{"plugin_id","action_id","settings"}}`
   inside `layers.conf`. Its shape is validated without the manifest (ids, settings that are
   text up to 1024 characters, integers or booleans, at most 16 settings) so it survives a

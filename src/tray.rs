@@ -271,7 +271,7 @@ pub(super) fn show_about(app: &Application) {
         .program_name(crate::APP_NAME)
         .version(env!("CARGO_PKG_VERSION"))
         .comments(
-            "Configure and control an Elgato Stream Deck + on Linux.\nLicensed under the MIT license.",
+            "Configure and control Elgato Stream Deck devices on Linux.\nLicensed under the MIT license.",
         )
         .authors(["Aldo Silvestre"])
         .copyright("Copyright (c) 2026 Aldo Silvestre")

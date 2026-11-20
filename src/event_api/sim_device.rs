@@ -1,12 +1,16 @@
-//! A simulated Stream Deck + / + XL for tests (also exposed, hidden, through
-//! `test_support` so binary tests can run the real hub over it). It scripts 0x01 input reports,
-//! captures every 0x02 output report and feature report, reassembles the JPEG
-//! chunks of each image, and can be unplugged so a different model is found
-//! next. A [`Bus`] lists the devices that are plugged in right now, and a
-//! [`Rig`] runs the real hub over it, so several devices can come and go at
-//! runtime. No hardware, HID stack or display server is involved.
+//! A simulated Stream Deck of any registry model for tests (also exposed,
+//! hidden, through `test_support` so binary tests can run the real hub over
+//! it). It scripts 0x01 input reports in the layout of the model's protocol
+//! family, captures every 0x02 output report and feature report, checks each
+//! image chunk header (Expanded `02 07/08/0B/0C`, Legacy Mini `02 01`),
+//! reassembles the JPEG or BMP of each image, and can be unplugged so a
+//! different model is found next. A [`Bus`] lists the devices that are plugged
+//! in right now, and a [`Rig`] runs the real hub over it, so several devices
+//! can come and go at runtime. No hardware, HID stack or display server is
+//! involved.
 
 use super::*;
+use crate::device_model::ProtocolFamily;
 use gtk::gdk_pixbuf::Pixbuf;
 use std::collections::VecDeque;
 
@@ -86,13 +90,16 @@ impl Device for SimDevice {
 
 /// An image the host uploaded, reassembled from its chunk reports.
 pub struct CapturedImage {
-    /// 0x07 key image, 0x0b full window, 0x0c partial window.
+    /// Expanded: 0x07 key image, 0x08 full screen (a Classic's keypad
+    /// background), 0x0b full window, 0x0c partial window.
+    /// Legacy Mini: 0x01 key image (Upload Data to Image Memory Bank).
     pub command: u8,
-    /// Zero-based key for 0x07, otherwise 0.
+    /// Zero-based key of a key image, otherwise 0.
     pub slot: u8,
     /// `(x, y, width, height)` of a 0x0c partial window.
     pub window: Option<(u16, u16, u16, u16)>,
     pub chunks: usize,
+    /// The encoded picture: JPEG, or BMP for a Legacy Mini.
     pub jpeg: Vec<u8>,
 }
 
@@ -146,13 +153,23 @@ impl SimDevice {
         Arc::strong_count(&self.state)
     }
 
-    /// The newest finished key image of zero-based `slot`.
+    /// The command byte of a key image in the model's family.
+    pub fn key_command(&self) -> u8 {
+        match self.model.family {
+            ProtocolFamily::Expanded => 0x07,
+            ProtocolFamily::LegacyMini => 0x01,
+        }
+    }
+
+    /// The newest finished key image of zero-based `slot` (JPEG, or BMP for a
+    /// Legacy Mini).
     pub fn last_key_jpeg(&self, slot: u8) -> Option<Vec<u8>> {
+        let key = self.key_command();
         self.assemble()
             .0
             .into_iter()
             .rev()
-            .find(|image| image.command == 0x07 && image.slot == slot)
+            .find(|image| image.command == key && image.slot == slot)
             .map(|image| image.jpeg)
     }
 
@@ -191,27 +208,9 @@ impl SimDevice {
             assert_eq!(report.len(), self.model.image_report_len, "report size");
             assert_eq!(report[0], 0x02, "output report id");
             let command = report[1];
-            let (slot, window, last, index, length, header) = match command {
-                0x07 | 0x0b => (
-                    report[2],
-                    None,
-                    report[3] == 1,
-                    u16::from_le_bytes([report[6], report[7]]),
-                    usize::from(u16::from_le_bytes([report[4], report[5]])),
-                    self.model.key_header_len,
-                ),
-                0x0c => {
-                    let word = |at: usize| u16::from_le_bytes([report[at], report[at + 1]]);
-                    (
-                        0,
-                        Some((word(2), word(4), word(6), word(8))),
-                        report[10] == 1,
-                        word(11),
-                        usize::from(word(13)),
-                        self.model.zone_header_len,
-                    )
-                }
-                other => panic!("unexpected output command {other:#04x}"),
+            let (slot, window, last, index, length, header) = match self.model.family {
+                ProtocolFamily::Expanded => self.expanded_chunk(&report),
+                ProtocolFamily::LegacyMini => self.legacy_mini_chunk(&report),
             };
             let at = open.iter().position(|image| {
                 image.command == command && image.slot == slot && image.window == window
@@ -245,10 +244,73 @@ impl SimDevice {
                 .extend_from_slice(&report[header..header + length]);
             image.chunks += 1;
             if last {
-                done.push(open.remove(at));
+                let mut image = open.remove(at);
+                if self.model.family == ProtocolFamily::LegacyMini {
+                    trim_to_bmp(&mut image, report.len() - header);
+                }
+                done.push(image);
             }
         }
         (done, open.len())
+    }
+
+    /// `(slot, window, last, chunk index, data length, header length)` of an
+    /// Expanded `02 07`, `02 08`, `02 0B` or `02 0C` report. Update Full
+    /// Screen Image (`02 08`) has the key image's layout with its key index
+    /// byte reserved, which must be 0.
+    fn expanded_chunk(&self, report: &[u8]) -> ChunkHeader {
+        if report[1] == 0x08 {
+            assert_eq!(report[2], 0, "reserved byte of a full screen image");
+        }
+        match report[1] {
+            0x07 | 0x08 | 0x0b => (
+                report[2],
+                None,
+                report[3] == 1,
+                u16::from_le_bytes([report[6], report[7]]),
+                usize::from(u16::from_le_bytes([report[4], report[5]])),
+                self.model.key_header_len,
+            ),
+            0x0c => {
+                let word = |at: usize| u16::from_le_bytes([report[at], report[at + 1]]);
+                (
+                    0,
+                    Some((word(2), word(4), word(6), word(8))),
+                    report[10] == 1,
+                    word(11),
+                    usize::from(word(13)),
+                    self.model.zone_header_len,
+                )
+            }
+            other => panic!("unexpected output command {other:#04x}"),
+        }
+    }
+
+    /// A Legacy Mini `02 01` report, as Elgato's Mini page lays it out: chunk
+    /// index, 0x00, Show Image flag, key index, ten zero bytes. It carries no
+    /// length, so every chunk takes the whole payload; [`trim_to_bmp`] cuts
+    /// the finished picture to the size its BMP header gives.
+    fn legacy_mini_chunk(&self, report: &[u8]) -> ChunkHeader {
+        assert_eq!(report[1], 0x01, "Legacy Mini output command");
+        assert_eq!(report[3], 0x00, "reserved byte 3");
+        assert!(report[4] <= 1, "Show Image flag is 0 or 1");
+        assert!(
+            report[6..16].iter().all(|byte| *byte == 0),
+            "reserved bytes"
+        );
+        let slot = report[5]
+            .checked_sub(crate::protocol::MINI_KEY_INDEX_BASE)
+            .filter(|slot| *slot < self.model.keys())
+            .unwrap_or_else(|| panic!("key index {} out of range", report[5]));
+        let header = self.model.key_header_len;
+        (
+            slot,
+            None,
+            report[4] == 1,
+            u16::from(report[2]),
+            report.len() - header,
+            header,
+        )
     }
 
     /// Finished images; panics if an upload was left half-sent.
@@ -272,14 +334,45 @@ fn input_report(model: &DeviceModel, command: u8, payload: &[u8]) -> Vec<u8> {
     report
 }
 
-/// Key states, one byte per key, for the zero-based keys in `down`.
+/// `(slot, window, last, chunk index, data length, header length)`.
+type ChunkHeader = (u8, Option<(u16, u16, u16, u16)>, bool, u16, usize, usize);
+
+/// Cut a finished Legacy Mini picture, made of whole `chunk`-byte payloads, to
+/// the file size in its BMP header; what follows must be zero padding inside
+/// the last chunk.
+fn trim_to_bmp(image: &mut CapturedImage, chunk: usize) {
+    let bmp = &image.jpeg;
+    assert_eq!(
+        bmp.get(..2),
+        Some(&b"BM"[..]),
+        "a Legacy Mini key image is a BMP"
+    );
+    let size = u32::from_le_bytes([bmp[2], bmp[3], bmp[4], bmp[5]]) as usize;
+    assert!(size <= bmp.len(), "the BMP is cut short");
+    assert!(bmp.len() - size < chunk, "a whole chunk after the BMP");
+    assert!(bmp[size..].iter().all(|byte| *byte == 0), "padding is zero");
+    image.jpeg.truncate(size);
+}
+
+/// Key states, one byte per key, for the zero-based keys in `down`, in the
+/// input layout of the model's family.
 pub fn key_report(model: &DeviceModel, down: &[usize]) -> Vec<u8> {
     // Sensors a model appends after its keys are the last entries.
     let mut states = vec![0; usize::from(model.key_inputs())];
     for key in down {
         states[*key] = 1;
     }
-    input_report(model, 0x00, &states)
+    match model.family {
+        ProtocolFamily::Expanded => input_report(model, 0x00, &states),
+        // Elgato's Mini page: report id 0x01, then one byte per key, in a
+        // fixed 65-byte report.
+        ProtocolFamily::LegacyMini => {
+            let mut report = vec![0x01];
+            report.extend_from_slice(&states);
+            report.resize(model.input_report_len, 0);
+            report
+        }
+    }
 }
 
 /// Encoder buttons (type 0) for the zero-based dials in `down`.

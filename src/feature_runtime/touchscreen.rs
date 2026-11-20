@@ -147,11 +147,15 @@ impl FeatureRuntime {
             .create
             .set_sensitive(!pages.is_empty() && pages.len() < 64);
         controls.delete.set_sensitive(pages.len() > 1);
+        // Touch pages hold the strip and the dials: a model with neither has none to offer.
+        let model = layers.model();
         controls.root.set_visible(
-            matches!(
-                self.ui.control_kind(),
-                crate::ControlKind::Touch | crate::ControlKind::Encoder
-            ) && !pages.is_empty(),
+            (model.has_touch() || model.dials > 0)
+                && matches!(
+                    self.ui.control_kind(),
+                    crate::ControlKind::Touch | crate::ControlKind::Encoder
+                )
+                && !pages.is_empty(),
         );
         controls.updating.set(false);
     }

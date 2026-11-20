@@ -271,10 +271,11 @@ fn the_enumeration_order_changes_nothing() {
 }
 
 #[test]
-fn a_planned_product_id_next_to_a_supported_one_is_never_opened() {
-    let (planned, plus) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS));
+fn an_unknown_product_id_next_to_a_supported_one_is_never_opened() {
+    // 0x0060 is the original Classic, with a protocol of its own.
+    let (unknown, plus) = (SimDevice::new(&PLUS), SimDevice::new(&PLUS));
     let mut rig = Rig::empty();
-    rig.bus.plug_ids("/dev/hidraw1", (VID, 0x006D), &planned);
+    rig.bus.plug_ids("/dev/hidraw1", (VID, 0x0060), &unknown);
     rig.bus.plug_ids("/dev/hidraw2", (VID, 0x0084), &plus);
     rig.wait_connection(connected_as("/dev/hidraw2", &PLUS));
     let seen = rig.bus.enumerations();
@@ -282,7 +283,7 @@ fn a_planned_product_id_next_to_a_supported_one_is_never_opened() {
         thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(rig.bus.opens("/dev/hidraw1"), 0);
-    assert!(planned.writes().is_empty() && planned.features().is_empty());
+    assert!(unknown.writes().is_empty() && unknown.features().is_empty());
 }
 
 #[test]

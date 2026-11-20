@@ -126,6 +126,9 @@ fn every_rect(layout: &PreviewLayout) -> Vec<(String, Rect)> {
     if let Some(rail) = &layout.dial_rail {
         rects.push(("rail".into(), rail.rail));
     }
+    if let Some(background) = layout.background {
+        rects.push(("background".into(), background));
+    }
     rects
 }
 
@@ -174,7 +177,8 @@ fn every_model_has_a_sane_deterministic_layout() {
                 model.id
             );
         }
-        // The header and the strip live inside the bezel; the rest is disjoint.
+        // The header and the strip live inside the bezel (a window is its own
+        // frame); the rest is disjoint.
         let loose: Vec<_> = blocks
             .iter()
             .filter(|(name, _)| !matches!(name.as_str(), "header" | "strip"))
@@ -186,7 +190,13 @@ fn every_model_has_a_sane_deterministic_layout() {
         }
         if let Some(strip) = &layout.strip {
             assert!(strip.bezel.contains(&strip.header) && strip.bezel.contains(&strip.rect));
-            assert!(!strip.header.overlaps(&strip.rect), "{}", model.id);
+            if strip.touch {
+                assert!(!strip.header.overlaps(&strip.rect), "{}", model.id);
+            } else {
+                // An empty window shows its caption inside itself.
+                assert_eq!(strip.bezel, strip.rect, "{}", model.id);
+                assert!(strip.rect.contains(&strip.header), "{}", model.id);
+            }
             for (index, zone) in strip.zones.iter().enumerate() {
                 assert!(
                     strip.rect.contains(zone),
@@ -238,7 +248,38 @@ fn every_model_has_a_sane_deterministic_layout() {
                 + usize::from(model.dials)
                 + usize::from(model.zones())
                 + usize::from(model.has_touch())
+                + usize::from(model.has_info_window())
+                + usize::from(model.touch_buttons)
+                + usize::from(model.has_keypad_background())
         );
+        assert_eq!(
+            layout.background.is_some(),
+            model.has_keypad_background(),
+            "{}",
+            model.id
+        );
+        // Touch buttons sit on the chassis, beside the display but never on
+        // its frame, and cover no other control or block.
+        assert_eq!(
+            layout.touch_button_count(),
+            usize::from(model.touch_buttons),
+            "{}",
+            model.id
+        );
+        for (index, button) in layout.touch_buttons.iter().enumerate() {
+            assert!(chassis.contains(button), "{}: touch button", model.id);
+            for (name, rect) in &blocks {
+                assert!(
+                    !button.overlaps(rect),
+                    "{}: touch button {} overlaps {name}",
+                    model.id,
+                    index + 1
+                );
+            }
+            for other in &layout.touch_buttons[index + 1..] {
+                assert!(!button.overlaps(other), "{}", model.id);
+            }
+        }
     }
 }
 
@@ -280,19 +321,90 @@ fn layouts_are_horizontally_symmetric() {
 }
 
 #[test]
-fn neo_window_is_decoration_without_controls() {
+fn neo_window_is_a_selectable_display_between_its_keys_and_touch_buttons() {
     let neo = DeviceModel::by_id("neo").expect("registry lists the Neo");
     let layout = PreviewLayout::for_model(neo);
     let strip = layout.strip.as_ref().expect("the window is drawn");
     assert!(!strip.touch && strip.zones.is_empty());
-    assert!(
-        !layout.has(ControlRef::Strip),
-        "a plain window cannot be selected"
+    // The window is no touch strip: it is selected for its picture and
+    // information, never for touch gestures.
+    assert!(!layout.has(ControlRef::Strip));
+    assert_eq!(layout.rect_of(ControlRef::Window), Some(strip.rect));
+    // Drawn at half its 248x58 pixels, so pictures keep their proportions,
+    // and it is its own frame: no bezel or header line around it. Its pads sit
+    // 10 px either side, vertically centred (the odd half pixel downwards, so
+    // Tab reaches the window first), and the row spans the keys.
+    let window = strip.rect;
+    assert_eq!(window.w * 58, window.h * 248, "248x58-proportioned");
+    assert_eq!(window, r(86, 146, 124, 29));
+    assert_eq!(strip.bezel, window);
+    assert_eq!(strip.header, r(86, 152, 124, 16));
+    assert_eq!(
+        layout.touch_buttons,
+        vec![r(48, 147, 28, 28), r(220, 147, 28, 28)]
     );
-    assert!(layout
-        .controls()
+    for pad in &layout.touch_buttons {
+        assert!(!pad.overlaps(&window), "{pad:?}");
+    }
+    assert_eq!(layout.touch_buttons[0].x, layout.keys[0].x);
+    assert_eq!(layout.touch_buttons[1].right(), layout.keys[3].right());
+    assert_eq!(layout.size, (296, 208));
+    assert_eq!(
+        ControlRef::Window.accessible_name().as_deref(),
+        Some("Info window")
+    );
+    let mut expected: Vec<_> = (1..=8).map(ControlRef::Key).collect();
+    expected.extend([
+        ControlRef::Window,
+        ControlRef::TouchButton(1),
+        ControlRef::TouchButton(2),
+    ]);
+    assert_eq!(layout.controls(), expected);
+    assert_eq!(layout.touch_button_count(), 2);
+    // Models with a touch strip, or no display, have no window control.
+    for model in [&PLUS, &PLUS_XL]
+        .into_iter()
+        .chain(["classic", "xl"].map(|id| DeviceModel::by_id(id).unwrap()))
+    {
+        let layout = PreviewLayout::for_model(model);
+        assert!(!layout.has(ControlRef::Window), "{}", model.id);
+        assert!(!layout.controls().contains(&ControlRef::Window));
+    }
+}
+
+/// The Stream Deck Classic's keypad background (S6) is selected from a slim
+/// "Background" bar under its keys, after them in the order of the controls.
+/// No other model has one, and the XL keeps its size.
+#[test]
+fn the_classic_offers_its_background_as_a_control_under_its_keys() {
+    let classic = DeviceModel::by_id("classic").unwrap();
+    let layout = PreviewLayout::for_model(classic);
+    let bar = layout
+        .background
+        .expect("the Classic shows its background control");
+    // As wide as the keys and 12 px under the last row, like a display.
+    assert_eq!(layout.keys[10], r(48, 142, 44, 44));
+    assert_eq!(bar, r(48, 198, 252, 28));
+    assert_eq!(layout.size, (348, 250));
+    assert_eq!(layout.rect_of(ControlRef::Background), Some(bar));
+    assert_eq!(
+        ControlRef::Background.accessible_name().as_deref(),
+        Some("Background")
+    );
+    let mut expected: Vec<_> = (1..=15).map(ControlRef::Key).collect();
+    expected.push(ControlRef::Background);
+    assert_eq!(layout.controls(), expected);
+    for model in DeviceModel::all()
         .iter()
-        .all(|control| matches!(control, ControlRef::Key(_))));
+        .filter(|model| model.id != "classic")
+    {
+        let layout = PreviewLayout::for_model(model);
+        assert_eq!(layout.background, None, "{}", model.id);
+        assert!(!layout.has(ControlRef::Background), "{}", model.id);
+        assert!(!layout.controls().contains(&ControlRef::Background));
+    }
+    let xl = PreviewLayout::for_model(DeviceModel::by_id("xl").unwrap());
+    assert_eq!(xl.size, (504, 262));
 }
 
 #[test]

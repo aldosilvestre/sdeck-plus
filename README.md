@@ -6,25 +6,34 @@
 > [!NOTE]
 > New features will be released over time.
 
-sdeck-plus is a native GTK4 control desk for the Elgato Stream Deck +
-(VID `0x0FD9`, PID `0x0084`) and the Stream Deck + XL (PID `0x00C6`) on Linux,
-developed on Arch Linux with Hyprland. It configures the keys, dials and touch
-strip, shows live information on them and runs desktop, media, audio and OBS
-Studio actions.
+sdeck-plus is a native GTK4 control desk for six Elgato Stream Deck models
+(VID `0x0FD9`) on Linux, developed on Arch Linux with Hyprland. It configures the
+keys, dials, touch strip, touch buttons and displays each model has, shows live
+information on them and runs desktop, media, audio and OBS Studio actions.
 
-| Model | Controls | Status |
-|-------|----------|--------|
-| Stream Deck + | 8 keys, 4 dials, touch strip with 4 sections | Developed and tested on this hardware. |
-| Stream Deck + XL | 36 keys, 6 dials, touch strip with 6 sections | Implemented from [Elgato's HID documentation](https://docs.elgato.com/streamdeck/hid/stream-deck-plus-xl) and validated with a simulated device; real-hardware validation is pending. |
+| Model | USB product ids | Controls | Status |
+|-------|-----------------|----------|--------|
+| [Stream Deck +](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-plus) | `0084` | 8 keys, 4 dials, touch strip with 4 sections | Developed and tested on this hardware. |
+| [Stream Deck + XL](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-plus-xl) | `00c6` | 36 keys, 6 dials, touch strip with 6 sections | Simulator only |
+| [Stream Deck Classic](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-classic) | `006d` `0080` `00a5` `00b9` | 15 keys and a background picture behind them | Simulator only |
+| [Stream Deck XL](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-xl) | `006c` `008f` `00ba` | 32 keys | Simulator only |
+| [Stream Deck Mini](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-mini) | `0063` `0090` `00b3` `00b8` | 6 keys | Simulator only |
+| [Stream Deck Neo](https://aldosilvestre.github.io/sdeck-plus/docs.html#device-neo) | `009a` | 8 keys, 2 touch buttons, an info window | Simulator only |
+
+*Simulator only*: implemented from [Elgato's HID documentation](https://docs.elgato.com/streamdeck/hid/intro)
+(for the Mini's key numbering and picture orientation, from the open-source
+drivers that run on real Minis) and validated with a simulated device;
+real-hardware validation is pending. Each model's section of the documentation
+lists its sizes, its preview and what is still unconfirmed.
 
 The app detects the connected models and shows the preview of the one you are
 configuring; each model keeps its own profiles. Several Stream Decks can be
 connected at once and each runs its own configuration live. A **Current**
 selector in the header appears only while two or more different models are
-connected and chooses which one the window edits. Simultaneous operation, like
-the XL, has been validated only with simulated devices, not on real hardware.
-Other Elgato models are prepared in the model registry but are not supported
-yet; see [DEVICES.md](DEVICES.md).
+connected and chooses which one the window edits. Simultaneous operation has
+been validated only with simulated devices, not on real hardware. Other Elgato
+products (such as the original Stream Deck, PID `0x0060`) are not supported;
+[DEVICES.md](DEVICES.md) explains how a model is added.
 
 **Website and full documentation:** <https://aldosilvestre.github.io/sdeck-plus/>
 
@@ -33,8 +42,7 @@ yet; see [DEVICES.md](DEVICES.md).
 ## Why
 
 Elgato's own software does not run on Linux. sdeck-plus gives Linux desktop
-users a native, local application for every control of the Stream Deck + and
-Stream Deck + XL,
+users a native, local application for every control of six Stream Deck models,
 with no account, cloud service or system-wide changes required. It runs in the
 tray, keeps working with its window closed and never installs packages or changes
 permissions on its own.
@@ -42,7 +50,8 @@ permissions on its own.
 ## Features
 
 - **Every control:** the keys, the dials with press and clockwise/counterclockwise
-  bindings, and touch-strip sections with tap, hold, flick and swipes.
+  bindings, touch-strip sections with tap, hold, flick and swipes, the Neo's touch
+  buttons and info window, and the Classic's background picture.
 - **Profiles, pages and folders:** a profile rail switched automatically by the
   focused application (Hyprland), with an optional return to the previous profile
   when focus leaves, plus touchscreen pages navigated by swiping.
@@ -120,7 +129,7 @@ it. To try it without installing, run `cargo run` from the checkout.
 Your user needs permission to open the device's HID node. If access is denied, an
 administrator has to install the repository's rule file,
 [`udev/70-sdeck.rules`](udev/70-sdeck.rules). It grants the logged-in user access
-to the Stream Deck + (`0fd9:0084`) and the + XL (`0fd9:00c6`) with `TAG+="uaccess"`
+to the product ids of every supported model (one line each) with `TAG+="uaccess"`
 and nothing else. It can be installed in either of two ways:
 
 **With one command (downloads the file and writes it with `sudo`):**
@@ -153,10 +162,10 @@ for the full list and installer options.
 
 - [Features](https://aldosilvestre.github.io/sdeck-plus/#features) and
   [Actions](https://aldosilvestre.github.io/sdeck-plus/#actions): what each part does.
-- [Supported devices](https://aldosilvestre.github.io/sdeck-plus/docs.html#devices): models,
-  detection, several devices at once and the **Current** selector, per-model data and
-  validation status; [DEVICES.md](DEVICES.md)
-  explains how models are added.
+- [Supported devices](https://aldosilvestre.github.io/sdeck-plus/docs.html#devices): one
+  section per model (controls, sizes, product ids, preview and validation status),
+  detection, several devices at once and the **Current** selector, and per-model data;
+  [DEVICES.md](DEVICES.md) explains how models are added.
 - [Configuration](https://aldosilvestre.github.io/sdeck-plus/docs.html#configuration): controls,
   touchscreen pages, profiles, artwork, OBS setup, data files, tray and startup.
 - [Development](https://aldosilvestre.github.io/sdeck-plus/docs.html#development): checks,

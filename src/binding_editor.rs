@@ -16,7 +16,21 @@ pub enum ControlKind {
     Button,
     Encoder,
     Touch,
+    /// A capacitive touch button reported after the keys (the Stream Deck Neo's).
+    TouchButton,
+    /// The information window of a model whose window takes no touch (the
+    /// Stream Deck Neo's), number 1: it shows the page's picture and live
+    /// information and runs no action.
+    Window,
+    /// The keypad background of a model that has one (the Stream Deck
+    /// Classic's), number 1: the page's picture behind the keys. It runs no
+    /// action and has no event; its picture is set under Appearance.
+    Background,
 }
+
+/// Why a binding cannot be saved or tested on the keypad background.
+pub const BACKGROUND_RUNS_NOTHING: &str =
+    "The background runs no action; choose its picture under Appearance.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
@@ -31,6 +45,8 @@ pub enum EventKind {
     TouchSwipeRight,
     TouchSwipeUp,
     TouchSwipeDown,
+    /// What the information window shows; it is never an input.
+    Display,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +62,10 @@ pub enum ActionKind {
     Plugin,
 }
 
-/// The control kinds `model` has: its keys, plus dials and touch strip when present.
+/// The control kinds of `model` that run actions: its keys, plus dials, touch
+/// strip and touch buttons when present. An information window
+/// ([`ControlKind::Window`]) and a keypad background
+/// ([`ControlKind::Background`]) only show things and are not among them.
 pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     let mut controls = vec![ControlKind::Button];
     if model.dials > 0 {
@@ -55,12 +74,19 @@ pub fn controls_for(model: &DeviceModel) -> Vec<ControlKind> {
     if model.has_touch() {
         controls.push(ControlKind::Touch);
     }
+    if model.touch_buttons > 0 {
+        controls.push(ControlKind::TouchButton);
+    }
     controls
 }
 
+/// The events the editor offers for `control`. A touch button has one, its
+/// press (a touch), like a key; the information window and the keypad
+/// background have only what they display.
 pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
     match control {
-        ControlKind::Button => vec![EventKind::ButtonPress],
+        ControlKind::Button | ControlKind::TouchButton => vec![EventKind::ButtonPress],
+        ControlKind::Window | ControlKind::Background => vec![EventKind::Display],
         ControlKind::Encoder => vec![
             EventKind::EncoderPress,
             EventKind::EncoderClockwise,
@@ -79,13 +105,21 @@ pub fn events_for_control(control: ControlKind) -> Vec<EventKind> {
 }
 
 /// Why `number` is no control of `model`, in the editor's words; `None` when
-/// the model has it (the strip, number 0, is always a valid touch selection).
+/// the model has it (the strip, number 0, is a valid touch selection on every
+/// model with a touch strip). A model without dials or a touch strip refuses
+/// them by name.
 pub fn control_number_error(
     model: &DeviceModel,
     control: ControlKind,
     number: u8,
 ) -> Option<String> {
     match control {
+        ControlKind::Encoder if model.dials == 0 => {
+            Some(format!("The {} has no dials.", model.name))
+        }
+        ControlKind::Touch if !model.has_touch() => {
+            Some(format!("The {} has no touch strip.", model.name))
+        }
         ControlKind::Button if !model.is_valid_key(number) => Some(format!(
             "Button {number} does not exist on the {}; its buttons are 1..={}.",
             model.name,
@@ -100,6 +134,25 @@ pub fn control_number_error(
             model.name,
             model.zones()
         )),
+        ControlKind::TouchButton if model.touch_buttons == 0 => {
+            Some(format!("The {} has no touch buttons.", model.name))
+        }
+        ControlKind::TouchButton if !model.is_valid_touch_button(number) => Some(format!(
+            "Touch button {number} does not exist on the {}; its touch buttons are 1..={}.",
+            model.name, model.touch_buttons
+        )),
+        ControlKind::Window if !model.has_info_window() => {
+            Some(format!("The {} has no information window.", model.name))
+        }
+        ControlKind::Window if number != 1 => {
+            Some(format!("The {} has one information window.", model.name))
+        }
+        ControlKind::Background if !model.has_keypad_background() => {
+            Some(format!("The {} has no keypad background.", model.name))
+        }
+        ControlKind::Background if number != 1 => {
+            Some(format!("The {} has one keypad background.", model.name))
+        }
         _ => None,
     }
 }
@@ -125,9 +178,23 @@ pub fn trigger_from_selection_for(
     if control == ControlKind::Touch && !model.has_touch() {
         return Err("this device has no touch strip".into());
     }
+    // The keypad background is a picture: it has no binding.
+    if control == ControlKind::Background {
+        return Err(BACKGROUND_RUNS_NOTHING.into());
+    }
     match (control, event) {
         (ControlKind::Button, EventKind::ButtonPress) if model.is_valid_key(control_number) => {
             Ok(Trigger::KeyPress(control_number))
+        }
+        (ControlKind::TouchButton, EventKind::ButtonPress)
+            if model.is_valid_touch_button(control_number) =>
+        {
+            Ok(Trigger::TouchButton(control_number))
+        }
+        (ControlKind::Window, EventKind::Display)
+            if model.has_info_window() && control_number == 1 =>
+        {
+            Ok(Trigger::Window)
         }
         (ControlKind::Encoder, EventKind::EncoderPress) if model.is_valid_dial(control_number) => {
             Ok(Trigger::EncoderPress(control_number))
@@ -273,7 +340,8 @@ pub fn action_from_fields(
 
 /// Every trigger one control owns on a layer: its editable events, a key's
 /// hold, and a dial's exact-tick overrides. A touch section owns only its own
-/// tap and hold; the strip (number 0) owns the whole-strip gestures.
+/// tap and hold; the strip (number 0) owns the whole-strip gestures. The
+/// keypad background owns none (its picture is artwork).
 ///
 /// # Errors
 /// A control number outside the hardware range.
@@ -283,6 +351,12 @@ pub fn control_triggers(
     control: ControlKind,
     number: u8,
 ) -> Result<Vec<Trigger>, EditorError> {
+    if control == ControlKind::Background {
+        return match control_number_error(store.model(), control, number) {
+            Some(error) => Err(EditorError(error)),
+            None => Ok(Vec::new()),
+        };
+    }
     let mut triggers = Vec::new();
     for event in events_for_control(control) {
         let trigger = trigger_from_selection_for(store.model(), control, number, event)?;
@@ -302,7 +376,10 @@ pub fn control_triggers(
                 }).cloned());
             }
         }
-        ControlKind::Touch => {}
+        ControlKind::Touch
+        | ControlKind::TouchButton
+        | ControlKind::Window
+        | ControlKind::Background => {}
     }
     Ok(triggers)
 }
@@ -315,10 +392,22 @@ pub fn control_summary(
     control: ControlKind,
     number: u8,
 ) -> String {
+    // The window runs nothing: it is described by what it shows.
+    if control == ControlKind::Window {
+        return match store.info_source(layer, &Trigger::Window) {
+            Some(source) => format!("Live information: {}", source.label()),
+            None => "No live information".into(),
+        };
+    }
+    if control == ControlKind::Background {
+        return "Behind every key without a picture of its own".into();
+    }
     let sample = match control {
         ControlKind::Touch => Trigger::TouchTap,
         ControlKind::Encoder => Trigger::EncoderPress(number),
         ControlKind::Button => Trigger::KeyPress(number),
+        ControlKind::TouchButton => Trigger::TouchButton(number),
+        ControlKind::Window | ControlKind::Background => Trigger::Window,
     };
     let bindings = store
         .binding_layer(layer, &sample)
@@ -517,9 +606,13 @@ impl GestureBinding {
 
 /// Swipe left/right, tap and hold of the whole strip on `layer`'s touch page,
 /// in that order. Unbound swipes report their default paging; explicit
-/// `None` bindings and unassigned taps or holds are omitted.
+/// `None` bindings and unassigned taps or holds are omitted. A model without
+/// a touch strip has none.
 pub fn strip_gestures(store: &LayerStore, layer: &str) -> Vec<GestureBinding> {
     use crate::binding_icons::BindingIcon;
+    if !store.model().has_touch() {
+        return Vec::new();
+    }
     StripGesture::ALL
         .into_iter()
         .filter_map(|gesture| {
@@ -549,6 +642,7 @@ fn summary_event_label(event: EventKind) -> &'static str {
         EventKind::TouchSwipeRight => "Swipe right",
         EventKind::TouchSwipeUp => "Swipe up",
         EventKind::TouchSwipeDown => "Swipe down",
+        EventKind::Display => "Display",
     }
 }
 
@@ -889,6 +983,64 @@ mod tests {
         assert_eq!(
             control_number_error(&PLUS, ControlKind::Touch, 5).unwrap(),
             "Touch section 5 does not exist on the Stream Deck +; its sections are 1..=4 (0 is the whole strip)."
+        );
+    }
+
+    #[test]
+    fn models_without_dials_or_a_touch_strip_refuse_them_by_name() {
+        use crate::device_model::{DeviceModel, CLASSIC, XL};
+        let neo = DeviceModel::by_id("neo").unwrap();
+        for model in [&CLASSIC, &XL, neo] {
+            for number in [0, 1] {
+                assert_eq!(
+                    control_number_error(model, ControlKind::Touch, number),
+                    Some(format!("The {} has no touch strip.", model.name)),
+                    "{} section {number}",
+                    model.id
+                );
+            }
+            for number in [0, 1, 4] {
+                assert_eq!(
+                    control_number_error(model, ControlKind::Encoder, number),
+                    Some(format!("The {} has no dials.", model.name)),
+                    "{} dial {number}",
+                    model.id
+                );
+            }
+            assert!(control_number_error(model, ControlKind::Button, model.keys()).is_none());
+            assert!(trigger_from_selection_for(
+                model,
+                ControlKind::Touch,
+                0,
+                EventKind::TouchSwipeLeft
+            )
+            .is_err());
+        }
+        // Only a touch strip has gestures: no swipe badge offers paging the
+        // Neo's window or a Classic cannot do.
+        let (path, _) = temp_store();
+        for model in [&CLASSIC, &XL, neo] {
+            let root = path.join(model.id);
+            let store = LayerStore::open_at_model(&root, model).unwrap();
+            assert_eq!(strip_gestures(&store, "Base"), Vec::new(), "{}", model.id);
+        }
+        let plus = LayerStore::open_at_model(path.join("plus"), &PLUS).unwrap();
+        assert_eq!(
+            strip_gestures(&plus, "Base")
+                .iter()
+                .map(|gesture| (gesture.gesture, gesture.default))
+                .collect::<Vec<_>>(),
+            [
+                (StripGesture::SwipeLeft, true),
+                (StripGesture::SwipeRight, true)
+            ]
+        );
+        let _ = fs::remove_dir_all(&path);
+        // The Stream Deck + keeps its messages.
+        assert!(control_number_error(&PLUS, ControlKind::Touch, 0).is_none());
+        assert_eq!(
+            control_number_error(&PLUS, ControlKind::Encoder, 5).unwrap(),
+            "Encoder 5 does not exist on the Stream Deck +; its encoders are 1..=4."
         );
     }
 

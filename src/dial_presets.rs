@@ -151,8 +151,8 @@ pub(crate) fn connect(
         let artwork = artwork.clone();
         let presets = presets.clone();
         let widgets: Vec<_> = selected.iter().map(ObjectExt::downgrade).collect();
-        // The first dial's widget follows the strip, after every key.
-        let dial_offset = usize::from(ui.model.get().keys()) + 1;
+        // The first dial's widget follows every key and the strip.
+        let dial_offset = preview::first_dial_widget(ui.model.get());
         let guard_ui = ui.clone();
         let guard_widgets = widgets.clone();
         let apply: Assign = Rc::new(move |preset, dial| {
@@ -285,7 +285,7 @@ pub(crate) fn connect(
     let model = ui.model.get();
     for (dial, control) in selected
         .iter()
-        .skip(usize::from(model.keys()) + 1)
+        .skip(preview::first_dial_widget(model))
         .take(usize::from(model.dials))
         .enumerate()
     {

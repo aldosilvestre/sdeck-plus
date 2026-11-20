@@ -60,6 +60,8 @@ pub(super) struct ModelFixture {
     pub(super) artwork: ArtworkUi,
     pub(super) requests: Option<mpsc::Receiver<LayerCommand>>,
     pub(super) commands: mpsc::Sender<LayerCommand>,
+    /// What the window sent towards the device.
+    pub(super) hardware: mpsc::Receiver<ArtworkCommand>,
 }
 
 pub(super) fn model_fixture(
@@ -86,7 +88,7 @@ pub(super) fn model_fixture(
         ArtworkStore::open_at_for_layer_model(root.join("artwork"), Some("Base"), model).unwrap();
     setup(&mut store, &mut images);
     let layers = Rc::new(RefCell::new(store));
-    let (output, _hardware) = mpsc::channel();
+    let (output, hardware) = mpsc::channel();
     let artwork = ArtworkUi {
         store: Rc::new(RefCell::new(Some(images))),
         layers: layers.clone(),
@@ -127,6 +129,7 @@ pub(super) fn model_fixture(
         artwork,
         requests: Some(requests),
         commands,
+        hardware,
     })
 }
 
@@ -189,14 +192,14 @@ pub(super) fn render_preview(
 }
 
 /// Selectable controls of `chassis` in widget (and so Tab) order.
-fn controls_of(chassis: &gtk::Widget) -> Vec<Button> {
+pub(super) fn controls_of(chassis: &gtk::Widget) -> Vec<Button> {
     descendants_of::<Button>(chassis)
         .into_iter()
         .filter(|button| button.has_css_class("control-selectable"))
         .collect()
 }
 
-fn kind_of(button: &Button) -> &'static str {
+pub(super) fn kind_of(button: &Button) -> &'static str {
     if button.has_css_class("key-surface") {
         "key"
     } else if button.has_css_class("strip-zone") {
@@ -205,12 +208,21 @@ fn kind_of(button: &Button) -> &'static str {
         "strip"
     } else if button.has_css_class("encoder") {
         "dial"
+    } else if button.has_css_class("touch-button") {
+        "touch button"
+    } else if button.has_css_class("window-surface") {
+        "window"
+    } else if button.has_css_class("background-surface") {
+        "background"
     } else {
         "other"
     }
 }
 
-fn bounds_in(widget: &impl IsA<gtk::Widget>, chassis: &gtk::Widget) -> (i32, i32, i32, i32) {
+pub(super) fn bounds_in(
+    widget: &impl IsA<gtk::Widget>,
+    chassis: &gtk::Widget,
+) -> (i32, i32, i32, i32) {
     let bounds = widget.compute_bounds(chassis).expect("bounds");
     (
         bounds.x().round() as i32,
@@ -220,7 +232,7 @@ fn bounds_in(widget: &impl IsA<gtk::Widget>, chassis: &gtk::Widget) -> (i32, i32
     )
 }
 
-fn chassis_of(root: &gtk::Widget) -> gtk::Widget {
+pub(super) fn chassis_of(root: &gtk::Widget) -> gtk::Widget {
     class_of(root, "hardware-chassis")
 }
 
@@ -238,7 +250,7 @@ fn shape(buttons: &[Button]) -> Vec<(&'static str, usize)> {
 }
 
 /// The controls Tab visits inside the chassis, from its start.
-fn tab_order(
+pub(super) fn tab_order(
     window: &ApplicationWindow,
     chassis: &gtk::Widget,
     controls: &[Button],
@@ -588,8 +600,13 @@ fn previews_render_to_images_for_every_supported_model_without_a_device() {
             }
             sizes.push((model.id, rendered.width, rendered.height, rendered.hash()));
         }
-        assert_eq!(sizes.len(), 2);
-        assert_ne!(sizes[0].3, sizes[1].3, "each model draws its own preview");
+        assert_eq!(sizes.len(), DeviceModel::supported().count());
+        let hashes: std::collections::BTreeSet<_> = sizes.iter().map(|size| size.3).collect();
+        assert_eq!(
+            hashes.len(),
+            sizes.len(),
+            "each model draws its own preview"
+        );
         assert!(
             sizes[1].1 > sizes[0].1,
             "the XL+ preview is wider than the +"

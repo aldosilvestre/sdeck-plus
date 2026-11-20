@@ -13,7 +13,10 @@ use std::{
     process::{Child, Command},
 };
 
+mod touch_buttons;
 mod touchscreen;
+
+pub use touch_buttons::TouchButtonPresses;
 
 const VERSION: &str = "streamdeck-layers-v1";
 pub const DEFAULT_LAYER: &str = "Base";
@@ -46,6 +49,15 @@ pub enum Trigger {
     ZoneTap(u8),
     /// Press and hold on one of the four sections of the touch strip.
     ZonePress(u8),
+    /// Touch on one of the capacitive buttons a model reports after its keys
+    /// (the Stream Deck Neo's two), numbered from one. Stored as `tb:<n>`; a
+    /// touch runs it once when it starts, and there is no hold.
+    TouchButton(u8),
+    /// The information window under the keys of a model whose window takes
+    /// no touch (the Stream Deck Neo's). Stored as `window` on the keypad
+    /// page; no input ever names it, so it runs nothing (its action is always
+    /// `none`) and only carries the page's live information for the window.
+    Window,
 }
 
 impl Trigger {
@@ -60,10 +72,14 @@ impl Trigger {
 
     fn event_triggers(model: &DeviceModel, event: &Event) -> Vec<Self> {
         match *event {
+            // The model's touch buttons are reported as the indexes after its keys.
             Event::Key {
                 index,
                 pressed: true,
-            } => one_based(index).map(Self::KeyPress).into_iter().collect(),
+            } => match model.touch_button_at(index) {
+                Some(number) => vec![Self::TouchButton(number)],
+                None => one_based(index).map(Self::KeyPress).into_iter().collect(),
+            },
             Event::EncoderButton {
                 index,
                 pressed: true,
@@ -675,7 +691,7 @@ impl LayerStore {
         // could not read no longer applies.
         self.kept.retain(|row| {
             !(row.kind == KeptKind::Info
-                && row.trigger == *trigger
+                && row.is_for(trigger)
                 && (row.layer == layer || row.layer == owner))
         });
         Ok(())
@@ -801,13 +817,13 @@ impl LayerStore {
     fn forget_kept_binding(&mut self, layer: &str, trigger: &Trigger) {
         self.kept.retain(|row| {
             !(row.layer == layer
-                && row.trigger == *trigger
+                && row.is_for(trigger)
                 && matches!(row.kind, KeptKind::Binding | KeptKind::PageReturn))
         });
     }
     fn forget_kept_control(&mut self, layer: &str, trigger: &Trigger) {
         self.kept
-            .retain(|row| !(row.layer == layer && row.trigger == *trigger));
+            .retain(|row| !(row.layer == layer && row.is_for(trigger)));
     }
     fn load(&mut self) -> io::Result<()> {
         let path = self.root.join("layers.conf");
@@ -893,6 +909,7 @@ fn shows_information(trigger: &Trigger) -> bool {
             | Trigger::EncoderCounterClockwise(_)
             | Trigger::ZoneTap(_)
             | Trigger::ZonePress(_)
+            | Trigger::Window
     )
 }
 fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
@@ -910,6 +927,12 @@ fn validate_trigger(model: &DeviceModel, t: &Trigger) -> io::Result<()> {
         }
         Trigger::ZoneTap(n) | Trigger::ZonePress(n) if !model.is_valid_zone(*n) => {
             Err(invalid("touch section out of range"))
+        }
+        Trigger::TouchButton(n) if !model.is_valid_touch_button(*n) => {
+            Err(invalid("touch button out of range"))
+        }
+        Trigger::Window if !model.has_info_window() => {
+            Err(invalid("this device has no information window"))
         }
         Trigger::TouchTap | Trigger::TouchPress | Trigger::TouchFlick | Trigger::TouchSwipe(_)
             if !model.has_touch() =>
@@ -983,6 +1006,10 @@ pub(crate) fn validate_step_action(a: &Action) -> io::Result<()> {
     validate_action(a)
 }
 fn validate_binding_action(trigger: &Trigger, action: &Action) -> io::Result<()> {
+    // Nothing ever triggers the window: its entry only carries information.
+    if *trigger == Trigger::Window && *action != Action::None {
+        return Err(invalid("the information window runs no action"));
+    }
     if matches!(
         action,
         Action::Feature(crate::features::FeatureAction::Multi { .. })
@@ -1084,7 +1111,33 @@ fn encode_trigger(t: &Trigger) -> String {
         Trigger::TouchSwipe(direction) => format!("swipe:{}", encode_swipe_direction(*direction)),
         Trigger::ZoneTap(zone) => format!("ztap:{zone}"),
         Trigger::ZonePress(zone) => format!("zpress:{zone}"),
+        Trigger::TouchButton(number) => format!("tb:{number}"),
+        Trigger::Window => "window".into(),
     }
+}
+
+/// Control kinds (the part of a trigger before its first `:`) `decode_trigger` reads.
+const KNOWN_TRIGGER_KINDS: [&str; 12] = [
+    "k", "kh", "b", "r", "tap", "press", "flick", "swipe", "ztap", "zpress", "tb", "window",
+];
+
+/// Whether `name` is shaped like a kind a newer build could add: 1-32
+/// lowercase ASCII letters, digits and dashes, starting with a letter.
+fn is_kind_name(name: &str) -> bool {
+    name.len() <= 32
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Why `trigger` names a control kind this build does not know (written by a
+/// newer build), or `None` when the kind is known (even if malformed) or is
+/// not shaped like a kind at all.
+pub(crate) fn unknown_trigger_kind(trigger: &str) -> Option<String> {
+    let kind = trigger.split(':').next().unwrap_or_default();
+    (is_kind_name(kind) && !KNOWN_TRIGGER_KINDS.contains(&kind))
+        .then(|| format!("unknown control kind '{kind}'"))
 }
 fn encode_swipe_direction(direction: SwipeDirection) -> &'static str {
     match direction {
@@ -1123,6 +1176,8 @@ fn decode_trigger(model: &DeviceModel, s: &str) -> Result<Trigger, String> {
         ["swipe", direction] => Trigger::TouchSwipe(decode_swipe_direction(direction)?),
         ["ztap", zone] => Trigger::ZoneTap(zone.parse().map_err(|_| "invalid touch section")?),
         ["zpress", zone] => Trigger::ZonePress(zone.parse().map_err(|_| "invalid touch section")?),
+        ["tb", number] => Trigger::TouchButton(number.parse().map_err(|_| "invalid touch button")?),
+        ["window"] => Trigger::Window,
         _ => return Err("invalid trigger".into()),
     };
     validate_trigger(model, &t).map_err(|e| e.to_string())?;
@@ -1267,13 +1322,28 @@ enum KeptKind {
     Info,
 }
 
+/// The control a kept row belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum KeptControl {
+    Known(Trigger),
+    /// A trigger of a control kind this build does not know, as written. Only
+    /// deleting its layer drops it: this build cannot select that control.
+    Unknown(String),
+}
+
 /// A `layers.conf` row this build cannot interpret, stored as read.
 #[derive(Clone, Debug)]
 struct KeptRow {
     layer: String,
-    trigger: Trigger,
+    control: KeptControl,
     kind: KeptKind,
     row: String,
+}
+
+impl KeptRow {
+    fn is_for(&self, trigger: &Trigger) -> bool {
+        matches!(&self.control, KeptControl::Known(known) if known == trigger)
+    }
 }
 
 /// Action prefixes `decode_action` understands.
@@ -1305,12 +1375,7 @@ pub(crate) fn unknown_action_kind(action: &str) -> Option<String> {
             && !crate::features::FeatureAction::VARIANTS.contains(&key.as_str()))
         .then(|| format!("unknown feature variant '{}'", key.escape_debug()));
     }
-    let named = prefix.len() <= 32
-        && prefix.starts_with(|c: char| c.is_ascii_lowercase())
-        && prefix
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    (named && !KNOWN_ACTION_PREFIXES.contains(&prefix))
+    (is_kind_name(prefix) && !KNOWN_ACTION_PREFIXES.contains(&prefix))
         .then(|| format!("unknown action kind '{prefix}'"))
 }
 
@@ -1428,6 +1493,10 @@ fn apply_row(
         }
         ["binding", layer, trigger, action] => {
             let layer = canonical_layer_name(&unhex(layer)?);
+            if let Some(reason) = unknown_trigger_kind(trigger) {
+                return keep_unknown_control(layers, kept, layer, trigger, KeptKind::Binding, row)
+                    .map(|()| Some(reason));
+            }
             let trigger = decode_trigger(model, trigger)?;
             if let Some(reason) = unknown_action_kind(action) {
                 let data = layers
@@ -1439,7 +1508,7 @@ fn apply_row(
                 }
                 kept.push(KeptRow {
                     layer,
-                    trigger,
+                    control: KeptControl::Known(trigger),
                     kind: KeptKind::Binding,
                     row: row.into(),
                 });
@@ -1463,6 +1532,17 @@ fn apply_row(
         ["return", _, _, _, _] => {}
         ["pagereturn", layer, trigger, target, seconds] => {
             let layer = canonical_layer_name(&unhex(layer)?);
+            if let Some(reason) = unknown_trigger_kind(trigger) {
+                return keep_unknown_control(
+                    layers,
+                    kept,
+                    layer,
+                    trigger,
+                    KeptKind::PageReturn,
+                    row,
+                )
+                .map(|()| Some(reason));
+            }
             let trigger = decode_trigger(model, trigger)?;
             let value = PageReturn {
                 layer: canonical_layer_name(&unhex(target)?),
@@ -1475,7 +1555,7 @@ fn apply_row(
             if has_kept_binding(kept, &layer, &trigger) {
                 kept.push(KeptRow {
                     layer,
-                    trigger,
+                    control: KeptControl::Known(trigger),
                     kind: KeptKind::PageReturn,
                     row: row.into(),
                 });
@@ -1490,6 +1570,10 @@ fn apply_row(
         }
         ["info", layer, trigger, source] => {
             let layer = canonical_layer_name(&unhex(layer)?);
+            if let Some(reason) = unknown_trigger_kind(trigger) {
+                return keep_unknown_control(layers, kept, layer, trigger, KeptKind::Info, row)
+                    .map(|()| Some(reason));
+            }
             let trigger = decode_trigger(model, trigger)?;
             let data = layers
                 .get_mut(&layer)
@@ -1501,12 +1585,12 @@ fn apply_row(
                         || has_kept_binding(kept, &layer, &trigger))
                     && !data.displays.contains_key(&trigger)
                     && !kept.iter().any(|row| {
-                        row.kind == KeptKind::Info && row.layer == layer && row.trigger == trigger
+                        row.kind == KeptKind::Info && row.layer == layer && row.is_for(&trigger)
                     }) =>
                 {
                     kept.push(KeptRow {
                         layer,
-                        trigger,
+                        control: KeptControl::Known(trigger),
                         kind: KeptKind::Info,
                         row: row.into(),
                     });
@@ -1529,7 +1613,49 @@ fn apply_row(
 
 fn has_kept_binding(kept: &[KeptRow], layer: &str, trigger: &Trigger) -> bool {
     kept.iter()
-        .any(|row| row.kind == KeptKind::Binding && row.layer == layer && row.trigger == *trigger)
+        .any(|row| row.kind == KeptKind::Binding && row.layer == layer && row.is_for(trigger))
+}
+
+/// Keep a row of a control kind this build does not know, as written. Like a
+/// known control, its page return and information need its binding first, and
+/// a second row of the same kind for the same control is a duplicate.
+fn keep_unknown_control(
+    layers: &BTreeMap<String, Layer>,
+    kept: &mut Vec<KeptRow>,
+    layer: String,
+    trigger: &str,
+    kind: KeptKind,
+    row: &str,
+) -> Result<(), String> {
+    let (missing, invalid) = match kind {
+        KeptKind::Binding => ("binding references missing layer", "duplicate binding"),
+        KeptKind::PageReturn => (
+            "return references missing layer",
+            "invalid or duplicate page return",
+        ),
+        KeptKind::Info => (
+            "information references missing layer",
+            "invalid or duplicate live information",
+        ),
+    };
+    if !layers.contains_key(&layer) {
+        return Err(missing.into());
+    }
+    let control = KeptControl::Unknown(trigger.to_owned());
+    let has = |wanted: KeptKind| {
+        kept.iter()
+            .any(|row| row.kind == wanted && row.layer == layer && row.control == control)
+    };
+    if has(kind) || (kind != KeptKind::Binding && !has(KeptKind::Binding)) {
+        return Err(invalid.into());
+    }
+    kept.push(KeptRow {
+        layer,
+        control,
+        kind,
+        row: row.into(),
+    });
+    Ok(())
 }
 
 fn conflict_for(row: &str, reason: String) -> ConfigConflict {

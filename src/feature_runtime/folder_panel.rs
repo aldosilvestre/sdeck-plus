@@ -94,10 +94,25 @@ pub(super) struct FolderPanel {
     deletable: Rc<Cell<bool>>,
     built: Rc<RefCell<BuiltRows>>,
     handler: Rc<RefCell<Option<FolderHandler>>>,
+    /// The controls a link is saved on, in words (see [`link_targets`]).
+    link_targets: &'static str,
+}
+
+/// The controls of `model` a folder link can be saved on: every model has
+/// keys, and only a model with dials or touch buttons names them.
+fn link_targets(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
+    if model.dials > 0 {
+        "key or dial"
+    } else if model.touch_buttons > 0 {
+        "key or touch button"
+    } else {
+        "key"
+    }
 }
 
 impl FolderPanel {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(model: &sdeck_plus::device_model::DeviceModel) -> Self {
+        let link_targets = link_targets(model);
         let root = GtkBox::new(Orientation::Vertical, 12);
         root.add_css_class("folder-panel");
         root.set_width_request(340);
@@ -108,9 +123,9 @@ impl FolderPanel {
         context.add_css_class("field-label");
         context.add_css_class("folder-context");
         heading.append(&context);
-        heading.append(&ui::helper(
-            "Link saves navigation on the selected key or dial without opening it.",
-        ));
+        heading.append(&ui::helper(&format!(
+            "Link saves navigation on the selected {link_targets} without opening it."
+        )));
         root.append(&heading);
 
         let create_row = GtkBox::new(Orientation::Horizontal, 0);
@@ -172,6 +187,7 @@ impl FolderPanel {
             deletable: Rc::new(Cell::new(true)),
             built: Rc::default(),
             handler: Rc::default(),
+            link_targets,
         };
         panel.connect_create();
         let callback = panel.clone();
@@ -307,7 +323,7 @@ impl FolderPanel {
         let open = button("folder-open-symbolic", format!("Open folder {name}"));
         let link = button(
             "sdeck-link-symbolic",
-            format!("Link folder {name} to selected key or dial"),
+            format!("Link folder {name} to selected {}", self.link_targets),
         );
         let rename = button("document-edit-symbolic", format!("Rename folder {name}"));
         let delete = button("user-trash-symbolic", format!("Delete folder {name}"));
