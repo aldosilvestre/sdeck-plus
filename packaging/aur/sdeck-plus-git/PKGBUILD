@@ -1,7 +1,7 @@
 # Maintainer: Aldo Silvestre <aldosilvestre89@gmail.com>
 pkgname=sdeck-plus-git
 _pkgname=sdeck-plus
-pkgver=1.0.0.r0.g0000000
+pkgver=1.1.0.r0.g0000000
 pkgrel=1
 pkgdesc="GTK4 control desk for Elgato Stream Deck devices on Linux (git version)"
 arch=('x86_64' 'aarch64')

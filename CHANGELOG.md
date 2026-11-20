@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-20
+
 ### Added
 
 - **Stream Deck Classic, XL, Mini and Neo support** (VID `0x0FD9`): the Classic / MK.2 family

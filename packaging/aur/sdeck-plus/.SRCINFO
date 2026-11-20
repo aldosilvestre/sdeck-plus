@@ -1,6 +1,6 @@
 pkgbase = sdeck-plus
 	pkgdesc = GTK4 control desk for Elgato Stream Deck devices on Linux
-	pkgver = 1.0.0
+	pkgver = 1.1.0
 	pkgrel = 1
 	url = https://aldosilvestre.github.io/sdeck-plus/
 	arch = x86_64
@@ -14,11 +14,12 @@ pkgbase = sdeck-plus
 	optdepends = mpv: sound playback
 	optdepends = wireplumber: volume and mute (wpctl)
 	optdepends = pipewire: audio output discovery (pw-dump)
-	optdepends = wl-clipboard: text pasting (wl-copy)
+	optdepends = wtype: typing text into any window
+	optdepends = wl-clipboard: text pasting without wtype (wl-copy)
 	optdepends = xdg-utils: opening files and websites (xdg-open)
 	optdepends = curl: weather information
 	options = !lto
-	source = sdeck-plus-1.0.0.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.0.0.tar.gz
+	source = sdeck-plus-1.1.0.tar.gz::https://github.com/aldosilvestre/sdeck-plus/archive/refs/tags/v1.1.0.tar.gz
 	sha256sums = 63c59dcf75ab3edbb209db11e354966bef46e885118ef4e67e4f3f1c1e4d2c8d
 
 pkgname = sdeck-plus
