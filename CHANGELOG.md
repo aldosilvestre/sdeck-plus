@@ -75,6 +75,10 @@ All notable changes to this project are documented here. The format follows
   controls it has ("Stream Deck Classic connected — keys are live"); the not-found message lists
   each model with all its product ids. The udev rule and the installer cover every supported
   product id.
+- **Descriptions name every model:** the package descriptions (`Cargo.toml`, both PKGBUILDs), the
+  packaged desktop entry's comment ("Configure Elgato Stream Deck devices on Linux") and the About
+  text ("Configure and control Elgato Stream Deck devices on Linux.") no longer name only the
+  Stream Deck + or + XL.
 - **Brightness, sleep and blank per protocol family:** the feature reports come from the model's
   protocol family; the + and + XL send the same bytes as before.
 - **Unknown control kinds are kept:** a `layers.conf` row for a control kind this version does not
@@ -96,13 +100,11 @@ All notable changes to this project are documented here. The format follows
 - **Microphone readings show a microphone:** the live information for **Microphone volume and
   mute** and **Audio input device** drew a speaker (or headphones for a headset microphone); it now
   shows a microphone, grey with a red slash while muted.
-
 - **Start at login after reinstalling:** the login entry kept naming the previous executable
   (for example `/usr/bin/sdeck-plus` after moving to `install.sh`, or the reverse with the pacman
   package), so the session skipped it after a reboot while the tray still showed it on.
   `install.sh` now repoints an existing entry at the installed executable, and the app repoints an
   entry whose executable no longer exists at itself when it starts.
-
 - **Type text works in any window, terminals included:** the text is now typed through a Wayland
   virtual keyboard with `wtype`, so it no longer depends on each application's paste shortcut and
   leaves the clipboard alone. Ctrl+V was a literal-insert prefix in terminals (only "^M" appeared),

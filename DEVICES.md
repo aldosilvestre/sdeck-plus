@@ -163,8 +163,9 @@ its model and `blank_device` goes through `protocol_for(model.family)`; the
    - the `DOCUMENTED` array length in `tests/device_registry.rs`;
    - one udev rule line per product id in `udev/70-sdeck.rules`
      (`tests/packaging.rs` fails when one is missing);
-   - `install.sh`: the hidraw uevent regex and the printed rule;
-   - the desktop file comment;
+   - `install.sh`: the comment listing the supported product ids and the
+     hidraw uevent regex under it (the printed `curl` command fetches
+     `udev/70-sdeck.rules` and needs no change);
    - the model tables in the README, `docs/index.html` (Supported devices) and
      `docs/docs.html` (Models at a glance), a section of its own in
      `docs/docs.html` (`#device-<id>`: controls, sizes, product ids, preview,

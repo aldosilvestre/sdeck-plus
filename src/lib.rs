@@ -1,4 +1,4 @@
-//! In-process API for observing Stream Deck + HID input.
+//! In-process API for observing the HID input of supported Stream Deck models.
 
 pub mod asset_links;
 pub mod binding_editor;

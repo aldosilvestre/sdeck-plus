@@ -36,8 +36,10 @@
   (function () {
     var root = document.documentElement;
     root.classList.add("js");
-    if (/^#(configuration|development|getting-around|controls-and-actions|touch-strip|profiles-pages-folders|appearance|obs-studio|data-tray-lifecycle|install-details|requirements|device-access)$/.test(location.hash)) {
-      location.replace("docs.html" + location.search + location.hash);
+    /* Device access (the udev rule) is covered under Requirements on docs.html. */
+    var hash = location.hash === "#device-access" ? "#requirements" : location.hash;
+    if (/^#(configuration|development|getting-around|controls-and-actions|touch-strip|profiles-pages-folders|appearance|obs-studio|data-tray-lifecycle|install-details|requirements)$/.test(hash)) {
+      location.replace("docs.html" + location.search + hash);
     }
     try {
       var forced = /[?&]theme=(light|dark)(?:&|$)/.exec(location.search);

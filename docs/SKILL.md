@@ -35,7 +35,7 @@ Ask the user ONLY what is missing; decide the rest and say which defaults you ch
 | Need | Default if the user has no preference |
 |---|---|
 | What each action does (one sentence per action) | none: ask |
-| Controls per action: `key`, `dial_turn`, `dial_press`, `touch` | `key` (and `dial_press` for a one-shot) |
+| Controls per action: `key` (also a Stream Deck Neo touch button), `dial_turn`, `dial_press`, `touch` | `key` (and `dial_press` for a one-shot) |
 | Settings the user edits per binding (text / integer / boolean) | the fewest that make sense |
 | External tools, services, credentials | Python 3 standard library only; no credentials |
 | Target desktop / OS (the app is Linux; Hyprland, GNOME...) | the user's current desktop |
@@ -100,7 +100,7 @@ Unknown fields are rejected at every level. At most 64 KiB. Example (identical t
 | `executable` | plain relative path, at most 128 chars (`run`); no `..`, no absolute path, must stay inside the folder |
 | `actions` | 1-32 entries, unique ids |
 | action `id` / `name` / `description` | id as above; name 1-64 printable; description optional, at most 256 characters |
-| action `controls` | non-empty list of `key`, `dial_turn`, `dial_press`, `touch` |
+| action `controls` | non-empty list of `key`, `dial_turn`, `dial_press`, `touch`; a `key` action can also be bound to a Stream Deck Neo touch button (the Neo's info window and the Classic's background take none) |
 | action `settings` | at most 16 fields, unique ids; the validated payload stays within 4096 bytes |
 | `requirements` | optional, at most 16, no duplicate (`kind`, `name`) |
 

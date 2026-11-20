@@ -10,7 +10,7 @@ A physical keypad key can have a short action and a separate **Hold 2 seconds** 
 
 The hold action is optional and can be any catalog action, not only cancellation. Selecting an action for the same key keeps the current short/hold mode. Opening or toggling the editor does not create or execute a binding. To edit the short action again, clear **Hold 2 seconds**.
 
-**Remove binding** in hold mode removes only the secondary binding, restoring immediate key-down execution on the next press. Undo restores that binding and its page-return setting. An explicitly saved **None** secondary action is still a configured hold binding; remove it to disable hold recognition.
+**Remove binding** clears the whole key in either mode: the short and the hold action together, with their page-return settings and live information. **Undo** in its toast restores all of it for ten seconds. An explicitly saved **None** secondary action is still a configured hold binding, so the short action keeps running on release rather than on key-down.
 
 ## What stays independent
 

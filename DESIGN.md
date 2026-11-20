@@ -5,8 +5,10 @@
 sdeck-plus is a native hardware configuration desk, not a web dashboard. Ink-toned
 surfaces, restrained violet actions and cyan interaction cues frame the graphite Stream Deck preview of the shown model: eight keys, a touch
 strip and four circular encoders on the Stream Deck +; 36 keys, a touch strip and
-six encoders on the Stream Deck + XL. Preserve its coordinates, artwork and
-existing functions.
+six encoders on the Stream Deck + XL; 15 keys and a background bar on the
+Classic; 32 keys on the XL; six keys on the Mini; eight keys, an info window and
+two touch buttons on the Neo. Preserve its coordinates, artwork and existing
+functions.
 
 Configuration follows a short path: choose a profile, drag an action from the
 right-hand searchable catalog onto a keypad button, then complete its fields
@@ -363,7 +365,8 @@ Secondary panels have 16px between logical sections. Setup help groups each
 heading with its explanation at 8px, rather than giving headings and unrelated
 steps the same gap. Text editing keeps 16px between form and preview and 12px
 between Save/Remove actions; its preview is the key at the shown model's size
-(120px for the +, 112px for the + XL).
+(its key image size: 120px for the +, 112px for the + XL, 72px for the Classic,
+96px for the XL and the Neo, 80px for the Mini).
 
 The fixed-geometry device chassis sits in its preview card: the chassis plus
 a 14px frame (padding and border), 440x428 at 1x for the Stream Deck +. The card is presented through `ScaledBin`
@@ -387,6 +390,10 @@ in preview pixels at 1x:
 |-------|---------|------|-------------|-------|
 | Stream Deck + | 426x414 | 8 (4x2), 60px on a 91x67 pitch | 328x41, 4 sections of 82px | 4 knobs of 46px, 91px pitch |
 | Stream Deck + XL | 556x456 | 36 (9x4), 40px on a 46px pitch | 456x41, 6 sections of 76px | 6 knobs of 46px, each centered under its section |
+| Stream Deck Classic | 348x250 | 15 (5x3), 44px on a 52px pitch | none (a 252x28 Background bar under the keys) | none |
+| Stream Deck XL | 504x262 | 32 (8x4), 44px on a 52px pitch | none | none |
+| Stream Deck Mini | 244x158 | 6 (3x2), 44px on a 52px pitch | none | none |
+| Stream Deck Neo | 296x208 | 8 (4x2), 44px on a 52px pitch | none (a 124x29 info window without touch, between 2 touch buttons of 28px) | none |
 
 The Stream Deck + keeps the geometry it always had, pixel for pixel. Every
 other model of the registry is laid out by the same generic rules (44px keys on
@@ -462,9 +469,10 @@ rendered from the real preview widget with no device: `preview-<model id>.png`
 is the device card alone, the size of its chassis (426x414 for the +, 556x456
 for the + XL, 348x250 for the Classic, 504x262 for the XL, 244x158 for the Mini,
 296x208 for the Neo) and
-`main-window-xl.png` is the window content configuring the + XL (1088x668: the
-+ XL workspace needs 1088px; no selector: one model). `main-window-two-devices.png`
-(968x668, scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
+`main-window-xl.png` is the window content configuring the + XL at the default
+1120x884 size (1152x916 with the 16px shell margin; no selector: one model).
+`main-window-two-devices.png` (a 1000x700 window, 1032x732 with the margin,
+scrolled to the header) shows the "Current" selector with a simulated + and + XL connected through
 the real hub. They are written by the documentation screenshot generator, which
 iterates `DeviceModel::supported()` for the per-model images, so a model that
 becomes supported gets its image without editing the generator. The + XL images

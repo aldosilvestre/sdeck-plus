@@ -1,6 +1,7 @@
 //! Test support, not part of the supported API: the real HID hub over
-//! simulated devices, so the binary's tests can plug a Stream Deck + and a
-//! + XL into the window without hardware, a HID stack or a display server.
+//! simulated devices, so the binary's tests can plug any supported Stream Deck
+//! model, one or several at once, into the window without hardware, a HID
+//! stack or a display server.
 //!
 //! Plug devices into a [`SimBus`], start the hub with [`start_hub`] and
 //! script input through [`SimDevice`]; what the hub wrote comes back through

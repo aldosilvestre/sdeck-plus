@@ -1040,7 +1040,7 @@ sudo udevadm control --reload-rules</code></pre>
           <div class="cards">
             <article class="card">
               <h4>Button text</h4>
-              <p><strong>Right-click a key</strong> and choose <strong>Add text and image…</strong> (<strong>Edit text and image…</strong> once it has text). The popover opens on that key and also holds its <strong>Background image</strong>: <strong>Image…</strong> chooses one and <strong>Clear image</strong> removes it. The Appearance section is gone from the inspector for keys and dials; only the touch strip and its zones keep theirs for now. The popover names the key and page, for example "Key 3 on “Everyday / Page 1”".
+              <p><strong>Right-click a key</strong> and choose <strong>Add text and image…</strong> (<strong>Edit text and image…</strong> once it has text). The popover opens on that key and also holds its <strong>Background image</strong>: <strong>Image…</strong> chooses one and <strong>Clear image</strong> removes it. The Appearance section is gone from the inspector for keys and dials; only the touch strip and its zones, the Stream Deck Neo's info window and the Stream Deck Classic's <strong>Background</strong> bar keep theirs for now. The popover names the key and page, for example "Key 3 on “Everyday / Page 1”".
                  Choose an installed font, a size from 6 to 120 px, horizontal or vertical orientation (vertical rotates the text 90° clockwise) and a position on a 3x3 grid.
                  Text is white with a black outline and may span several lines.</p>
               <p>The preview shows the key as the device will: over its image, over its action icon when the text leaves room, or over black, with a warning when the text does not fit
@@ -1143,8 +1143,8 @@ sudo udevadm control --reload-rules</code></pre>
               <h4>Data location and files</h4>
               <p>Configuration lives in <code>$XDG_DATA_HOME/sdeck-plus</code>, or <code>$HOME/.local/share/sdeck-plus</code> when it is unset (normally
                  <code>~/.local/share/sdeck-plus</code>): <code>layers.conf</code> (keypad layers and bindings), <code>touchscreen.json</code>, <code>organization.json</code>,
-                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest, <code>keypad-background.conf</code> (Stream Deck Classic only, see below) and <code>button-errors.log</code>. These are the Stream Deck + files; every other model keeps its own set under
-                 <code>devices/&lt;id&gt;/</code> (see <a href="#device-data">Data per model</a>).</p>
+                 <code>info.json</code>, <code>obs.json</code>, the <code>assets</code> directory with its artwork manifest and <code>button-errors.log</code>. These are the Stream Deck + files; every other model keeps its own set under
+                 <code>devices/&lt;id&gt;/</code> (see <a href="#device-data">Data per model</a>), and only the Stream Deck Classic's folder, <code>devices/classic/</code>, can also hold <code>keypad-background.conf</code> (see below).</p>
               <p><strong>Model-specific records.</strong> <code>layers.conf</code> rows are tab-separated, with hex-encoded page names. On the Stream Deck Neo, each touch button is bound like a key, as <code>tb:1</code> or <code>tb:2</code>
                  (<code>binding &lt;page&gt; tb:1 &lt;action&gt;</code>), and the info window's live information is a <code>window</code> binding whose action is always <code>none</code>, with its <code>info</code> row
                  (<code>binding &lt;page&gt; window none</code> and <code>info &lt;page&gt; window &lt;source&gt;</code>). On the Stream Deck Classic, each page's background picture is a row of <code>keypad-background.conf</code>, beside the artwork manifest:
@@ -1225,7 +1225,7 @@ sudo udevadm control --reload-rules</code></pre>
             </article>
             <article class="card">
               <h4>Quitting and reconnecting</h4>
-              <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys and touch strip to black (a Stream Deck Classic's background picture is not cleared; brightness 0 hides it), stops the action worker and app-owned playback,
+              <p><strong>Quit</strong> discards pending uploads, turns off display brightness, clears the keys, the touch strip and a Stream Deck Neo's info window to black (a Stream Deck Classic's background picture is not cleared; brightness 0 hides it), stops the action worker and app-owned playback,
                  cancels timers and releases the device; a blocked driver call can delay exiting. Independently opened applications stay open.
                  On the next launch brightness returns to 100% and saved artwork is replayed. While running, unplugging and reconnecting retries automatically.</p>
             </article>
@@ -1270,7 +1270,7 @@ cargo clippy --offline --all-targets --all-features -- -D warnings</code></pre>
               <h4>Documentation screenshots</h4>
               <p>The captures in <code>docs/screenshots</code> are generated from the production widgets with isolated demonstration profiles; they do not operate a device,
                  change audio output or connect to OBS. Regenerate them from a graphical session (captures use a 1000 × 950 window). The same run renders the preview of every supported model, with no device, as <code>preview-&lt;model id&gt;.png</code>
-                 (<code>preview-plus.png</code>, <code>preview-plus-xl.png</code>, <code>preview-classic.png</code>, <code>preview-xl.png</code>, <code>preview-mini.png</code> and <code>preview-neo.png</code>, shown under <a href="#devices">Supported devices</a>), plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (1088 × 668 and 968 × 668; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
+                 (<code>preview-plus.png</code>, <code>preview-plus-xl.png</code>, <code>preview-classic.png</code>, <code>preview-xl.png</code>, <code>preview-mini.png</code> and <code>preview-neo.png</code>, shown under <a href="#devices">Supported devices</a>), plus <code>main-window-xl.png</code> and <code>main-window-two-devices.png</code> (1152 × 916 and 1032 × 732, each with the window's 16 px margin: the first is the default 1120 × 884 window, the second a 1000 × 700 one; the second runs a simulated + and + XL through the real hub so the header shows the <strong>Current</strong> selector):</p>
               <div class="code-block">
 <pre><code>GDK_BACKEND=x11 STREAMDECK_DOC_SCREENSHOTS_DIR="$PWD/docs/screenshots" \
   cargo test --offline --bin sdeck-plus \
