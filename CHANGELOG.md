@@ -36,7 +36,9 @@ All notable changes to this project are documented here. The format follows
   Classic bundle that carries a background.
 - **One documentation section per model** (controls, sizes, product ids, validation status and
   known limits) with its preview image (`preview-classic.png`, `preview-xl.png`,
-  `preview-mini.png`, `preview-neo.png`), linked from the landing page's device cards.
+  `preview-mini.png`, `preview-neo.png`), linked from the landing page's device cards. Each
+  section has a **Simulate it** command (`SDECK_SIMULATE_MODEL=<id>`) that opens the real window
+  with that model simulated, over scratch folders.
 - **Multi action:** **More actions > System > Multi action** runs several actions from one key
   press or key hold (not dials or the touch strip) in strict order: each step starts only after the
   previous one finished (a command when its process exits, an application once it is launched, a
@@ -89,6 +91,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Simulated devices window:** it now uses the app's own icons instead of the system icon theme
+  (it runs under another application id, so GTK did not add the app's icon path).
 - **Microphone readings show a microphone:** the live information for **Microphone volume and
   mute** and **Audio input device** drew a speaker (or headphones for a headset microphone); it now
   shows a microphone, grey with a red slash while muted.
