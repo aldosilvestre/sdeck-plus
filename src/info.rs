@@ -133,6 +133,25 @@ impl InfoSource {
         })
     }
 
+    /// Parses a device reading from `wpctl inspect` output; the microphone
+    /// device is also crossed out and dimmed while `wpctl get-volume` output
+    /// for the same source says it is muted. Other sources ignore `volume`.
+    pub fn parse_input_device(self, inspect: &str, volume: Option<&str>) -> Option<InfoValue> {
+        let value = self.parse(inspect)?;
+        let muted = self == Self::InputDevice
+            && volume
+                .and_then(parse_volume)
+                .is_some_and(|reading| reading.inactive);
+        if !muted {
+            return Some(value);
+        }
+        Some(InfoValue {
+            glyph: Glyph::MicrophoneMuted,
+            inactive: true,
+            ..value
+        })
+    }
+
     /// Shown until the first reading arrives.
     pub fn placeholder(self) -> InfoValue {
         InfoValue::text(self.glyph(), ELLIPSIS)
@@ -636,10 +655,16 @@ impl InfoReader {
 
     fn try_read(&mut self, source: InfoSource) -> Option<InfoValue> {
         match source {
-            InfoSource::Volume
-            | InfoSource::InputVolume
-            | InfoSource::AudioDevice
-            | InfoSource::InputDevice => source.parse(&run("wpctl", &source.wpctl_args()?)?),
+            InfoSource::Volume | InfoSource::InputVolume | InfoSource::AudioDevice => {
+                source.parse(&run("wpctl", &source.wpctl_args()?)?)
+            }
+            InfoSource::InputDevice => {
+                let inspect = run("wpctl", &source.wpctl_args()?)?;
+                let volume = InfoSource::InputVolume
+                    .wpctl_args()
+                    .and_then(|args| run("wpctl", &args));
+                source.parse_input_device(&inspect, volume.as_deref())
+            }
             InfoSource::Brightness => None,
             InfoSource::Clock => {
                 let output = run("date", &["+%H:%M%n%a %d"])?;
@@ -1131,6 +1156,42 @@ mod tests {
         let headphones = InfoSource::AudioDevice.parse(headset).unwrap();
         assert_eq!(headphones.glyph, Glyph::Headphones);
         assert_eq!(InfoSource::Clock.parse("12:00"), None);
+    }
+
+    #[test]
+    fn microphone_device_reading_shows_the_microphone_mute() {
+        let headset =
+            "id 55, type PipeWire:Interface:Node\n  * node.description = \"USB Headset Mic\"\n";
+        let device = InfoSource::InputDevice.parse(headset).unwrap();
+        // Muted: the device name stays, the microphone is crossed out and dimmed.
+        let muted = InfoSource::InputDevice
+            .parse_input_device(headset, Some("Volume: 0.80 [MUTED]"))
+            .unwrap();
+        assert_eq!(
+            muted,
+            InfoValue {
+                glyph: Glyph::MicrophoneMuted,
+                inactive: true,
+                ..device.clone()
+            }
+        );
+        // Not muted, or the mute could not be read: the plain device reading.
+        for volume in [Some("Volume: 0.80"), Some("garbage"), None] {
+            assert_eq!(
+                InfoSource::InputDevice.parse_input_device(headset, volume),
+                Some(device.clone())
+            );
+        }
+        // No device name: no reading, as before.
+        assert_eq!(
+            InfoSource::InputDevice.parse_input_device("", Some("Volume: 0.80 [MUTED]")),
+            None
+        );
+        // Outputs are unchanged.
+        assert_eq!(
+            InfoSource::AudioDevice.parse_input_device(headset, Some("Volume: 0.80 [MUTED]")),
+            InfoSource::AudioDevice.parse(headset)
+        );
     }
 
     #[test]

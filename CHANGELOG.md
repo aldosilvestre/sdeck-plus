@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The **Audio input device** live reading now shows when the microphone is muted: its microphone
+  icon is crossed out and dimmed, like **Microphone volume and mute**. Before, it read only the
+  device name, so muting the microphone (for example with a dial's **Toggle input mute** press)
+  changed nothing on that key or strip section.
+
 ## [1.1.0] - 2026-11-20
 
 ### Added
