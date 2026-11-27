@@ -30,6 +30,7 @@ mod http;
 mod interfaces;
 mod password;
 mod server;
+pub mod settings;
 mod socket;
 mod viewer;
 mod x509;
