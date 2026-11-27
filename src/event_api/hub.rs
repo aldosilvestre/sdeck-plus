@@ -1,6 +1,7 @@
 //! The HID hub: one thread enumerates every supported device, one worker thread
 //! serves each, and artwork and controls are addressed to a MODEL and fanned
-//! out to every live device of it.
+//! out to every live device of it. An attached virtual deck is listed with
+//! the devices and served the same way (see `virtual_device`).
 //!
 //! Lock rule: [`Shared`] is locked only to route messages between channels. It
 //! is never held across a HID call, a send that can block, or a join.
@@ -9,8 +10,10 @@ use super::{
     command_target,
     device_controls::Controls,
     device_worker::{DeviceWorker, Prepare},
-    not_found_message, ArtworkCommand, ConnectionState, Device, DeviceAction, DeviceId, DeviceKey,
-    HidController, HidHandle, HubClosed, MonitorEvent, StopSignal,
+    not_found_message,
+    virtual_device::{Served, VirtualSlot},
+    ArtworkCommand, ConnectionState, Device, DeviceAction, DeviceId, DeviceKey, HidController,
+    HidHandle, HubClosed, MonitorEvent, StopSignal,
 };
 use crate::{device_control::DesiredState, device_model::DeviceModel, image_output};
 use std::{
@@ -52,7 +55,8 @@ pub(super) struct Candidate<D> {
     pub(super) open: Box<dyn FnOnce() -> Result<D, String> + Send>,
 }
 
-type Pid = u16;
+/// Models are told apart by id: a virtual model has no product id.
+type ModelKey = &'static str;
 
 struct Slot {
     id: DeviceId,
@@ -68,16 +72,16 @@ struct State {
     /// Paths with a worker that has not finished with its device yet.
     occupied: HashSet<String>,
     /// Work addressed to a model that had no live device, in send order.
-    pending: HashMap<Option<Pid>, Vec<ArtworkCommand>>,
+    pending: HashMap<Option<ModelKey>, Vec<ArtworkCommand>>,
     /// The latest complete picture of each model: its last snapshot plus the
     /// single newest command of every target since.
-    snapshots: HashMap<Pid, Vec<ArtworkCommand>>,
+    snapshots: HashMap<ModelKey, Vec<ArtworkCommand>>,
     /// What each model was last asked for, for devices that attach later.
     /// `None` is intent sent before any model was known.
-    desired: HashMap<Option<Pid>, DesiredState>,
+    desired: HashMap<Option<ModelKey>, DesiredState>,
     /// The model last attached on each path.
-    last_model: HashMap<String, Pid>,
-    last_active: Option<Pid>,
+    last_model: HashMap<String, ModelKey>,
+    last_active: Option<ModelKey>,
     served: bool,
     closed: bool,
 }
@@ -85,7 +89,7 @@ struct State {
 impl State {
     fn refresh_active(&mut self) {
         if let Some(slot) = self.workers.first() {
-            self.last_active = Some(slot.model.pid());
+            self.last_active = Some(slot.model.id);
         }
     }
 }
@@ -141,7 +145,7 @@ impl Shared {
     /// the next. `None` is "no model yet", for work sent before any device.
     pub(super) fn send_artwork(
         &self,
-        model: Option<Pid>,
+        model: Option<ModelKey>,
         command: ArtworkCommand,
     ) -> Result<(), HubClosed> {
         let mut guard = self.lock();
@@ -150,9 +154,9 @@ impl Shared {
             return Err(HubClosed);
         }
         let mut delivered = false;
-        if let Some(pid) = model {
-            remember(state.snapshots.entry(pid).or_default(), &command);
-            for slot in state.workers.iter().filter(|slot| slot.model.pid() == pid) {
+        if let Some(id) = model {
+            remember(state.snapshots.entry(id).or_default(), &command);
+            for slot in state.workers.iter().filter(|slot| slot.model.id == id) {
                 delivered |= slot.artwork.send(command.clone()).is_ok();
             }
         }
@@ -166,7 +170,7 @@ impl Shared {
     /// it either way, and a model with no device says so.
     pub(super) fn send_control(
         &self,
-        model: Option<Pid>,
+        model: Option<ModelKey>,
         action: DeviceAction,
     ) -> Result<(), HubClosed> {
         let mut guard = self.lock();
@@ -181,8 +185,8 @@ impl Shared {
             .apply(&action)
             .map_err(|error| error.to_string());
         let mut delivered = false;
-        if let Some(pid) = model {
-            for slot in state.workers.iter().filter(|slot| slot.model.pid() == pid) {
+        if let Some(id) = model {
+            for slot in state.workers.iter().filter(|slot| slot.model.id == id) {
                 delivered |= slot.controls.send(action.clone()).is_ok();
             }
         }
@@ -201,7 +205,7 @@ impl Shared {
 
     /// The model the one-session adapter addresses: the first connected
     /// device's, or the last one's while none is.
-    fn active_model(&self) -> Option<Pid> {
+    fn active_model(&self) -> Option<ModelKey> {
         self.lock().last_active
     }
 
@@ -224,42 +228,38 @@ impl Shared {
     fn attach(&self, key: &DeviceKey) -> Attachment {
         let mut guard = self.lock();
         let state = &mut *guard;
-        let pid = key.model.pid();
-        let seen = state.last_model.insert(key.path.clone(), pid);
-        if let Some(previous) = seen.filter(|previous| *previous != pid) {
+        let id = key.model.id;
+        let seen = state.last_model.insert(key.path.clone(), id);
+        if let Some(previous) = seen.filter(|previous| *previous != id) {
             // The same port now has another model. What was held for the old
             // model (artwork, controls, its picture) means nothing to the new
             // one, and must not replay stale if the old model returns later.
             // It is dropped only when no other live device of the old model
             // remains to take it; then it is kept.
-            if !state
-                .workers
-                .iter()
-                .any(|slot| slot.model.pid() == previous)
-            {
+            if !state.workers.iter().any(|slot| slot.model.id == previous) {
                 state.pending.remove(&Some(previous));
                 state.desired.remove(&Some(previous));
                 state.snapshots.remove(&previous);
             }
         }
-        let mirrored = state.workers.iter().any(|slot| slot.model.pid() == pid);
+        let mirrored = state.workers.iter().any(|slot| slot.model.id == id);
         let unaddressed = if state.served {
             Vec::new()
         } else {
             state.pending.remove(&None).unwrap_or_default()
         };
         for command in &unaddressed {
-            remember(state.snapshots.entry(pid).or_default(), command);
+            remember(state.snapshots.entry(id).or_default(), command);
         }
         if !state.served {
             // Intent sent before any model was known goes to the first one.
             if let Some(early) = state.desired.remove(&None) {
-                state.desired.entry(Some(pid)).or_insert(early);
+                state.desired.entry(Some(id)).or_insert(early);
             }
         }
-        let held = state.pending.remove(&Some(pid)).unwrap_or_default();
+        let held = state.pending.remove(&Some(id)).unwrap_or_default();
         let replay = if mirrored || seen.is_none() {
-            let mut all = state.snapshots.get(&pid).cloned().unwrap_or_default();
+            let mut all = state.snapshots.get(&id).cloned().unwrap_or_default();
             all.extend(unaddressed);
             all
         } else {
@@ -283,7 +283,7 @@ impl Shared {
         Attachment {
             artwork: artwork_commands,
             controls: control_commands,
-            desired: state.desired.get(&Some(pid)).cloned().unwrap_or_default(),
+            desired: state.desired.get(&Some(id)).cloned().unwrap_or_default(),
         }
     }
 
@@ -296,7 +296,7 @@ impl Shared {
             return;
         };
         let slot = state.workers.remove(at);
-        let held = state.pending.entry(Some(slot.model.pid())).or_default();
+        let held = state.pending.entry(Some(slot.model.id)).or_default();
         for command in artwork.try_iter() {
             hold(held, command);
         }
@@ -347,12 +347,12 @@ pub(super) fn route_artwork_to(
     commands: Receiver<ArtworkCommand>,
 ) -> std::io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
-        .name(format!("hid-art-{:04x}", model.pid()))
+        .name(format!("hid-art-{}", model.id))
         .spawn(move || {
             while stop.live() {
                 match commands.recv_timeout(ROUTE_POLL) {
                     Ok(command) => {
-                        if shared.send_artwork(Some(model.pid()), command).is_err() {
+                        if shared.send_artwork(Some(model.id), command).is_err() {
                             return;
                         }
                     }
@@ -371,12 +371,12 @@ pub(super) fn route_controls_to(
     commands: Receiver<DeviceAction>,
 ) -> std::io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
-        .name(format!("hid-ctl-{:04x}", model.pid()))
+        .name(format!("hid-ctl-{}", model.id))
         .spawn(move || {
             while stop.live() {
                 match commands.recv_timeout(ROUTE_POLL) {
                     Ok(action) => {
-                        if shared.send_control(Some(model.pid()), action).is_err() {
+                        if shared.send_control(Some(model.id), action).is_err() {
                             return;
                         }
                     }
@@ -409,6 +409,8 @@ struct Hub<D, E> {
     stop: StopSignal,
     shared: Arc<Shared>,
     ended: Arc<AtomicBool>,
+    /// The controller's virtual deck; an attach cuts the wait short.
+    virtual_deck: VirtualSlot,
     workers: Vec<Running>,
     announced: Announced,
     devices: PhantomData<fn() -> D>,
@@ -567,6 +569,9 @@ where
     fn pause(&self) -> bool {
         let mut deadline = Instant::now() + self.cadence.search;
         loop {
+            if self.virtual_deck.take_rescan() {
+                return true;
+            }
             if self.ended.swap(false, Ordering::AcqRel) {
                 deadline = deadline.min(Instant::now() + self.cadence.after_unplug);
             }
@@ -595,6 +600,7 @@ where
 
 /// Start the hub on its own thread. `enumerate` lists the supported devices
 /// without opening them; `prepare` turns artwork into reports for a model.
+/// The virtual deck the controller attaches is listed after them.
 pub(super) fn spawn<D, E, P>(
     sender: Sender<MonitorEvent>,
     enumerate: E,
@@ -613,14 +619,16 @@ where
     let (controls, control_commands) = channel();
     let stop = StopSignal::default();
     let shared = Arc::new(Shared::new(sender.clone()));
-    let mut hub = Hub {
-        enumerate,
+    let virtual_deck = VirtualSlot::default();
+    let mut hub: Hub<Served<D>, _> = Hub {
+        enumerate: virtual_deck.around(enumerate),
         sender,
         prepare: Arc::new(prepare),
         cadence,
         stop: stop.clone(),
         shared: shared.clone(),
         ended: Arc::default(),
+        virtual_deck: virtual_deck.clone(),
         workers: Vec::new(),
         announced: Announced::Nothing,
         devices: PhantomData,
@@ -647,6 +655,7 @@ where
             shared: Some(shared),
         },
         routes: Mutex::default(),
+        virtual_deck,
     }
 }
 
@@ -668,13 +677,13 @@ mod tests {
         for round in 0..100_000u32 {
             let key = 1 + (round % 8) as u8;
             // The addressed path and the one-session adapter path (no model yet).
-            shared.send_artwork(Some(0x00C6), clear(key)).unwrap();
+            shared.send_artwork(Some("plus-xl"), clear(key)).unwrap();
             shared.send_artwork(None, clear(key)).unwrap();
         }
         let state = shared.lock();
-        assert_eq!(state.pending[&Some(0x00C6)].len(), 8);
+        assert_eq!(state.pending[&Some("plus-xl")].len(), 8);
         assert_eq!(state.pending[&None].len(), 8);
-        assert_eq!(state.snapshots[&0x00C6].len(), 8);
+        assert_eq!(state.snapshots["plus-xl"].len(), 8);
     }
 
     #[test]

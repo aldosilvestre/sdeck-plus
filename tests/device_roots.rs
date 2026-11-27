@@ -4,7 +4,7 @@
 use sdeck_plus::{
     asset_links, config_bundle,
     desktop_actions::DesktopAction,
-    device_model::{DeviceModel, PLUS, PLUS_XL},
+    device_model::{DeviceModel, CLASSIC, PLUS, PLUS_XL, VIRTUAL_CLASSIC},
     device_roots::{self, data_root_in, ensure_root_fits, owner_of_root},
     features::FeatureAction,
     info,
@@ -125,6 +125,112 @@ fn roots_are_the_plus_directory_and_a_devices_folder_per_other_model() {
         data_root_in(base, &PLUS_XL),
         Path::new("/data/sdeck-plus/devices/plus-xl")
     );
+}
+
+#[test]
+fn the_virtual_classic_owns_devices_virtual_classic_beside_the_real_classic() {
+    let base = Path::new("/data/sdeck-plus");
+    let virtual_root = data_root_in(base, &VIRTUAL_CLASSIC);
+    let classic_root = data_root_in(base, &CLASSIC);
+    assert_eq!(
+        virtual_root,
+        Path::new("/data/sdeck-plus/devices/virtual-classic")
+    );
+    assert_ne!(virtual_root, classic_root);
+    assert_eq!(owner_of_root(&virtual_root), Some(&VIRTUAL_CLASSIC));
+    assert_eq!(owner_of_root(&classic_root), Some(&CLASSIC));
+    assert!(ensure_root_fits(&virtual_root, &VIRTUAL_CLASSIC).is_ok());
+    let error = ensure_root_fits(&virtual_root, &CLASSIC).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "{} is the data folder of the {}, not the {}",
+            virtual_root.display(),
+            VIRTUAL_CLASSIC.name,
+            CLASSIC.name
+        )
+    );
+    assert!(ensure_root_fits(&classic_root, &VIRTUAL_CLASSIC).is_err());
+}
+
+#[test]
+fn the_virtual_classic_and_a_real_classic_keep_independent_configurations() {
+    let f = Fixture::new("virtual-classic");
+    let plus = f.plus();
+    let classic = data_root_in(&plus, &CLASSIC);
+    let virtual_root = data_root_in(&plus, &VIRTUAL_CLASSIC);
+    let mut real = LayerStore::open_at_model(&classic, &CLASSIC).unwrap();
+    real.bind(
+        "Base",
+        Trigger::KeyPress(1),
+        Action::Command("printf real".into()),
+    )
+    .unwrap();
+    real.persist().unwrap();
+    let classic_before = tree(&classic);
+    assert!(!virtual_root.exists(), "nothing is created before it opens");
+
+    let mut shown = LayerStore::open_at_model(&virtual_root, &VIRTUAL_CLASSIC).unwrap();
+    for key in [1, 15] {
+        shown
+            .bind(
+                "Base",
+                Trigger::KeyPress(key),
+                Action::Command("printf virtual".into()),
+            )
+            .unwrap();
+    }
+    shown.persist().unwrap();
+    Organization::open_at(&virtual_root, &shown)
+        .unwrap()
+        .persist()
+        .unwrap();
+    ArtworkStore::open_at_for_layer_model(&virtual_root, Some("Base"), &VIRTUAL_CLASSIC).unwrap();
+    ObsConfig::default().save_at(&virtual_root).unwrap();
+    assert!(virtual_root.join("layers.conf").is_file());
+    assert_eq!(
+        tree(&classic),
+        classic_before,
+        "the real Classic is untouched"
+    );
+
+    let real = LayerStore::open_at_model(&classic, &CLASSIC).unwrap();
+    let shown = LayerStore::open_at_model(&virtual_root, &VIRTUAL_CLASSIC).unwrap();
+    assert!(real.diagnostics().is_empty() && shown.diagnostics().is_empty());
+    assert_eq!(
+        real.layers()["Base"].bindings.get(&Trigger::KeyPress(1)),
+        Some(&Action::Command("printf real".into()))
+    );
+    assert!(!real.layers()["Base"]
+        .bindings
+        .contains_key(&Trigger::KeyPress(15)));
+    assert_eq!(
+        shown.layers()["Base"].bindings.get(&Trigger::KeyPress(1)),
+        Some(&Action::Command("printf virtual".into()))
+    );
+    // Neither root opens as the other model.
+    assert!(LayerStore::open_at_model(&virtual_root, &CLASSIC).is_err());
+    assert!(LayerStore::open_at_model(&classic, &VIRTUAL_CLASSIC).is_err());
+
+    // Its configuration exports and imports as its own model.
+    let bundle = f.0.join("virtual.json");
+    export_for_model(&virtual_root, &bundle, &VIRTUAL_CLASSIC);
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(&bundle).unwrap()).unwrap();
+    assert_eq!(value["model"], "virtual-classic");
+    let error = config_bundle::import_for(&bundle, &classic, &CLASSIC).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "This configuration is for {}; connect that model to import it.",
+            VIRTUAL_CLASSIC.name
+        )
+    );
+    let target = f.0.join("restored");
+    config_bundle::import_for(&bundle, &target, &VIRTUAL_CLASSIC).unwrap();
+    let restored = LayerStore::open_at_model(&target, &VIRTUAL_CLASSIC).unwrap();
+    assert!(restored.layers()["Base"]
+        .bindings
+        .contains_key(&Trigger::KeyPress(15)));
 }
 
 #[test]

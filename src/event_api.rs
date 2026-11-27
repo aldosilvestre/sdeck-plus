@@ -35,6 +35,12 @@ mod marquee;
 mod sim_device;
 #[doc(hidden)]
 pub mod test_support;
+mod virtual_device;
+mod wire;
+
+pub use virtual_device::{
+    virtual_deck_pair, VirtualDeck, VirtualDeckLink, VirtualFrame, VIRTUAL_DECK_PATH,
+};
 
 #[cfg(test)]
 mod sim_tests;
@@ -332,7 +338,7 @@ impl HidHandle {
         command: ArtworkCommand,
     ) -> Result<(), HubClosed> {
         match &self.shared {
-            Some(shared) => shared.send_artwork(Some(model.pid()), command),
+            Some(shared) => shared.send_artwork(Some(model.id), command),
             None => self.artwork.send(command).map_err(|_| HubClosed),
         }
     }
@@ -340,7 +346,7 @@ impl HidHandle {
     /// Send a brightness or sleep action to every live device of `model`.
     pub fn send_control(&self, model: &DeviceModel, action: DeviceAction) -> Result<(), HubClosed> {
         match &self.shared {
-            Some(shared) => shared.send_control(Some(model.pid()), action),
+            Some(shared) => shared.send_control(Some(model.id), action),
             None => self.controls.send(action).map_err(|_| HubClosed),
         }
     }
@@ -357,9 +363,27 @@ pub struct HidController {
     handle: HidHandle,
     /// Routers of the senders handed out by [`HidController::model_senders`].
     routes: Mutex<Vec<thread::JoinHandle<()>>>,
+    /// The virtual deck the hub serves beside the hardware, if attached.
+    virtual_deck: virtual_device::VirtualSlot,
 }
 
 impl HidController {
+    /// Serve `deck` as a device of the virtual Stream Deck Classic model at
+    /// [`VIRTUAL_DECK_PATH`], beside whatever hardware is plugged in. The hub
+    /// opens it within one wait slice and reports it like a plug; a deck
+    /// attached before is unplugged first. A controller with no hub (see
+    /// [`Self::detached`]) never serves it.
+    pub fn attach_virtual(&self, deck: VirtualDeck) {
+        self.virtual_deck.attach(deck);
+    }
+
+    /// Unplug the attached virtual deck, if any: its worker reports the device
+    /// lost, exactly as when a cable is pulled, and its link reaches nothing
+    /// any more.
+    pub fn detach_virtual(&self) {
+        self.virtual_deck.detach();
+    }
+
     /// A sender whose commands reach the model of the first connected device.
     pub fn control_sender(&self) -> Sender<DeviceAction> {
         self.handle.controls.clone()
@@ -440,12 +464,15 @@ impl HidController {
                     shared: None,
                 },
                 routes: Mutex::default(),
+                virtual_deck: virtual_device::VirtualSlot::default(),
             },
             commands,
             control_commands,
         )
     }
 
+    /// Stop and join the hub (each worker blanks its device), then unplug the
+    /// virtual deck.
     pub fn shutdown(&mut self) {
         self.request_stop();
         if let Some(hub) = self.hub.take() {
@@ -455,6 +482,7 @@ impl HidController {
         for route in routes {
             let _ = route.join();
         }
+        self.detach_virtual();
     }
 }
 
@@ -465,7 +493,8 @@ impl Drop for HidController {
 }
 
 /// Start the HID hub on a dedicated, owned thread. It serves every supported
-/// device it finds, each on a worker of its own, and follows plugs and unplugs.
+/// device it finds, each on a worker of its own, and follows plugs and unplugs;
+/// a virtual deck given to [`HidController::attach_virtual`] is served beside them.
 pub fn start_hid_monitor(sender: Sender<MonitorEvent>) -> HidController {
     hub::spawn(
         sender,

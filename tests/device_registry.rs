@@ -6,7 +6,10 @@ use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
 use sdeck_plus::{
     binding_editor::{controls_for, trigger_from_selection_for, ControlKind, EventKind},
     config_bundle,
-    device_model::{DeviceModel, ImageFormat, ProtocolFamily, Rotation, Support, PLUS, PLUS_XL},
+    device_model::{
+        DeviceModel, ImageFormat, ProtocolFamily, Rotation, Support, CLASSIC, PLUS, PLUS_XL,
+        VIRTUAL_CLASSIC,
+    },
     device_roots::{data_root_in, owner_of_root},
     image_output,
     layers::{Action, LayerStore, SwipeDirection, Trigger},
@@ -735,4 +738,108 @@ fn by_id_supported_names_only_connectable_models() {
             model.id
         );
     }
+}
+
+/// Everything but the identity: the virtual Classic speaks and draws exactly
+/// like a plugged-in Classic.
+#[test]
+fn the_virtual_classic_is_a_classic_the_application_serves_itself() {
+    let model =
+        DeviceModel::by_id("virtual-classic").expect("the registry names the virtual Classic");
+    assert_eq!(model, &VIRTUAL_CLASSIC);
+    assert_eq!(model.support, Support::Virtual);
+    assert!(model.is_virtual() && !model.is_supported());
+    assert!(!CLASSIC.is_virtual() && !PLUS.is_virtual());
+    assert_eq!(DeviceModel::by_id_supported("virtual-classic"), None);
+    assert!(model.pids.is_empty(), "no USB product id");
+    assert!(!model.name.is_empty() && model.name != CLASSIC.name);
+    assert!(model
+        .id
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'));
+    assert_eq!((model.key_cols, model.key_rows, model.keys()), (5, 3, 15));
+    assert_eq!(
+        DeviceModel {
+            id: CLASSIC.id,
+            name: CLASSIC.name,
+            aliases: CLASSIC.aliases,
+            support: CLASSIC.support,
+            pids: CLASSIC.pids,
+            doc_url: CLASSIC.doc_url,
+            ..*model
+        },
+        CLASSIC,
+        "the same geometry, images, background and reports as the Classic"
+    );
+    assert_eq!(model.ensure_protocol(), Ok(()));
+    for key in model.key_numbers() {
+        assert_eq!(model.key_on_background(key), CLASSIC.key_on_background(key));
+    }
+    assert_eq!(model.live_controls(), "keys");
+}
+
+#[test]
+fn the_virtual_classic_is_never_discovered_over_usb_or_listed_with_the_hardware() {
+    let is_virtual = |model: &&DeviceModel| model.id == "virtual-classic";
+    // Discovery, udev and installer checks, previews and screenshots iterate these.
+    assert!(!DeviceModel::supported().any(|model| is_virtual(&model)));
+    assert!(!DeviceModel::all().iter().any(is_virtual));
+    for pid in 0..=u16::MAX {
+        assert!(DeviceModel::by_pid_any(pid).is_none_or(|model| !model.is_virtual()));
+        assert!(DeviceModel::by_pid(pid).is_none_or(|model| !model.is_virtual()));
+    }
+    let virtuals: Vec<_> = DeviceModel::virtual_models()
+        .iter()
+        .map(|model| model.id)
+        .collect();
+    assert_eq!(virtuals, ["virtual-classic"]);
+    // What a session can run: the hardware first, then the virtual decks.
+    let connectable: Vec<_> = DeviceModel::connectable().map(|model| model.id).collect();
+    assert_eq!(
+        connectable,
+        [
+            "plus",
+            "plus-xl",
+            "classic",
+            "xl",
+            "neo",
+            "mini",
+            "virtual-classic"
+        ]
+    );
+    let rules =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("udev/70-sdeck.rules"))
+            .unwrap();
+    assert!(!rules.contains("virtual"));
+}
+
+#[test]
+fn the_virtual_classic_encodes_and_decodes_the_classic_reports() {
+    let scratch = Scratch::new("virtual-classic");
+    let source = picture(&scratch.0, "source.png", 500, 300);
+    for target in [
+        ArtworkTarget::Keypad(1),
+        ArtworkTarget::Keypad(15),
+        ArtworkTarget::TouchStripBackground,
+    ] {
+        let ours = image_output::prepare_jpeg_for(&VIRTUAL_CLASSIC, target, &source).unwrap();
+        let theirs = image_output::prepare_jpeg_for(&CLASSIC, target, &source).unwrap();
+        assert_eq!(ours, theirs, "{target:?}");
+        assert_eq!(
+            image_output::encode_reports_for(&VIRTUAL_CLASSIC, target, &ours).unwrap(),
+            image_output::encode_reports_for(&CLASSIC, target, &theirs).unwrap(),
+            "{target:?}"
+        );
+    }
+    let mut report = vec![0x01, 0x00, 15, 0];
+    report.extend((0..15).map(|key| u8::from(key % 4 == 0)));
+    report.resize(64, 0);
+    assert_eq!(
+        sdeck_plus::protocol::decode_report_for(&VIRTUAL_CLASSIC, &report),
+        sdeck_plus::protocol::decode_report_for(&CLASSIC, &report)
+    );
+    assert_eq!(
+        sdeck_plus::protocol::decode_report_for(&VIRTUAL_CLASSIC, &report).len(),
+        15
+    );
 }
