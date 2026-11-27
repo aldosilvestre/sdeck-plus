@@ -5745,6 +5745,7 @@ mod tests {
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
+    mod virtual_background_preview_tests;
     mod virtual_deck_ui_tests;
     mod volume_step_tests;
     mod xl_editor_tests;

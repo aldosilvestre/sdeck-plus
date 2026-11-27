@@ -421,6 +421,9 @@ as them and 12px below the last row (252x28, key material with the key's inset
 edge, `.background-surface`): the page's background picture (42x24, cover) and
 the caption "Background" (11px/600). It is a selectable control named
 "Background" (see "Keypad background" below); the Classic chassis is 348x250.
+A background of any size or shape (a 1920x1080 photo, a tall 600x1200 one)
+fills only that thumbnail and each key's share: the bar, the chassis, the card
+and the window keep their size, on the Classic and the virtual Classic alike.
 
 **Models without dials or a touch strip.** The Stream Deck Classic (15 keys,
 5x3) and XL (32 keys, 8x4) have keys only, and the Neo keys, two touch buttons
@@ -1080,8 +1083,10 @@ two columns fit.
   not offered in the selector. The menu's import and export, OBS and Test
   action act on the shown session; the focused application reaches every
   session. Each preview's brand line is the model's name in capitals ("STREAM
-  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC"), and the setup help
-  follows the shown model.
+  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC"), except the virtual
+  Classic's, which reads "VIRTUAL DECK" (its full name stays in the header's
+  connection line and the Current selector), and the setup help follows the
+  shown model.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never

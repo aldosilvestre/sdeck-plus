@@ -55,7 +55,7 @@ fn new_password_hash() -> String {
 }
 
 /// Ports nothing listens on right now, all different.
-fn free_ports<const N: usize>() -> [u16; N] {
+pub(super) fn free_ports<const N: usize>() -> [u16; N] {
     let listeners: Vec<TcpListener> = (0..N)
         .map(|_| TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap())
         .collect();
@@ -71,7 +71,7 @@ fn config_dir(roots: &feature_runtime::SessionRoots) -> PathBuf {
 }
 
 /// Remembers the test password and `port`, as an earlier run would have.
-fn remember(port: u16) -> impl FnOnce(&feature_runtime::SessionRoots) {
+pub(super) fn remember(port: u16) -> impl FnOnce(&feature_runtime::SessionRoots) {
     move |roots| {
         let mut store = SettingsStore::open(&config_dir(roots));
         store.set_port(port).unwrap();
@@ -93,7 +93,7 @@ fn wait_phase(panel: &VirtualDeckPanel, phase: Phase) {
     });
 }
 
-fn turn_on_and_wait(pair: &Pair) -> VirtualDeckPanel {
+pub(super) fn turn_on_and_wait(pair: &Pair) -> VirtualDeckPanel {
     let panel = panel(pair);
     panel.test_widgets().switch.set_active(true);
     wait_phase(&panel, Phase::On);

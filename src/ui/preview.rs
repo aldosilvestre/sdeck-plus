@@ -115,6 +115,20 @@ fn placeholder(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
     }
 }
 
+/// The preview title of the virtual models (L33). Their name stays
+/// everywhere else (connection line, Current selector).
+const VIRTUAL_TITLE: &str = "VIRTUAL DECK";
+
+/// The title over the keys: the model's name in capitals (`layout.brand`),
+/// [`VIRTUAL_TITLE`] for a virtual model.
+fn title(model: &DeviceModel, layout: &PreviewLayout) -> String {
+    if model.is_virtual() {
+        VIRTUAL_TITLE.to_owned()
+    } else {
+        layout.brand.clone()
+    }
+}
+
 /// One model's chassis subtree.
 struct Built {
     chassis: gtk::Fixed,
@@ -315,7 +329,7 @@ impl PreviewView {
     }
 
     fn install(self: &Rc<Self>, model: &'static DeviceModel) {
-        let built = self.build(PreviewLayout::for_model(model));
+        let built = self.build(model, PreviewLayout::for_model(model));
         self.card.append(&built.chassis);
         *self.built.borrow_mut() = Some(built);
         let selected = self.selected.get();
@@ -374,7 +388,7 @@ impl PreviewView {
         self.ui.load_selected_binding(&self.layers);
     }
 
-    fn build(self: &Rc<Self>, layout: PreviewLayout) -> Built {
+    fn build(self: &Rc<Self>, model: &DeviceModel, layout: PreviewLayout) -> Built {
         let chassis = gtk::Fixed::new();
         chassis.set_halign(gtk::Align::Center);
         chassis.set_valign(gtk::Align::Center);
@@ -388,7 +402,7 @@ impl PreviewView {
             handlers: Vec::new(),
             bindings: Vec::new(),
         };
-        let brand = Label::new(Some(&layout.brand));
+        let brand = Label::new(Some(&title(model, &layout)));
         brand.add_css_class("hardware-brand");
         brand.set_size_request(layout.brand_rect.w, layout.brand_rect.h);
         chassis.put(
@@ -444,16 +458,29 @@ impl PreviewView {
             }
             bar.set_size_request(rect.w, rect.h);
             let content = GtkBox::new(Orientation::Horizontal, 8);
+            // The LCD's 480:272 shape at the bar's height. A picture's natural
+            // size is its pixel size, so the picture is an overlay of a frame
+            // of that shape, which GTK does not measure (as on the keys): a
+            // background of any size never widens the bar, the chassis or
+            // the card past the device.
+            let frame = gtk::Overlay::new();
+            frame.add_css_class("background-thumbnail");
+            frame.set_overflow(gtk::Overflow::Hidden);
+            frame.set_size_request(42, 24);
+            frame.set_hexpand(false);
+            frame.set_valign(gtk::Align::Center);
             let thumbnail = artwork_picture();
-            thumbnail.add_css_class("background-thumbnail");
-            thumbnail.set_hexpand(false);
-            // The LCD's 480:272 shape at the bar's height.
-            thumbnail.set_size_request(42, 24);
             thumbnail.set_visible(false);
+            frame.add_overlay(&thumbnail);
+            // The frame shows while the page has a background.
+            thumbnail
+                .bind_property("visible", &frame, "visible")
+                .sync_create()
+                .build();
             let caption = Label::new(Some("Background"));
             caption.add_css_class("background-caption");
             caption.set_xalign(0.0);
-            content.append(&thumbnail);
+            content.append(&frame);
             content.append(&caption);
             bar.set_child(Some(&content));
             put(&chassis, &bar, rect);
