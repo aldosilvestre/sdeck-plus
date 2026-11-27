@@ -696,6 +696,7 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 .virtual-deck-row { min-height: 22px; padding: 8px 10px; }
 .virtual-deck-title { font-weight: 700; }
 .virtual-deck-qr { border-radius: 8px; }
+.virtual-deck-password text { letter-spacing: 2px; }
 /* Switches: a field with a control edge when off, violet when on; a muted knob turns bg-coloured. */
 switch {
     background-color: @desk_field;

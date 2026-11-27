@@ -311,6 +311,37 @@ impl Drop for ViewerClient {
 }
 
 #[test]
+fn hidden_passwords_show_small_bullets_in_every_password_field() {
+    run_gtk_test(|| {
+        let [port] = free_ports();
+        let Some(pair) = start_pair_with("virtual-bullets", remember(port)) else {
+            return;
+        };
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        assert_eq!(virtual_deck_ui::HIDDEN_CHAR, '\u{2022}');
+        for entry in [
+            &w.first_form.new,
+            &w.first_form.repeat,
+            &w.change_form.new,
+            &w.change_form.repeat,
+        ] {
+            assert!(entry.has_css_class("virtual-deck-password"));
+            let mut texts = Vec::new();
+            let mut child = entry.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                if let Ok(text) = widget.downcast::<gtk::Text>() {
+                    texts.push(text);
+                }
+            }
+            assert_eq!(texts.len(), 1, "one text inside each password entry");
+            assert_eq!(texts[0].invisible_char(), virtual_deck_ui::HIDDEN_CHAR);
+        }
+    });
+}
+
+#[test]
 fn the_menu_offers_the_switch_below_export_configuration_and_it_starts_off() {
     run_gtk_test(|| {
         let [port] = free_ports();

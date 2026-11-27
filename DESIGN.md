@@ -987,6 +987,9 @@ two columns fit.
     is about 380px like the artboard) show only when there is something to show and scroll past
     620px or on a short screen. A wrapping feedback banner at their top says why turning on, or
     opening the browser from **Open**, failed. Turning on never opens a browser window by itself.
+    Password fields (here and on the web login) hide characters as small bullets (`•`, 2px apart in
+    the app; 13px with 0.24em spacing on the web, 16px on iOS so focus does not zoom) and reveal them
+    with an eye icon (eye-off while shown), never a "Show" caption.
   - **First time** (no stored password): turning the switch on leaves it off and opens an inline
     form instead: the warning line "Set a password before turning the virtual deck on.", the
     labelled password entries "New password" and "Repeat it" (peek icon), an error line, then the

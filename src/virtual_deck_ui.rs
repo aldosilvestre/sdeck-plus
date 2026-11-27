@@ -299,8 +299,20 @@ impl PasswordForm {
     }
 }
 
+/// What a hidden password shows per character: a bullet, lighter than GTK's
+/// default large disc.
+pub(crate) const HIDDEN_CHAR: char = '\u{2022}';
+
 fn password_entry(name: &str) -> gtk::PasswordEntry {
     let entry = gtk::PasswordEntry::builder().show_peek_icon(true).build();
+    entry.add_css_class("virtual-deck-password");
+    let mut child = entry.first_child();
+    while let Some(widget) = child {
+        if let Some(text) = widget.downcast_ref::<gtk::Text>() {
+            text.set_invisible_char(HIDDEN_CHAR);
+        }
+        child = widget.next_sibling();
+    }
     entry.update_property(&[gtk::accessible::Property::Label(name)]);
     entry
 }
