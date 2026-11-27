@@ -2,6 +2,8 @@
 
 Synced from the native GTK4 app, read only. Sources read: `src/ui.css` (dark default, token definitions and component rules), `src/ui-light.css` (light overrides of the same tokens), `DESIGN.md` (visual and interaction contract, Add plugin dialog section). `docs/assets/site.css` is the marketing site and is deliberately ignored.
 
+Re-synced 2026-11-21: `docs/assets/site.css` changed after the last sync only in marketing-site layout rules (copy button row, device-card shot, key tables, heading margins), no token; the app tokens are unchanged. `src/ui.css` gained the Neo window, touch buttons, Classic keypad background and multi-step rules, recorded under Hardware preview.
+
 Every value below was found in those files. Where a value is not declared (the font family, widget heights that GTK derives) it says so.
 
 ## Colors
@@ -126,6 +128,23 @@ Keyboard focus is a 2px `desk_cyan` outline: `outline: 2px solid @desk_cyan; out
 | Check box | field fill, control edge; checked fill `desk_violet` | src/ui.css `checkbutton` |
 | Plugin heading | 11 / 700 muted label with padding 2px 8px 0 | src/ui.css `.plugin-heading` |
 | Plugin add dialog preview | padding 2px 2px 8px; section labels 13px with 6px top padding; add button 28px square | src/ui.css `.plugin-add-dialog`, `button.plugin-add` |
+
+## Hardware preview
+
+The device drawing in the main window (and the base for a virtual device face). Literal colors, not `desk_*` tokens.
+
+| Element | Value | Source |
+| --- | --- | --- |
+| `.hardware-chassis` | `linear-gradient(135deg, #414951, #272d34)`, radius 26px, `inset 0 1px alpha(#ffffff, 0.18), inset 0 -1px alpha(#000000, 0.45)` | src/ui.css |
+| `.hardware-rail` | `linear-gradient(180deg, #22282e, #343c44)`, radius 28px, `inset 0 1px 2px alpha(#000000, 0.35), inset 0 -1px alpha(#ffffff, 0.08)` | src/ui.css |
+| Bezel / key / strip / window surface | `#08090b`; bezel radius 2px | src/ui.css `.hardware-bezel, .key-surface, ...` |
+| `.key-surface` | radius 8px, `inset 0 0 0 2px #515b65`; active `#174936` | src/ui.css |
+| Surface hover | `#11151a` | src/ui.css `.window-surface:hover`, `.background-surface:hover` |
+| `.touch-button` | `radial-gradient(circle, #1d2228, #08090b)`, radius 50%, `inset 0 0 0 2px #515b65`; hover `radial-gradient(circle, #2c343c, #11151a)` | src/ui.css |
+| `.background-surface` (Classic keypad background) | `#08090b`, radius 6px, `inset 0 0 0 1px #515b65`, padding 2px 8px; caption `#c9d1d9` 11 / 600 | src/ui.css |
+| Pressed control | `outline: 4px solid desk_live_press`, offset -4px, `filter: brightness(1.25)` | src/ui.css `.control-pressed` |
+| Touch display / dial legend | `#b4f1da` 11 / 600; `#d5dce5` 10 / 600 | src/ui.css |
+| Multi-step number | 13 / 700 `desk_muted` | src/ui.css `.multi-step-number` |
 
 ## Motion
 
