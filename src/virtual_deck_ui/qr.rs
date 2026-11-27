@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn an_address_encodes_with_finder_patterns_in_three_corners() {
-        let matrix = Matrix::encode("https://192.168.100.200:65535/").unwrap();
+        let matrix = Matrix::encode("http://192.168.100.200:65535/").unwrap();
         let width = matrix.width();
         assert!(
             width >= 21 && (width - 21).is_multiple_of(4),
@@ -187,8 +187,8 @@ mod tests {
     #[test]
     fn different_addresses_make_different_codes() {
         assert_ne!(
-            Matrix::encode("https://127.0.0.1:8765/").unwrap(),
-            Matrix::encode("https://127.0.0.1:8766/").unwrap()
+            Matrix::encode("http://127.0.0.1:8765/").unwrap(),
+            Matrix::encode("http://127.0.0.1:8766/").unwrap()
         );
     }
 }

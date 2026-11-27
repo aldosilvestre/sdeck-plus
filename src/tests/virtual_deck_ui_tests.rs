@@ -3,31 +3,36 @@
 //! password form, on and off, the viewers with Disconnect, a new password, a
 //! new port, the Current selector and the header lines.
 //!
-//! The server is real and listens on 127.0.0.1 only (the test binary's `LAN`);
-//! the config folder is scratch; the test binary records the browser address
-//! instead of starting a browser; viewers are a rustls + tungstenite client.
+//! The server is real, plain HTTP, and listens on 127.0.0.1 only (the test
+//! binary's `LAN`); the config folder is scratch; the test binary records the
+//! browser address instead of starting a browser; viewers log in with the
+//! page's challenge-response (computed here with `ring`) and watch through a
+//! tungstenite client.
 use super::model_session_tests::{header_label, wait_until};
 use super::two_device_tests::{active, start_pair_with, wait_layer, Pair, PLUS_PATH};
 use super::*;
 use crate::virtual_deck_ui::{self, Phase, VirtualDeckPanel};
-use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ring::{digest, hmac, pbkdf2};
 use sdeck_plus::{
     device_model::{PLUS, VIRTUAL_CLASSIC},
     event_api::test_support::SimDevice,
     virtual_deck::{
-        hash_password,
+        build_verifier,
         settings::{SettingsStore, FILE_NAME},
+        Verifier,
     },
 };
-use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     io::{ErrorKind, Read, Write},
-    net::{IpAddr, Ipv4Addr, TcpListener, TcpStream},
+    net::{Ipv4Addr, TcpListener, TcpStream},
+    num::NonZeroU32,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc, Mutex, OnceLock,
     },
 };
 use tungstenite::{client::IntoClientRequest, Message};
@@ -41,17 +46,24 @@ AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
 /// Upper bound of every wait on a real signal; never a fixed sleep.
 const WAIT: Duration = Duration::from_secs(20);
 
-/// One hash for the whole binary: Argon2id is deliberately slow.
-fn password_hash() -> String {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| hash_password(PASSWORD).unwrap())
+/// One verifier for the whole binary: deriving it is deliberately slow.
+fn password_verifier() -> Verifier {
+    static VERIFIER: OnceLock<Verifier> = OnceLock::new();
+    VERIFIER
+        .get_or_init(|| build_verifier(PASSWORD).unwrap())
         .clone()
 }
 
-fn new_password_hash() -> String {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| hash_password(NEW_PASSWORD).unwrap())
+fn new_password_verifier() -> Verifier {
+    static VERIFIER: OnceLock<Verifier> = OnceLock::new();
+    VERIFIER
+        .get_or_init(|| build_verifier(NEW_PASSWORD).unwrap())
         .clone()
+}
+
+/// The verifier the settings file holds.
+fn stored_verifier(config: &Path) -> Option<Verifier> {
+    SettingsStore::open(config).settings().verifier.clone()
 }
 
 /// Ports nothing listens on right now, all different.
@@ -75,7 +87,7 @@ pub(super) fn remember(port: u16) -> impl FnOnce(&feature_runtime::SessionRoots)
     move |roots| {
         let mut store = SettingsStore::open(&config_dir(roots));
         store.set_port(port).unwrap();
-        store.set_password_hash(password_hash()).unwrap();
+        store.set_verifier(password_verifier()).unwrap();
     }
 }
 
@@ -149,15 +161,6 @@ fn buttons_in(widget: &gtk::Widget) -> Vec<Button> {
     found
 }
 
-fn fingerprint_of(config: &Path) -> String {
-    let der = CertificateDer::from_pem_file(config.join("virtual/cert.pem")).unwrap();
-    let hex: Vec<String> = Sha256::digest(der.as_ref())
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect();
-    format!("SHA-256 {}", hex.join(":"))
-}
-
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -171,39 +174,19 @@ struct ViewerClient {
     handle: Option<thread::JoinHandle<()>>,
 }
 
-type Tls = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
-
-fn client_config(config: &Path) -> Arc<rustls::ClientConfig> {
-    let cert = CertificateDer::from_pem_file(config.join("virtual/cert.pem")).unwrap();
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(cert).unwrap();
-    Arc::new(
-        rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(roots)
-        .with_no_client_auth(),
-    )
-}
-
-fn tls(config: &Arc<rustls::ClientConfig>, port: u16) -> Tls {
+fn connect(port: u16) -> TcpStream {
     let tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
     tcp.set_read_timeout(Some(WAIT)).unwrap();
     tcp.set_write_timeout(Some(WAIT)).unwrap();
-    let name = ServerName::from(IpAddr::V4(Ipv4Addr::LOCALHOST));
-    let connection = rustls::ClientConnection::new(config.clone(), name).unwrap();
-    rustls::StreamOwned::new(connection, tcp)
+    tcp
 }
 
-/// POST /login: the session cookie, or the refusing status.
-fn login(config: &Arc<rustls::ClientConfig>, port: u16, password: &str) -> Result<String, u16> {
-    let mut stream = tls(config, port);
-    let body = format!("password={}", password.replace(' ', "+"));
+/// A POST with a JSON body: the status, the headers and the body.
+fn post(port: u16, path: &str, body: &str) -> (u16, String, serde_json::Value) {
+    let mut stream = connect(port);
     let request = format!(
-        "POST /login HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
-         Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
@@ -214,15 +197,85 @@ fn login(config: &Arc<rustls::ClientConfig>, port: u16, password: &str) -> Resul
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(read) => raw.extend_from_slice(&chunk[..read]),
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof && !raw.is_empty() => break,
-            Err(error) => panic!("reading the login answer failed: {error}"),
+            Err(error) if error.kind() == ErrorKind::ConnectionReset && !raw.is_empty() => break,
+            Err(error) => panic!("reading the answer failed: {error}"),
         }
     }
-    let head = String::from_utf8_lossy(&raw).to_string();
+    let raw = String::from_utf8_lossy(&raw).to_string();
+    let (head, body) = raw.split_once("\r\n\r\n").expect("a whole answer");
     let status: u16 = head.split(' ').nth(1).unwrap().parse().unwrap();
-    if status != 303 {
+    (
+        status,
+        head.to_string(),
+        serde_json::from_str(body).unwrap_or_default(),
+    )
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), data);
+    tag.as_ref().try_into().unwrap()
+}
+
+/// SaltedPasswords by password and salt.
+type SaltedCache = Mutex<HashMap<(String, Vec<u8>), [u8; 32]>>;
+
+/// SaltedPassword, derived once per password and salt for the whole binary.
+fn salted_password(password: &str, salt: &[u8], iterations: u32) -> [u8; 32] {
+    static SALTED: OnceLock<SaltedCache> = OnceLock::new();
+    let cache = SALTED.get_or_init(Mutex::default);
+    let key = (password.to_string(), salt.to_vec());
+    if let Some(salted) = cache.lock().unwrap().get(&key) {
+        return *salted;
+    }
+    let mut salted = [0u8; 32];
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        NonZeroU32::new(iterations).unwrap(),
+        salt,
+        password.as_bytes(),
+        &mut salted,
+    );
+    cache.lock().unwrap().insert(key, salted);
+    salted
+}
+
+/// The page's login: POST /login/start, the proof computed here, POST
+/// /login/finish. The session cookie, or the refusing status.
+fn login(port: u16, password: &str) -> Result<String, u16> {
+    let (status, _, challenge) = post(port, "/login/start", "");
+    if status != 200 {
         return Err(status);
     }
+    let salt = STANDARD
+        .decode(challenge["salt"].as_str().unwrap())
+        .unwrap();
+    let iterations = u32::try_from(challenge["iterations"].as_u64().unwrap()).unwrap();
+    let nonce = challenge["nonce"].as_str().unwrap();
+    let salted = salted_password(password, &salt, iterations);
+    let client_key = hmac_sha256(&salted, b"Client Key");
+    let stored_key = digest::digest(&digest::SHA256, &client_key);
+    let client_nonce = "0123456789abcdef0123456789abcdef";
+    let auth_message = format!("{client_nonce}{nonce}");
+    let signature = hmac_sha256(stored_key.as_ref(), auth_message.as_bytes());
+    let mut proof = client_key;
+    for (byte, signature) in proof.iter_mut().zip(signature) {
+        *byte ^= signature;
+    }
+    let body = serde_json::json!({
+        "nonce": nonce,
+        "client_nonce": client_nonce,
+        "proof": STANDARD.encode(proof),
+    });
+    let (status, head, answer) = post(port, "/login/finish", &body.to_string());
+    if status != 200 {
+        return Err(status);
+    }
+    let server_key = hmac_sha256(&salted, b"Server Key");
+    assert_eq!(
+        answer["server_signature"],
+        STANDARD.encode(hmac_sha256(&server_key, auth_message.as_bytes())),
+        "the server proves it knows the password"
+    );
     let cookie = head
         .lines()
         .find_map(|line| line.strip_prefix("Set-Cookie: "))
@@ -231,10 +284,9 @@ fn login(config: &Arc<rustls::ClientConfig>, port: u16, password: &str) -> Resul
 }
 
 impl ViewerClient {
-    fn connect(config: &Path, port: u16, user_agent: &str) -> Self {
-        let tls_config = client_config(config);
-        let cookie = login(&tls_config, port, PASSWORD).expect("the right password logs in");
-        let mut request = format!("wss://127.0.0.1:{port}/ws")
+    fn connect(port: u16, user_agent: &str) -> Self {
+        let cookie = login(port, PASSWORD).expect("the right password logs in");
+        let mut request = format!("ws://127.0.0.1:{port}/ws")
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();
@@ -242,14 +294,13 @@ impl ViewerClient {
         headers.insert("Cookie", cookie.parse().unwrap());
         headers.insert(
             "Origin",
-            format!("https://127.0.0.1:{port}").parse().unwrap(),
+            format!("http://127.0.0.1:{port}").parse().unwrap(),
         );
         let (mut socket, _) =
-            tungstenite::client(request, tls(&tls_config, port)).expect("the page connects");
+            tungstenite::client(request, connect(port)).expect("the page connects");
         // Short reads, so the thread also sends presses while nothing arrives.
         socket
             .get_ref()
-            .sock
             .set_read_timeout(Some(Duration::from_millis(20)))
             .unwrap();
         let (sender, messages) = mpsc::channel();
@@ -412,6 +463,7 @@ fn turning_on_without_a_password_asks_for_one_and_checks_it_first() {
             label_texts(w.first_time.upcast_ref())[..3],
             [virtual_deck_ui::NEEDS_PASSWORD, "New password", "Repeat it"]
         );
+        assert_eq!(w.first_warning.text(), virtual_deck_ui::NEEDS_PASSWORD);
         let form = &w.first_form;
         assert_eq!(button_caption(&form.cancel).as_deref(), Some("Cancel"));
         assert_eq!(
@@ -447,6 +499,63 @@ fn turning_on_without_a_password_asks_for_one_and_checks_it_first() {
     });
 }
 
+/// What an older version wrote: an Argon2id PHC string.
+const OLD_HASH: &str =
+    "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
+
+/// A settings file from an older version keeps its port, but its Argon2id
+/// hash cannot log in over plain HTTP: the switch asks for a new password and
+/// says why, and the file changes only when the new password is saved.
+#[test]
+fn an_old_argon2_password_asks_for_a_new_one_and_keeps_the_port() {
+    run_gtk_test(|| {
+        let [port] = free_ports();
+        let old = serde_json::json!({"port": port, "password_hash": OLD_HASH}).to_string();
+        let written = old.clone();
+        let Some(pair) = start_pair_with("virtual-old-password", move |roots| {
+            let dir = config_dir(roots);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(FILE_NAME), &written).unwrap();
+        }) else {
+            return;
+        };
+        let settings = config_dir(&pair.roots).join(FILE_NAME);
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        w.switch.set_active(true);
+        assert!(
+            !w.switch.is_active(),
+            "no usable password: the switch stays off"
+        );
+        assert_eq!(panel.test_phase(), Phase::Off);
+        assert!(w.first_time.get_visible());
+        assert_eq!(w.first_warning.text(), virtual_deck_ui::OLD_PASSWORD);
+        assert!(!w.feedback.get_visible(), "the old file is not an error");
+        assert!(!listening(port));
+        assert_eq!(
+            std::fs::read_to_string(&settings).unwrap(),
+            old,
+            "kept as it is"
+        );
+        // Cancel and try again: still kept.
+        w.first_form.cancel.emit_clicked();
+        w.switch.set_active(true);
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), old);
+        w.first_form.new.set_text(PASSWORD);
+        w.first_form.repeat.set_text(PASSWORD);
+        w.first_form.submit.emit_clicked();
+        wait_phase(&panel, Phase::On);
+        assert_eq!(panel.test_port(), Some(port), "on the remembered port");
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(stored["port"], port);
+        assert!(stored.get("password_hash").is_none(), "{stored}");
+        assert!(stored["stored_key"].is_string(), "{stored}");
+        assert!(login(port, PASSWORD).is_ok());
+        assert!(virtual_deck_ui::take_opened().is_empty());
+    });
+}
+
 #[test]
 fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
     run_gtk_test(|| {
@@ -468,27 +577,32 @@ fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
         form.repeat.set_text(PASSWORD);
         form.submit.emit_clicked();
         wait_phase(&panel, Phase::On);
-        let url = format!("https://127.0.0.1:{port}/");
-        // S4: only the hash is stored, owner-only.
+        let url = format!("http://127.0.0.1:{port}/");
+        // S4: only the verifier is stored, owner-only.
         let settings = config.join(FILE_NAME);
         let stored: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
         assert_eq!(stored["port"], port);
-        let hash = stored["password_hash"].as_str().unwrap();
-        assert!(hash.starts_with("$argon2id$"), "{hash}");
-        assert!(!std::fs::read_to_string(&settings)
-            .unwrap()
-            .contains(PASSWORD));
+        assert_eq!(stored["iterations"], sdeck_plus::virtual_deck::ITERATIONS);
+        for key in ["salt", "stored_key", "server_key"] {
+            assert!(stored[key].is_string(), "{key}: {stored}");
+        }
+        assert!(stored.get("password_hash").is_none(), "{stored}");
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains(PASSWORD) && !text.contains(&STANDARD.encode(PASSWORD)));
         assert_eq!(mode(&settings), 0o600);
         assert!(!w.first_time.get_visible());
-        // S5: the server listens on the remembered port with its certificate.
+        // S5: the server listens on the remembered port over plain HTTP: no
+        // certificate, no fingerprint.
         assert!(listening(port));
         assert_eq!(panel.test_port(), Some(port));
-        assert_eq!(mode(&config.join("virtual/key.pem")), 0o600);
-        assert_eq!(w.fingerprint.text(), fingerprint_of(&config));
-        assert_eq!(panel.test_fingerprint().unwrap(), w.fingerprint.text());
-        assert!(label_texts(w.running.upcast_ref())
-            .contains(&virtual_deck_ui::FINGERPRINT_HELP.to_string()));
+        assert!(!config.join("virtual").exists(), "no certificate folder");
+        let shown = label_texts(w.running.upcast_ref()).join("\n");
+        assert!(
+            !shown.contains("ertificate") && !shown.contains("ingerprint"),
+            "{shown}"
+        );
+        assert!(login(port, PASSWORD).is_ok());
         // S6: the address and its QR code, never the password.
         assert_eq!(panel.test_url().as_deref(), Some(url.as_str()));
         assert_eq!(w.address.text(), url);
@@ -641,10 +755,9 @@ fn a_viewer_is_listed_presses_keys_sees_pictures_and_disconnect_ends_it() {
         }) else {
             return;
         };
-        let config = config_dir(&pair.roots);
         let panel = turn_on_and_wait(&pair);
         let w = panel.test_widgets();
-        let viewer = ViewerClient::connect(&config, port, ANDROID_CHROME);
+        let viewer = ViewerClient::connect(port, ANDROID_CHROME);
         // A new page gets the deck as it is, starting blank.
         viewer.next_of("reset");
         let heading = w.viewers_heading.clone();
@@ -697,7 +810,7 @@ fn changing_the_password_asks_first_then_disconnects_every_viewer() {
         let settings = config.join(FILE_NAME);
         let panel = turn_on_and_wait(&pair);
         let w = panel.test_widgets();
-        let viewer = ViewerClient::connect(&config, port, MAC_SAFARI);
+        let viewer = ViewerClient::connect(port, MAC_SAFARI);
         let heading = w.viewers_heading.clone();
         wait_until("the viewer is listed", move || {
             heading.text() == "Viewers (1)"
@@ -748,13 +861,8 @@ fn changing_the_password_asks_first_then_disconnects_every_viewer() {
         });
         assert!(!form.root.get_visible());
         assert_ne!(std::fs::read(&settings).unwrap(), before);
-        let tls = client_config(&config);
-        assert_eq!(
-            login(&tls, port, PASSWORD),
-            Err(401),
-            "the old one is refused"
-        );
-        assert!(login(&tls, port, "another secret").is_ok());
+        assert_eq!(login(port, PASSWORD), Err(401), "the old one is refused");
+        assert!(login(port, "another secret").is_ok());
     });
 }
 
@@ -803,7 +911,7 @@ fn a_new_port_restarts_the_server_and_a_busy_one_is_reported() {
         wait_until("the server moves", move || {
             watched.test_port() == Some(second) && watched.test_phase() == Phase::On
         });
-        let url = format!("https://127.0.0.1:{second}/");
+        let url = format!("http://127.0.0.1:{second}/");
         assert_eq!(w.address.text(), url);
         assert_eq!(w.qr.text(), url);
         assert!(!w.port_feedback.get_visible());
@@ -894,26 +1002,21 @@ fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_ser
         hold.release();
         wait_port(&panel, second);
         // The live server accepts exactly the password the app keeps.
-        let tls = client_config(&config);
-        let stored = SettingsStore::open(&config)
-            .settings()
-            .password_hash
-            .clone()
-            .unwrap();
-        let (kept, other) = if stored == password_hash() {
+        let stored = stored_verifier(&config).unwrap();
+        let (kept, other) = if stored == password_verifier() {
             (PASSWORD, NEW_PASSWORD)
         } else {
             (NEW_PASSWORD, PASSWORD)
         };
         assert!(
-            login(&tls, second, kept).is_ok(),
+            login(second, kept).is_ok(),
             "the new server accepts the password the app keeps ({kept:?})"
         );
-        assert_eq!(login(&tls, second, other), Err(401));
+        assert_eq!(login(second, other), Err(401));
         // While restarting nothing changed: Change… and the confirmation waited and said why.
         assert_eq!(
             stored,
-            password_hash(),
+            password_verifier(),
             "nothing was confirmed while restarting"
         );
         assert_eq!(
@@ -936,7 +1039,7 @@ fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_ser
             secondary_text(&dialog).as_deref(),
             Some(virtual_deck_ui::CHANGE_WARNING)
         );
-        let viewer = ViewerClient::connect(&config, second, MAC_SAFARI);
+        let viewer = ViewerClient::connect(second, MAC_SAFARI);
         let heading = w.viewers_heading.clone();
         wait_until("the viewer is listed", move || {
             heading.text() == "Viewers (1)"
@@ -945,16 +1048,9 @@ fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_ser
         assert_eq!(viewer.next_of("bye")["reason"], "password-changed");
         assert!(panel.test_confirmation().is_none());
         assert!(!form.root.get_visible());
-        assert_eq!(
-            login(&tls, second, PASSWORD),
-            Err(401),
-            "the old one is refused"
-        );
-        assert!(login(&tls, second, NEW_PASSWORD).is_ok());
-        assert_ne!(
-            SettingsStore::open(&config).settings().password_hash,
-            Some(password_hash())
-        );
+        assert_eq!(login(second, PASSWORD), Err(401), "the old one is refused");
+        assert!(login(second, NEW_PASSWORD).is_ok());
+        assert_ne!(stored_verifier(&config), Some(password_verifier()));
     });
 }
 
@@ -987,10 +1083,7 @@ fn a_new_password_is_refused_while_the_server_restarts() {
         let watched = panel.clone();
         wait_until("every worker is joined", move || watched.test_idle());
         assert!(panel.test_confirmation().is_none());
-        assert_eq!(
-            SettingsStore::open(&config).settings().password_hash,
-            Some(password_hash())
-        );
+        assert_eq!(stored_verifier(&config), Some(password_verifier()));
     });
 }
 
@@ -1010,33 +1103,32 @@ fn a_server_that_starts_or_restarts_takes_the_password_the_app_keeps() {
         w.switch.set_active(true);
         assert_eq!(panel.test_phase(), Phase::Starting);
         SettingsStore::open(&config)
-            .set_password_hash(new_password_hash())
+            .set_verifier(new_password_verifier())
             .unwrap();
         hold.release();
         wait_phase(&panel, Phase::On);
-        let tls = client_config(&config);
         assert_eq!(
-            login(&tls, first, PASSWORD),
+            login(first, PASSWORD),
             Err(401),
             "the started server refuses the old password"
         );
-        assert!(login(&tls, first, NEW_PASSWORD).is_ok());
+        assert!(login(first, NEW_PASSWORD).is_ok());
         // And while it moves to another port.
         let hold = panel.test_hold_servers();
         w.port.set_text(&second.to_string());
         w.port.emit_activate();
         assert_eq!(panel.test_phase(), Phase::Restarting);
         SettingsStore::open(&config)
-            .set_password_hash(password_hash())
+            .set_verifier(password_verifier())
             .unwrap();
         hold.release();
         wait_port(&panel, second);
         assert_eq!(
-            login(&tls, second, NEW_PASSWORD),
+            login(second, NEW_PASSWORD),
             Err(401),
             "the restarted server refuses the old password"
         );
-        assert!(login(&tls, second, PASSWORD).is_ok());
+        assert!(login(second, PASSWORD).is_ok());
     });
 }
 
@@ -1081,7 +1173,7 @@ fn a_new_port_that_cannot_be_remembered_is_still_the_one_shown_and_served() {
         w.port.set_text(&second.to_string());
         w.port.emit_activate();
         wait_port(&panel, second);
-        let url = format!("https://127.0.0.1:{second}/");
+        let url = format!("http://127.0.0.1:{second}/");
         assert!(listening(second));
         assert_eq!(w.port.text(), second.to_string());
         assert_eq!(w.address.text(), url);
@@ -1180,7 +1272,7 @@ fn the_current_selector_lists_the_virtual_classic_while_it_is_on() {
             detail.tooltip_text().unwrap().as_str(),
             format!(
                 "{sentence}\nUSB device VID 0FD9 / PID 0084 · HID input and artwork active\n\
-                 Virtual Stream Deck Classic — served at https://127.0.0.1:{port}/"
+                 Virtual Stream Deck Classic — served at http://127.0.0.1:{port}/"
             )
         );
         panel.test_widgets().switch.set_active(false);
@@ -1236,8 +1328,8 @@ fn virtual_deck_menu_capture() {
         w.first_form.repeat.set_text(PASSWORD);
         w.first_form.submit.emit_clicked();
         wait_phase(&panel, Phase::On);
-        let _phone = ViewerClient::connect(&config, port, ANDROID_CHROME);
-        let _mac = ViewerClient::connect(&config, port, MAC_SAFARI);
+        let _phone = ViewerClient::connect(port, ANDROID_CHROME);
+        let _mac = ViewerClient::connect(port, MAC_SAFARI);
         let heading = w.viewers_heading.clone();
         wait_until("two viewers", move || heading.text() == "Viewers (2)");
         capture("virtual-deck-menu-running");

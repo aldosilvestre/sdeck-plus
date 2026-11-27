@@ -1,8 +1,9 @@
-//! The virtual Stream Deck Classic's web server: HTTPS + WSS on the LAN.
+//! The virtual Stream Deck Classic's web server: plain HTTP + WebSocket on
+//! the LAN, so no browser ever shows a certificate warning.
 //!
-//! A phone or browser opens `https://<lan-ip>:<port>/`, logs in with the
+//! A phone or browser opens `http://<lan-ip>:<port>/`, logs in with the
 //! password the app set, and gets the deck page; the page then opens
-//! `wss://<lan-ip>:<port>/ws` and exchanges JSON text frames:
+//! `ws://<lan-ip>:<port>/ws` and exchanges JSON text frames:
 //!
 //! - server to page: `{"type":"key","key":n,"jpeg":"<base64>"}`,
 //!   `{"type":"background","jpeg":"<base64>"}`, `{"type":"brightness","percent":n}`,
@@ -13,23 +14,39 @@
 //! Keys are 1 to 15, row-major from the top-left, five columns. A newly
 //! connected page first gets the snapshot, then every published frame.
 //!
-//! Security: the certificate is self-signed (ECDSA P-256, `rustls` with the
-//! `ring` provider) and its key is stored 0600 in a 0700 directory; only an
-//! Argon2id hash of the password is held; each address gets five wrong
-//! passwords, then must wait 30 seconds; a session is a random 32-byte cookie
-//! (`HttpOnly; Secure; SameSite=Strict`); the WebSocket needs that cookie and
-//! `Origin: https://<Host>`; at most eight viewers; one address may hold at
-//! most eight connections that are not (yet) viewers, within 32 open
-//! connections in all; each viewer may press keys at most 50 times a second
-//! (later presses in that second are ignored, releases never are, and a
-//! viewer that leaves lets go of every key it held); every request, header,
-//! body and WebSocket message is size-limited and every read has a deadline.
+//! Login (SCRAM-SHA-256 style; the password never travels): `POST
+//! /login/start` answers `{"salt":"<base64>","iterations":n,"nonce":"<64 hex>"}`
+//! with a random 32-byte server nonce that only this address may use, once,
+//! within 30 seconds. The page derives the keys from the password (see
+//! [`Verifier`]) in plain JavaScript, picks a client nonce and sends `POST
+//! /login/finish` with `{"nonce","client_nonce","proof":"<base64>"}`, where
+//! the proof covers AuthMessage = client nonce + server nonce. A right proof
+//! gets 200 `{"server_signature":"<base64>"}`, which the page checks, and the
+//! session cookie; a wrong one 401 `{"error":"Wrong password.","tries_left":n}`;
+//! an unknown, used, expired or another address's nonce 400 `{"error":"The
+//! login expired. Try again."}`; a locked-out address 429 `{"error":"Too many
+//! tries.","retry_after":30}`.
+//!
+//! Security: only the verifier (salt, iterations, StoredKey, ServerKey) is
+//! held, never the password; each address gets five wrong proofs, then must
+//! wait 30 seconds; a session is a random 32-byte cookie (`HttpOnly;
+//! SameSite=Strict`, no `Secure` on plain HTTP); the login requests and
+//! `POST /logout` refuse a foreign or `null` `Origin`, and the WebSocket
+//! needs the cookie and `Origin: http://<Host>`; at most eight viewers; one
+//! address may hold at most eight connections that are not (yet) viewers,
+//! within 32 open connections in all; each viewer may press keys at most 50
+//! times a second (later presses in that second are ignored, releases never
+//! are, and a viewer that leaves lets go of every key it held); every
+//! request, header, body and WebSocket message is size-limited and every
+//! read has a deadline. Plain HTTP is a deliberate trade-off: anyone on the
+//! LAN can read the pictures, the presses and the session cookie, and could
+//! tamper with the page on its way to a phone; the password itself never
+//! crosses the network.
 //!
 //! The server never touches a device: key input arrives on the `inputs`
 //! channel and pictures leave through [`VirtualDeckServer::publish`].
 mod access;
 mod browser;
-mod certificate;
 mod http;
 mod interfaces;
 mod password;
@@ -37,14 +54,11 @@ mod server;
 pub mod settings;
 mod socket;
 mod viewer;
-mod x509;
 
-pub use password::hash_password;
+pub use password::{build_verifier, Verifier, ITERATIONS};
 
 use std::{
-    collections::BTreeSet,
     net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
     sync::{
         mpsc::{Receiver, Sender},
         Arc,
@@ -62,24 +76,21 @@ const KEYS: usize = 15;
 const INDEX_PAGE: &str = include_str!("virtual_deck/page/index.html");
 const LOGIN_PAGE: &str = include_str!("virtual_deck/page/login.html");
 
-/// Where and how the server listens.
+/// Where the server listens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     /// TCP port; 0 picks a free one (see [`VirtualDeckServer::local_port`]).
     pub port: u16,
     /// Address to listen on; `0.0.0.0` listens on every interface.
     pub bind: IpAddr,
-    /// The app's config directory; the certificate lives in `virtual/` inside it.
-    pub config_dir: PathBuf,
 }
 
-impl ServerConfig {
+impl Default for ServerConfig {
     /// Port 8765 on every interface.
-    pub fn new(config_dir: PathBuf) -> Self {
+    fn default() -> Self {
         Self {
             port: DEFAULT_PORT,
             bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            config_dir,
         }
     }
 }
@@ -132,44 +143,23 @@ pub struct VirtualDeckServer {
     running: server::Running,
     bind: IpAddr,
     lan: Vec<Ipv4Addr>,
-    fingerprint: String,
 }
 
 impl VirtualDeckServer {
-    /// Loads or creates the certificate, starts listening and returns once
-    /// the port is bound. `password_hash` comes from [`hash_password`].
+    /// Starts listening and returns once the port is bound. `verifier`
+    /// comes from [`build_verifier`] (or the settings file).
     pub fn start(
         config: ServerConfig,
-        password_hash: String,
+        verifier: Verifier,
         inputs: Sender<DeckInput>,
         snapshot: Snapshot,
     ) -> Result<Self, String> {
-        password::check_hash(&password_hash)?;
-        let lan = interfaces::lan_ipv4();
-        let names = certificate_names(&lan, config.bind);
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let identity = certificate::load_or_create(&config.config_dir, &names, &provider)?;
-        let fingerprint = identity.fingerprint();
-        let tls_error = |error: rustls::Error| format!("Could not set up HTTPS: {error}");
-        let mut tls = rustls::ServerConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(tls_error)?
-            .with_no_client_auth()
-            .with_single_cert(vec![identity.cert], identity.key)
-            .map_err(tls_error)?;
-        tls.alpn_protocols = vec![b"http/1.1".to_vec()];
-        let shared = Arc::new(server::Shared::new(
-            Arc::new(tls),
-            password_hash,
-            inputs,
-            snapshot,
-        ));
+        let shared = Arc::new(server::Shared::new(verifier, inputs, snapshot));
         let running = server::Running::start(config.bind, config.port, shared)?;
         Ok(Self {
             running,
             bind: config.bind,
-            lan,
-            fingerprint,
+            lan: interfaces::lan_ipv4(),
         })
     }
 
@@ -194,10 +184,10 @@ impl VirtualDeckServer {
         self.running.shared.disconnect(id);
     }
 
-    /// Replaces the password hash; every session ends and every viewer gets
-    /// bye "password-changed". An invalid hash changes nothing.
-    pub fn set_password(&self, password_hash: String) -> Result<(), String> {
-        self.running.shared.set_password(password_hash)
+    /// Replaces the password verifier; every session ends, every unanswered
+    /// login challenge is void and every viewer gets bye "password-changed".
+    pub fn set_password(&self, verifier: Verifier) {
+        self.running.shared.set_password(verifier);
     }
 
     /// A new receiver of every later event; each call makes another one.
@@ -205,28 +195,23 @@ impl VirtualDeckServer {
         self.running.shared.subscribe()
     }
 
-    /// The page addresses to offer: `https://<lan-ip>:<port>/`, best first.
+    /// The page addresses to offer: `http://<lan-ip>:<port>/`, best first.
     pub fn url_candidates(&self) -> Vec<String> {
         let port = self.local_port();
         match self.bind {
             IpAddr::V6(address) if !address.is_unspecified() => {
-                vec![format!("https://[{address}]:{port}/")]
+                vec![format!("http://[{address}]:{port}/")]
             }
             IpAddr::V4(address) if !address.is_unspecified() => {
-                vec![format!("https://{address}:{port}/")]
+                vec![format!("http://{address}:{port}/")]
             }
-            _ if self.lan.is_empty() => vec![format!("https://127.0.0.1:{port}/")],
+            _ if self.lan.is_empty() => vec![format!("http://127.0.0.1:{port}/")],
             _ => self
                 .lan
                 .iter()
-                .map(|address| format!("https://{address}:{port}/"))
+                .map(|address| format!("http://{address}:{port}/"))
                 .collect(),
         }
-    }
-
-    /// "SHA-256 AA:BB:..." of the served certificate.
-    pub fn fingerprint(&self) -> String {
-        self.fingerprint.clone()
     }
 
     /// Says bye ("stopped") to every viewer, closes the listener and every
@@ -240,14 +225,4 @@ impl Drop for VirtualDeckServer {
     fn drop(&mut self) {
         self.running.stop();
     }
-}
-
-/// localhost, 127.0.0.1, every LAN IPv4 address and a specific bind address.
-fn certificate_names(lan: &[Ipv4Addr], bind: IpAddr) -> BTreeSet<String> {
-    let mut names: BTreeSet<String> = ["localhost".to_string(), "127.0.0.1".to_string()].into();
-    names.extend(lan.iter().map(Ipv4Addr::to_string));
-    if !bind.is_unspecified() {
-        names.insert(bind.to_string());
-    }
-    names
 }

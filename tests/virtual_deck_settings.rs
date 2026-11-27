@@ -1,16 +1,22 @@
-//! The virtual deck's remembered settings (S4 password hash, S5 port):
+//! The virtual deck's remembered settings (S4 password verifier, S5 port):
 //! `virtual-deck.json` in the app's config directory, validated when read,
 //! replaced atomically, private (0600), and never overwritten while invalid.
+//! A file from an older version (Argon2id `password_hash`) keeps its port
+//! and asks for a new password; it is rewritten only when one is saved.
 //!
 //! Every test works in its own scratch directory under the system temp dir;
 //! nothing reads or writes the user's configuration.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ring::{digest, hmac, pbkdf2};
 use sdeck_plus::virtual_deck::{
-    hash_password,
+    build_verifier,
     settings::{check_port, config_dir_from, parse_port, Settings, SettingsStore, FILE_NAME},
-    DEFAULT_PORT,
+    Verifier, DEFAULT_PORT, ITERATIONS,
 };
+use serde_json::{json, Value};
 use std::{
     fs,
+    num::NonZeroU32,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
@@ -20,6 +26,10 @@ use std::{
 };
 
 const PORT_RANGE: &str = "Use a port from 1024 to 65535.";
+const PASSWORD: &str = "correct horse";
+/// What an older version wrote: an Argon2id PHC string.
+const OLD_HASH: &str =
+    "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -49,11 +59,35 @@ impl Drop for Scratch {
     }
 }
 
-/// One Argon2id hash for the whole binary: hashing is deliberately slow.
-fn hash() -> String {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| hash_password("correct horse").unwrap())
+/// One verifier for the whole binary: deriving is deliberately slow.
+fn verifier() -> Verifier {
+    static VERIFIER: OnceLock<Verifier> = OnceLock::new();
+    VERIFIER
+        .get_or_init(|| build_verifier(PASSWORD).unwrap())
         .clone()
+}
+
+fn written(scratch: &Scratch) -> Value {
+    serde_json::from_slice(&fs::read(scratch.file()).unwrap()).unwrap()
+}
+
+fn base64_of(value: &Value) -> Vec<u8> {
+    STANDARD
+        .decode(value.as_str().expect("a base64 string"))
+        .unwrap()
+}
+
+/// `virtual-deck.json` contents with a verifier's fields.
+fn verifier_file(port: u16, extra: Value) -> String {
+    let scratch = Scratch::new();
+    let mut store = SettingsStore::open(&scratch.0);
+    store.set_port(port).unwrap();
+    store.set_verifier(verifier()).unwrap();
+    let mut file = written(&scratch);
+    for (key, value) in extra.as_object().unwrap() {
+        file[key] = value.clone();
+    }
+    file.to_string()
 }
 
 fn mode(path: &Path) -> u32 {
@@ -83,9 +117,10 @@ fn without_a_file_the_store_offers_port_8765_and_no_password_and_writes_nothing(
         store.settings(),
         &Settings {
             port: DEFAULT_PORT,
-            password_hash: None,
+            verifier: None,
         }
     );
+    assert!(!store.has_old_password());
     assert_eq!(DEFAULT_PORT, 8765);
     assert_eq!(store.error(), None);
     assert_eq!(store.path(), scratch.file());
@@ -93,22 +128,23 @@ fn without_a_file_the_store_offers_port_8765_and_no_password_and_writes_nothing(
 }
 
 #[test]
-fn a_password_and_a_port_round_trip_through_a_private_file() {
+fn a_verifier_and_a_port_round_trip_through_a_private_file() {
     let scratch = Scratch::new();
     let mut store = SettingsStore::open(&scratch.0);
-    store.set_password_hash(hash()).unwrap();
+    store.set_verifier(verifier()).unwrap();
     store.set_port(9123).unwrap();
     assert_eq!(store.settings().port, 9123);
+    assert_eq!(store.settings().verifier, Some(verifier()));
+    let file = written(&scratch);
     assert_eq!(
-        store.settings().password_hash.as_deref(),
-        Some(hash().as_str())
+        file.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["iterations", "port", "salt", "server_key", "stored_key"]
     );
-    let written: serde_json::Value =
-        serde_json::from_slice(&fs::read(scratch.file()).unwrap()).unwrap();
-    assert_eq!(
-        written,
-        serde_json::json!({"port": 9123, "password_hash": hash()})
-    );
+    assert_eq!(file["port"], 9123);
+    assert_eq!(file["iterations"], ITERATIONS);
+    assert_eq!(base64_of(&file["salt"]), verifier().salt());
+    assert_eq!(base64_of(&file["stored_key"]).len(), 32);
+    assert_eq!(base64_of(&file["server_key"]).len(), 32);
     assert_eq!(mode(&scratch.file()), 0o600, "the file is owner-only");
     assert_eq!(
         entries(&scratch.0),
@@ -125,31 +161,79 @@ fn a_missing_config_directory_is_created_private() {
     let scratch = Scratch::new();
     let dir = scratch.0.join("config/sdeck-plus");
     let mut store = SettingsStore::open(&dir);
-    store.set_password_hash(hash()).unwrap();
+    store.set_verifier(verifier()).unwrap();
     assert_eq!(mode(&dir), 0o700);
     assert_eq!(mode(&dir.join(FILE_NAME)), 0o600);
 }
 
+/// The keys are SCRAM-SHA-256's: StoredKey = SHA-256(HMAC(SaltedPassword,
+/// "Client Key")), ServerKey = HMAC(SaltedPassword, "Server Key"), with
+/// SaltedPassword = PBKDF2-HMAC-SHA-256(password, salt, iterations).
 #[test]
-fn the_password_is_stored_only_as_its_hash() {
+fn the_password_is_stored_only_as_its_verifier_keys() {
     let scratch = Scratch::new();
     let mut store = SettingsStore::open(&scratch.0);
-    store.set_password_hash(hash()).unwrap();
+    store.set_verifier(verifier()).unwrap();
     let text = fs::read_to_string(scratch.file()).unwrap();
-    assert!(!text.contains("correct horse"));
-    assert!(text.contains("$argon2id$"));
+    assert!(!text.contains(PASSWORD) && !text.contains(&STANDARD.encode(PASSWORD)));
+    let file = written(&scratch);
+    let mut salted = [0u8; 32];
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        NonZeroU32::new(ITERATIONS).unwrap(),
+        &base64_of(&file["salt"]),
+        PASSWORD.as_bytes(),
+        &mut salted,
+    );
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &salted);
+    let client_key = hmac::sign(&key, b"Client Key");
+    let stored_key = digest::digest(&digest::SHA256, client_key.as_ref());
+    assert_eq!(base64_of(&file["stored_key"]), stored_key.as_ref());
+    assert_eq!(
+        base64_of(&file["server_key"]),
+        hmac::sign(&key, b"Server Key").as_ref()
+    );
 }
 
 #[test]
-fn a_hash_that_is_not_argon2id_is_refused_and_nothing_is_written() {
+fn an_old_argon2_file_keeps_its_port_asks_for_a_password_and_is_kept_until_one_is_saved() {
     let scratch = Scratch::new();
+    let old = json!({"port": 9123, "password_hash": OLD_HASH}).to_string();
+    fs::write(scratch.file(), &old).unwrap();
+    let store = SettingsStore::open(&scratch.0);
+    assert_eq!(store.error(), None, "the old file is valid");
+    assert_eq!(
+        store.settings(),
+        &Settings {
+            port: 9123,
+            verifier: None,
+        },
+        "no usable verifier: the password must be set again"
+    );
+    assert!(store.has_old_password());
+    assert_eq!(
+        fs::read_to_string(scratch.file()).unwrap(),
+        old,
+        "untouched"
+    );
+    // A port change keeps the old hash as it is.
     let mut store = SettingsStore::open(&scratch.0);
-    let error = store
-        .set_password_hash("correct horse".to_string())
-        .unwrap_err();
-    assert_eq!(error, "The password hash is not valid.");
-    assert_eq!(store.settings().password_hash, None);
-    assert!(entries(&scratch.0).is_empty());
+    store.set_port(9124).unwrap();
+    assert_eq!(
+        written(&scratch),
+        json!({"port": 9124, "password_hash": OLD_HASH})
+    );
+    assert!(SettingsStore::open(&scratch.0).has_old_password());
+    // A new password replaces it with a verifier, on the same port.
+    store.set_verifier(verifier()).unwrap();
+    let file = written(&scratch);
+    assert_eq!(file["port"], 9124);
+    assert!(file.get("password_hash").is_none(), "{file}");
+    assert_eq!(mode(&scratch.file()), 0o600);
+    let reopened = SettingsStore::open(&scratch.0);
+    assert!(!reopened.has_old_password());
+    assert_eq!(reopened.settings().verifier, Some(verifier()));
+    assert_eq!(entries(&scratch.0), [FILE_NAME]);
 }
 
 #[test]
@@ -171,7 +255,7 @@ fn ports_from_1024_to_65535_are_accepted_and_others_refused() {
 fn an_out_of_range_port_changes_nothing() {
     let scratch = Scratch::new();
     let mut store = SettingsStore::open(&scratch.0);
-    store.set_password_hash(hash()).unwrap();
+    store.set_verifier(verifier()).unwrap();
     let before = fs::read(scratch.file()).unwrap();
     assert_eq!(store.set_port(1023), Err(PORT_RANGE.to_string()));
     assert_eq!(store.settings().port, DEFAULT_PORT);
@@ -192,7 +276,7 @@ fn assert_kept_and_refused(contents: &[u8], why: &str) {
     assert_eq!(store.settings(), &Settings::default(), "{why}");
     assert_eq!(store.set_port(9000).unwrap_err(), error, "{why}");
     assert_eq!(
-        store.set_password_hash(hash()).unwrap_err(),
+        store.set_verifier(verifier()).unwrap_err(),
         store.error().unwrap(),
         "{why}"
     );
@@ -207,21 +291,32 @@ fn an_invalid_file_is_kept_and_every_write_is_refused() {
     assert_kept_and_refused(b"{\"port\":70000}", "port above 65535");
     assert_kept_and_refused(
         b"{\"port\":8765,\"password_hash\":\"plain text\"}",
-        "not a hash",
+        "an old hash that is not Argon2id",
     );
-    let extra = format!(
-        "{{\"port\":8765,\"password_hash\":\"{}\",\"password\":\"x\"}}",
-        hash()
-    );
-    assert_kept_and_refused(extra.as_bytes(), "unknown field");
     assert_kept_and_refused(b"{\"password_hash\":null}", "no port");
+    let cases = [
+        (json!({"password": PASSWORD}), "unknown field"),
+        (json!({"password_hash": OLD_HASH}), "old hash and verifier"),
+        (json!({"iterations": 9_999}), "too few iterations"),
+        (json!({"iterations": 2_000_001}), "too many iterations"),
+        (json!({"salt": STANDARD.encode([1u8; 8])}), "short salt"),
+        (
+            json!({"stored_key": STANDARD.encode([1u8; 31])}),
+            "short key",
+        ),
+        (json!({"server_key": "not base64!"}), "not base64"),
+        (json!({"stored_key": null}), "incomplete verifier"),
+    ];
+    for (extra, why) in cases {
+        assert_kept_and_refused(verifier_file(8765, extra).as_bytes(), why);
+    }
 }
 
 #[test]
 fn a_file_that_turns_invalid_after_opening_is_not_overwritten() {
     let scratch = Scratch::new();
     let mut store = SettingsStore::open(&scratch.0);
-    store.set_password_hash(hash()).unwrap();
+    store.set_verifier(verifier()).unwrap();
     fs::write(scratch.file(), b"edited by hand").unwrap();
     let error = store.set_port(9000).unwrap_err();
     assert!(error.contains(FILE_NAME), "{error}");

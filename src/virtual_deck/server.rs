@@ -4,11 +4,13 @@ use super::{
     access::{Access, SESSION_COOKIE},
     browser,
     http::{self, BodyError, HeadError, Origin, Reply, Request},
-    password,
-    socket::{self, Socket, Tls},
+    password::{Key, Verifier},
+    socket::{self, Socket},
     viewer::{self, ByeReason, ViewerHandle},
     DeckFrame, DeckInput, ServerEvent, Snapshot, Viewer, INDEX_PAGE, KEYS, LOGIN_PAGE, MAX_VIEWERS,
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::Deserialize;
 use serde_json::json;
 use std::{
     io,
@@ -30,12 +32,20 @@ const MAX_CONNECTIONS: usize = 32;
 /// handshakes it never finishes. Its viewers do not count: one computer may
 /// hold every viewer slot and still load the page.
 const MAX_PENDING_PER_ADDRESS: usize = 8;
-/// TLS handshake, request head and body must all arrive within this time.
+/// The request head and body must both arrive within this time.
 const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 /// A client that takes longer than this to take our bytes is dropped.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Wait after a failed accept (for example, out of file descriptors).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(250);
+/// The session cookie's attributes: script cannot read it, other sites never
+/// send it. There is no `Secure`: the deck is served over plain HTTP.
+const COOKIE_ATTRIBUTES: &str = "HttpOnly; SameSite=Strict; Path=/";
+/// What a login answer gets when its challenge is unknown, used, expired,
+/// voided by a new password or another address's.
+const EXPIRED: &str = "The login expired. Try again.";
+/// Client nonces: 16 to 128 characters of the base64 and base64url alphabets.
+const CLIENT_NONCE: std::ops::RangeInclusive<usize> = 16..=128;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -43,11 +53,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// State every thread of one server shares.
 pub(super) struct Shared {
-    tls: Arc<rustls::ServerConfig>,
+    /// Challenges, proofs, lockouts and sessions all change under this one
+    /// lock: a proof check is two HMACs and a hash, so it never waits long,
+    /// and a lockout or a password change cannot be raced.
     registry: Mutex<Registry>,
-    /// Argon2id checks run one at a time: bounded memory and CPU, and a
-    /// lockout cannot be raced by parallel logins from one address.
-    verifying: Mutex<()>,
     /// How many viewers hold each key down.
     pressed: Mutex<[u16; KEYS]>,
     inputs: Sender<DeckInput>,
@@ -64,21 +73,14 @@ struct Registry {
 }
 
 impl Shared {
-    pub fn new(
-        tls: Arc<rustls::ServerConfig>,
-        password_hash: String,
-        inputs: Sender<DeckInput>,
-        snapshot: Snapshot,
-    ) -> Self {
+    pub fn new(verifier: Verifier, inputs: Sender<DeckInput>, snapshot: Snapshot) -> Self {
         Self {
-            tls,
             registry: Mutex::new(Registry {
-                access: Access::new(password_hash),
+                access: Access::new(verifier),
                 viewers: Vec::new(),
                 next_id: 0,
                 stopping: false,
             }),
-            verifying: Mutex::new(()),
             pressed: Mutex::new([0; KEYS]),
             inputs,
             snapshot,
@@ -172,18 +174,15 @@ impl Shared {
         }
     }
 
-    pub fn set_password(&self, hash: String) -> Result<(), String> {
-        password::check_hash(&hash)?;
+    pub fn set_password(&self, verifier: Verifier) {
         let removed = {
-            let _turn = lock(&self.verifying);
             let mut registry = self.registry();
-            registry.access.set_password(hash);
+            registry.access.set_password(verifier);
             close_viewers(&mut registry.viewers, ByeReason::PasswordChanged, |_| true)
         };
         if removed {
             self.emit(ServerEvent::ViewersChanged);
         }
-        Ok(())
     }
 
     /// Refuses new viewers and asks every viewer to say bye; returns whether
@@ -213,29 +212,58 @@ impl Shared {
             .map(too_many_tries)
     }
 
-    fn log_in(&self, address: IpAddr, password: Option<&str>) -> Reply {
-        let _turn = lock(&self.verifying);
-        let (hash, generation) = {
-            let mut registry = self.registry();
-            if let Some(wait) = registry.access.locked(address, Instant::now()) {
-                return too_many_tries(wait);
-            }
-            registry.access.password()
-        };
-        let matches = password.is_some_and(|password| password::verify(password, &hash));
+    /// POST /login/start: a new challenge for `address`, unless it is locked out.
+    fn start_login(&self, address: IpAddr) -> Reply {
+        let now = Instant::now();
         let mut registry = self.registry();
-        if !matches || registry.access.generation() != generation {
-            let tries_left = registry.access.fail(address, Instant::now());
+        if let Some(wait) = registry.access.locked(address, now) {
+            return too_many_tries(wait);
+        }
+        match registry.access.challenge(address, now) {
+            Ok(issued) => Reply::json(
+                200,
+                &json!({
+                    "salt": STANDARD.encode(&issued.salt),
+                    "iterations": issued.iterations,
+                    "nonce": issued.nonce,
+                }),
+            ),
+            Err(error) => Reply::error(500, &error),
+        }
+    }
+
+    /// POST /login/finish: uses up the challenge, then checks the proof. A
+    /// wrong proof counts as a wrong password; a right one opens a session
+    /// and answers with the ServerSignature.
+    fn finish_login(&self, address: IpAddr, answer: &Answer) -> Reply {
+        let now = Instant::now();
+        let mut registry = self.registry();
+        if let Some(wait) = registry.access.locked(address, now) {
+            return too_many_tries(wait);
+        }
+        if !registry.access.take_challenge(&answer.nonce, address, now) {
+            return Reply::error(400, EXPIRED);
+        }
+        let auth_message = format!("{}{}", answer.client_nonce, answer.nonce);
+        let Some(signature) = registry
+            .access
+            .check_proof(auth_message.as_bytes(), &answer.proof)
+        else {
+            let tries_left = registry.access.fail(address, now);
             return Reply::json(
                 401,
                 &json!({"error": "Wrong password.", "tries_left": tries_left}),
             );
-        }
+        };
         registry.access.succeed(address);
-        match registry.access.open_session(Instant::now()) {
-            Ok((token, _)) => Reply::home().with(
+        match registry.access.open_session(now) {
+            Ok((token, _)) => Reply::json(
+                200,
+                &json!({"server_signature": STANDARD.encode(signature)}),
+            )
+            .with(
                 "Set-Cookie",
-                format!("{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/"),
+                format!("{SESSION_COOKIE}={token}; {COOKIE_ATTRIBUTES}"),
             ),
             Err(error) => Reply::error(500, &error),
         }
@@ -323,6 +351,40 @@ fn close_viewers(
         }
     });
     viewers.len() != before
+}
+
+/// A page's answer to a challenge: `{"nonce", "client_nonce", "proof"}`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerBody {
+    nonce: String,
+    client_nonce: String,
+    proof: String,
+}
+
+/// A well-formed answer: the proof is 32 bytes of base64.
+struct Answer {
+    nonce: String,
+    client_nonce: String,
+    proof: Key,
+}
+
+impl Answer {
+    fn parse(body: &[u8]) -> Option<Self> {
+        let body: AnswerBody = serde_json::from_slice(body).ok()?;
+        let client_nonce_ok = CLIENT_NONCE.contains(&body.client_nonce.len())
+            && body
+                .client_nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"+/=-_".contains(&byte));
+        let proof = STANDARD.decode(&body.proof).ok()?;
+        let proof = Key::try_from(proof).ok()?;
+        client_nonce_ok.then_some(Self {
+            nonce: body.nonce,
+            client_nonce: body.client_nonce,
+            proof,
+        })
+    }
 }
 
 fn too_many_tries(wait: Duration) -> Reply {
@@ -523,13 +585,9 @@ fn admit(tcp: TcpStream, peer: IpAddr, shared: &Arc<Shared>, connections: &Mutex
 }
 
 fn serve_connection(tcp: TcpStream, peer: IpAddr, shared: &Shared, upgraded: &AtomicBool) {
-    let Ok(socket) = Socket::new(tcp, Instant::now() + REQUEST_DEADLINE, WRITE_TIMEOUT) else {
+    let Ok(mut stream) = Socket::new(tcp, Instant::now() + REQUEST_DEADLINE, WRITE_TIMEOUT) else {
         return;
     };
-    let Ok(connection) = rustls::ServerConnection::new(shared.tls.clone()) else {
-        return;
-    };
-    let mut stream = rustls::StreamOwned::new(connection, socket);
     let (request, leftover) = match http::read_head(&mut stream) {
         Ok(parts) => parts,
         Err(HeadError::Gone) => return,
@@ -547,37 +605,58 @@ fn serve_connection(tcp: TcpStream, peer: IpAddr, shared: &Shared, upgraded: &At
         ("GET", "/") if shared.has_session(&request) => Reply::html(INDEX_PAGE),
         ("GET", "/") => Reply::html(LOGIN_PAGE),
         ("GET", "/login") => Reply::home(),
-        ("POST", "/login") => match log_in(&mut stream, &request, leftover, peer, shared) {
-            Some(answer) => answer,
-            None => return,
-        },
+        ("POST", "/login/start") => start_login(&request, peer, shared),
+        ("POST", "/login/finish") => {
+            match finish_login(&mut stream, &request, leftover, peer, shared) {
+                Some(answer) => answer,
+                None => return,
+            }
+        }
         ("POST", "/logout") => log_out(&request, shared),
-        (_, "/" | "/ws") => Reply::error(405, "Method not allowed.").with("Allow", "GET".into()),
-        (_, "/logout") => Reply::error(405, "Method not allowed.").with("Allow", "POST".into()),
-        (_, "/login") => Reply::error(405, "Method not allowed.").with("Allow", "GET, POST".into()),
+        (_, "/" | "/ws" | "/login") => {
+            Reply::error(405, "Method not allowed.").with("Allow", "GET".into())
+        }
+        (_, "/logout" | "/login/start" | "/login/finish") => {
+            Reply::error(405, "Method not allowed.").with("Allow", "POST".into())
+        }
         _ => Reply::error(404, "Not found."),
     };
     reply(stream, answer, request.header("host"));
 }
 
 /// Sends `answer` and closes; `host` is the request's `Host`, if any.
-fn reply(mut stream: Tls, answer: Reply, host: Option<&str>) {
+fn reply(mut stream: Socket, answer: Reply, host: Option<&str>) {
     if answer.write_to(&mut stream, host).is_ok() {
         socket::finish(stream);
     }
 }
 
-/// POST /login; None when the client went away mid-body. A foreign origin is
-/// refused before anything else, so it never counts as a try; `null` is
-/// allowed, because that is what the login form's own post sends.
-fn log_in(
-    stream: &mut Tls,
+/// The login's own requests come from the page's fetch(), which sends the
+/// page's origin; a request without one is not from a browser. A foreign or
+/// `null` origin is refused before anything else, so it never counts as a try.
+fn login_origin_ok(request: &Request) -> bool {
+    matches!(request.origin(), Origin::Same | Origin::Absent)
+}
+
+/// POST /login/start: `{"salt", "iterations", "nonce"}` for this address.
+fn start_login(request: &Request, peer: IpAddr, shared: &Shared) -> Reply {
+    if !login_origin_ok(request) {
+        return forbidden();
+    }
+    shared.start_login(peer)
+}
+
+/// POST /login/finish with `{"nonce", "client_nonce", "proof"}`; None when
+/// the client went away mid-body. A malformed answer uses up nothing and
+/// counts as no try.
+fn finish_login(
+    stream: &mut Socket,
     request: &Request,
     leftover: Vec<u8>,
     peer: IpAddr,
     shared: &Shared,
 ) -> Option<Reply> {
-    if request.origin() == Origin::Foreign {
+    if !login_origin_ok(request) {
         return Some(forbidden());
     }
     if let Some(answer) = shared.locked(peer) {
@@ -589,13 +668,15 @@ fn log_in(
         Err(BodyError::TooLarge) => return Some(Reply::error(413, "Request body is too large.")),
         Err(BodyError::LengthRequired) => return Some(Reply::error(411, "Length required.")),
     };
-    let password = http::password_field(request.header("content-type"), &body);
-    Some(shared.log_in(peer, password.as_deref()))
+    Some(match Answer::parse(&body) {
+        Some(answer) => shared.finish_login(peer, &answer),
+        None => Reply::error(400, "Bad request."),
+    })
 }
 
 /// POST /logout: ends the session (and its viewers) and clears the cookie.
-/// The page logs out with fetch(), which sends its own origin, so `null`
-/// can only come from another page.
+/// The page logs out with fetch() and the same-origin referrer policy, which
+/// sends its own origin, so `null` can only come from another page.
 fn log_out(request: &Request, shared: &Shared) -> Reply {
     if matches!(request.origin(), Origin::Foreign | Origin::Null) {
         return forbidden();
@@ -603,13 +684,13 @@ fn log_out(request: &Request, shared: &Shared) -> Reply {
     shared.log_out(request);
     Reply::home().with(
         "Set-Cookie",
-        format!("{SESSION_COOKIE}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/"),
+        format!("{SESSION_COOKIE}=; Max-Age=0; {COOKIE_ATTRIBUTES}"),
     )
 }
 
-/// GET /ws: needs a live session cookie and `Origin: https://<Host>`.
+/// GET /ws: needs a live session cookie and `Origin: http://<Host>`.
 fn open_viewer(
-    mut stream: Tls,
+    mut stream: Socket,
     request: &Request,
     leftover: Vec<u8>,
     peer: IpAddr,
@@ -636,7 +717,7 @@ fn open_viewer(
         Err(answer) => return reply(stream, answer, request.header("host")),
     };
     let switched = http::write_switching_protocols(&mut stream, &key)
-        .and_then(|()| stream.sock.poll_every(viewer::POLL));
+        .and_then(|()| stream.poll_every(viewer::POLL));
     if switched.is_err() {
         shared.remove_viewer(handle.id);
         return;

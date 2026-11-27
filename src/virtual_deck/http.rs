@@ -6,24 +6,25 @@ use std::io::{self, Read, Write};
 /// Request line plus headers.
 pub(super) const MAX_HEAD: usize = 8 * 1024;
 const MAX_HEADERS: usize = 64;
-/// A login form; see `password::MAX_CHARACTERS`.
+/// A login answer is about 200 bytes.
 pub(super) const MAX_BODY: usize = 4 * 1024;
 
 /// Longest `Host` value the policy repeats: a DNS name plus a port.
 const MAX_HOST: usize = 260;
 
-/// The page's Content-Security-Policy. `connect-src` names `wss://<Host>`
-/// as well as 'self', because older Safari does not let 'self' cover wss:.
+/// The page's Content-Security-Policy. `connect-src` names `ws://<Host>`
+/// as well as 'self', because older Safari does not let 'self' cover ws:.
 /// A `Host` that is not a plain host[:port] is left out, so a client can
-/// never add directives of its own.
+/// never add directives of its own. `form-action 'none'`: the login never
+/// posts a form, so a browser without JavaScript cannot send the password.
 pub(super) fn content_security_policy(host: Option<&str>) -> String {
     let connect = match host.filter(|host| is_plain_host(host)) {
-        Some(host) => format!("'self' wss://{host}"),
+        Some(host) => format!("'self' ws://{host}"),
         None => "'self'".to_string(),
     };
     format!(
         "default-src 'self'; img-src 'self' data: blob:; connect-src {connect}; \
-         style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+         style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; form-action 'none'"
     )
 }
 
@@ -64,14 +65,14 @@ impl Request {
             })
     }
 
-    /// How the `Origin` header relates to `https://<Host>`.
+    /// How the `Origin` header relates to `http://<Host>`.
     pub fn origin(&self) -> Origin {
         let Some(origin) = self.header("origin") else {
             return Origin::Absent;
         };
         let same = self
             .header("host")
-            .is_some_and(|host| origin.eq_ignore_ascii_case(&format!("https://{host}")));
+            .is_some_and(|host| origin.eq_ignore_ascii_case(&format!("http://{host}")));
         match origin {
             _ if same => Origin::Same,
             "null" => Origin::Null,
@@ -97,13 +98,13 @@ impl Request {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Origin {
-    /// `https://<Host>`.
+    /// `http://<Host>`.
     Same,
-    /// No `Origin` header.
+    /// No `Origin` header: not a browser, or a browser too old to send one.
     Absent,
-    /// `Origin: null`: what browsers send for the login form's own post,
-    /// because the pages use Referrer-Policy no-referrer, but also what any
-    /// other page can make its posts send.
+    /// `Origin: null`: what any page can make its posts send (and what a
+    /// no-referrer page's own posts send, which is why the pages' fetch()
+    /// calls ask for the same-origin referrer policy).
     Null,
     Foreign,
 }
@@ -112,7 +113,7 @@ pub(super) enum Origin {
 pub(super) enum HeadError {
     TooLarge,
     Malformed,
-    /// Closed, timed out or failed (including the TLS handshake): no reply.
+    /// Closed, timed out or failed: no reply.
     Gone,
 }
 
@@ -220,43 +221,6 @@ pub(super) fn read_body(
     stream.read_exact(&mut rest).map_err(|_| BodyError::Gone)?;
     leftover.extend_from_slice(&rest);
     Ok(leftover)
-}
-
-/// The `password` field of a login body: a URL-encoded form, or a JSON
-/// object when the request says `application/json`.
-pub(super) fn password_field(content_type: Option<&str>, body: &[u8]) -> Option<String> {
-    let is_json = content_type.is_some_and(|value| {
-        value
-            .split(';')
-            .next()
-            .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
-    });
-    if is_json {
-        let value: Value = serde_json::from_slice(body).ok()?;
-        return value.get("password")?.as_str().map(str::to_string);
-    }
-    let body = std::str::from_utf8(body).ok()?;
-    body.split('&').find_map(|pair| {
-        let (name, value) = pair.split_once('=')?;
-        (url_decode(name)? == "password").then(|| url_decode(value))?
-    })
-}
-
-fn url_decode(text: &str) -> Option<String> {
-    let mut bytes = Vec::with_capacity(text.len());
-    let mut input = text.bytes();
-    while let Some(byte) = input.next() {
-        bytes.push(match byte {
-            b'+' => b' ',
-            b'%' => {
-                let high = (input.next()? as char).to_digit(16)?;
-                let low = (input.next()? as char).to_digit(16)?;
-                (high * 16 + low) as u8
-            }
-            other => other,
-        });
-    }
-    String::from_utf8(bytes).ok()
 }
 
 /// A complete response; every one carries the security headers and closes.
@@ -367,11 +331,10 @@ mod tests {
 
     #[test]
     fn reads_a_head_and_keeps_the_bytes_after_it() {
-        let raw =
-            b"POST /login?next=1 HTTP/1.1\r\nHost: a\r\nCookie: x=1; sdeck_session=ab\r\n\r\nbody";
+        let raw = b"POST /login/finish?next=1 HTTP/1.1\r\nHost: a\r\nCookie: x=1; sdeck_session=ab\r\n\r\nbody";
         let (request, leftover) = read_head(&mut &raw[..]).unwrap();
         assert_eq!(request.method, "POST");
-        assert_eq!(request.path, "/login");
+        assert_eq!(request.path, "/login/finish");
         assert_eq!(request.header("HOST"), Some("a"));
         assert_eq!(request.cookies("sdeck_session").collect::<Vec<_>>(), ["ab"]);
         assert_eq!(leftover, b"body");
@@ -402,31 +365,14 @@ mod tests {
     }
 
     #[test]
-    fn decodes_the_password_of_a_form_or_json_body() {
-        assert_eq!(
-            password_field(None, b"user=a&password=p%C3%B1+x%26y"),
-            Some("pñ x&y".to_string())
-        );
-        assert_eq!(
-            password_field(
-                Some("application/json; charset=utf-8"),
-                br#"{"password":"a b"}"#
-            ),
-            Some("a b".to_string())
-        );
-        assert_eq!(password_field(None, b"password=%zz"), None);
-        assert_eq!(password_field(None, b"other=1"), None);
-    }
-
-    #[test]
     fn the_policy_names_the_websocket_host_but_never_a_hostile_one() {
         assert_eq!(
             content_security_policy(Some("192.168.1.20:8765")),
             "default-src 'self'; img-src 'self' data: blob:; \
-             connect-src 'self' wss://192.168.1.20:8765; style-src 'self' 'unsafe-inline'; \
-             script-src 'self' 'unsafe-inline'"
+             connect-src 'self' ws://192.168.1.20:8765; style-src 'self' 'unsafe-inline'; \
+             script-src 'self' 'unsafe-inline'; form-action 'none'"
         );
-        assert!(content_security_policy(Some("[::1]:8765")).contains("wss://[::1]:8765;"));
+        assert!(content_security_policy(Some("[::1]:8765")).contains("ws://[::1]:8765;"));
         for hostile in ["x; script-src *", "x'", "x y", "", "a\"b"] {
             let policy = content_security_policy(Some(hostile));
             assert!(
@@ -438,16 +384,18 @@ mod tests {
     }
 
     #[test]
-    fn same_origin_means_https_and_the_host() {
+    fn same_origin_means_http_and_the_host() {
         let request = |origin: &str| {
             parse_head(&format!(
                 "GET /ws HTTP/1.1\r\nHost: 10.0.0.2:8765\r\nOrigin: {origin}"
             ))
             .unwrap()
         };
-        assert_eq!(request("https://10.0.0.2:8765").origin(), Origin::Same);
-        assert_eq!(request("http://10.0.0.2:8765").origin(), Origin::Foreign);
-        assert_eq!(request("https://10.0.0.2").origin(), Origin::Foreign);
+        assert_eq!(request("http://10.0.0.2:8765").origin(), Origin::Same);
+        assert_eq!(request("HTTP://10.0.0.2:8765").origin(), Origin::Same);
+        assert_eq!(request("https://10.0.0.2:8765").origin(), Origin::Foreign);
+        assert_eq!(request("http://10.0.0.2").origin(), Origin::Foreign);
+        assert_eq!(request("http://evil.example").origin(), Origin::Foreign);
         assert_eq!(request("null").origin(), Origin::Null);
         let absent = parse_head("POST /logout HTTP/1.1\r\nHost: 10.0.0.2:8765").unwrap();
         assert_eq!(absent.origin(), Origin::Absent);

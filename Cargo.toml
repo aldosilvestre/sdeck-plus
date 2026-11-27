@@ -22,11 +22,10 @@ base64 = "0.22"
 async-channel = "2"
 ksni = { version = "0.3", features = ["blocking"] }
 tokio = { version = "1.53.3", features = ["rt", "time"] }
-# Virtual deck HTTPS/WSS server: ring provider only (no aws-lc-rs), self-signed
-# certificate, Argon2id password hashes, OS random bytes.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
-argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+# Virtual deck login (plain HTTP): PBKDF2/HMAC-SHA-256 password verifier and
+# challenge-response (SCRAM-SHA-256 style); OS random bytes for salts, nonces
+# and session tokens.
+ring = { version = "0.17", default-features = false }
 getrandom = "0.3"
 # QR code of the virtual deck's address in the header menu; no image/svg renderers.
 qrcode = { version = "0.14", default-features = false }

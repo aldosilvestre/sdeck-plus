@@ -10,8 +10,6 @@ use std::{
 const CLOSE_DRAIN: Duration = Duration::from_secs(1);
 const CLOSE_DRAIN_BYTES: usize = 64 * 1024;
 
-pub(super) type Tls = rustls::StreamOwned<rustls::ServerConnection, Socket>;
-
 pub(super) struct Socket {
     tcp: TcpStream,
     deadline: Option<Instant>,
@@ -56,7 +54,7 @@ impl Read for Socket {
 /// The server keeps a second handle on every connection, to cut it short on
 /// stop, so closing this one alone would leave the connection open until the
 /// next accept: every way out of a connection shuts it down, so the client
-/// sees the end at once (a failed TLS handshake included).
+/// sees the end at once.
 impl Drop for Socket {
     fn drop(&mut self) {
         let _ = self.tcp.shutdown(Shutdown::Both);
@@ -73,13 +71,11 @@ impl Write for Socket {
     }
 }
 
-/// Ends a connection cleanly: TLS close_notify, no more writes, then reads
-/// what the client still sends (bounded), so closing never turns into a reset
-/// that would discard the last response before the client reads it.
-pub(super) fn finish(mut stream: Tls) {
-    stream.conn.send_close_notify();
-    let _ = stream.flush();
-    let socket = &mut stream.sock;
+/// Ends a connection cleanly: no more writes, then reads what the client
+/// still sends (bounded), so closing never turns into a reset that would
+/// discard the last response before the client reads it.
+pub(super) fn finish(mut socket: Socket) {
+    let _ = socket.flush();
     let _ = socket.tcp.shutdown(Shutdown::Write);
     socket.deadline = Some(Instant::now() + CLOSE_DRAIN);
     let mut sink = [0u8; 4096];

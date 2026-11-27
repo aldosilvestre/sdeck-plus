@@ -1,21 +1,81 @@
-//! Argon2id password hashes: the app keeps only the PHC string, never the password.
-use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Algorithm, Argon2, Params,
-};
+//! The password verifier and the login proof (SCRAM-SHA-256 style, RFC 5802
+//! and RFC 7677): the app keeps only a salt, an iteration count and two keys
+//! derived from the password, never the password, and a page proves it knows
+//! the password without sending it.
+//!
+//! ```text
+//! SaltedPassword  = PBKDF2-HMAC-SHA-256(password, salt, iterations), 32 bytes
+//! ClientKey       = HMAC(SaltedPassword, "Client Key")
+//! StoredKey       = SHA-256(ClientKey)                       (stored)
+//! ServerKey       = HMAC(SaltedPassword, "Server Key")       (stored)
+//! AuthMessage     = client nonce + server nonce              (as sent, ASCII)
+//! ClientSignature = HMAC(StoredKey, AuthMessage)
+//! ClientProof     = ClientKey XOR ClientSignature            (the page sends it)
+//! ServerSignature = HMAC(ServerKey, AuthMessage)             (the server answers it)
+//! ```
+//!
+//! The server recovers ClientKey = ClientProof XOR ClientSignature and
+//! accepts when SHA-256(ClientKey) equals StoredKey (compared in constant
+//! time). The page computes the same in plain JavaScript (`page/login.html`),
+//! because `crypto.subtle` needs HTTPS.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ring::{digest, hmac, pbkdf2};
+use std::{fmt, num::NonZeroU32};
 
 const MIN_CHARACTERS: usize = 8;
-/// A login body holds at most `http::MAX_BODY` bytes; 128 characters fit even
-/// when every one is a 4-byte UTF-8 sequence sent percent-encoded.
+/// Typing limit for the app's password fields (the password itself never
+/// reaches the server).
 const MAX_CHARACTERS: usize = 128;
+/// Bytes of random salt in a new verifier.
 const SALT_BYTES: usize = 16;
-const INVALID_HASH: &str = "The password hash is not valid.";
+/// Salts read back from the settings file may be this long at most.
+const MAX_SALT_BYTES: usize = 64;
+/// PBKDF2 iterations of a new verifier. The page runs them in plain
+/// JavaScript: about 0.12 s on a fast laptop (Ryzen 9 5900HX, Node 26), so
+/// roughly 0.5 to 1.2 s on a mid-range or older phone, 4 to 10 times slower.
+/// Every iteration also slows down a guess at a login someone recorded on
+/// the LAN.
+pub const ITERATIONS: u32 = 200_000;
+/// Iteration counts accepted from the settings file: below this a recorded
+/// login is too cheap to guess at, above it a phone takes too long.
+const MIN_ITERATIONS: u32 = 10_000;
+const MAX_ITERATIONS: u32 = 2_000_000;
+/// StoredKey, ServerKey, a proof and a signature are all SHA-256 sized.
+const KEY_BYTES: usize = 32;
+const INVALID: &str = "The password verifier is not valid.";
 
-/// Hashes a new password as an Argon2id PHC string with a random salt.
+pub(super) type Key = [u8; KEY_BYTES];
+
+/// What the app keeps instead of the password: a salt, an iteration count,
+/// StoredKey and ServerKey. Built by [`build_verifier`].
+///
+/// Keep it private: with StoredKey and one recorded login, someone could
+/// log in; with ServerKey, pass for the server.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Verifier {
+    salt: Vec<u8>,
+    iterations: u32,
+    stored_key: Key,
+    server_key: Key,
+}
+
+impl fmt::Debug for Verifier {
+    /// Never prints the keys.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Verifier")
+            .field("salt_bytes", &self.salt.len())
+            .field("iterations", &self.iterations)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Builds the verifier of a new password with a random salt and
+/// [`ITERATIONS`]; slow on purpose, so call it off the GTK thread.
 ///
 /// Rejects passwords shorter than 8 characters with "At least 8 characters."
 /// and longer than 128 characters with "At most 128 characters.".
-pub fn hash_password(password: &str) -> Result<String, String> {
+pub fn build_verifier(password: &str) -> Result<Verifier, String> {
     let characters = password.chars().count();
     if characters < MIN_CHARACTERS {
         return Err("At least 8 characters.".to_string());
@@ -23,36 +83,247 @@ pub fn hash_password(password: &str) -> Result<String, String> {
     if characters > MAX_CHARACTERS {
         return Err("At most 128 characters.".to_string());
     }
-    let mut salt = [0u8; SALT_BYTES];
+    let mut salt = vec![0u8; SALT_BYTES];
     getrandom::fill(&mut salt).map_err(|error| format!("No random bytes for the salt: {error}"))?;
-    let salt = SaltString::encode_b64(&salt).map_err(|error| error.to_string())?;
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
-        .map_err(|error| format!("Could not hash the password: {error}"))
+    Ok(Verifier::derive(password, salt, ITERATIONS))
 }
 
-/// Accepts only a complete Argon2id PHC string with usable parameters.
-pub(super) fn check_hash(hash: &str) -> Result<(), String> {
-    let parsed = PasswordHash::new(hash).map_err(|_| INVALID_HASH.to_string())?;
-    let usable = parsed.algorithm == Algorithm::Argon2id.ident()
-        && parsed.salt.is_some()
-        && parsed.hash.is_some()
-        && Params::try_from(&parsed).is_ok();
-    if usable {
-        Ok(())
-    } else {
-        Err(INVALID_HASH.to_string())
+impl Verifier {
+    /// The verifier of `password` with this salt and iteration count.
+    fn derive(password: &str, salt: Vec<u8>, iterations: u32) -> Self {
+        let salted = salted_password(password.as_bytes(), &salt, iterations);
+        Self {
+            stored_key: sha256(&hmac_sha256(&salted, b"Client Key")),
+            server_key: hmac_sha256(&salted, b"Server Key"),
+            salt,
+            iterations,
+        }
+    }
+
+    /// The PBKDF2 salt the page needs.
+    pub fn salt(&self) -> &[u8] {
+        &self.salt
+    }
+
+    /// The PBKDF2 iteration count the page needs.
+    pub fn iterations(&self) -> u32 {
+        self.iterations
+    }
+
+    /// A verifier read back from the settings file: base64 salt (16 to 64
+    /// bytes) and keys (32 bytes each), iterations within the accepted range.
+    pub(super) fn from_stored(
+        salt: &str,
+        iterations: u32,
+        stored_key: &str,
+        server_key: &str,
+    ) -> Result<Self, String> {
+        let salt = STANDARD.decode(salt).map_err(|_| INVALID.to_string())?;
+        let key = |text: &str| -> Result<Key, String> {
+            STANDARD
+                .decode(text)
+                .ok()
+                .and_then(|bytes| Key::try_from(bytes).ok())
+                .ok_or_else(|| INVALID.to_string())
+        };
+        let usable = (SALT_BYTES..=MAX_SALT_BYTES).contains(&salt.len())
+            && (MIN_ITERATIONS..=MAX_ITERATIONS).contains(&iterations);
+        if !usable {
+            return Err(INVALID.to_string());
+        }
+        Ok(Self {
+            salt,
+            iterations,
+            stored_key: key(stored_key)?,
+            server_key: key(server_key)?,
+        })
+    }
+
+    /// The salt, StoredKey and ServerKey in base64, as the settings file keeps them.
+    pub(super) fn stored(&self) -> (String, String, String) {
+        (
+            STANDARD.encode(&self.salt),
+            STANDARD.encode(self.stored_key),
+            STANDARD.encode(self.server_key),
+        )
+    }
+
+    /// Checks a page's ClientProof for `auth_message`; returns the
+    /// ServerSignature to answer with when the proof is right.
+    pub(super) fn check_proof(&self, auth_message: &[u8], proof: &Key) -> Option<Key> {
+        let signature = hmac_sha256(&self.stored_key, auth_message);
+        let mut client_key = [0u8; KEY_BYTES];
+        for (byte, (proof, signature)) in client_key.iter_mut().zip(proof.iter().zip(&signature)) {
+            *byte = proof ^ signature;
+        }
+        same(&sha256(&client_key), &self.stored_key)
+            .then(|| hmac_sha256(&self.server_key, auth_message))
     }
 }
 
-/// Whether `password` matches `hash`; the final comparison is constant-time
-/// (`password_hash::Output` compares with `subtle`).
-pub(super) fn verify(password: &str, hash: &str) -> bool {
-    let Ok(parsed) = PasswordHash::new(hash) else {
-        return false;
-    };
-    Argon2::default()
-        .verify_password(password.as_bytes(), &parsed)
-        .is_ok()
+fn salted_password(password: &[u8], salt: &[u8], iterations: u32) -> Key {
+    let mut salted = [0u8; KEY_BYTES];
+    let rounds = NonZeroU32::new(iterations).unwrap_or(NonZeroU32::MIN);
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        rounds,
+        salt,
+        password,
+        &mut salted,
+    );
+    salted
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Key {
+    let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), data);
+    let mut out = [0u8; KEY_BYTES];
+    out.copy_from_slice(tag.as_ref());
+    out
+}
+
+fn sha256(data: &[u8]) -> Key {
+    let mut out = [0u8; KEY_BYTES];
+    out.copy_from_slice(digest::digest(&digest::SHA256, data).as_ref());
+    out
+}
+
+/// Whether two keys are equal, looking at every byte whatever they hold.
+fn same(left: &Key, right: &Key) -> bool {
+    let difference = left
+        .iter()
+        .zip(right)
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right));
+    std::hint::black_box(difference) == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn hmac_sha256_matches_rfc_4231() {
+        // Test cases 1, 2 and 6 (a key longer than the block).
+        assert_eq!(
+            hex(&hmac_sha256(&[0x0b; 20], b"Hi There")),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        );
+        assert_eq!(
+            hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(
+            hex(&hmac_sha256(
+                &[0xaa; 131],
+                b"Test Using Larger Than Block-Size Key - Hash Key First"
+            )),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
+    }
+
+    #[test]
+    fn pbkdf2_hmac_sha256_matches_rfc_7914() {
+        // Section 11, first 32 bytes of each 64-byte result.
+        assert_eq!(
+            hex(&salted_password(b"passwd", b"salt", 1)),
+            "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc"
+        );
+        assert_eq!(
+            hex(&salted_password(b"Password", b"NaCl", 80_000)),
+            "4ddcd8f60b98be21830cee5ef22701f9641a4418d04c0414aeff08876b34ab56"
+        );
+    }
+
+    /// RFC 7677 section 3: user "user", password "pencil".
+    #[test]
+    fn the_proof_and_signature_follow_rfc_7677() {
+        let salt = STANDARD.decode("W22ZaJ0SNY7soEsUEjb6gQ==").unwrap();
+        let verifier = Verifier::derive("pencil", salt, 4096);
+        let nonce = "rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0";
+        let auth_message = format!(
+            "n=user,r=rOprNGfwEbeRWgbNEkqO,r={nonce},s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096,\
+             c=biws,r={nonce}"
+        );
+        let proof: Key = STANDARD
+            .decode("dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=")
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let signature = verifier
+            .check_proof(auth_message.as_bytes(), &proof)
+            .expect("the RFC's proof is accepted");
+        assert_eq!(
+            STANDARD.encode(signature),
+            "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
+        );
+        let mut wrong = proof;
+        wrong[31] ^= 1;
+        assert_eq!(verifier.check_proof(auth_message.as_bytes(), &wrong), None);
+        assert_eq!(verifier.check_proof(b"another message", &proof), None);
+    }
+
+    #[test]
+    fn a_new_verifier_has_a_fresh_salt_and_never_shows_its_keys() {
+        let first = build_verifier("12345678").unwrap();
+        let second = build_verifier("12345678").unwrap();
+        assert_eq!(first.salt().len(), SALT_BYTES);
+        assert_eq!(first.iterations(), ITERATIONS);
+        assert_ne!(first, second, "every verifier has its own salt");
+        let shown = format!("{first:?}");
+        let (_, stored, server) = first.stored();
+        assert!(
+            !shown.contains(&stored) && !shown.contains(&server),
+            "{shown}"
+        );
+        assert!(!shown.contains("12345678"), "{shown}");
+    }
+
+    #[test]
+    fn the_length_rules_count_characters() {
+        assert_eq!(
+            build_verifier("1234567"),
+            Err("At least 8 characters.".to_string())
+        );
+        assert_eq!(
+            build_verifier("ñññññññ"),
+            Err("At least 8 characters.".to_string())
+        );
+        assert_eq!(
+            build_verifier(&"a".repeat(129)),
+            Err("At most 128 characters.".to_string())
+        );
+        assert!(build_verifier(&"ñ".repeat(128)).is_ok());
+    }
+
+    #[test]
+    fn a_stored_verifier_round_trips_and_bad_values_are_refused() {
+        let verifier = build_verifier("correct horse").unwrap();
+        let (salt, stored, server) = verifier.stored();
+        assert_eq!(
+            Verifier::from_stored(&salt, ITERATIONS, &stored, &server),
+            Ok(verifier)
+        );
+        let short_salt = STANDARD.encode([1u8; 8]);
+        let short_key = STANDARD.encode([1u8; 31]);
+        for (salt, iterations, stored, server) in [
+            (
+                short_salt.as_str(),
+                ITERATIONS,
+                stored.as_str(),
+                server.as_str(),
+            ),
+            (salt.as_str(), MIN_ITERATIONS - 1, &stored, &server),
+            (&salt, MAX_ITERATIONS + 1, &stored, &server),
+            (&salt, ITERATIONS, &short_key, &server),
+            (&salt, ITERATIONS, &stored, "not base64!"),
+        ] {
+            assert_eq!(
+                Verifier::from_stored(salt, iterations, stored, server),
+                Err(INVALID.to_string())
+            );
+        }
+    }
 }

@@ -1,5 +1,4 @@
-//! The computer's LAN IPv4 addresses: the certificate's names and the
-//! addresses a phone can type or scan.
+//! The computer's LAN IPv4 addresses: the addresses a phone can type or scan.
 use std::net::Ipv4Addr;
 
 /// Interface name prefixes of container and VM bridges: listed last, because

@@ -1,43 +1,44 @@
-//! The virtual Stream Deck Classic's HTTPS + WSS server (S4, S5, S1 clean stop).
+//! The virtual Stream Deck Classic's plain HTTP + WebSocket server (S4, S5,
+//! S1 clean stop).
 //!
-//! Every test starts a real server on 127.0.0.1 with an ephemeral port and a
-//! scratch config directory, then talks to it with a real rustls client and a
-//! tungstenite WebSocket client, through the public `sdeck_plus::virtual_deck`
-//! API only. Nothing reaches a device or the network beyond loopback; a
-//! second client address is 127.0.0.2, which Linux routes over loopback too.
-use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName};
+//! Every test starts a real server on 127.0.0.1 with an ephemeral port, then
+//! talks to it over plain TCP and with a tungstenite WebSocket client, through
+//! the public `sdeck_plus::virtual_deck` API only. The login is the page's
+//! challenge-response, implemented here from its definition with `ring`, so
+//! the tests also pin the protocol the page speaks. Nothing reaches a device
+//! or the network beyond loopback; a second client address is 127.0.0.2,
+//! which Linux routes over loopback too.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ring::{digest, hmac, pbkdf2};
 use sdeck_plus::virtual_deck::{
-    hash_password, DeckFrame, DeckInput, ServerConfig, ServerEvent, VirtualDeckServer,
+    build_verifier, DeckFrame, DeckInput, ServerConfig, ServerEvent, Verifier, VirtualDeckServer,
+    ITERATIONS,
 };
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     fs,
     io::{self, ErrorKind, Read, Write},
     net::{IpAddr, Ipv4Addr, TcpStream},
-    os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::fs::PermissionsExt,
-    },
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc, Arc, OnceLock,
-    },
+    num::NonZeroU32,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    sync::{mpsc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime},
 };
 use tungstenite::{client::IntoClientRequest, handshake::HandshakeError, Message, WebSocket};
 
 const PASSWORD: &str = "correct horse";
+const NEW_PASSWORD: &str = "another secret";
 /// Upper bound of every wait on a real signal; never a fixed sleep.
 const WAIT: Duration = Duration::from_secs(20);
-/// The page policy; `connect-src` also names `wss://<Host>` for older Safari.
+const EXPIRED: &str = "The login expired. Try again.";
+/// The page policy; `connect-src` also names `ws://<Host>` for older Safari.
 fn csp(port: u16) -> String {
     format!(
         "default-src 'self'; img-src 'self' data: blob:; \
-         connect-src 'self' wss://127.0.0.1:{port}; \
-         style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+         connect-src 'self' ws://127.0.0.1:{port}; \
+         style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; form-action 'none'"
     )
 }
 const ANDROID_CHROME: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 \
@@ -51,54 +52,147 @@ const PENDING_PER_ADDRESS: usize = 8;
 /// Key presses one viewer may make per second.
 const PRESSES_PER_SECOND: u64 = 50;
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+type Socket = WebSocket<TcpStream>;
 
-type Tls = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
-type Socket = WebSocket<Tls>;
-
-/// A scratch config directory under the system temp dir, removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "sdeck-virtual-deck-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// One hash for the whole binary: Argon2id is deliberately slow.
-fn password_hash() -> String {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| hash_password(PASSWORD).expect("hash the test password"))
+/// One verifier per password for the whole binary: deriving is slow on purpose.
+fn verifier_of(password: &'static str) -> Verifier {
+    static VERIFIERS: OnceLock<Mutex<HashMap<&'static str, Verifier>>> = OnceLock::new();
+    let verifiers = VERIFIERS.get_or_init(Mutex::default);
+    let mut verifiers = verifiers.lock().unwrap();
+    verifiers
+        .entry(password)
+        .or_insert_with(|| build_verifier(password).expect("a verifier of the test password"))
         .clone()
 }
 
-fn config(dir: &std::path::Path, port: u16) -> ServerConfig {
+fn config(port: u16) -> ServerConfig {
     ServerConfig {
         port,
         bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        config_dir: dir.to_path_buf(),
     }
+}
+
+// ---- the page's side of the login, from its definition ----
+
+type Key = [u8; 32];
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Key {
+    let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), data);
+    tag.as_ref().try_into().unwrap()
+}
+
+fn sha256(data: &[u8]) -> Key {
+    digest::digest(&digest::SHA256, data)
+        .as_ref()
+        .try_into()
+        .unwrap()
+}
+
+/// SaltedPasswords by password, salt and iterations.
+type SaltedCache = Mutex<HashMap<(String, Vec<u8>, u32), Key>>;
+
+/// PBKDF2-HMAC-SHA-256(password, salt, iterations), remembered per input so
+/// the many logins of this binary derive each password once.
+fn salted_password(password: &str, salt: &[u8], iterations: u32) -> Key {
+    static SALTED: OnceLock<SaltedCache> = OnceLock::new();
+    let cache = SALTED.get_or_init(Mutex::default);
+    let key = (password.to_string(), salt.to_vec(), iterations);
+    if let Some(salted) = cache.lock().unwrap().get(&key) {
+        return *salted;
+    }
+    let mut salted = [0u8; 32];
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        NonZeroU32::new(iterations).unwrap(),
+        salt,
+        password.as_bytes(),
+        &mut salted,
+    );
+    cache.lock().unwrap().insert(key, salted);
+    salted
+}
+
+/// The server's challenge: `{"salt","iterations","nonce"}`.
+#[derive(Debug, Clone)]
+struct Challenge {
+    salt: Vec<u8>,
+    iterations: u32,
+    nonce: String,
+}
+
+impl Challenge {
+    fn of(response: &Response) -> Self {
+        assert_eq!(response.status, 200, "{response:?}");
+        let body = response.json();
+        Self {
+            salt: STANDARD.decode(body["salt"].as_str().unwrap()).unwrap(),
+            iterations: u32::try_from(body["iterations"].as_u64().unwrap()).unwrap(),
+            nonce: body["nonce"].as_str().unwrap().to_string(),
+        }
+    }
+}
+
+/// What the page sends for `password` and what it expects back.
+struct Answer {
+    body: String,
+    server_signature: String,
+}
+
+fn answer(password: &str, challenge: &Challenge, client_nonce: &str) -> Answer {
+    let salted = salted_password(password, &challenge.salt, challenge.iterations);
+    let client_key = hmac_sha256(&salted, b"Client Key");
+    let stored_key = sha256(&client_key);
+    let auth_message = format!("{client_nonce}{}", challenge.nonce);
+    let signature = hmac_sha256(&stored_key, auth_message.as_bytes());
+    let mut proof = client_key;
+    for (byte, signature) in proof.iter_mut().zip(signature) {
+        *byte ^= signature;
+    }
+    let server_key = hmac_sha256(&salted, b"Server Key");
+    Answer {
+        body: json!({
+            "nonce": challenge.nonce,
+            "client_nonce": client_nonce,
+            "proof": STANDARD.encode(proof),
+        })
+        .to_string(),
+        server_signature: STANDARD.encode(hmac_sha256(&server_key, auth_message.as_bytes())),
+    }
+}
+
+/// A fresh client nonce, as the page makes one: 32 random bytes in hex.
+fn client_nonce() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let bytes = sha256(format!("{}-{count}", std::process::id()).as_bytes());
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A POST with an optional JSON body, `Origin` and cookie.
+fn post_request(
+    port: u16,
+    path: &str,
+    body: &str,
+    origin: Option<&str>,
+    cookie: Option<&str>,
+) -> String {
+    let origin = origin
+        .map(|origin| format!("Origin: {origin}\r\n"))
+        .unwrap_or_default();
+    let cookie = cookie
+        .map(|cookie| format!("Cookie: {cookie}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}{cookie}\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
 }
 
 struct Harness {
     server: Option<VirtualDeckServer>,
     inputs: mpsc::Receiver<DeckInput>,
     port: u16,
-    tls: Arc<rustls::ClientConfig>,
-    scratch: Scratch,
 }
 
 impl Harness {
@@ -107,24 +201,20 @@ impl Harness {
     }
 
     fn with_snapshot(frames: Vec<DeckFrame>) -> Self {
-        let scratch = Scratch::new();
         let (sender, inputs) = mpsc::channel();
         let server = VirtualDeckServer::start(
-            config(&scratch.0, 0),
-            password_hash(),
+            config(0),
+            verifier_of(PASSWORD),
             sender,
             Box::new(move || frames.clone()),
         )
         .expect("start the virtual deck server");
         let port = server.local_port();
         assert_ne!(port, 0, "port 0 binds an ephemeral port");
-        let tls = client_config(&scratch.0);
         Self {
             server: Some(server),
             inputs,
             port,
-            tls,
-            scratch,
         }
     }
 
@@ -132,18 +222,18 @@ impl Harness {
         self.server.as_ref().unwrap()
     }
 
-    fn connect(&self) -> Tls {
+    fn connect(&self) -> TcpStream {
         let tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, self.port)).unwrap();
-        tls_over(&self.tls, tcp)
+        with_timeouts(tcp)
     }
 
-    /// A TLS connection whose source address is `source`.
-    fn connect_from(&self, source: Ipv4Addr) -> Tls {
-        tls_over(&self.tls, tcp_from(source, self.port))
+    /// A connection whose source address is `source`.
+    fn connect_from(&self, source: Ipv4Addr) -> TcpStream {
+        with_timeouts(tcp_from(source, self.port))
     }
 
     fn origin(&self) -> String {
-        format!("https://127.0.0.1:{}", self.port)
+        format!("http://127.0.0.1:{}", self.port)
     }
 
     fn request(&self, raw: &str) -> Response {
@@ -152,30 +242,6 @@ impl Harness {
 
     fn request_from(&self, source: Ipv4Addr, raw: &str) -> Response {
         send_request(self.connect_from(source), raw)
-    }
-
-    fn login_from(&self, source: Ipv4Addr, password: &str) -> Response {
-        self.request_from(source, &login_request(self.port, password))
-    }
-
-    /// A POST with an `Origin` header.
-    fn post_from_origin(
-        &self,
-        path: &str,
-        body: &str,
-        cookie: Option<&str>,
-        origin: &str,
-    ) -> Response {
-        let cookie = cookie
-            .map(|c| format!("Cookie: {c}\r\n"))
-            .unwrap_or_default();
-        self.request(&format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\n\
-             Content-Type: application/x-www-form-urlencoded\r\n\
-             Content-Length: {}\r\n{cookie}\r\n{body}",
-            body.len(),
-            port = self.port
-        ))
     }
 
     fn get(&self, path: &str, cookie: Option<&str>) -> Response {
@@ -188,27 +254,41 @@ impl Harness {
         ))
     }
 
-    fn post(&self, path: &str, body: &str, cookie: Option<&str>) -> Response {
-        let cookie = cookie
-            .map(|c| format!("Cookie: {c}\r\n"))
-            .unwrap_or_default();
-        self.request(&format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
-             Content-Type: application/x-www-form-urlencoded\r\n\
-             Content-Length: {}\r\n{cookie}\r\n{body}",
-            body.len(),
-            port = self.port
-        ))
+    fn post(&self, path: &str, body: &str, origin: Option<&str>, cookie: Option<&str>) -> Response {
+        self.request(&post_request(self.port, path, body, origin, cookie))
+    }
+
+    fn post_from(&self, source: Ipv4Addr, path: &str, body: &str) -> Response {
+        self.request_from(source, &post_request(self.port, path, body, None, None))
+    }
+
+    /// POST /login/start from `source`.
+    fn challenge_from(&self, source: Ipv4Addr) -> Challenge {
+        Challenge::of(&self.post_from(source, "/login/start", ""))
+    }
+
+    fn challenge(&self) -> Challenge {
+        self.challenge_from(Ipv4Addr::LOCALHOST)
+    }
+
+    /// The whole login from `source`: the answer to /login/finish.
+    fn login_from(&self, source: Ipv4Addr, password: &str) -> Response {
+        let start = self.post_from(source, "/login/start", "");
+        if start.status != 200 {
+            return start;
+        }
+        let answer = answer(password, &Challenge::of(&start), &client_nonce());
+        self.post_from(source, "/login/finish", &answer.body)
     }
 
     fn login_with(&self, password: &str) -> Response {
-        self.request(&login_request(self.port, password))
+        self.login_from(Ipv4Addr::LOCALHOST, password)
     }
 
     /// Logs in with the right password and returns the `Cookie` header value.
     fn login(&self) -> String {
         let response = self.login_with(PASSWORD);
-        assert_eq!(response.status, 303, "{response:?}");
+        assert_eq!(response.status, 200, "{response:?}");
         session_cookie(&response)
     }
 
@@ -218,7 +298,7 @@ impl Harness {
         origin: Option<&str>,
         user_agent: &str,
     ) -> Result<Socket, u16> {
-        let mut request = format!("wss://127.0.0.1:{}/ws", self.port)
+        let mut request = format!("ws://127.0.0.1:{}/ws", self.port)
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();
@@ -268,12 +348,10 @@ impl Drop for Harness {
     }
 }
 
-fn tls_over(tls: &Arc<rustls::ClientConfig>, tcp: TcpStream) -> Tls {
+fn with_timeouts(tcp: TcpStream) -> TcpStream {
     tcp.set_read_timeout(Some(WAIT)).unwrap();
     tcp.set_write_timeout(Some(WAIT)).unwrap();
-    let name = ServerName::from(IpAddr::V4(Ipv4Addr::LOCALHOST));
-    let connection = rustls::ClientConnection::new(tls.clone(), name).unwrap();
-    rustls::StreamOwned::new(connection, tcp)
+    tcp
 }
 
 /// A TCP connection to 127.0.0.1:`port` from `source`; every 127.0.0.0/8
@@ -321,17 +399,7 @@ fn tcp_from(source: Ipv4Addr, port: u16) -> TcpStream {
     TcpStream::from(socket)
 }
 
-fn login_request(port: u16, password: &str) -> String {
-    let body = format!("password={}", password.replace(' ', "+"));
-    format!(
-        "POST /login HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
-         Content-Type: application/x-www-form-urlencoded\r\n\
-         Content-Length: {}\r\n\r\n{body}",
-        body.len()
-    )
-}
-
-fn send_request(mut stream: Tls, raw: &str) -> Response {
+fn send_request(mut stream: TcpStream, raw: &str) -> Response {
     stream.write_all(raw.as_bytes()).unwrap();
     stream.flush().unwrap();
     read_response(&mut stream)
@@ -357,45 +425,8 @@ fn read_until_closed(stream: &mut impl Read) -> Vec<u8> {
     }
 }
 
-/// Bytes that hold no HTTP answer: nothing, or a TLS alert record.
-fn assert_no_http_reply(received: &[u8], what: &str) {
-    assert!(
-        !received.windows(5).any(|window| window == b"HTTP/"),
-        "{what}: {received:?}"
-    );
-    if let Some(first) = received.first() {
-        assert_eq!(*first, 0x15, "{what}: only a TLS alert, got {received:?}");
-    }
-}
-
-/// A ClientHello that offers only `version` (no supported_versions
-/// extension) with a suite, groups and signature schemes the server could
-/// use with TLS 1.2, so only the version can make it fail.
-fn client_hello(version: [u8; 2]) -> Vec<u8> {
-    let mut hello = version.to_vec();
-    hello.extend_from_slice(&[0x5a; 32]); // random
-    hello.push(0); // no session id
-                   // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 and _256_GCM_SHA384.
-    hello.extend_from_slice(&[0x00, 0x04, 0xc0, 0x2b, 0xc0, 0x2c]);
-    hello.extend_from_slice(&[0x01, 0x00]); // null compression
-    let extensions: &[u8] = &[
-        0x00, 0x0d, 0x00, 0x06, 0x00, 0x04, 0x04, 0x03, 0x08, 0x04, // signature_algorithms
-        0x00, 0x0a, 0x00, 0x06, 0x00, 0x04, 0x00, 0x1d, 0x00, 0x17, // supported_groups
-        0x00, 0x0b, 0x00, 0x02, 0x01, 0x00, // ec_point_formats: uncompressed
-    ];
-    hello.extend_from_slice(&(extensions.len() as u16).to_be_bytes());
-    hello.extend_from_slice(extensions);
-    let mut handshake = vec![0x01, 0x00];
-    handshake.extend_from_slice(&(hello.len() as u16).to_be_bytes());
-    handshake.extend_from_slice(&hello);
-    let mut record = vec![0x16, 0x03, 0x01];
-    record.extend_from_slice(&(handshake.len() as u16).to_be_bytes());
-    record.extend_from_slice(&handshake);
-    record
-}
-
 /// Whether a request on `stream` gets any HTTP answer at all.
-fn answered(mut stream: Tls, raw: &str) -> bool {
+fn answered(mut stream: TcpStream, raw: &str) -> bool {
     if stream
         .write_all(raw.as_bytes())
         .and_then(|()| stream.flush())
@@ -404,22 +435,6 @@ fn answered(mut stream: Tls, raw: &str) -> bool {
         return false;
     }
     read_until_closed(&mut stream).starts_with(b"HTTP/")
-}
-
-fn client_config(config_dir: &std::path::Path) -> Arc<rustls::ClientConfig> {
-    let cert = CertificateDer::from_pem_file(config_dir.join("virtual/cert.pem"))
-        .expect("the server stored its certificate");
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(cert).expect("trust the self-signed certificate");
-    Arc::new(
-        rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(roots)
-        .with_no_client_auth(),
-    )
 }
 
 #[derive(Debug)]
@@ -449,7 +464,7 @@ fn read_response(stream: &mut impl Read) -> Response {
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => raw.extend_from_slice(&chunk[..n]),
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof && !raw.is_empty() => break,
+            Err(error) if error.kind() == ErrorKind::ConnectionReset && !raw.is_empty() => break,
             Err(error) => panic!("reading the response failed: {error}"),
         }
     }
@@ -525,98 +540,170 @@ fn wait_viewers_changed(events: &mpsc::Receiver<ServerEvent>) {
     }
 }
 
-fn sha256_fingerprint(der: &[u8]) -> String {
-    let hex: Vec<String> = Sha256::digest(der)
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect();
-    format!("SHA-256 {}", hex.join(":"))
+fn wrong_password(tries_left: u32) -> Value {
+    json!({"error": "Wrong password.", "tries_left": tries_left})
 }
 
-// ---- password ----
+// ---- password verifier ----
 
 #[test]
-fn hash_password_rejects_seven_characters_with_the_exact_message() {
+fn build_verifier_counts_characters_with_the_exact_messages() {
     assert_eq!(
-        hash_password("1234567"),
-        Err("At least 8 characters.".to_string())
+        build_verifier("1234567").err().as_deref(),
+        Some("At least 8 characters.")
     );
     // Characters, not bytes: seven two-byte letters are still too short.
     assert_eq!(
-        hash_password("ñññññññ"),
-        Err("At least 8 characters.".to_string())
+        build_verifier("ñññññññ").err().as_deref(),
+        Some("At least 8 characters.")
     );
-}
-
-#[test]
-fn hash_password_returns_a_salted_argon2id_phc_string() {
-    let first = hash_password("12345678").unwrap();
-    let second = hash_password("12345678").unwrap();
-    assert!(first.starts_with("$argon2id$"), "{first}");
-    assert_ne!(first, second, "every hash has its own salt");
-    assert!(!first.contains("12345678"), "the password is never stored");
-}
-
-#[test]
-fn hash_password_uses_argon2id_with_19_mib_two_passes_and_one_lane() {
-    let hash = hash_password("12345678").unwrap();
-    let parsed = argon2::password_hash::PasswordHash::new(&hash).expect("a PHC string");
-    assert_eq!(parsed.algorithm.as_str(), "argon2id");
-    assert_eq!(parsed.version, Some(19));
-    let params = argon2::Params::try_from(&parsed).expect("Argon2 parameters");
     assert_eq!(
-        (params.m_cost(), params.t_cost(), params.p_cost()),
-        (19_456, 2, 1)
+        build_verifier(&"a".repeat(129)).err().as_deref(),
+        Some("At most 128 characters.")
     );
-    assert!(
-        hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"),
-        "{hash}"
-    );
+    assert!(build_verifier(&"ñ".repeat(128)).is_ok());
 }
 
 #[test]
-fn start_rejects_a_value_that_is_not_an_argon2id_hash() {
-    let scratch = Scratch::new();
-    let (sender, _inputs) = mpsc::channel();
-    let result = VirtualDeckServer::start(
-        config(&scratch.0, 0),
-        PASSWORD.to_string(),
-        sender,
-        Box::new(Vec::new),
+fn build_verifier_salts_every_verifier_and_uses_200000_iterations() {
+    let first = build_verifier("12345678").unwrap();
+    let second = build_verifier("12345678").unwrap();
+    assert_eq!(ITERATIONS, 200_000);
+    assert_eq!(first.iterations(), ITERATIONS);
+    assert_eq!(first.salt().len(), 16);
+    assert_ne!(
+        first.salt(),
+        second.salt(),
+        "every verifier has its own salt"
     );
-    assert!(result.is_err());
+    assert_ne!(first, second);
+    assert!(!format!("{first:?}").contains("12345678"));
 }
 
 // ---- login ----
 
 #[test]
-fn a_wrong_password_answers_401_with_the_tries_left() {
+fn the_login_starts_with_a_single_use_challenge_from_the_password_verifier() {
+    let harness = Harness::start();
+    let verifier = verifier_of(PASSWORD);
+    let response = harness.post("/login/start", "", None, None);
+    assert_eq!(response.status, 200);
+    assert_eq!(response.header("Content-Type"), Some("application/json"));
+    assert_eq!(response.header("Set-Cookie"), None);
+    let body = response.json();
+    assert_eq!(
+        body.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["iterations", "nonce", "salt"]
+    );
+    let challenge = Challenge::of(&response);
+    assert_eq!(challenge.salt, verifier.salt());
+    assert_eq!(challenge.iterations, ITERATIONS);
+    assert_eq!(challenge.nonce.len(), 64, "32 random bytes as hex");
+    assert!(challenge
+        .nonce
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    assert_ne!(harness.challenge().nonce, challenge.nonce);
+    assert_eq!(harness.get("/login/start", None).status, 405);
+}
+
+#[test]
+fn the_right_proof_sets_a_private_session_cookie_and_proves_the_server() {
+    let harness = Harness::start();
+    let challenge = harness.challenge();
+    let answer = answer(PASSWORD, &challenge, &client_nonce());
+    let response = harness.post("/login/finish", &answer.body, None, None);
+    assert_eq!(response.status, 200, "{response:?}");
+    assert_eq!(
+        response.json(),
+        json!({"server_signature": answer.server_signature}),
+        "the server proves it knows the verifier"
+    );
+    let set_cookie = response.header("Set-Cookie").unwrap();
+    let (cookie, attributes) = set_cookie.split_once(';').unwrap();
+    let token = cookie.strip_prefix("sdeck_session=").unwrap();
+    assert_eq!(token.len(), 64, "32 random bytes as hex");
+    assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    let attributes: Vec<&str> = attributes.split(';').map(str::trim).collect();
+    assert_eq!(
+        attributes,
+        ["HttpOnly", "SameSite=Strict", "Path=/"],
+        "no Secure: the deck is plain HTTP"
+    );
+    let deck_page = fs::read("src/virtual_deck/page/index.html").unwrap();
+    assert_eq!(
+        harness.get("/", Some(&session_cookie(&response))).body,
+        deck_page
+    );
+}
+
+#[test]
+fn the_password_never_travels_in_any_login_request() {
+    let harness = Harness::start();
+    let challenge = harness.challenge();
+    let start = post_request(harness.port, "/login/start", "", None, None);
+    let answer = answer(PASSWORD, &challenge, &client_nonce());
+    let finish = post_request(harness.port, "/login/finish", &answer.body, None, None);
+    let finished = harness.request(&finish);
+    assert_eq!(finished.status, 200);
+    let hex: String = PASSWORD.bytes().map(|byte| format!("{byte:02x}")).collect();
+    let forms = [
+        PASSWORD.to_string(),
+        PASSWORD.replace(' ', "+"),
+        PASSWORD.replace(' ', "%20"),
+        STANDARD.encode(PASSWORD),
+        hex,
+        "correct".to_string(),
+        "password".to_string(),
+    ];
+    for request in [&start, &finish] {
+        for form in &forms {
+            assert!(!request.contains(form.as_str()), "{form:?} in {request}");
+        }
+    }
+    // The old form login is gone: a password posted to /login logs nobody in.
+    let old = harness.request(&format!(
+        "POST /login HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\
+         Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 21\r\n\r\n\
+         password=correct+horse",
+        harness.port
+    ));
+    assert_eq!(old.status, 405);
+    assert_eq!(old.header("Allow"), Some("GET"));
+    assert_eq!(old.header("Set-Cookie"), None);
+    assert_eq!(harness.get("/login", None).status, 303);
+}
+
+#[test]
+fn a_wrong_proof_answers_401_with_the_tries_left() {
     let harness = Harness::start();
     let response = harness.login_with("wrong password");
     assert_eq!(response.status, 401);
-    assert_eq!(
-        response.json(),
-        json!({"error": "Wrong password.", "tries_left": 4})
-    );
+    assert_eq!(response.json(), wrong_password(4));
     assert_eq!(response.header("Set-Cookie"), None);
 }
 
 #[test]
 fn the_sixth_try_after_five_failures_answers_429_even_with_the_right_password() {
     let harness = Harness::start();
+    // A challenge taken before the lockout is no way around it.
+    let early = harness.challenge();
     for tries_left in (0..5).rev() {
         let response = harness.login_with("wrong password");
         assert_eq!(response.status, 401);
-        assert_eq!(response.json()["tries_left"], json!(tries_left));
+        assert_eq!(response.json(), wrong_password(tries_left));
     }
-    let response = harness.login_with(PASSWORD);
-    assert_eq!(response.status, 429);
-    assert_eq!(
-        response.json(),
-        json!({"error": "Too many tries.", "retry_after": 30})
-    );
-    assert_eq!(response.header("Retry-After"), Some("30"));
-    assert_eq!(response.header("Set-Cookie"), None);
+    let too_many = json!({"error": "Too many tries.", "retry_after": 30});
+    let start = harness.post("/login/start", "", None, None);
+    assert_eq!(start.status, 429);
+    assert_eq!(start.json(), too_many);
+    assert_eq!(start.header("Retry-After"), Some("30"));
+    let right = answer(PASSWORD, &early, &client_nonce());
+    let finish = harness.post("/login/finish", &right.body, None, None);
+    assert_eq!(finish.status, 429);
+    assert_eq!(finish.json(), too_many);
+    assert_eq!(finish.header("Retry-After"), Some("30"));
+    assert_eq!(finish.header("Set-Cookie"), None);
 }
 
 #[test]
@@ -629,12 +716,9 @@ fn a_locked_address_does_not_lock_another_one() {
 
     let other = harness.login_from(OTHER_ADDRESS, "wrong password");
     assert_eq!(other.status, 401);
-    assert_eq!(
-        other.json(),
-        json!({"error": "Wrong password.", "tries_left": 4})
-    );
+    assert_eq!(other.json(), wrong_password(4));
     let other = harness.login_from(OTHER_ADDRESS, PASSWORD);
-    assert_eq!(other.status, 303, "{other:?}");
+    assert_eq!(other.status, 200, "{other:?}");
     assert!(other.header("Set-Cookie").is_some());
 
     let first = harness.login_with(PASSWORD);
@@ -642,67 +726,133 @@ fn a_locked_address_does_not_lock_another_one() {
 }
 
 #[test]
-fn a_foreign_origin_login_is_forbidden_and_never_counts_as_a_try() {
+fn a_replayed_answer_is_rejected_and_never_counts_as_a_try() {
     let harness = Harness::start();
-    for password in ["wrong+password", "correct+horse"] {
-        let response = harness.post_from_origin(
-            "/login",
-            &format!("password={password}"),
-            None,
-            "https://evil.example",
-        );
-        assert_eq!(response.status, 403, "{password}");
-        assert_eq!(response.json(), json!({"error": "Forbidden."}));
-        assert_eq!(response.header("Set-Cookie"), None, "{password}");
-    }
-    let next = harness.login_with("wrong password");
-    assert_eq!(next.status, 401);
+    let challenge = harness.challenge();
+    let right = answer(PASSWORD, &challenge, &client_nonce());
     assert_eq!(
-        next.json(),
-        json!({"error": "Wrong password.", "tries_left": 4}),
-        "the forbidden tries were not counted"
+        harness
+            .post("/login/finish", &right.body, None, None)
+            .status,
+        200
+    );
+    for _ in 0..2 {
+        let replayed = harness.post("/login/finish", &right.body, None, None);
+        assert_eq!(replayed.status, 400);
+        assert_eq!(replayed.json(), json!({"error": EXPIRED}));
+        assert_eq!(replayed.header("Set-Cookie"), None);
+    }
+    // A wrong answer uses its challenge up too.
+    let challenge = harness.challenge();
+    let wrong = answer("wrong password", &challenge, &client_nonce());
+    assert_eq!(
+        harness
+            .post("/login/finish", &wrong.body, None, None)
+            .status,
+        401
+    );
+    let again = harness.post("/login/finish", &wrong.body, None, None);
+    assert_eq!(again.status, 400);
+    assert_eq!(again.json(), json!({"error": EXPIRED}));
+    // An unknown nonce is no challenge either.
+    let unknown = Challenge {
+        nonce: "ab".repeat(32),
+        ..challenge
+    };
+    let made_up = answer(PASSWORD, &unknown, &client_nonce());
+    assert_eq!(
+        harness
+            .post("/login/finish", &made_up.body, None, None)
+            .status,
+        400
+    );
+    assert_eq!(
+        harness.login_with("wrong password").json(),
+        wrong_password(3),
+        "only the one wrong proof counted"
     );
 }
 
 #[test]
-fn a_login_form_posted_with_a_null_origin_still_logs_in() {
-    // Browsers send `Origin: null` for the login form's own post, because the
-    // page's Referrer-Policy is no-referrer.
+fn a_nonce_from_another_address_is_rejected_and_stays_usable_by_its_own() {
     let harness = Harness::start();
-    let deck_page = fs::read("src/virtual_deck/page/index.html").unwrap();
-    let wrong = harness.post_from_origin("/login", "password=wrong+password", None, "null");
-    assert_eq!(wrong.status, 401);
-    assert_eq!(wrong.json()["tries_left"], json!(4));
-    let response = harness.post_from_origin("/login", "password=correct+horse", None, "null");
-    assert_eq!(response.status, 303, "{response:?}");
-    let cookie = session_cookie(&response);
-    assert_eq!(harness.get("/", Some(&cookie)).body, deck_page);
+    let challenge = harness.challenge();
+    let right = answer(PASSWORD, &challenge, &client_nonce());
+    let elsewhere = harness.post_from(OTHER_ADDRESS, "/login/finish", &right.body);
+    assert_eq!(elsewhere.status, 400);
+    assert_eq!(elsewhere.json(), json!({"error": EXPIRED}));
+    assert_eq!(elsewhere.header("Set-Cookie"), None);
+    let own = harness.post("/login/finish", &right.body, None, None);
+    assert_eq!(own.status, 200, "{own:?}");
+    assert_eq!(
+        harness.login_from(OTHER_ADDRESS, "wrong password").json(),
+        wrong_password(4),
+        "the other address's attempt counted as no try"
+    );
 }
 
 #[test]
-fn the_right_password_sets_a_private_session_cookie_and_redirects_home() {
+fn a_malformed_answer_is_a_bad_request_and_uses_up_nothing() {
     let harness = Harness::start();
-    let response = harness.login_with(PASSWORD);
-    assert_eq!(response.status, 303);
-    assert_eq!(response.header("Location"), Some("/"));
-    let set_cookie = response.header("Set-Cookie").unwrap();
-    let (cookie, attributes) = set_cookie.split_once(';').unwrap();
-    let token = cookie.strip_prefix("sdeck_session=").unwrap();
-    assert_eq!(token.len(), 64, "32 random bytes as hex");
-    assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    let attributes: Vec<&str> = attributes.split(';').map(str::trim).collect();
-    for wanted in ["HttpOnly", "Secure", "SameSite=Strict", "Path=/"] {
-        assert!(attributes.contains(&wanted), "{set_cookie}");
+    let challenge = harness.challenge();
+    let right = answer(PASSWORD, &challenge, &client_nonce());
+    let fields: Value = serde_json::from_str(&right.body).unwrap();
+    let with = |key: &str, value: Value| {
+        let mut body = fields.clone();
+        body[key] = value;
+        body.to_string()
+    };
+    for body in [
+        "not json".to_string(),
+        json!({"nonce": challenge.nonce, "client_nonce": "abcdefghijklmnop"}).to_string(),
+        with("proof", json!(STANDARD.encode([1u8; 31]))),
+        with("proof", json!("not base64!")),
+        with("client_nonce", json!("short")),
+        with("client_nonce", json!("a,b".repeat(10))),
+        with("password", json!(PASSWORD)),
+    ] {
+        let response = harness.post("/login/finish", &body, None, None);
+        assert_eq!(response.status, 400, "{body}");
+        assert_eq!(response.json(), json!({"error": "Bad request."}), "{body}");
     }
-    // A JSON login body works too.
-    let body = json!({"password": PASSWORD}).to_string();
-    let json_login = harness.request(&format!(
-        "POST /login HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\n\r\n{body}",
-        harness.port,
-        body.len()
-    ));
-    assert_eq!(json_login.status, 303);
+    assert_eq!(
+        harness
+            .post("/login/finish", &right.body, None, None)
+            .status,
+        200,
+        "the challenge is still there"
+    );
+    assert_eq!(
+        harness.login_with("wrong password").json(),
+        wrong_password(4)
+    );
+}
+
+#[test]
+fn a_foreign_or_null_origin_login_is_forbidden_and_never_counts_as_a_try() {
+    let harness = Harness::start();
+    let https = format!("https://127.0.0.1:{}", harness.port);
+    for origin in ["https://evil.example", "null", https.as_str()] {
+        let start = harness.post("/login/start", "", Some(origin), None);
+        assert_eq!(start.status, 403, "{origin}");
+        assert_eq!(start.json(), json!({"error": "Forbidden."}));
+        for password in ["wrong password", PASSWORD] {
+            let answer = answer(password, &harness.challenge(), &client_nonce());
+            let finish = harness.post("/login/finish", &answer.body, Some(origin), None);
+            assert_eq!(finish.status, 403, "{origin}");
+            assert_eq!(finish.header("Set-Cookie"), None, "{origin}");
+        }
+    }
+    // The page's own origin logs in.
+    let challenge = Challenge::of(&harness.post("/login/start", "", Some(&harness.origin()), None));
+    let right = answer(PASSWORD, &challenge, &client_nonce());
+    let response = harness.post("/login/finish", &right.body, Some(&harness.origin()), None);
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        harness.login_with("wrong password").json(),
+        wrong_password(4),
+        "the forbidden tries were not counted"
+    );
 }
 
 #[test]
@@ -741,10 +891,13 @@ fn home_serves_the_login_page_without_a_session_and_the_deck_with_one() {
 fn logout_drops_the_session_and_redirects_home() {
     let harness = Harness::start();
     let cookie = harness.login();
-    let response = harness.post("/logout", "", Some(&cookie));
+    let response = harness.post("/logout", "", Some(&harness.origin()), Some(&cookie));
     assert_eq!(response.status, 303);
     assert_eq!(response.header("Location"), Some("/"));
-    assert!(response.header("Set-Cookie").unwrap().contains("Max-Age=0"));
+    assert_eq!(
+        response.header("Set-Cookie"),
+        Some("sdeck_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/")
+    );
     assert_eq!(
         harness
             .open_viewer(Some(&cookie), Some(&harness.origin()), ANDROID_CHROME)
@@ -758,9 +911,9 @@ fn logout_with_a_null_or_foreign_origin_is_forbidden_and_keeps_the_session() {
     let harness = Harness::start();
     let deck_page = fs::read("src/virtual_deck/page/index.html").unwrap();
     let cookie = harness.login();
-    let plain_http = format!("http://127.0.0.1:{}", harness.port);
-    for origin in ["null", "https://evil.example", plain_http.as_str()] {
-        let response = harness.post_from_origin("/logout", "", Some(&cookie), origin);
+    let https = format!("https://127.0.0.1:{}", harness.port);
+    for origin in ["null", "https://evil.example", https.as_str()] {
+        let response = harness.post("/logout", "", Some(origin), Some(&cookie));
         assert_eq!(response.status, 403, "{origin}");
         assert_eq!(response.json(), json!({"error": "Forbidden."}), "{origin}");
         assert_eq!(response.header("Set-Cookie"), None, "{origin}");
@@ -770,10 +923,8 @@ fn logout_with_a_null_or_foreign_origin_is_forbidden_and_keeps_the_session() {
             "{origin}: the session is still live"
         );
     }
-    // The page's own logout is a fetch(), which sends its real origin.
-    let response = harness.post_from_origin("/logout", "", Some(&cookie), &harness.origin());
+    let response = harness.post("/logout", "", Some(&harness.origin()), Some(&cookie));
     assert_eq!(response.status, 303);
-    assert!(response.header("Set-Cookie").unwrap().contains("Max-Age=0"));
     assert_ne!(harness.get("/", Some(&cookie)).body, deck_page);
 }
 
@@ -789,16 +940,16 @@ fn an_oversized_request_head_is_refused() {
 }
 
 #[test]
-fn an_oversized_login_body_is_refused_without_counting_a_try() {
+fn an_oversized_login_answer_is_refused_without_counting_a_try() {
     let harness = Harness::start();
     let response = harness.request(&format!(
-        "POST /login HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 5000\r\n\r\n",
+        "POST /login/finish HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 5000\r\n\r\n",
         harness.port
     ));
     assert_eq!(response.status, 413);
     assert_eq!(
-        harness.login_with("wrong password").json()["tries_left"],
-        json!(4)
+        harness.login_with("wrong password").json(),
+        wrong_password(4)
     );
 }
 
@@ -819,20 +970,23 @@ fn a_websocket_without_the_session_cookie_is_forbidden() {
 fn a_websocket_from_a_foreign_or_missing_origin_is_forbidden() {
     let harness = Harness::start();
     let cookie = harness.login();
-    let foreign = harness.open_viewer(Some(&cookie), Some("https://evil.example"), ANDROID_CHROME);
-    assert_eq!(foreign.err(), Some(403));
-    let plain_http = harness.open_viewer(
-        Some(&cookie),
-        Some(&format!("http://127.0.0.1:{}", harness.port)),
-        ANDROID_CHROME,
-    );
-    assert_eq!(plain_http.err(), Some(403));
-    let missing = harness.open_viewer(Some(&cookie), None, ANDROID_CHROME);
-    assert_eq!(missing.err(), Some(403));
-    let null = harness.open_viewer(Some(&cookie), Some("null"), ANDROID_CHROME);
-    assert_eq!(null.err(), Some(403));
+    let https = format!("https://127.0.0.1:{}", harness.port);
+    for origin in [
+        Some("http://evil.example"),
+        Some("https://evil.example"),
+        Some(https.as_str()),
+        Some("http://127.0.0.1"),
+        Some("null"),
+        None,
+    ] {
+        let refused = harness.open_viewer(Some(&cookie), origin, ANDROID_CHROME);
+        assert_eq!(refused.err(), Some(403), "{origin:?}");
+    }
     assert!(harness.server().viewers().is_empty());
     assert!(harness.inputs.try_recv().is_err(), "no DeckInput emitted");
+    assert!(harness
+        .open_viewer(Some(&cookie), Some(&harness.origin()), ANDROID_CHROME)
+        .is_ok());
 }
 
 #[test]
@@ -855,58 +1009,12 @@ fn at_most_eight_viewers_connect() {
 // ---- transport ----
 
 #[test]
-fn plaintext_http_gets_no_http_reply() {
-    let harness = Harness::start();
-    let mut tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, harness.port)).unwrap();
-    tcp.set_read_timeout(Some(WAIT)).unwrap();
-    tcp.write_all(format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", harness.port).as_bytes())
-        .unwrap();
-    assert_no_http_reply(&read_until_closed(&mut tcp), "plaintext HTTP");
-}
-
-#[test]
-fn tls_older_than_1_2_gets_no_http_reply() {
-    let harness = Harness::start();
-    let connect = || {
-        let tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, harness.port)).unwrap();
-        tcp.set_read_timeout(Some(WAIT)).unwrap();
-        tcp
-    };
-    for (version, name) in [([3, 1], "TLS 1.0"), ([3, 2], "TLS 1.1")] {
-        let mut tcp = connect();
-        tcp.write_all(&client_hello(version)).unwrap();
-        tcp.write_all(
-            format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", harness.port).as_bytes(),
-        )
-        .unwrap();
-        let received = read_until_closed(&mut tcp);
-        assert_no_http_reply(&received, name);
-        // A fatal protocol_version alert, then the connection ends.
-        assert_eq!(received, [0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 70], "{name}");
-    }
-    // The same hello offering TLS 1.2 gets a ServerHello: only the version
-    // was refused.
-    let mut tcp = connect();
-    tcp.write_all(&client_hello([3, 3])).unwrap();
-    let mut header = [0u8; 6];
-    tcp.read_exact(&mut header).unwrap();
-    assert_eq!(
-        &header[..3],
-        [0x16, 0x03, 0x03],
-        "a TLS 1.2 handshake record"
-    );
-    assert_eq!(header[5], 0x02, "a ServerHello");
-    // A TLS 1.2+ client is still served.
-    assert_eq!(harness.get("/", None).status, 200);
-}
-
-#[test]
 fn one_address_cannot_hold_more_than_eight_unfinished_connections() {
     let harness = Harness::start();
     let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", harness.port);
-    // Connections that never start their TLS handshake.
+    // Connections that never send their request.
     let stalled: Vec<TcpStream> = (0..PENDING_PER_ADDRESS)
-        .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, harness.port)).unwrap())
+        .map(|_| harness.connect())
         .collect();
     assert!(
         !answered(harness.connect(), &request),
@@ -918,7 +1026,7 @@ fn one_address_cannot_hold_more_than_eight_unfinished_connections() {
     );
     // The eight were accepted and are served once they speak.
     for tcp in stalled {
-        assert!(answered(tls_over(&harness.tls, tcp), &request));
+        assert!(answered(tcp, &request));
     }
     // Their slots free up again once they are done.
     let deadline = Instant::now() + WAIT;
@@ -1172,11 +1280,7 @@ fn set_password_disconnects_every_viewer_and_requires_the_new_password() {
     let (mut second, _) = harness.viewer(MAC_SAFARI);
     wait_viewers_changed(&events);
 
-    let new_password = "another secret";
-    harness
-        .server()
-        .set_password(hash_password(new_password).unwrap())
-        .unwrap();
+    harness.server().set_password(verifier_of(NEW_PASSWORD));
     assert!(harness.server().viewers().is_empty());
     wait_viewers_changed(&events);
     for socket in [&mut first, &mut second] {
@@ -1192,56 +1296,43 @@ fn set_password_disconnects_every_viewer_and_requires_the_new_password() {
             .err(),
         Some(403)
     );
+    assert_eq!(
+        harness.challenge().salt,
+        verifier_of(NEW_PASSWORD).salt(),
+        "challenges carry the new salt"
+    );
     assert_eq!(harness.login_with(PASSWORD).status, 401);
-    assert_eq!(harness.login_with(new_password).status, 303);
-    assert!(harness.server().set_password("not a hash".into()).is_err());
-    assert_eq!(harness.login_with(new_password).status, 303);
+    assert_eq!(harness.login_with(NEW_PASSWORD).status, 200);
 }
 
 #[test]
-fn no_session_from_the_old_password_survives_a_password_change() {
+fn no_session_or_challenge_from_the_old_password_survives_a_password_change() {
     let harness = Harness::start();
     let login_page = fs::read("src/virtual_deck/page/login.html").unwrap();
     let before = harness.login();
-    let new_password = "another secret";
-    let new_hash = hash_password(new_password).unwrap();
-
-    // A login with the old password, in flight while the password changes:
-    // whichever finishes first, it must not leave a live session behind.
-    let stream = harness.connect();
-    let raw = login_request(harness.port, PASSWORD);
-    let (sent, ready) = mpsc::channel();
-    let racing = thread::spawn(move || {
-        let mut stream = stream;
-        stream.write_all(raw.as_bytes()).unwrap();
-        stream.flush().unwrap();
-        sent.send(()).unwrap();
-        read_response(&mut stream)
-    });
-    ready.recv_timeout(WAIT).expect("the login was sent");
-    harness.server().set_password(new_hash).unwrap();
-    let raced = racing.join().unwrap();
-
-    let mut cookies = vec![before];
-    match raced.status {
-        303 => cookies.push(session_cookie(&raced)),
-        401 => assert_eq!(raced.header("Set-Cookie"), None),
-        other => panic!("unexpected login answer {other}: {raced:?}"),
-    }
-    for cookie in &cookies {
-        assert_eq!(
-            harness.get("/", Some(cookie)).body,
-            login_page,
-            "the old session shows the login page"
-        );
-        assert_eq!(
-            harness
-                .open_viewer(Some(cookie), Some(&harness.origin()), ANDROID_CHROME)
-                .err(),
-            Some(403)
-        );
-    }
-    assert_eq!(harness.login_with(new_password).status, 303);
+    // A login with the old password, in flight while the password changes.
+    let challenge = harness.challenge();
+    harness.server().set_password(verifier_of(NEW_PASSWORD));
+    let late = answer(PASSWORD, &challenge, &client_nonce());
+    let response = harness.post("/login/finish", &late.body, None, None);
+    assert_eq!(
+        response.status, 400,
+        "the challenge went with the old password"
+    );
+    assert_eq!(response.json(), json!({"error": EXPIRED}));
+    assert_eq!(response.header("Set-Cookie"), None);
+    assert_eq!(
+        harness.get("/", Some(&before)).body,
+        login_page,
+        "the old session shows the login page"
+    );
+    assert_eq!(
+        harness
+            .open_viewer(Some(&before), Some(&harness.origin()), ANDROID_CHROME)
+            .err(),
+        Some(403)
+    );
+    assert_eq!(harness.login_with(NEW_PASSWORD).status, 200);
 }
 
 #[test]
@@ -1271,7 +1362,7 @@ fn a_client_that_drops_its_connection_releases_the_keys_it_held() {
         ]
     );
 
-    // No WebSocket close, no TLS close_notify: the phone just vanishes.
+    // No WebSocket close: the phone just vanishes.
     drop(socket);
     let mut released = vec![
         harness.inputs.recv_timeout(WAIT).unwrap(),
@@ -1390,9 +1481,8 @@ fn stop_says_bye_closes_every_connection_and_joins_every_thread() {
             pressed: true
         }
     );
-    // A client that never starts its TLS handshake must not keep stop() waiting.
-    let mut idle = TcpStream::connect((Ipv4Addr::LOCALHOST, harness.port)).unwrap();
-    idle.set_read_timeout(Some(WAIT)).unwrap();
+    // A client that never sends its request must not keep stop() waiting.
+    let mut idle = harness.connect();
     // Nor one that stops in the middle of its request head.
     let mut half = harness.connect();
     half.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n").unwrap();
@@ -1430,121 +1520,35 @@ fn stop_says_bye_closes_every_connection_and_joins_every_thread() {
     );
 }
 
-// ---- certificate ----
+// ---- addresses ----
 
 #[test]
-fn the_certificate_and_its_private_key_are_stored_privately() {
-    let harness = Harness::start();
-    let dir = harness.scratch.0.join("virtual");
-    let mode = |path: PathBuf| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode(dir.clone()), 0o700);
-    assert_eq!(mode(dir.join("key.pem")), 0o600);
-    assert!(dir.join("cert.pem").is_file());
-    let key = fs::read_to_string(dir.join("key.pem")).unwrap();
-    assert!(key.contains("PRIVATE KEY"));
-}
-
-#[test]
-fn the_fingerprint_is_the_sha256_of_the_served_certificate() {
-    let harness = Harness::start();
-    let mut stream = harness.connect();
-    while stream.conn.is_handshaking() {
-        stream.conn.complete_io(&mut stream.sock).unwrap();
-    }
-    let served = stream.conn.peer_certificates().unwrap()[0].to_vec();
-    let fingerprint = harness.server().fingerprint();
-    assert_eq!(fingerprint, sha256_fingerprint(&served));
-    assert_eq!(fingerprint.len(), "SHA-256 ".len() + 32 * 3 - 1);
-}
-
-#[test]
-fn the_certificate_is_kept_while_the_names_match_and_replaced_when_they_change() {
-    let scratch = Scratch::new();
-    let start = |dir: &std::path::Path| {
-        let (sender, _inputs) = mpsc::channel();
-        VirtualDeckServer::start(config(dir, 0), password_hash(), sender, Box::new(Vec::new))
-            .unwrap()
-    };
-    let first = start(&scratch.0);
-    let fingerprint = first.fingerprint();
-    first.stop();
-    let second = start(&scratch.0);
-    assert_eq!(
-        second.fingerprint(),
-        fingerprint,
-        "same names, same certificate"
-    );
-    second.stop();
-
-    // A certificate for other names (an address the computer no longer has).
-    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let stale = rcgen::CertificateParams::new(vec!["10.255.255.254".to_string()])
-        .unwrap()
-        .self_signed(&key)
-        .unwrap();
-    let dir = scratch.0.join("virtual");
-    fs::write(dir.join("cert.pem"), stale.pem()).unwrap();
-    fs::write(dir.join("key.pem"), key.serialize_pem()).unwrap();
-    let third = start(&scratch.0);
-    assert_ne!(third.fingerprint(), sha256_fingerprint(stale.der()));
-    assert_ne!(third.fingerprint(), fingerprint);
-    third.stop();
-    let mode = fs::metadata(dir.join("key.pem"))
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
-}
-
-#[test]
-fn a_private_key_that_others_can_read_is_replaced_by_a_private_one() {
-    let scratch = Scratch::new();
-    let start = |dir: &std::path::Path| {
-        let (sender, _inputs) = mpsc::channel();
-        VirtualDeckServer::start(config(dir, 0), password_hash(), sender, Box::new(Vec::new))
-            .unwrap()
-    };
-    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    let first = start(&scratch.0);
-    let fingerprint = first.fingerprint();
-    first.stop();
-    let key_path = scratch.0.join("virtual/key.pem");
-    let exposed = fs::read(&key_path).unwrap();
-    fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
-
-    let second = start(&scratch.0);
-    assert_ne!(
-        second.fingerprint(),
-        fingerprint,
-        "a new key means a new certificate"
-    );
-    second.stop();
-    assert_eq!(mode(&key_path), 0o600);
-    assert_ne!(
-        fs::read(&key_path).unwrap(),
-        exposed,
-        "the key was replaced"
-    );
-}
-
-#[test]
-fn url_candidates_name_the_bound_address_and_port() {
+fn url_candidates_name_the_bound_address_and_port_over_plain_http() {
     let harness = Harness::start();
     assert_eq!(
         harness.server().url_candidates(),
-        vec![format!("https://127.0.0.1:{}/", harness.port)]
+        vec![format!("http://127.0.0.1:{}/", harness.port)]
+    );
+}
+
+#[test]
+fn the_default_config_listens_on_every_interface_at_8765() {
+    assert_eq!(
+        ServerConfig::default(),
+        ServerConfig {
+            port: 8765,
+            bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        }
     );
 }
 
 #[test]
 fn a_port_in_use_is_reported() {
     let harness = Harness::start();
-    let scratch = Scratch::new();
     let (sender, _inputs) = mpsc::channel();
     let error = VirtualDeckServer::start(
-        config(&scratch.0, harness.port),
-        password_hash(),
+        config(harness.port),
+        verifier_of(PASSWORD),
         sender,
         Box::new(Vec::new),
     )

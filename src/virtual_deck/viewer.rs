@@ -1,6 +1,6 @@
 //! One connected page: its WebSocket loop, its outgoing queue and the JSON
 //! protocol shared with `page/index.html`.
-use super::{access::SessionId, server::Shared, socket, DeckFrame, DeckInput, KEYS};
+use super::{access::SessionId, server::Shared, socket::Socket, DeckFrame, DeckInput, KEYS};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Deserialize;
 use serde_json::json;
@@ -182,7 +182,7 @@ pub(super) fn websocket_config() -> WebSocketConfig {
         .max_write_buffer_size(MAX_WRITE_BUFFER)
 }
 
-pub(super) fn upgrade(stream: socket::Tls, leftover: Vec<u8>) -> WebSocket<socket::Tls> {
+pub(super) fn upgrade(stream: Socket, leftover: Vec<u8>) -> WebSocket<Socket> {
     WebSocket::from_partially_read(stream, leftover, Role::Server, Some(websocket_config()))
 }
 
@@ -190,11 +190,11 @@ pub(super) fn upgrade(stream: socket::Tls, leftover: Vec<u8>) -> WebSocket<socke
 /// of the keys it held, says bye when asked to close, and returns the
 /// connection for the caller to finish.
 pub(super) fn run(
-    mut socket: WebSocket<socket::Tls>,
+    mut socket: WebSocket<Socket>,
     handle: &ViewerHandle,
     outbox: &Receiver<Utf8Bytes>,
     shared: &Shared,
-) -> socket::Tls {
+) -> Socket {
     let mut held = [false; KEYS];
     let reason = serve(&mut socket, handle, outbox, shared, &mut held);
     for (index, pressed) in held.iter_mut().enumerate() {
@@ -218,7 +218,7 @@ pub(super) fn run(
 
 /// Returns the reason to say bye with, or None when the page went away.
 fn serve(
-    socket: &mut WebSocket<socket::Tls>,
+    socket: &mut WebSocket<Socket>,
     handle: &ViewerHandle,
     outbox: &Receiver<Utf8Bytes>,
     shared: &Shared,
@@ -282,7 +282,7 @@ fn serve(
     }
 }
 
-fn send_snapshot(socket: &mut WebSocket<socket::Tls>, shared: &Shared) -> tungstenite::Result<()> {
+fn send_snapshot(socket: &mut WebSocket<Socket>, shared: &Shared) -> tungstenite::Result<()> {
     for frame in shared.snapshot() {
         socket.write(Message::Text(frame_text(&frame)))?;
     }

@@ -3,20 +3,23 @@
 //! switch below Export configuration..., and everything the switch needs.
 //!
 //! The switch is off on every launch. Turned on without a stored password it
-//! shows an inline form first (the server never starts without one). While on,
-//! the menu shows the page address (QR code, Copy, Open), the certificate
-//! fingerprint, the password (Change…), the port ("Restarts the server") and
-//! the viewers, each with Disconnect; the header says "Virtual deck on · N
-//! viewers". The password changes only while the deck is on, and a server
-//! that starts or restarts takes the stored password before it serves.
+//! shows an inline form first (the server never starts without one); a
+//! password saved by an older version (an Argon2id hash) cannot log in over
+//! plain HTTP, so it counts as none and the form says why. While on, the menu
+//! shows the page address (`http://…`: QR code, Copy, Open), the password
+//! (Change…), the port ("Restarts the server") and the viewers, each with
+//! Disconnect; the header says "Virtual deck on · N viewers". The password
+//! changes only while the deck is on, and a server that starts or restarts
+//! takes the stored password before it serves.
 //!
-//! Turning it on starts the HTTPS server, attaches a virtual Stream Deck
+//! Turning it on starts the plain HTTP server, attaches a virtual Stream Deck
 //! Classic to the HID hub (no browser window opens by itself; the Open button
 //! does that); turning it off
 //! (or quitting) stops the server, detaches the deck and joins the glue thread
 //! that carries presses and pictures between the two. GTK never waits for any
-//! of it: hashing, starting and stopping run on owned worker threads whose
-//! results, like the server's events, arrive through async channels.
+//! of it: deriving the password verifier, starting and stopping run on owned
+//! worker threads whose results, like the server's events, arrive through
+//! async channels.
 mod glue;
 #[cfg(test)]
 mod hold;
@@ -27,9 +30,9 @@ use gtk::{glib, prelude::*, Box as GtkBox, Button, Label, Orientation};
 use sdeck_plus::{
     event_api::{virtual_deck_pair, VirtualDeck, VirtualDeckLink},
     virtual_deck::{
-        hash_password,
+        build_verifier,
         settings::{parse_port, SettingsStore},
-        DeckInput, ServerConfig, ServerEvent, Snapshot, Viewer, VirtualDeckServer,
+        DeckInput, ServerConfig, ServerEvent, Snapshot, Verifier, Viewer, VirtualDeckServer,
     },
 };
 use std::{
@@ -51,6 +54,9 @@ pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
 pub(crate) const TITLE: &str = "Virtual deck (Classic)";
 pub(crate) const NEEDS_PASSWORD: &str = "Set a password before turning the virtual deck on.";
+/// The first-time form's warning when the settings hold an older version's password.
+pub(crate) const OLD_PASSWORD: &str =
+    "Passwords saved by an older version no longer work. Set a new one before turning the virtual deck on.";
 pub(crate) const MISMATCH: &str = "The passwords do not match.";
 pub(crate) const NO_VIEWERS: &str = "No one is viewing the deck yet.";
 pub(crate) const CHANGE_TITLE: &str = "Change the password?";
@@ -60,8 +66,6 @@ pub(crate) const CONFIRM_WAIT: &str =
     "The server is restarting. Confirm once it is on; changing the password disconnects every viewer.";
 /// Why a new password is refused while the server restarts.
 pub(crate) const CHANGE_WAIT: &str = "The server is restarting. Change the password once it is on.";
-pub(crate) const FINGERPRINT_HELP: &str =
-    "Certificate fingerprint · compare it with the browser's warning";
 const SWITCH_TIP: &str = "Serve a virtual Stream Deck Classic in a web page on this network";
 /// The QR code's side, as in the artboard.
 const QR_SIZE: i32 = 112;
@@ -87,7 +91,7 @@ pub(crate) type Opener = Rc<dyn Fn(&str) -> Result<(), String>>;
 
 /// What the virtual deck needs from the window.
 pub(crate) struct Environment {
-    /// The app's config directory: the settings and the certificate live here.
+    /// The app's config directory: the settings live here.
     pub(crate) config_dir: Result<PathBuf, String>,
     /// Where the server listens: [`LAN`] in the app, loopback in tests.
     pub(crate) bind: IpAddr,
@@ -193,11 +197,11 @@ fn viewer_icon(browser: &str) -> &'static str {
     }
 }
 
-/// The new password's hash when both fields agree; the length rules come first.
-fn checked_hash(new: &str, repeat: &str) -> Result<String, String> {
-    let hash = hash_password(new)?;
+/// The new password's verifier when both fields agree; the length rules come first.
+fn checked_verifier(new: &str, repeat: &str) -> Result<Verifier, String> {
+    let verifier = build_verifier(new)?;
     if new == repeat {
-        Ok(hash)
+        Ok(verifier)
     } else {
         Err(MISMATCH.to_string())
     }
@@ -280,7 +284,7 @@ impl PasswordForm {
         ui::feedback(&self.error, true);
     }
 
-    /// While the password is hashed nothing in the form can be used.
+    /// While the verifier is derived nothing in the form can be used.
     fn set_busy(&self, busy: bool) {
         for widget in [
             self.new.upcast_ref::<gtk::Widget>(),
@@ -325,13 +329,14 @@ pub(crate) struct Widgets {
     /// Why turning on (or opening the browser) failed.
     pub(crate) feedback: Label,
     pub(crate) first_time: GtkBox,
+    /// "Set a password…", or why an older version's password no longer works.
+    pub(crate) first_warning: Label,
     pub(crate) first_form: PasswordForm,
     pub(crate) running: GtkBox,
     pub(crate) qr: qr::QrView,
     pub(crate) address: Label,
     pub(crate) copy: Button,
     pub(crate) open: Button,
-    pub(crate) fingerprint: Label,
     pub(crate) change: Button,
     pub(crate) change_form: PasswordForm,
     pub(crate) port: gtk::Entry,
@@ -422,18 +427,18 @@ fn build_widgets() -> Widgets {
     // First time: no password yet.
     let first_time = GtkBox::new(Orientation::Vertical, 8);
     first_time.set_size_request(CONTENT_WIDTH, -1);
-    let warning = Label::new(Some(NEEDS_PASSWORD));
-    warning.add_css_class("feedback-warning");
-    warning.set_xalign(0.0);
-    warning.set_wrap(true);
-    warning.set_max_width_chars(38);
-    first_time.append(&warning);
+    let first_warning = Label::new(Some(NEEDS_PASSWORD));
+    first_warning.add_css_class("feedback-warning");
+    first_warning.set_xalign(0.0);
+    first_warning.set_wrap(true);
+    first_warning.set_max_width_chars(38);
+    first_time.append(&first_warning);
     let first_form = PasswordForm::new("Save and turn on");
     first_time.append(&first_form.root);
     first_time.set_visible(false);
     content.append(&first_time);
 
-    // On: address, fingerprint, password, port and viewers.
+    // On: address, password, port and viewers.
     let running = GtkBox::new(Orientation::Vertical, 12);
     running.set_size_request(CONTENT_WIDTH, -1);
     let address_row = GtkBox::new(Orientation::Horizontal, 12);
@@ -442,7 +447,7 @@ fn build_widgets() -> Widgets {
     let address_column = GtkBox::new(Orientation::Vertical, 6);
     address_column.set_valign(gtk::Align::Center);
     address_column.set_hexpand(true);
-    // Beside the QR code: "https://192.168.100.200:65535/" fits on one line.
+    // Beside the QR code: "http://192.168.100.200:65535/" fits on one line.
     let address = chip(30);
     address_column.append(&address);
     let address_actions = GtkBox::new(Orientation::Horizontal, 6);
@@ -459,13 +464,6 @@ fn build_widgets() -> Widgets {
     address_column.append(&address_actions);
     address_row.append(&address_column);
     running.append(&address_row);
-
-    let certificate = GtkBox::new(Orientation::Vertical, 4);
-    certificate.append(&ui::helper(FINGERPRINT_HELP));
-    // The whole fingerprint, to compare with the browser's, on three lines.
-    let fingerprint = chip(42);
-    certificate.append(&fingerprint);
-    running.append(&certificate);
 
     let password_row = GtkBox::new(Orientation::Horizontal, 8);
     password_row.append(&row_heading("Password"));
@@ -560,13 +558,13 @@ fn build_widgets() -> Widgets {
         switch,
         feedback,
         first_time,
+        first_warning,
         first_form,
         running,
         qr,
         address,
         copy,
         open,
-        fingerprint,
         change,
         change_form,
         port,
@@ -595,11 +593,11 @@ struct Started {
     deck: VirtualDeck,
     link: VirtualDeckLink,
     inputs: mpsc::Receiver<DeckInput>,
-    hash: String,
+    verifier: Verifier,
 }
 
 /// Start the server on `config` for a new virtual deck. Runs on a worker.
-fn start_server(config: ServerConfig, hash: String) -> Result<Started, String> {
+fn start_server(config: ServerConfig, verifier: Verifier) -> Result<Started, String> {
     let (deck, link) = virtual_deck_pair();
     let (sender, inputs) = mpsc::channel();
     let viewer_link = link.clone();
@@ -610,13 +608,13 @@ fn start_server(config: ServerConfig, hash: String) -> Result<Started, String> {
             .map(glue::deck_frame)
             .collect()
     });
-    let server = VirtualDeckServer::start(config, hash.clone(), sender, snapshot)?;
+    let server = VirtualDeckServer::start(config, verifier.clone(), sender, snapshot)?;
     Ok(Started {
         server,
         deck,
         link,
         inputs,
-        hash,
+        verifier,
     })
 }
 
@@ -625,8 +623,8 @@ struct Running {
     server: Arc<VirtualDeckServer>,
     glue: glue::Glue,
     url: String,
-    /// The password hash the server checks, kept for a port change.
-    hash: String,
+    /// The password verifier the server checks, kept for a port change.
+    verifier: Verifier,
     /// Tells this server's events from an earlier one's.
     generation: u64,
 }
@@ -650,8 +648,8 @@ enum Outcome {
     Stopped {
         last: bool,
     },
-    FirstPassword(Result<String, String>),
-    NewPassword(Result<String, String>),
+    FirstPassword(Result<Verifier, String>),
+    NewPassword(Result<Verifier, String>),
 }
 
 struct Worker {
@@ -903,12 +901,11 @@ impl VirtualDeckPanel {
         }
     }
 
-    fn server_config(&self, port: u16) -> Result<ServerConfig, String> {
-        Ok(ServerConfig {
+    fn server_config(&self, port: u16) -> ServerConfig {
+        ServerConfig {
             port,
             bind: self.0.env.bind,
-            config_dir: self.0.env.config_dir.clone()?,
-        })
+        }
     }
 
     /// Run `work` on an owned worker thread; its outcome comes back to GTK.
@@ -994,8 +991,8 @@ impl VirtualDeckPanel {
                     self.set_phase(Phase::Off);
                 }
             }
-            Outcome::FirstPassword(result) => self.first_password_hashed(result),
-            Outcome::NewPassword(result) => self.new_password_hashed(result),
+            Outcome::FirstPassword(result) => self.first_password_derived(result),
+            Outcome::NewPassword(result) => self.new_password_derived(result),
         }
     }
 
@@ -1013,25 +1010,24 @@ impl VirtualDeckPanel {
                 return;
             }
         };
-        match store.settings().password_hash.clone() {
-            Some(hash) => self.start(store.settings().port, hash),
+        match store.settings().verifier.clone() {
+            Some(verifier) => self.start(store.settings().port, verifier),
             None => {
                 self.set_switch(false);
-                self.widgets().first_time.set_visible(true);
-                self.widgets().first_form.open();
+                let w = self.widgets();
+                w.first_warning.set_text(if store.has_old_password() {
+                    OLD_PASSWORD
+                } else {
+                    NEEDS_PASSWORD
+                });
+                w.first_time.set_visible(true);
+                w.first_form.open();
             }
         }
     }
 
-    fn start(&self, port: u16, hash: String) {
-        let config = match self.server_config(port) {
-            Ok(config) => config,
-            Err(error) => {
-                self.set_phase(Phase::Off);
-                self.report(&error);
-                return;
-            }
-        };
+    fn start(&self, port: u16, verifier: Verifier) {
+        let config = self.server_config(port);
         self.clear_feedback();
         self.set_phase(Phase::Starting);
         let hold = self.hold();
@@ -1039,7 +1035,7 @@ impl VirtualDeckPanel {
             "virtual-deck-start",
             move || {
                 hold();
-                Outcome::Started(start_server(config, hash))
+                Outcome::Started(start_server(config, verifier))
             },
             |error| Outcome::Started(Err(error)),
         );
@@ -1050,7 +1046,7 @@ impl VirtualDeckPanel {
             return;
         }
         let installed = result.and_then(|mut started| {
-            self.take_stored_password(&mut started)?;
+            self.take_stored_password(&mut started);
             self.launch(started)
         });
         match installed {
@@ -1069,22 +1065,20 @@ impl VirtualDeckPanel {
     }
 
     /// The password may have changed while `started` was starting: before it
-    /// is installed, the server takes the stored hash (which disconnects every
-    /// viewer it may already have), so it never accepts an older password. An
-    /// unusable settings file keeps the hash it started with: nothing can be
-    /// saved over that file either.
-    fn take_stored_password(&self, started: &mut Started) -> Result<(), String> {
+    /// is installed, the server takes the stored verifier (which disconnects
+    /// every viewer it may already have), so it never accepts an older
+    /// password. An unusable settings file keeps the verifier it started
+    /// with: nothing can be saved over that file either.
+    fn take_stored_password(&self, started: &mut Started) {
         let stored = self
             .open_store()
             .ok()
-            .and_then(|store| store.settings().password_hash.clone());
-        match stored {
-            Some(stored) if stored != started.hash => {
-                started.server.set_password(stored.clone())?;
-                started.hash = stored;
-                Ok(())
+            .and_then(|store| store.settings().verifier.clone());
+        if let Some(stored) = stored {
+            if stored != started.verifier {
+                started.server.set_password(stored.clone());
+                started.verifier = stored;
             }
-            _ => Ok(()),
         }
     }
 
@@ -1096,7 +1090,7 @@ impl VirtualDeckPanel {
             deck,
             link,
             inputs,
-            hash,
+            verifier,
         } = started;
         let url = server
             .url_candidates()
@@ -1121,7 +1115,7 @@ impl VirtualDeckPanel {
             server,
             glue,
             url,
-            hash,
+            verifier,
             generation,
         })
     }
@@ -1177,7 +1171,6 @@ impl VirtualDeckPanel {
             if let Err(error) = w.qr.show(&running.url) {
                 self.report(&error);
             }
-            w.fingerprint.set_text(&running.server.fingerprint());
             w.port.set_text(&running.server.local_port().to_string());
             self.0
                 .badge
@@ -1286,16 +1279,16 @@ impl VirtualDeckPanel {
         form.set_busy(true);
         self.run(
             "virtual-deck-password",
-            move || Outcome::FirstPassword(checked_hash(&new, &repeat)),
+            move || Outcome::FirstPassword(checked_verifier(&new, &repeat)),
             |error| Outcome::FirstPassword(Err(error)),
         );
     }
 
-    fn first_password_hashed(&self, result: Result<String, String>) {
+    fn first_password_derived(&self, result: Result<Verifier, String>) {
         let form = &self.widgets().first_form;
         form.set_busy(false);
-        let hash = match result {
-            Ok(hash) => hash,
+        let verifier = match result {
+            Ok(verifier) => verifier,
             Err(error) => return form.show_error(&error),
         };
         if self.phase() != Phase::Off {
@@ -1305,12 +1298,12 @@ impl VirtualDeckPanel {
             Ok(store) => store,
             Err(error) => return form.show_error(&error),
         };
-        if let Err(error) = store.set_password_hash(hash.clone()) {
+        if let Err(error) = store.set_verifier(verifier.clone()) {
             return form.show_error(&error);
         }
         form.clear();
         self.widgets().first_time.set_visible(false);
-        self.start(store.settings().port, hash);
+        self.start(store.settings().port, verifier);
     }
 
     fn submit_change(&self) {
@@ -1322,12 +1315,12 @@ impl VirtualDeckPanel {
         form.set_busy(true);
         self.run(
             "virtual-deck-password",
-            move || Outcome::NewPassword(checked_hash(&new, &repeat)),
+            move || Outcome::NewPassword(checked_verifier(&new, &repeat)),
             |error| Outcome::NewPassword(Err(error)),
         );
     }
 
-    fn new_password_hashed(&self, result: Result<String, String>) {
+    fn new_password_derived(&self, result: Result<Verifier, String>) {
         let form = &self.widgets().change_form;
         form.set_busy(false);
         // Turned off meanwhile: the form was closed and there is nothing to confirm.
@@ -1335,14 +1328,14 @@ impl VirtualDeckPanel {
             return;
         }
         match result {
-            Ok(hash) => self.confirm_change(hash),
+            Ok(verifier) => self.confirm_change(verifier),
             Err(error) => form.show_error(&error),
         }
     }
 
     /// "Changing the password disconnects every viewer." Cancel is the default.
     /// While the server restarts it waits: "Change password" acts only while on.
-    fn confirm_change(&self, hash: String) {
+    fn confirm_change(&self, verifier: Verifier) {
         let Some(window) = self.widgets().section.root().and_downcast::<gtk::Window>() else {
             return;
         };
@@ -1374,7 +1367,7 @@ impl VirtualDeckPanel {
                     }
                     panel.0.confirmation.borrow_mut().take();
                     if response == gtk::ResponseType::Accept {
-                        panel.apply_password(hash.clone());
+                        panel.apply_password(verifier.clone());
                     }
                 }
             }
@@ -1385,9 +1378,10 @@ impl VirtualDeckPanel {
         dialog.present();
     }
 
-    /// Remember the new hash, then give it to the server, which disconnects
-    /// every viewer. Only while on: a server still starting would miss it.
-    fn apply_password(&self, hash: String) {
+    /// Remember the new verifier, then give it to the server, which
+    /// disconnects every viewer. Only while on: a server still starting
+    /// would miss it.
+    fn apply_password(&self, verifier: Verifier) {
         let form = &self.widgets().change_form;
         if self.phase() != Phase::On {
             return form.show_error(CHANGE_WAIT);
@@ -1396,14 +1390,12 @@ impl VirtualDeckPanel {
             Ok(store) => store,
             Err(error) => return form.show_error(&error),
         };
-        if let Err(error) = store.set_password_hash(hash.clone()) {
+        if let Err(error) = store.set_verifier(verifier.clone()) {
             return form.show_error(&error);
         }
         if let Some(running) = self.0.running.borrow_mut().as_mut() {
-            if let Err(error) = running.server.set_password(hash.clone()) {
-                return form.show_error(&error);
-            }
-            running.hash = hash;
+            running.server.set_password(verifier.clone());
+            running.verifier = verifier;
         }
         form.clear();
         form.root.set_visible(false);
@@ -1422,8 +1414,8 @@ impl VirtualDeckPanel {
         if self.phase() != Phase::On {
             return;
         }
-        let (current, hash) = match self.0.running.borrow().as_ref() {
-            Some(running) => (running.server.local_port(), running.hash.clone()),
+        let (current, verifier) = match self.0.running.borrow().as_ref() {
+            Some(running) => (running.server.local_port(), running.verifier.clone()),
             None => return,
         };
         ui::clear_feedback(&w.port_feedback);
@@ -1431,17 +1423,14 @@ impl VirtualDeckPanel {
         if port == current {
             return;
         }
-        let config = match self.server_config(port) {
-            Ok(config) => config,
-            Err(error) => return self.port_error(&error),
-        };
+        let config = self.server_config(port);
         self.set_phase(Phase::Restarting);
         let hold = self.hold();
         self.run(
             "virtual-deck-restart",
             move || {
                 hold();
-                Outcome::Restarted(port, start_server(config, hash))
+                Outcome::Restarted(port, start_server(config, verifier))
             },
             move |error| Outcome::Restarted(port, Err(error)),
         );
@@ -1458,9 +1447,7 @@ impl VirtualDeckPanel {
             Ok(started) => started,
             Err(error) => return self.port_error(&error),
         };
-        if let Err(error) = self.take_stored_password(&mut started) {
-            return self.port_error(&error);
-        }
+        self.take_stored_password(&mut started);
         let old = self.0.running.borrow_mut().take();
         match self.launch(started) {
             Ok(running) => {
@@ -1509,14 +1496,6 @@ impl VirtualDeckPanel {
             .borrow()
             .as_ref()
             .map(|running| running.server.local_port())
-    }
-
-    pub(crate) fn test_fingerprint(&self) -> Option<String> {
-        self.0
-            .running
-            .borrow()
-            .as_ref()
-            .map(|running| running.server.fingerprint())
     }
 
     pub(crate) fn test_confirmation(&self) -> Option<gtk::MessageDialog> {
@@ -1588,14 +1567,15 @@ mod tests {
     #[test]
     fn a_new_password_needs_8_characters_first_then_a_matching_repeat() {
         assert_eq!(
-            checked_hash("short", ""),
+            checked_verifier("short", ""),
             Err("At least 8 characters.".to_string())
         );
         assert_eq!(
-            checked_hash("long enough", "long enougj"),
+            checked_verifier("long enough", "long enougj"),
             Err(MISMATCH.to_string())
         );
-        let hash = checked_hash("long enough", "long enough").unwrap();
-        assert!(hash.starts_with("$argon2id$"), "{hash}");
+        let verifier = checked_verifier("long enough", "long enough").unwrap();
+        assert_eq!(verifier.iterations(), sdeck_plus::virtual_deck::ITERATIONS);
+        assert!(!format!("{verifier:?}").contains("long enough"));
     }
 }
