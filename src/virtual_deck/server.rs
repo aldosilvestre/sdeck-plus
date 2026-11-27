@@ -25,6 +25,11 @@ use tungstenite::Utf8Bytes;
 
 /// Open connections at once (viewers included); more are closed at accept.
 const MAX_CONNECTIONS: usize = 32;
+/// Open connections one address may have that are not viewers (yet); more
+/// are closed at accept, so one address cannot fill every slot with
+/// handshakes it never finishes. Its viewers do not count: one computer may
+/// hold every viewer slot and still load the page.
+const MAX_PENDING_PER_ADDRESS: usize = 8;
 /// TLS handshake, request head and body must all arrive within this time.
 const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 /// A client that takes longer than this to take our bytes is dropped.
@@ -334,6 +339,7 @@ fn forbidden() -> Reply {
 }
 
 struct Connection {
+    peer: IpAddr,
     thread: JoinHandle<()>,
     /// A second handle on the socket, to cut a request short on stop.
     tcp: TcpStream,
@@ -485,7 +491,11 @@ fn admit(tcp: TcpStream, peer: IpAddr, shared: &Arc<Shared>, connections: &Mutex
             index += 1;
         }
     }
-    if open.len() >= MAX_CONNECTIONS {
+    let pending_from_peer = open
+        .iter()
+        .filter(|connection| connection.peer == peer && !connection.upgraded.load(Ordering::SeqCst))
+        .count();
+    if open.len() >= MAX_CONNECTIONS || pending_from_peer >= MAX_PENDING_PER_ADDRESS {
         return;
     }
     let Ok(watch) = tcp.try_clone() else {
@@ -501,6 +511,7 @@ fn admit(tcp: TcpStream, peer: IpAddr, shared: &Arc<Shared>, connections: &Mutex
         });
     match spawned {
         Ok(thread) => open.push(Connection {
+            peer,
             thread,
             tcp: watch,
             upgraded,
@@ -512,14 +523,12 @@ fn admit(tcp: TcpStream, peer: IpAddr, shared: &Arc<Shared>, connections: &Mutex
 }
 
 fn serve_connection(tcp: TcpStream, peer: IpAddr, shared: &Shared, upgraded: &AtomicBool) {
-    let _ = tcp.set_nodelay(true);
-    if tcp.set_write_timeout(Some(WRITE_TIMEOUT)).is_err() {
+    let Ok(socket) = Socket::new(tcp, Instant::now() + REQUEST_DEADLINE, WRITE_TIMEOUT) else {
         return;
-    }
+    };
     let Ok(connection) = rustls::ServerConnection::new(shared.tls.clone()) else {
         return;
     };
-    let socket = Socket::new(tcp, Instant::now() + REQUEST_DEADLINE);
     let mut stream = rustls::StreamOwned::new(connection, socket);
     let (request, leftover) = match http::read_head(&mut stream) {
         Ok(parts) => parts,
@@ -558,7 +567,9 @@ fn reply(mut stream: Tls, answer: Reply, host: Option<&str>) {
     }
 }
 
-/// POST /login; None when the client went away mid-body.
+/// POST /login; None when the client went away mid-body. A foreign origin is
+/// refused before anything else, so it never counts as a try; `null` is
+/// allowed, because that is what the login form's own post sends.
 fn log_in(
     stream: &mut Tls,
     request: &Request,
@@ -583,8 +594,10 @@ fn log_in(
 }
 
 /// POST /logout: ends the session (and its viewers) and clears the cookie.
+/// The page logs out with fetch(), which sends its own origin, so `null`
+/// can only come from another page.
 fn log_out(request: &Request, shared: &Shared) -> Reply {
-    if request.origin() == Origin::Foreign {
+    if matches!(request.origin(), Origin::Foreign | Origin::Null) {
         return forbidden();
     }
     shared.log_out(request);

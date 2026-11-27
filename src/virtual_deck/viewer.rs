@@ -28,6 +28,43 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 /// A page that sends nothing, not even a pong, for this long is gone.
 const SILENCE_LIMIT: Duration = Duration::from_secs(45);
 const MAX_WRITE_BUFFER: usize = 8 * 1024 * 1024;
+/// Key presses one page may make per second; later presses in that second
+/// are ignored. Releases are never ignored, but one only reaches the deck
+/// for a key that page holds, so the deck gets at most twice this many
+/// inputs a second from a page, and `MAX_VIEWERS` times that in all.
+const PRESSES_PER_SECOND: u32 = 50;
+const PRESS_WINDOW: Duration = Duration::from_secs(1);
+
+/// The presses a page has made in its current second.
+struct PressBudget {
+    since: Option<Instant>,
+    used: u32,
+}
+
+impl PressBudget {
+    fn new() -> Self {
+        Self {
+            since: None,
+            used: 0,
+        }
+    }
+
+    /// Whether a press at `now` may reach the deck.
+    fn allow(&mut self, now: Instant) -> bool {
+        match self.since {
+            Some(since) if now.saturating_duration_since(since) < PRESS_WINDOW => {}
+            _ => {
+                self.since = Some(now);
+                self.used = 0;
+            }
+        }
+        if self.used >= PRESSES_PER_SECOND {
+            return false;
+        }
+        self.used += 1;
+        true
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ByeReason {
@@ -192,6 +229,7 @@ fn serve(
     }
     let mut heard = Instant::now();
     let mut pinged = Instant::now();
+    let mut presses = PressBudget::new();
     loop {
         if let Some(reason) = handle.closing() {
             return Some(reason);
@@ -201,7 +239,9 @@ fn serve(
                 heard = Instant::now();
                 match message {
                     Message::Text(text) => {
-                        if let Some(input) = parse_input(text.as_str()) {
+                        let input = parse_input(text.as_str())
+                            .filter(|input| !input.pressed || presses.allow(Instant::now()));
+                        if let Some(input) = input {
                             let index = usize::from(input.key - 1);
                             shared.key(&mut held[index], index, input.pressed);
                         }
@@ -281,6 +321,17 @@ mod tests {
         ] {
             assert_eq!(parse_input(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn a_page_gets_fifty_presses_a_second() {
+        let mut budget = PressBudget::new();
+        let start = Instant::now();
+        assert!((0..50).all(|_| budget.allow(start)));
+        assert!(!budget.allow(start + Duration::from_millis(999)));
+        let next = start + Duration::from_secs(1);
+        assert!((0..50).all(|_| budget.allow(next)), "a new second");
+        assert!(!budget.allow(next + Duration::from_millis(500)));
     }
 
     #[test]

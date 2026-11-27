@@ -74,8 +74,7 @@ impl Request {
             .is_some_and(|host| origin.eq_ignore_ascii_case(&format!("https://{host}")));
         match origin {
             _ if same => Origin::Same,
-            // Browsers send "null" for same-site form posts under no-referrer.
-            "null" => Origin::Absent,
+            "null" => Origin::Null,
             _ => Origin::Foreign,
         }
     }
@@ -98,8 +97,14 @@ impl Request {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Origin {
+    /// `https://<Host>`.
     Same,
+    /// No `Origin` header.
     Absent,
+    /// `Origin: null`: what browsers send for the login form's own post,
+    /// because the pages use Referrer-Policy no-referrer, but also what any
+    /// other page can make its posts send.
+    Null,
     Foreign,
 }
 
@@ -443,6 +448,8 @@ mod tests {
         assert_eq!(request("https://10.0.0.2:8765").origin(), Origin::Same);
         assert_eq!(request("http://10.0.0.2:8765").origin(), Origin::Foreign);
         assert_eq!(request("https://10.0.0.2").origin(), Origin::Foreign);
-        assert_eq!(request("null").origin(), Origin::Absent);
+        assert_eq!(request("null").origin(), Origin::Null);
+        let absent = parse_head("POST /logout HTTP/1.1\r\nHost: 10.0.0.2:8765").unwrap();
+        assert_eq!(absent.origin(), Origin::Absent);
     }
 }

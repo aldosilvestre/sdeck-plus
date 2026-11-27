@@ -18,11 +18,16 @@ pub(super) struct Socket {
 }
 
 impl Socket {
-    pub fn new(tcp: TcpStream, deadline: Instant) -> Self {
-        Self {
+    /// Takes over a new connection: no Nagle delay, each write done within
+    /// `write_timeout`, the whole request read by `deadline`.
+    pub fn new(tcp: TcpStream, deadline: Instant, write_timeout: Duration) -> io::Result<Self> {
+        let socket = Self {
             tcp,
             deadline: Some(deadline),
-        }
+        };
+        let _ = socket.tcp.set_nodelay(true);
+        socket.tcp.set_write_timeout(Some(write_timeout))?;
+        Ok(socket)
     }
 
     /// No overall deadline any more; every read waits at most `every`.
@@ -45,6 +50,16 @@ impl Read for Socket {
             self.tcp.set_read_timeout(Some(left))?;
         }
         self.tcp.read(buffer)
+    }
+}
+
+/// The server keeps a second handle on every connection, to cut it short on
+/// stop, so closing this one alone would leave the connection open until the
+/// next accept: every way out of a connection shuts it down, so the client
+/// sees the end at once (a failed TLS handshake included).
+impl Drop for Socket {
+    fn drop(&mut self) {
+        let _ = self.tcp.shutdown(Shutdown::Both);
     }
 }
 
@@ -86,13 +101,20 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
     #[test]
     fn a_silent_client_cannot_outlast_the_request_deadline() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server_side, _) = listener.accept().unwrap();
         let started = Instant::now();
-        let mut socket = Socket::new(server_side, started + Duration::from_millis(50));
+        let mut socket = Socket::new(
+            server_side,
+            started + Duration::from_millis(50),
+            WRITE_TIMEOUT,
+        )
+        .unwrap();
         let error = socket.read(&mut [0u8; 16]).unwrap_err();
         assert!(
             matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
@@ -101,5 +123,20 @@ mod tests {
         let error = socket.read(&mut [0u8; 16]).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::TimedOut, "the deadline has passed");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn dropping_a_socket_ends_the_connection_even_with_another_handle_open() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(WRITE_TIMEOUT)).unwrap();
+        let (server_side, _) = listener.accept().unwrap();
+        let _watch = server_side.try_clone().unwrap();
+        drop(Socket::new(server_side, Instant::now() + WRITE_TIMEOUT, WRITE_TIMEOUT).unwrap());
+        assert_eq!(
+            client.read(&mut [0u8; 1]).unwrap(),
+            0,
+            "the client sees the end"
+        );
     }
 }
