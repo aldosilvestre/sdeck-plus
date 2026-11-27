@@ -135,7 +135,9 @@ The application wires the other end (`src/virtual_deck_ui.rs`, bin-only): its
 glue thread turns the web server's `DeckInput`s into `press` calls and the
 link's frames into `DeckFrame`s for `VirtualDeckServer::publish`, sending a
 snapshot instead after a `Reset` or when it lags. The server
-(`sdeck_plus::virtual_deck`) and the hub never import each other. Tests:
+(`sdeck_plus::virtual_deck`: plain HTTP and WebSocket on the LAN, with a
+SCRAM-SHA-256-style challenge-response login, so no certificate) and the hub
+never import each other. Tests:
 `tests/virtual_device.rs`, `src/event_api/virtual_device/tests.rs`, the
 virtual-classic cases of `tests/device_registry.rs` and `tests/device_roots.rs`,
 and `src/tests/virtual_deck_ui_tests.rs` (the real window over the real hub).

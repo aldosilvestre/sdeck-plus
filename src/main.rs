@@ -5374,7 +5374,7 @@ fn show_connection_state(
     state.is_connected()
 }
 
-/// "Virtual Stream Deck Classic — served at https://192.168.1.50:8765/" while
+/// "Virtual Stream Deck Classic — served at http://192.168.1.50:8765/" while
 /// the virtual deck is on, in place of USB ids.
 fn virtual_deck_line(model: &sdeck_plus::device_model::DeviceModel) -> String {
     match virtual_deck_ui::served_at() {

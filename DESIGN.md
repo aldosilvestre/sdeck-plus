@@ -994,19 +994,22 @@ two columns fit.
     the app; 13px with 0.24em spacing on the web, 16px on iOS so focus does not zoom) and reveal them
     with an eye icon (eye-off while shown), never a "Show" caption.
   - **First time** (no stored password): turning the switch on leaves it off and opens an inline
-    form instead: the warning line "Set a password before turning the virtual deck on.", the
-    labelled password entries "New password" and "Repeat it" (peek icon), an error line, then the
-    right-aligned Cancel and suggested **Save and turn on**. Enter in either entry submits. While
-    the password is hashed (on a worker) the whole form is insensitive. Errors read "At least 8
-    characters.", "At most 128 characters." (length first) and "The passwords do not match."
+    form instead: the warning line "Set a password before turning the virtual deck on." (when the
+    settings still hold an older version's Argon2id hash, which the plain HTTP login cannot use:
+    "Passwords saved by an older version no longer work. Set a new one before turning the virtual
+    deck on."), the labelled password entries "New password" and "Repeat it" (peek icon), an
+    error line, then the right-aligned Cancel and suggested **Save and turn on**. Enter in either
+    entry submits. While the password's verifier is derived (on a worker) the whole form is
+    insensitive. Errors read "At least 8 characters.", "At most 128 characters." (length first)
+    and "The passwords do not match."
   - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
     with 8px corners, a two-module quiet zone; never the password) beside the address in a
     selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
-    copied.") and **Open** ("Open the address in the browser") buttons; the address chip's tooltip
-    lists every address the page answers at. Then the helper "Certificate fingerprint · compare
-    it with the browser's warning" over the whole "SHA-256 AA:BB:..." in a chip (three lines).
-    Then two rows with 70px headings so their values line up: **Password** "Set" and
-    **Change…**, which opens the same password form with **Change password**; and **Port**, a
+    copied.") and **Open** ("Open the address in the browser") buttons; the address is plain
+    HTTP (the chip is 30 characters wide, so "http://192.168.100.200:65535/" fits on one line)
+    and the chip's tooltip lists every address the page answers at. There is no certificate and
+    no fingerprint. Then two rows with 70px headings so their values line up: **Password** "Set"
+    and **Change…**, which opens the same password form with **Change password**; and **Port**, a
     six-character digits entry ("1024 to 65535; press Enter to restart the server on it") and the
     helper "Restarts the server", with its own error banner ("Use a port from 1024 to 65535.",
     "Port N is already in use."). Then the "Viewers (n)" heading and a boxed list in the folder
@@ -1024,9 +1027,9 @@ two columns fit.
     (with other devices connected it is the last line of the tooltip), "Virtual Stream Deck
     Classic turned off — turn it on from the Menu" once off, and the model comes last in the
     connected list and the Current selector. It is never remembered as the last shown model.
-  - **Threads:** GTK never waits: hashing, starting, moving and stopping the server run on owned
-    worker threads, presses and pictures cross an owned glue thread, and results and server
-    events reach GTK through async channels. Quitting stops the server and joins every thread.
+  - **Threads:** GTK never waits: deriving the password verifier, starting, moving and stopping
+    the server run on owned worker threads, presses and pictures cross an owned glue thread, and
+    results and server events reach GTK through async channels. Quitting stops the server and joins every thread.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
 - **OBS:** visible endpoint/password labels, masked password, Save settings
@@ -1237,7 +1240,9 @@ served by `src/virtual_deck.rs`) follow the chosen artboard "02 · Keys first"
 (`design/virtual-classic/02-keys-first.html`); 01 and 03 are rejected alternatives. They are
 self-contained (inline CSS and script, no external URL), dark only (`color-scheme: dark`, the
 `desk_*` dark values as CSS variables) and in English. Validated in headless Chromium only (844x390,
-915x412, 390x844, 1280x720), never on a real phone.
+915x412, 390x844, 1280x720), never on a real phone; the login page's scripts also run under
+Node.js with a stand-in page in `tests/virtual_deck_page_crypto.rs`. They are served over plain
+HTTP, so browsers mark them "Not secure" but show no certificate warning page.
 
 - **Keys first:** no chassis. The 5x3 keys fill a phone held sideways: the key side is the
   largest that fits five columns and three rows in the stage (gap 2.5% of the shorter side,
@@ -1275,9 +1280,19 @@ self-contained (inline CSS and script, no external URL), dark only (`color-schem
 - **Portrait:** above the keys, "Turn your phone sideways for bigger keys. The deck still works
   here." with a rotate glyph; the menu button and its sheet move to the top right.
 - **Screen:** the page asks for a Screen Wake Lock when it opens, connects, takes a press or is
-  shown again, where the browser offers it (HTTPS pages only).
+  shown again, where the browser offers it. Browsers offer it only to HTTPS pages, so over plain
+  HTTP the request does nothing and the screen dims and locks as usual.
 - **Login page:** "Virtual Stream Deck", "Classic · served by sdeck-plus" (no host name), "Ask
-  the person running sdeck-plus for the password.", a labelled **Password** entry with
-  **Show**/**Hide**, an alert banner and a violet **Connect**. Wrong: "Wrong password." with "N
-  tries left before a 30-second wait."; locked: "Too many tries." with "Try again in N s."
-  counting down while Connect is disabled. Without JavaScript the form still posts.
+  the person running sdeck-plus for the password.", a labelled **Password** entry (small spaced
+  bullets) with a 44px eye button (named "Show password" or "Hide password", `aria-pressed`,
+  eye-off while shown), an alert banner and a violet **Connect**, which reads "Checking…" while
+  the page derives the proof from the password (PBKDF2 in slices of about 25ms, so the page stays
+  responsive). Wrong: "Wrong password." with "N tries left before a 30-second wait."; locked:
+  "Too many tries." with "Try again in N s." counting down while Connect is disabled; a used or
+  expired challenge: "Could not log in." with "The login expired. Try again."; a server that
+  cannot prove it knows the password: "Could not log in." with "This server could not prove it
+  knows the password. Check the address." (the page then logs that session out); unreachable:
+  "Could not reach sdeck-plus." with "Check that the virtual deck is still on, then try again."
+  The login needs JavaScript and never posts a form (the policy has `form-action 'none'`): the
+  form stays hidden and a note reads "This page needs JavaScript to log in." without it, or "This
+  browser cannot log in here. Try a newer browser." when the browser lacks what the login uses.

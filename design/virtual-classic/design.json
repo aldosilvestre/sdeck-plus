@@ -1,6 +1,6 @@
 {
   "title": "Virtual Stream Deck Classic",
-  "brief": "Web page that shows a virtual Stream Deck Classic on phones (landscape) and browsers after a password, plus the app-side header menu flag with address, QR, certificate fingerprint, password, port and viewers list.",
+  "brief": "Web page that shows a virtual Stream Deck Classic on phones (landscape) and browsers after a password, plus the app-side header menu flag with address, QR (plain http:// on the LAN), password, port and viewers list.",
   "feature": "odd/tasks/virtual-classic-web.md",
   "artboards": [
     { "file": "01-device-replica.html", "title": "Web · Device replica", "tradeoff": "Looks like the real Classic; chassis costs space, keys ~86 px on a phone", "width": 1860, "height": 1080 },

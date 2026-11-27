@@ -78,10 +78,12 @@ permissions on its own.
   web page that phones and browsers on your local network open (landscape on phones, a QR code of
   the address) after typing a password you set in the app. It runs the same actions as a plugged-in
   Classic, with its own profiles, and lists who is connected so you can disconnect them. It is
-  served over HTTPS with a self-signed certificate: the browser warns about it, so compare the
-  SHA-256 fingerprint the menu shows before going on. It is off at every launch, and anyone on
-  your network with the password can run that deck's actions, including commands. Validated with
-  automated tests and headless browsers only, not yet on real phones; see the
+  served over plain HTTP on your local network, so no certificate warning appears, but browsers
+  mark the page "Not secure": the password itself never crosses the network (the page proves it
+  knows it), while the key pictures, the presses and the login cookie can be read by others on the
+  network, so use a long passphrase. It is off at every launch, and anyone on your network with
+  the password can run that deck's actions, including commands. Validated with automated tests
+  and headless browsers only, not yet on real phones; see the
   [virtual deck documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#virtual-deck).
 - **System tray** with optional start at login.
 - **Light and dark GTK themes** following the desktop.
