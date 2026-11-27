@@ -5,6 +5,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Virtual Stream Deck Classic in a web page:** the switch **Menu > Virtual deck (Classic)**
+  serves a 15-key Stream Deck Classic (with its 480x272 background picture) that phones and
+  browsers on the local network open at `https://<lan-ip>:8765/`. It runs through the same hub,
+  actions and two-second key hold as a plugged-in Classic, is listed in the **Current** selector
+  while on, and keeps its own profiles in `devices/virtual-classic/`, so it runs beside a real
+  Classic. The switch is off at every launch; turning it on starts the server, opens the page in
+  the browser and shows the header badge "Virtual deck on · N viewers"; turning it off (or
+  quitting) stops the server and removes the device. The first time it asks for a password (8 to
+  128 characters, "At least 8 characters.", "At most 128 characters.", "The passwords do not
+  match."); the server never starts without one, and only its Argon2id hash is stored, in
+  `virtual-deck.json` in the config folder (0600) with the port.
+- **Menu section for the virtual deck:** while on, the menu shows a QR code of the page address
+  (never the password) with **Copy** and **Open**, the certificate's SHA-256 fingerprint
+  ("compare it with the browser's warning"), **Change…** for the password (it asks first, because
+  "Changing the password disconnects every viewer."), the **Port** (default 8765, 1024 to 65535;
+  Enter moves the server and the new port is remembered, the old server keeps running if the new
+  one cannot start) and **Viewers (n)**: each page's browser, address and start time with a
+  **Disconnect** button, which ends that login. The header's connection line reads "Virtual Stream
+  Deck Classic — served at <address>" instead of USB ids.
+- **The deck page:** keys first, filling a phone held sideways (no zoom, no page scroll, safe
+  areas, several fingers at once, no context menu on a long press) and usable with a mouse; a bar
+  fills to the two-second hold; one menu button holds the status, **Full screen** (where the
+  browser offers it) and **Leave**; it keeps the screen on where the browser offers the Screen Wake
+  Lock, says when the connection is lost or the deck was turned off, disconnected or its password
+  changed, and asks to turn a phone held upright. The login page says how many tries are left.
+- **HTTPS with a self-signed certificate:** ECDSA P-256, generated locally in the config folder's
+  `virtual/` directory (key 0600, directory 0700), valid 397 days and replaced at a start when the
+  computer's IPv4 addresses changed or fewer than 30 days are left. Browsers warn about it; the
+  menu shows its fingerprint to compare. Limits: five wrong passwords per address, then 30
+  seconds; at most eight viewers; at most eight unfinished connections per address; 50 key
+  presses a second per viewer (releases always arrive); size limits and deadlines on every
+  request. The server listens
+  on every IPv4 interface, its certificate names every IPv4 address of the computer (including VPN
+  and container bridges), and it sends no HSTS header. Anyone on the network who knows the
+  password can press the keys and run their actions, including **Command**. Validated with
+  automated tests (a real server on 127.0.0.1, the GTK menu on an off-screen display) and headless
+  browsers at phone sizes only; **not yet tried on real phones**. New dependencies: `rustls`
+  (ring provider), `rcgen`, `argon2`, `getrandom` and `qrcode`.
+
 ### Fixed
 
 - The **Audio input device** live reading now shows when the microphone is muted: its microphone

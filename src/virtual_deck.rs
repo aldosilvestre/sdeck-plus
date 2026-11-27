@@ -18,7 +18,11 @@
 //! Argon2id hash of the password is held; each address gets five wrong
 //! passwords, then must wait 30 seconds; a session is a random 32-byte cookie
 //! (`HttpOnly; Secure; SameSite=Strict`); the WebSocket needs that cookie and
-//! `Origin: https://<Host>`; at most eight viewers; every request, header,
+//! `Origin: https://<Host>`; at most eight viewers; one address may hold at
+//! most eight connections that are not (yet) viewers, within 32 open
+//! connections in all; each viewer may press keys at most 50 times a second
+//! (later presses in that second are ignored, releases never are, and a
+//! viewer that leaves lets go of every key it held); every request, header,
 //! body and WebSocket message is size-limited and every read has a deadline.
 //!
 //! The server never touches a device: key input arrives on the `inputs`

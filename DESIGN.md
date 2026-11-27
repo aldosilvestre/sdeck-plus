@@ -227,7 +227,8 @@ its own literals. The graphite hardware is identical in both modes.
 
 Status badges pair semantic tones with visible text, a low-alpha fill and a
 55%-alpha edge of the same token: warning for Not connected/Disconnected, error
-for Unavailable and success for Connected. Color alone never communicates state. Hardware uses a graphite chassis
+for Unavailable and success for Connected; the virtual deck's "Virtual deck on · N
+viewers" badge is violet (`.status-virtual`). Color alone never communicates state. Hardware uses a graphite chassis
 (`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
 (`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
 and neutral encoders (`#68737e` to `#343c44`). Subtle inset lighting gives the
@@ -556,8 +557,9 @@ secondary to the tabs. Menu is the window's one configuration menu button and li
 header, not the rail: on the title row, completely at the right edge and vertically centred on the
 "SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
 ("Menu: ..."), accessible name and description and headerless popover, and the same button serves
-every model shown. The header has two rows: the title row (title, update indicator when shown,
-Current selector when two models are connected, Menu) and, under it, the connection detail.
+every model shown. The header has two rows: the title row (title, the virtual deck badge while
+it is on, update indicator when shown, Current selector when two models are connected, Menu) and,
+under it, the connection detail.
 The Current selector sits immediately to the left of Menu on the same line. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
 inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
@@ -971,7 +973,54 @@ two columns fit.
   confirmation uses the same layout with an **Import** button.
 - **Menu popover:** the header's Menu is a headerless command menu (6px padding, 38px rows, no
   title row, no arrow and no Close button) of Help, Updates, Import configuration... and Export
-  configuration...; Escape or a click outside dismisses it.
+  configuration..., then a 1px separator and the **Virtual deck (Classic)** section below;
+  Escape or a click outside dismisses it. The Menu's tooltip and accessible description read
+  "Menu: help, updates, importing or exporting the configuration, and the virtual deck."
+- **Virtual deck (Classic)** (`src/virtual_deck_ui.rs`; source artboard
+  `design/virtual-classic/04-all-in-menu.html`): the menu's last section.
+  - **Switch row:** 38px like a command row (8px 10px padding): a 16px `input-dialpad-symbolic`
+    icon (presentation only), the bold title "Virtual deck (Classic)" and a `Switch` at the end,
+    named "Virtual deck (Classic)" with the tooltip and description "Serve a virtual Stream Deck
+    Classic in a web page on this network". The switch is off at every launch and insensitive while
+    the server starts, moves to another port or stops. Off, the menu ends at the switch row; the
+    details below it (10px side and bottom margins, 12px between groups, 344px wide so the menu
+    is about 380px like the artboard) show only when there is something to show and scroll past
+    620px or on a short screen. A wrapping feedback banner at their top says why turning on, or
+    opening the browser, failed.
+  - **First time** (no stored password): turning the switch on leaves it off and opens an inline
+    form instead: the warning line "Set a password before turning the virtual deck on.", the
+    labelled password entries "New password" and "Repeat it" (peek icon), an error line, then the
+    right-aligned Cancel and suggested **Save and turn on**. Enter in either entry submits. While
+    the password is hashed (on a worker) the whole form is insensitive. Errors read "At least 8
+    characters.", "At most 128 characters." (length first) and "The passwords do not match."
+  - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
+    with 8px corners, a two-module quiet zone; never the password) beside the address in a
+    selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
+    copied.") and **Open** ("Open the address in the browser") buttons; the address chip's tooltip
+    lists every address the page answers at. Then the helper "Certificate fingerprint · compare
+    it with the browser's warning" over the whole "SHA-256 AA:BB:..." in a chip (three lines).
+    Then two rows with 70px headings so their values line up: **Password** "Set" and
+    **Change…**, which opens the same password form with **Change password**; and **Port**, a
+    six-character digits entry ("1024 to 65535; press Enter to restart the server on it") and the
+    helper "Restarts the server", with its own error banner ("Use a port from 1024 to 65535.",
+    "Port N is already in use."). Then the "Viewers (n)" heading and a boxed list in the folder
+    list style, named "Viewers": each 40px row a `phone-symbolic` (Android, iOS, iPadOS) or
+    `computer-symbolic` icon, the browser ("Android · Chrome 131", ellipsized) over the muted
+    "192.168.1.73 · since 21:04", and a **Disconnect** button named "Disconnect <browser> at
+    <address>". Past four rows the list scrolls inside the menu; empty, it reads "No one is viewing
+    the deck yet."
+  - **Changing the password** confirms first in the shared dialog frame: "Change the password?",
+    "Changing the password disconnects every viewer." (while the server restarts: "The server is restarting. Confirm once it is on; changing the password disconnects every viewer." with the accept button disabled; the form itself refuses with "The server is restarting. Change the password once it is on."), Cancel (the default) and a red **Change
+    password**; success toasts "Password changed. Every viewer was disconnected."
+  - **Header:** while on, the title row shows the badge "Virtual deck on · N viewers" ("1
+    viewer"; violet, tooltip "Served at <address>") right after the title. The virtual Classic's
+    connection line reads "Virtual Stream Deck Classic — served at <address>" in place of USB ids
+    (with other devices connected it is the last line of the tooltip), "Virtual Stream Deck
+    Classic turned off — turn it on from the Menu" once off, and the model comes last in the
+    connected list and the Current selector. It is never remembered as the last shown model.
+  - **Threads:** GTK never waits: hashing, starting, moving and stopping the server run on owned
+    worker threads, presses and pictures cross an owned glue thread, and results and server
+    events reach GTK through async channels. Quitting stops the server and joins every thread.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
 - **OBS:** visible endpoint/password labels, masked password, Save settings
@@ -1034,7 +1083,7 @@ two columns fit.
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
   color alone. The Menu lists Help, Updates, Import configuration... and Export
-  configuration...; Updates opens a modal dialog (same width, margins and Close
+  configuration... (then the virtual deck section); Updates opens a modal dialog (same width, margins and Close
   button as Help) that groups its status, Check for updates button and Check
   for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
   scrolled window: text wraps at the shared helper measure and installer output
@@ -1172,3 +1221,55 @@ existing accessible error explanation, including how to enable a StatusNotifier
 tray and that closing the window exits. Do not change saved preferences or leave
 an inaccessible background process. Shutdown cancels registration, retries and
 GTK callbacks, releases the application hold and joins the owned worker.
+
+## 10. Virtual deck web page
+
+The virtual Stream Deck Classic's pages (`src/virtual_deck/page/index.html` and `login.html`,
+served by `src/virtual_deck.rs`) follow the chosen artboard "02 · Keys first"
+(`design/virtual-classic/02-keys-first.html`); 01 and 03 are rejected alternatives. They are
+self-contained (inline CSS and script, no external URL), dark only (`color-scheme: dark`, the
+`desk_*` dark values as CSS variables) and in English. Validated in headless Chromium only (844x390,
+915x412, 390x844, 1280x720), never on a real phone.
+
+- **Keys first:** no chassis. The 5x3 keys fill a phone held sideways: the key side is the
+  largest that fits five columns and three rows in the stage (gap 2.5% of the shorter side,
+  6 to 14px; at least 24px), inside `env(safe-area-inset-*)` with at least 8px top and bottom,
+  10px right and 12px left, and 56px kept free at the right for the menu button. No zoom
+  (`user-scalable=no`), no page scroll (fixed body, `overflow: hidden`), `touch-action: none`,
+  and no context menu, selection, drag or pinch.
+- **Key:** black `#08090b` with corners of 7% of the key (6 to 14px) and the device's inset
+  `#515b65` 2px edge; the picture covers it. The Classic's 480x272 background shows through every
+  key at its own place (key 1 at 11,5, a 97px pitch), as on the device. Pressed: a 4px green
+  `#22c55e` inset edge and the picture 25% brighter; with a mouse, hover shows the control edge.
+  Brightness dims the pictures (0% darkens them by 90%).
+- **Hold bar:** a key held for 0.3s shows a bar at its foot (8% side insets, 7% from the bottom,
+  at least 4px high, a pale track) whose green fill grows linearly to full at 2s, when
+  sdeck-plus runs the hold action. With reduced motion it jumps to full at 2s. Releasing hides it.
+- **Input:** pointer events, one key per pointer, several at once; a key pressed by two pointers
+  goes up when the last lets go; moving off a key past the gap (at least 6px of slack) lets go;
+  only the mouse's left button presses; Enter or Space presses a focused key. Hiding the page,
+  leaving the window or losing the connection lets go of every key.
+- **Chrome behind one button:** a single 44px icon button at the right edge, vertically centred,
+  named "Deck menu: status, full screen, leave", opens a sheet (role dialog "Deck menu", 280px,
+  12px corners, 44px rows): the status with its dot ("Connected to sdeck-plus."), the address,
+  then **Full screen** / **Exit full screen** (hidden where the browser has no Fullscreen API;
+  on Android it also asks to lock landscape) and a red **Leave**, which logs out. Escape or a tap
+  outside closes the sheet without pressing a key. An 8px dot by the button is amber while
+  connecting or reconnecting, green while connected and red once disconnected, and has an
+  accessible name ("Connecting", "Connected", "Reconnecting", "Disconnected").
+- **Overlays:** while not connected the keys are inert, dimmed to 35% and partly greyed, and a
+  centred card says why: "Connection lost. Reconnecting…" with a spinner, "Keys are paused until
+  the deck is back. If sdeck-plus turned the virtual deck off, this page waits here." and **Try
+  now** (retries back off from 1s to 10s); "The virtual deck was turned off in sdeck-plus." with
+  "Keys are paused. This page connects again when the virtual deck is turned back on."; "This
+  device was disconnected from sdeck-plus." or "The password changed. Log in again." with a violet
+  **Log in again**. Status changes are announced in a polite live region.
+- **Portrait:** above the keys, "Turn your phone sideways for bigger keys. The deck still works
+  here." with a rotate glyph; the menu button and its sheet move to the top right.
+- **Screen:** the page asks for a Screen Wake Lock when it opens, connects, takes a press or is
+  shown again, where the browser offers it (HTTPS pages only).
+- **Login page:** "Virtual Stream Deck", "Classic · served by sdeck-plus" (no host name), "Ask
+  the person running sdeck-plus for the password.", a labelled **Password** entry with
+  **Show**/**Hide**, an alert banner and a violet **Connect**. Wrong: "Wrong password." with "N
+  tries left before a 30-second wait."; locked: "Too many tries." with "Try again in N s."
+  counting down while Connect is disabled. Without JavaScript the form still posts.

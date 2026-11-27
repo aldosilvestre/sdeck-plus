@@ -14,7 +14,10 @@ dials, appended touch sensors (`touch_buttons`), the optional display under
 the keys (`strip: Option<StripSpec>`), the optional picture behind the keys
 (`keypad_background: Option<KeypadBackground>`), report sizes and the
 `doc_url` the facts come from. `DeviceModel::all()` lists every entry;
-`DeviceModel::supported()` lists the ones the app drives.
+`DeviceModel::supported()` lists the ones the app drives over USB. Virtual
+models are in neither (see "Virtual models"): `DeviceModel::virtual_models()`
+lists them and `DeviceModel::connectable()` is the supported models followed by
+the virtual ones.
 
 Generic code never reads raw fields where an accessor exists: use `keys()`,
 `key_inputs()`, `has_strip()`, `has_touch()`, `has_info_window()`,
@@ -35,6 +38,9 @@ information window) has a size but no sections.
   product ids (`by_pid` / `by_pid_supported` skip it; `by_pid_any` finds it for
   information only). Nothing is created on disk for it unless a store is opened.
   No entry is Planned today; a new model starts here.
+- `Virtual`: served by the application itself, never discovered over USB: no
+  product ids, no udev rule, outside `all()` and `supported()`. Live only while
+  the application attaches it. Today one entry, `VIRTUAL_CLASSIC`.
 
 ## Several devices at once
 
@@ -46,9 +52,10 @@ per **model**. Consequences for a new model:
   one model mirror each other; nothing is per unit.
 - Artwork and controls are addressed to a model and fanned out to every device of
   it; a device only ever receives its own model's pictures.
-- The header "Current" selector lists the connected supported models and appears
-  only with two or more. It needs no per-model code: entries come from
-  `DeviceModel::supported()` filtered by what is connected, in registry order.
+- The header "Current" selector lists the connected models and appears only with
+  two or more. It needs no per-model code: entries come from
+  `DeviceModel::connectable()` filtered by what is connected, in registry order
+  with the virtual models last.
 - Only the Stream Deck + has been tested on real hardware, and only on its own.
   The other five models and running several devices at once are validated with
   simulated devices (`event_api::test_support`, `src/tests/mixed_model_tests.rs`).
@@ -71,6 +78,68 @@ the Info window between the two touch buttons). Several at once, for example
 `SDECK_SIMULATE_MODEL=xl,neo`, also shows the Current selector. The launcher
 uses scratch folders and the app's own icons; simulated devices have no
 physical keys to press.
+
+## Virtual models
+
+`VIRTUAL_CLASSIC` (`src/device_model.rs`) is the Stream Deck Classic the
+application serves in a web page (the header Menu's "Virtual deck (Classic)"
+switch; user docs: the "Virtual Stream Deck Classic" group of `docs/docs.html`).
+It shares the Classic's row (`CLASSIC_FACTS`: Expanded family, 5x3 keys of 72
+px JPEG rotated 180, the 480x272 keypad background) under an identity of its
+own:
+
+- id `virtual-classic`, name "Virtual Stream Deck Classic", no aliases,
+  `support: Support::Virtual`, `pids: &[]`; `is_virtual()` is true and
+  `is_supported()` false.
+- It is not in `ALL`, so `all()`, `supported()`, `by_pid*`, discovery, udev
+  (`tests/packaging.rs`), `install.sh`, the previews and the screenshot
+  generator never see it. `by_id("virtual-classic")` finds it;
+  `by_id_supported` does not, so `device.json` never names it (the session code
+  never remembers it as the shown model: it is off at every launch).
+- Its own data root, `devices/virtual-classic/`, a complete set of stores
+  (including `keypad-background.conf`) independent of a real Classic's, so both
+  run side by side, one session each. Bundles name `virtual-classic` and the
+  Classic refuses them, and the reverse.
+- The header names its address instead of USB ids; it comes after the hardware
+  in the connected list and the Current selector (`connectable()`).
+
+How it flows through the hub (`src/event_api/virtual_device.rs`, re-exported
+from `event_api`):
+
+1. `virtual_deck_pair()` returns a `VirtualDeck` (the device end) and a
+   `VirtualDeckLink` (the viewer end, `Clone + Send`).
+2. `HidController::attach_virtual(deck)` puts the deck in the controller's
+   slot and asks for an enumeration at once. Every enumeration then lists, beside
+   the hardware found, a candidate at `VIRTUAL_DECK_PATH` (`virtual:classic`,
+   no serial, model `VIRTUAL_CLASSIC`), even when the USB listing fails. The hub
+   keys workers by model id, not product id, so a model without product ids gets
+   its worker like any device; attaching a second deck unplugs the first.
+3. The worker drives it through the same private `Device` trait as a HID
+   device. `read` returns Classic key reports built by `wire::input_report`
+   (shared with the simulator) from `VirtualDeckLink::press(key, pressed)` (keys
+   1-15; at most 64 waiting, oldest dropped, each carries every key's state).
+   `write` reassembles `02 07` key and `02 08` full-screen chunks
+   (`wire::expanded_chunk`, 4 MiB at most), turns the picture upright (undoing
+   the model's rotation and flip) and publishes `VirtualFrame::Key { key, jpeg }`
+   or `VirtualFrame::Background { jpeg }`; brightness feature reports become
+   `VirtualFrame::Brightness(percent)`. Each new connection, and the unplug,
+   publishes `VirtualFrame::Reset`.
+4. `VirtualDeckLink::frames()` has one consumer (a later call takes over) and a
+   256-frame queue that drops newer frames when full;
+   `VirtualDeckLink::snapshot()` is always the current state: `Reset`, the
+   brightness, the background, then every key picture.
+5. `HidController::detach_virtual()` (also part of `shutdown`) drops the deck:
+   the worker reports the device lost exactly as when a cable is pulled.
+
+The application wires the other end (`src/virtual_deck_ui.rs`, bin-only): its
+glue thread turns the web server's `DeckInput`s into `press` calls and the
+link's frames into `DeckFrame`s for `VirtualDeckServer::publish`, sending a
+snapshot instead after a `Reset` or when it lags. The server
+(`sdeck_plus::virtual_deck`) and the hub never import each other. Tests:
+`tests/virtual_device.rs`, `src/event_api/virtual_device/tests.rs`, the
+virtual-classic cases of `tests/device_registry.rs` and `tests/device_roots.rs`,
+and `src/tests/virtual_deck_ui_tests.rs` (the real window over the real hub).
+Validated with automated tests and headless browsers only, not on real phones.
 
 ## Protocol families
 
@@ -186,7 +255,8 @@ discovery ignoring Planned ids, `doc_url` under
 ## Data root rule
 
 `data_root(model)` is `<data>/sdeck-plus/devices/<id>/` for every model except
-the Stream Deck +, which keeps `<data>/sdeck-plus/` (legacy root). The root of a
+the Stream Deck +, which keeps `<data>/sdeck-plus/` (legacy root). Virtual
+models follow the same rule (`devices/virtual-classic/`). The root of a
 Planned model is never created unless a store is opened. Opening a model's root
 with another model is refused; paths are resolved (`..`, symlinks) before the
 comparison.
@@ -201,6 +271,7 @@ comparison.
 | xl | Stream Deck XL | Supported, simulator only | Expanded | 0x006C 0x008F 0x00BA | 8x4 | 96 JPEG, 180 | none | 0 |
 | neo | Stream Deck Neo | Supported, simulator only | Expanded | 0x009A | 4x2 | 96 JPEG, 180 | 248x58 info window, no touch, JPEG 180 (`02 0B`) | 2, after the keys |
 | mini | Stream Deck Mini | Supported, simulator only | Legacy Mini | 0x0063 0x0090 0x00B3 0x00B8 | 3x2 | 80 BMP, transposed (`Ccw90` + `key_flip_y`) | none | 0 |
+| virtual-classic | Virtual Stream Deck Classic | Virtual (web page), automated tests only | Expanded | none | 5x3 | as `classic` | as `classic` | 0 |
 
 Sources (the `plus` and `plus-xl` pages follow the site's naming pattern and
 were not opened):
@@ -263,8 +334,10 @@ until a real unit confirms it.
 
 ## Pitfalls
 
-- `by_id`, stored preferences and bundles can name Planned models. Consumers
-  that need a connectable model must use `by_pid_supported` / `by_id_supported`.
+- `by_id`, stored preferences and bundles can name Planned models, and `by_id`
+  also finds the virtual Classic. Consumers that need a USB model must use
+  `by_pid_supported` / `by_id_supported`; lists of what a session can run use
+  `connectable()`, never `supported()` alone.
 - Neo sensors arrive as `Event::Key` indexes beyond `keys()`; the layers level
   maps them to `Trigger::TouchButton`, and only models with touch buttons
   accept `tb` rows.
