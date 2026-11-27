@@ -464,7 +464,9 @@ fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
         assert_eq!(w.qr.text(), url);
         assert!(w.qr.matrix().is_some());
         assert!(!w.qr.text().contains(PASSWORD));
-        // S1: the browser opens at the address, once.
+        // S1: turning it on opens no browser window; only Open does, once.
+        assert!(virtual_deck_ui::take_opened().is_empty());
+        w.open.emit_clicked();
         assert_eq!(virtual_deck_ui::take_opened(), std::slice::from_ref(&url));
         // S1: the hub serves the virtual Classic like a plugged-in device.
         let registry = pair.registry.clone();

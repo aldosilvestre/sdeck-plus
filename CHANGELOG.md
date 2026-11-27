@@ -12,8 +12,8 @@ All notable changes to this project are documented here. The format follows
   browsers on the local network open at `https://<lan-ip>:8765/`. It runs through the same hub,
   actions and two-second key hold as a plugged-in Classic, is listed in the **Current** selector
   while on, and keeps its own profiles in `devices/virtual-classic/`, so it runs beside a real
-  Classic. The switch is off at every launch; turning it on starts the server, opens the page in
-  the browser and shows the header badge "Virtual deck on · N viewers"; turning it off (or
+  Classic. The switch is off at every launch; turning it on starts the server (no browser window
+  opens by itself: use **Open** or the QR code) and shows the header badge "Virtual deck on · N viewers"; turning it off (or
   quitting) stops the server and removes the device. The first time it asks for a password (8 to
   128 characters, "At least 8 characters.", "At most 128 characters.", "The passwords do not
   match."); the server never starts without one, and only its Argon2id hash is stored, in

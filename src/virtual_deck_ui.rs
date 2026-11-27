@@ -11,7 +11,8 @@
 //! that starts or restarts takes the stored password before it serves.
 //!
 //! Turning it on starts the HTTPS server, attaches a virtual Stream Deck
-//! Classic to the HID hub and opens the page in the browser; turning it off
+//! Classic to the HID hub (no browser window opens by itself; the Open button
+//! does that); turning it off
 //! (or quitting) stops the server, detaches the deck and joins the glue thread
 //! that carries presses and pictures between the two. GTK never waits for any
 //! of it: hashing, starting and stopping run on owned worker threads whose
@@ -1042,13 +1043,11 @@ impl VirtualDeckPanel {
         });
         match installed {
             Ok(running) => {
-                let url = running.url.clone();
+                // No browser window opens by itself: the page opens only from
+                // the panel's Open button (or the QR code on a phone).
                 self.0.running.replace(Some(running));
                 self.set_phase(Phase::On);
                 self.show_running();
-                if let Err(error) = (self.0.env.open)(&url) {
-                    self.report(&error);
-                }
             }
             Err(error) => {
                 self.set_phase(Phase::Off);

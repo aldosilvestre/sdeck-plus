@@ -986,7 +986,7 @@ two columns fit.
     details below it (10px side and bottom margins, 12px between groups, 344px wide so the menu
     is about 380px like the artboard) show only when there is something to show and scroll past
     620px or on a short screen. A wrapping feedback banner at their top says why turning on, or
-    opening the browser, failed.
+    opening the browser from **Open**, failed. Turning on never opens a browser window by itself.
   - **First time** (no stored password): turning the switch on leaves it off and opens an inline
     form instead: the warning line "Set a password before turning the virtual deck on.", the
     labelled password entries "New password" and "Repeat it" (peek icon), an error line, then the
