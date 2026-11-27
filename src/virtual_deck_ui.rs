@@ -7,7 +7,8 @@
 //! the menu shows the page address (QR code, Copy, Open), the certificate
 //! fingerprint, the password (Change…), the port ("Restarts the server") and
 //! the viewers, each with Disconnect; the header says "Virtual deck on · N
-//! viewers".
+//! viewers". The password changes only while the deck is on, and a server
+//! that starts or restarts takes the stored password before it serves.
 //!
 //! Turning it on starts the HTTPS server, attaches a virtual Stream Deck
 //! Classic to the HID hub and opens the page in the browser; turning it off
@@ -16,6 +17,8 @@
 //! of it: hashing, starting and stopping run on owned worker threads whose
 //! results, like the server's events, arrive through async channels.
 mod glue;
+#[cfg(test)]
+mod hold;
 mod qr;
 
 use crate::ui;
@@ -51,6 +54,11 @@ pub(crate) const MISMATCH: &str = "The passwords do not match.";
 pub(crate) const NO_VIEWERS: &str = "No one is viewing the deck yet.";
 pub(crate) const CHANGE_TITLE: &str = "Change the password?";
 pub(crate) const CHANGE_WARNING: &str = "Changing the password disconnects every viewer.";
+/// The confirmation's text while the server restarts: it can be confirmed once on.
+pub(crate) const CONFIRM_WAIT: &str =
+    "The server is restarting. Confirm once it is on; changing the password disconnects every viewer.";
+/// Why a new password is refused while the server restarts.
+pub(crate) const CHANGE_WAIT: &str = "The server is restarting. Change the password once it is on.";
 pub(crate) const FINGERPRINT_HELP: &str =
     "Certificate fingerprint · compare it with the browser's warning";
 const SWITCH_TIP: &str = "Serve a virtual Stream Deck Classic in a web page on this network";
@@ -151,6 +159,11 @@ pub(crate) fn badge_text(viewers: usize) -> String {
         1 => "Virtual deck on · 1 viewer".to_string(),
         count => format!("Virtual deck on · {count} viewers"),
     }
+}
+
+/// The server moved to `port` but the settings could not remember it.
+pub(crate) fn port_not_remembered(port: u16, error: &str) -> String {
+    format!("The server now runs on port {port}, but the port could not be remembered: {error}")
 }
 
 /// "192.168.1.73 · since 21:04", in local time.
@@ -647,6 +660,9 @@ struct State {
     workers: RefCell<Vec<Worker>>,
     confirmation: RefCell<Option<gtk::MessageDialog>>,
     closed: Cell<bool>,
+    /// Holds server starts on their workers while a test acts.
+    #[cfg(test)]
+    hold: RefCell<Option<hold::Gate>>,
 }
 
 impl State {
@@ -702,6 +718,8 @@ impl VirtualDeckPanel {
             workers: RefCell::default(),
             confirmation: RefCell::default(),
             closed: Cell::new(false),
+            #[cfg(test)]
+            hold: RefCell::default(),
         }));
         panel.connect();
         panel
@@ -768,7 +786,11 @@ impl VirtualDeckPanel {
             }
         });
         w.open.connect_clicked(move |_| open());
-        let change = self.on(|panel| panel.widgets().change_form.open());
+        let change = self.on(|panel| {
+            if panel.phase() == Phase::On {
+                panel.widgets().change_form.open();
+            }
+        });
         w.change.connect_clicked(move |_| change());
         let submit = self.on(Self::submit_change);
         w.change_form.submit.connect_clicked(move |_| submit());
@@ -799,12 +821,34 @@ impl VirtualDeckPanel {
         w.switch
             .set_sensitive(matches!(phase, Phase::Off | Phase::On));
         w.port.set_sensitive(phase == Phase::On);
+        // The password changes only while on, never for a server still starting.
+        w.change.set_sensitive(phase == Phase::On);
         w.running.set_visible(on);
         self.0.badge.set_visible(on);
-        if !on {
+        if on {
+            self.sync_confirmation();
+        } else {
             w.change_form.clear();
             w.change_form.root.set_visible(false);
             w.port_feedback.set_visible(false);
+            self.close_confirmation();
+        }
+    }
+
+    /// The confirmation can be accepted only while on; meanwhile it says why.
+    fn sync_confirmation(&self) {
+        let confirmation = self.0.confirmation.borrow().clone();
+        if let Some(dialog) = confirmation {
+            let ready = self.phase() == Phase::On;
+            dialog.set_response_sensitive(gtk::ResponseType::Accept, ready);
+            dialog.set_secondary_text(Some(if ready { CHANGE_WARNING } else { CONFIRM_WAIT }));
+        }
+    }
+
+    fn close_confirmation(&self) {
+        let confirmation = self.0.confirmation.borrow_mut().take();
+        if let Some(dialog) = confirmation {
+            dialog.destroy();
         }
     }
 
@@ -892,6 +936,21 @@ impl VirtualDeckPanel {
         });
     }
 
+    /// What a server worker does before it starts its server: nothing in the
+    /// app; a test may hold it there.
+    fn hold(&self) -> impl FnOnce() + Send + 'static {
+        #[cfg(test)]
+        let gate = self.0.hold.borrow().clone();
+        move || {
+            #[cfg(test)]
+            {
+                if let Some(gate) = gate {
+                    gate.pass();
+                }
+            }
+        }
+    }
+
     /// Join the workers that are done.
     fn reap(&self) {
         let finished: Vec<Worker> = {
@@ -962,9 +1021,13 @@ impl VirtualDeckPanel {
         };
         self.clear_feedback();
         self.set_phase(Phase::Starting);
+        let hold = self.hold();
         self.run(
             "virtual-deck-start",
-            move || Outcome::Started(start_server(config, hash)),
+            move || {
+                hold();
+                Outcome::Started(start_server(config, hash))
+            },
             |error| Outcome::Started(Err(error)),
         );
     }
@@ -973,7 +1036,11 @@ impl VirtualDeckPanel {
         if self.phase() != Phase::Starting {
             return;
         }
-        match result.and_then(|started| self.launch(started)) {
+        let installed = result.and_then(|mut started| {
+            self.take_stored_password(&mut started)?;
+            self.launch(started)
+        });
+        match installed {
             Ok(running) => {
                 let url = running.url.clone();
                 self.0.running.replace(Some(running));
@@ -987,6 +1054,26 @@ impl VirtualDeckPanel {
                 self.set_phase(Phase::Off);
                 self.report(&error);
             }
+        }
+    }
+
+    /// The password may have changed while `started` was starting: before it
+    /// is installed, the server takes the stored hash (which disconnects every
+    /// viewer it may already have), so it never accepts an older password. An
+    /// unusable settings file keeps the hash it started with: nothing can be
+    /// saved over that file either.
+    fn take_stored_password(&self, started: &mut Started) -> Result<(), String> {
+        let stored = self
+            .open_store()
+            .ok()
+            .and_then(|store| store.settings().password_hash.clone());
+        match stored {
+            Some(stored) if stored != started.hash => {
+                started.server.set_password(stored.clone())?;
+                started.hash = stored;
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -1217,6 +1304,9 @@ impl VirtualDeckPanel {
 
     fn submit_change(&self) {
         let form = &self.widgets().change_form;
+        if self.phase() != Phase::On {
+            return form.show_error(CHANGE_WAIT);
+        }
         let (new, repeat) = form.texts();
         form.set_busy(true);
         self.run(
@@ -1229,6 +1319,10 @@ impl VirtualDeckPanel {
     fn new_password_hashed(&self, result: Result<String, String>) {
         let form = &self.widgets().change_form;
         form.set_busy(false);
+        // Turned off meanwhile: the form was closed and there is nothing to confirm.
+        if !matches!(self.phase(), Phase::On | Phase::Restarting) {
+            return;
+        }
         match result {
             Ok(hash) => self.confirm_change(hash),
             Err(error) => form.show_error(&error),
@@ -1236,13 +1330,12 @@ impl VirtualDeckPanel {
     }
 
     /// "Changing the password disconnects every viewer." Cancel is the default.
+    /// While the server restarts it waits: "Change password" acts only while on.
     fn confirm_change(&self, hash: String) {
         let Some(window) = self.widgets().section.root().and_downcast::<gtk::Window>() else {
             return;
         };
-        if let Some(dialog) = self.0.confirmation.borrow_mut().take() {
-            dialog.destroy();
-        }
+        self.close_confirmation();
         let dialog = gtk::MessageDialog::builder()
             .transient_for(&window)
             .modal(true)
@@ -1263,6 +1356,11 @@ impl VirtualDeckPanel {
                 let panel = Self(state);
                 let current = panel.0.confirmation.borrow().as_ref() == Some(dialog);
                 if current {
+                    if response == gtk::ResponseType::Accept && panel.phase() != Phase::On {
+                        // Not on yet: the confirmation keeps asking and says why.
+                        panel.sync_confirmation();
+                        return;
+                    }
                     panel.0.confirmation.borrow_mut().take();
                     if response == gtk::ResponseType::Accept {
                         panel.apply_password(hash.clone());
@@ -1272,13 +1370,17 @@ impl VirtualDeckPanel {
             dialog.destroy();
         });
         self.0.confirmation.replace(Some(dialog.clone()));
+        self.sync_confirmation();
         dialog.present();
     }
 
     /// Remember the new hash, then give it to the server, which disconnects
-    /// every viewer.
+    /// every viewer. Only while on: a server still starting would miss it.
     fn apply_password(&self, hash: String) {
         let form = &self.widgets().change_form;
+        if self.phase() != Phase::On {
+            return form.show_error(CHANGE_WAIT);
+        }
         let mut store = match self.open_store() {
             Ok(store) => store,
             Err(error) => return form.show_error(&error),
@@ -1323,9 +1425,13 @@ impl VirtualDeckPanel {
             Err(error) => return self.port_error(&error),
         };
         self.set_phase(Phase::Restarting);
+        let hold = self.hold();
         self.run(
             "virtual-deck-restart",
-            move || Outcome::Restarted(port, start_server(config, hash)),
+            move || {
+                hold();
+                Outcome::Restarted(port, start_server(config, hash))
+            },
             move |error| Outcome::Restarted(port, Err(error)),
         );
     }
@@ -1337,10 +1443,13 @@ impl VirtualDeckPanel {
             return;
         }
         self.set_phase(Phase::On);
-        let started = match result {
+        let mut started = match result {
             Ok(started) => started,
             Err(error) => return self.port_error(&error),
         };
+        if let Err(error) = self.take_stored_password(&mut started) {
+            return self.port_error(&error);
+        }
         let old = self.0.running.borrow_mut().take();
         match self.launch(started) {
             Ok(running) => {
@@ -1356,8 +1465,9 @@ impl VirtualDeckPanel {
                     );
                 }
                 self.show_running();
+                // The menu keeps showing the port the server runs on, and says so.
                 if let Err(error) = self.open_store().and_then(|mut store| store.set_port(port)) {
-                    self.port_error(&error);
+                    self.port_error(&port_not_remembered(port, &error));
                 }
             }
             Err(error) => {
@@ -1400,6 +1510,14 @@ impl VirtualDeckPanel {
 
     pub(crate) fn test_confirmation(&self) -> Option<gtk::MessageDialog> {
         self.0.confirmation.borrow().clone()
+    }
+
+    /// Hold every server start or restart begun from now on before it starts
+    /// its server, until the returned hold is released or dropped.
+    pub(crate) fn test_hold_servers(&self) -> hold::ServerHold {
+        let gate = hold::Gate::held();
+        self.0.hold.replace(Some(gate.clone()));
+        hold::ServerHold::new(gate)
     }
 
     /// Whether every worker thread has been joined.

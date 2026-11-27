@@ -33,6 +33,7 @@ use std::{
 use tungstenite::{client::IntoClientRequest, Message};
 
 const PASSWORD: &str = "correct horse";
+const NEW_PASSWORD: &str = "another secret";
 const ANDROID_CHROME: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 \
 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36";
 const MAC_SAFARI: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
@@ -44,6 +45,12 @@ const WAIT: Duration = Duration::from_secs(20);
 fn password_hash() -> String {
     static HASH: OnceLock<String> = OnceLock::new();
     HASH.get_or_init(|| hash_password(PASSWORD).unwrap())
+        .clone()
+}
+
+fn new_password_hash() -> String {
+    static HASH: OnceLock<String> = OnceLock::new();
+    HASH.get_or_init(|| hash_password(NEW_PASSWORD).unwrap())
         .clone()
 }
 
@@ -792,6 +799,273 @@ fn a_new_port_restarts_the_server_and_a_busy_one_is_reported() {
             registry.live_devices(&VIRTUAL_CLASSIC) == 0
         });
         drop(blocker);
+    });
+}
+
+fn wait_port(panel: &VirtualDeckPanel, port: u16) {
+    let watched = panel.clone();
+    wait_until(&format!("the server to run on {port}"), move || {
+        watched.test_port() == Some(port) && watched.test_phase() == Phase::On
+    });
+}
+
+fn accept_button(dialog: &gtk::MessageDialog) -> Button {
+    dialog
+        .widget_for_response(gtk::ResponseType::Accept)
+        .and_downcast::<Button>()
+        .expect("the confirmation's Change password button")
+}
+
+fn secondary_text(dialog: &gtk::MessageDialog) -> Option<String> {
+    dialog.property::<Option<String>>("secondary-text")
+}
+
+/// L21 minor 1: a new password confirmed while the server moves to another
+/// port must not leave the new server on the old password. The confirmation
+/// acts only while the deck is on: it waits, says why, then reaches the new
+/// server, which disconnects every viewer.
+#[test]
+fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_server() {
+    run_gtk_test(|| {
+        let [first, second] = free_ports();
+        let Some(pair) = start_pair_with("virtual-password-restart", remember(first)) else {
+            return;
+        };
+        let config = config_dir(&pair.roots);
+        let panel = turn_on_and_wait(&pair);
+        let w = panel.test_widgets();
+        // The new password was hashed before the restart and waits for confirmation.
+        w.change.emit_clicked();
+        let form = &w.change_form;
+        form.new.set_text(NEW_PASSWORD);
+        form.repeat.set_text(NEW_PASSWORD);
+        form.submit.emit_clicked();
+        let watched = panel.clone();
+        wait_until("the confirmation", move || {
+            watched.test_confirmation().is_some()
+        });
+        let dialog = panel.test_confirmation().unwrap();
+        let accept = accept_button(&dialog);
+        assert!(accept.is_sensitive());
+        // The server moves to another port and its new server is held starting.
+        let hold = panel.test_hold_servers();
+        w.port.set_text(&second.to_string());
+        w.port.emit_activate();
+        assert_eq!(panel.test_phase(), Phase::Restarting);
+        let while_restarting = (
+            w.change.is_sensitive(),
+            accept.is_sensitive(),
+            secondary_text(&dialog),
+        );
+        dialog.response(gtk::ResponseType::Accept);
+        hold.release();
+        wait_port(&panel, second);
+        // The live server accepts exactly the password the app keeps.
+        let tls = client_config(&config);
+        let stored = SettingsStore::open(&config)
+            .settings()
+            .password_hash
+            .clone()
+            .unwrap();
+        let (kept, other) = if stored == password_hash() {
+            (PASSWORD, NEW_PASSWORD)
+        } else {
+            (NEW_PASSWORD, PASSWORD)
+        };
+        assert!(
+            login(&tls, second, kept).is_ok(),
+            "the new server accepts the password the app keeps ({kept:?})"
+        );
+        assert_eq!(login(&tls, second, other), Err(401));
+        // While restarting nothing changed: Change… and the confirmation waited and said why.
+        assert_eq!(
+            stored,
+            password_hash(),
+            "nothing was confirmed while restarting"
+        );
+        assert_eq!(
+            while_restarting,
+            (
+                false,
+                false,
+                Some(virtual_deck_ui::CONFIRM_WAIT.to_string())
+            )
+        );
+        assert_eq!(
+            panel.test_confirmation().as_ref(),
+            Some(&dialog),
+            "the confirmation still asks"
+        );
+        // On again: it can be confirmed, and it disconnects every viewer of the new server.
+        assert!(w.change.is_sensitive());
+        assert!(accept.is_sensitive());
+        assert_eq!(
+            secondary_text(&dialog).as_deref(),
+            Some(virtual_deck_ui::CHANGE_WARNING)
+        );
+        let viewer = ViewerClient::connect(&config, second, MAC_SAFARI);
+        let heading = w.viewers_heading.clone();
+        wait_until("the viewer is listed", move || {
+            heading.text() == "Viewers (1)"
+        });
+        accept.emit_clicked();
+        assert_eq!(viewer.next_of("bye")["reason"], "password-changed");
+        assert!(panel.test_confirmation().is_none());
+        assert!(!form.root.get_visible());
+        assert_eq!(
+            login(&tls, second, PASSWORD),
+            Err(401),
+            "the old one is refused"
+        );
+        assert!(login(&tls, second, NEW_PASSWORD).is_ok());
+        assert_ne!(
+            SettingsStore::open(&config).settings().password_hash,
+            Some(password_hash())
+        );
+    });
+}
+
+/// A form submitted while the server restarts is refused with the reason.
+#[test]
+fn a_new_password_is_refused_while_the_server_restarts() {
+    run_gtk_test(|| {
+        let [first, second] = free_ports();
+        let Some(pair) = start_pair_with("virtual-password-wait", remember(first)) else {
+            return;
+        };
+        let config = config_dir(&pair.roots);
+        let panel = turn_on_and_wait(&pair);
+        let w = panel.test_widgets();
+        w.change.emit_clicked();
+        let form = &w.change_form;
+        let hold = panel.test_hold_servers();
+        w.port.set_text(&second.to_string());
+        w.port.emit_activate();
+        assert_eq!(panel.test_phase(), Phase::Restarting);
+        assert!(form.root.get_visible(), "the form stays open");
+        form.new.set_text(NEW_PASSWORD);
+        form.repeat.set_text(NEW_PASSWORD);
+        form.submit.emit_clicked();
+        assert!(form.error.get_visible());
+        assert_eq!(form.error.text(), virtual_deck_ui::CHANGE_WAIT);
+        assert!(panel.test_confirmation().is_none());
+        hold.release();
+        wait_port(&panel, second);
+        let watched = panel.clone();
+        wait_until("every worker is joined", move || watched.test_idle());
+        assert!(panel.test_confirmation().is_none());
+        assert_eq!(
+            SettingsStore::open(&config).settings().password_hash,
+            Some(password_hash())
+        );
+    });
+}
+
+/// A server that starts or restarts takes the password the app keeps, even
+/// when it changed while the server was starting.
+#[test]
+fn a_server_that_starts_or_restarts_takes_the_password_the_app_keeps() {
+    run_gtk_test(|| {
+        let [first, second] = free_ports();
+        let Some(pair) = start_pair_with("virtual-password-resync", remember(first)) else {
+            return;
+        };
+        let config = config_dir(&pair.roots);
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        let hold = panel.test_hold_servers();
+        w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::Starting);
+        SettingsStore::open(&config)
+            .set_password_hash(new_password_hash())
+            .unwrap();
+        hold.release();
+        wait_phase(&panel, Phase::On);
+        let tls = client_config(&config);
+        assert_eq!(
+            login(&tls, first, PASSWORD),
+            Err(401),
+            "the started server refuses the old password"
+        );
+        assert!(login(&tls, first, NEW_PASSWORD).is_ok());
+        // And while it moves to another port.
+        let hold = panel.test_hold_servers();
+        w.port.set_text(&second.to_string());
+        w.port.emit_activate();
+        assert_eq!(panel.test_phase(), Phase::Restarting);
+        SettingsStore::open(&config)
+            .set_password_hash(password_hash())
+            .unwrap();
+        hold.release();
+        wait_port(&panel, second);
+        assert_eq!(
+            login(&tls, second, NEW_PASSWORD),
+            Err(401),
+            "the restarted server refuses the old password"
+        );
+        assert!(login(&tls, second, PASSWORD).is_ok());
+    });
+}
+
+/// Makes a folder read-only (0500) until dropped, then owner-writable again.
+struct ReadOnly(PathBuf);
+
+impl ReadOnly {
+    fn new(path: &Path) -> Self {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o500)).unwrap();
+        Self(path.to_path_buf())
+    }
+}
+
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
+/// L21 minor 2: the server moved but the settings could not remember the
+/// port; the menu says so and keeps showing the port it serves.
+#[test]
+fn a_new_port_that_cannot_be_remembered_is_still_the_one_shown_and_served() {
+    run_gtk_test(|| {
+        let [first, second] = free_ports();
+        let Some(pair) = start_pair_with("virtual-port-unsaved", remember(first)) else {
+            return;
+        };
+        let config = config_dir(&pair.roots);
+        let panel = turn_on_and_wait(&pair);
+        let w = panel.test_widgets();
+        // The settings file can be read but no longer replaced.
+        let _read_only = ReadOnly::new(&config);
+        let probe = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(config.join(".writable-probe"));
+        if probe.is_ok() {
+            eprintln!("The config folder stays writable (root?): nothing to check.");
+            return;
+        }
+        w.port.set_text(&second.to_string());
+        w.port.emit_activate();
+        wait_port(&panel, second);
+        let url = format!("https://127.0.0.1:{second}/");
+        assert!(listening(second));
+        assert_eq!(w.port.text(), second.to_string());
+        assert_eq!(w.address.text(), url);
+        assert_eq!(panel.test_url().as_deref(), Some(url.as_str()));
+        assert!(w.port_feedback.get_visible());
+        let said = w.port_feedback.text().to_string();
+        let expected = virtual_deck_ui::port_not_remembered(
+            second,
+            &format!("Could not save {}: ", config.join(FILE_NAME).display()),
+        );
+        assert!(said.starts_with(&expected), "{said}");
+        assert_eq!(
+            SettingsStore::open(&config).settings().port,
+            first,
+            "the old port is still the remembered one"
+        );
+        wait_until("the old server stops", move || !listening(first));
     });
 }
 
