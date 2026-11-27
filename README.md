@@ -76,8 +76,10 @@ permissions on its own.
   can follow [docs/SKILL.md](docs/SKILL.md)).
 - **Virtual Stream Deck Classic:** **Menu > Virtual deck (Classic)** serves a 15-key Classic in a
   web page that phones and browsers on your local network open (landscape on phones, a QR code of
-  the address) after typing a password you set in the app. It runs the same actions as a plugged-in
-  Classic, with its own profiles, and lists who is connected so you can disconnect them. It is
+  the address) after typing a password you set in the app for the session: it is kept only in
+  memory, never saved, and asked for again after sdeck-plus restarts, while the port and the deck's
+  own profiles are remembered. It runs the same actions as a plugged-in Classic and lists who is
+  connected so you can disconnect them. It is
   served over plain HTTP on your local network, so no certificate warning appears, but browsers
   mark the page "Not secure": the password itself never crosses the network (the page proves it
   knows it), while the key pictures, the presses and the login cookie can be read by others on the

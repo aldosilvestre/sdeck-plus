@@ -3,25 +3,28 @@
 //! password form, on and off, the viewers with Disconnect, a new password, a
 //! new port, the Current selector and the header lines.
 //!
+//! L40: the password lives in memory for one session. The first turn-on of
+//! each window asks for it, turning off and on again reuses it, Change…
+//! replaces it, and a restart forgets it; the settings file keeps the port
+//! only, and the virtual Classic's own data stays in its root.
+//!
 //! The server is real, plain HTTP, and listens on 127.0.0.1 only (the test
 //! binary's `LAN`); the config folder is scratch; the test binary records the
 //! browser address instead of starting a browser; viewers log in with the
 //! page's challenge-response (computed here with `ring`) and watch through a
 //! tungstenite client.
-use super::model_session_tests::{header_label, wait_until};
+use super::model_session_tests::{header_label, scratch, stored_binding, wait_until};
 use super::two_device_tests::{active, start_pair_with, wait_layer, Pair, PLUS_PATH};
 use super::*;
 use crate::virtual_deck_ui::{self, Phase, VirtualDeckPanel};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
 use ring::{digest, hmac, pbkdf2};
 use sdeck_plus::{
     device_model::{PLUS, VIRTUAL_CLASSIC},
     event_api::test_support::SimDevice,
-    virtual_deck::{
-        build_verifier,
-        settings::{SettingsStore, FILE_NAME},
-        Verifier,
-    },
+    local_artwork::KEYPAD_BACKGROUND_FILE,
+    virtual_deck::settings::{SettingsStore, FILE_NAME},
 };
 use std::{
     collections::HashMap,
@@ -39,32 +42,15 @@ use tungstenite::{client::IntoClientRequest, Message};
 
 const PASSWORD: &str = "correct horse";
 const NEW_PASSWORD: &str = "another secret";
+/// The first-time form's warning (L40), word for word.
+const SESSION_MESSAGE: &str =
+    "Set a password for this session. It is forgotten when sdeck-plus closes.";
 const ANDROID_CHROME: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 \
 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36";
 const MAC_SAFARI: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
 /// Upper bound of every wait on a real signal; never a fixed sleep.
 const WAIT: Duration = Duration::from_secs(20);
-
-/// One verifier for the whole binary: deriving it is deliberately slow.
-fn password_verifier() -> Verifier {
-    static VERIFIER: OnceLock<Verifier> = OnceLock::new();
-    VERIFIER
-        .get_or_init(|| build_verifier(PASSWORD).unwrap())
-        .clone()
-}
-
-fn new_password_verifier() -> Verifier {
-    static VERIFIER: OnceLock<Verifier> = OnceLock::new();
-    VERIFIER
-        .get_or_init(|| build_verifier(NEW_PASSWORD).unwrap())
-        .clone()
-}
-
-/// The verifier the settings file holds.
-fn stored_verifier(config: &Path) -> Option<Verifier> {
-    SettingsStore::open(config).settings().verifier.clone()
-}
 
 /// Ports nothing listens on right now, all different.
 pub(super) fn free_ports<const N: usize>() -> [u16; N] {
@@ -82,13 +68,36 @@ fn config_dir(roots: &feature_runtime::SessionRoots) -> PathBuf {
     roots.preference.parent().unwrap().to_path_buf()
 }
 
-/// Remembers the test password and `port`, as an earlier run would have.
+/// Remembers `port`, as an earlier run would have. Only the port: the
+/// password is never remembered.
 pub(super) fn remember(port: u16) -> impl FnOnce(&feature_runtime::SessionRoots) {
     move |roots| {
-        let mut store = SettingsStore::open(&config_dir(roots));
-        store.set_port(port).unwrap();
-        store.set_verifier(password_verifier()).unwrap();
+        SettingsStore::open(&config_dir(roots))
+            .set_port(port)
+            .unwrap();
     }
+}
+
+/// Types `password` twice in the first-time form and presses Save and turn on.
+fn save_and_turn_on(panel: &VirtualDeckPanel, password: &str) {
+    let form = &panel.test_widgets().first_form;
+    form.new.set_text(password);
+    form.repeat.set_text(password);
+    form.submit.emit_clicked();
+}
+
+/// The settings file holds the port and nothing about a password, owner-only.
+fn assert_port_only(settings: &Path, port: u16) {
+    let text = std::fs::read_to_string(settings).unwrap();
+    let stored: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(stored, serde_json::json!({ "port": port }), "{text}");
+    for secret in [PASSWORD, NEW_PASSWORD] {
+        assert!(
+            !text.contains(secret) && !text.contains(&STANDARD.encode(secret)),
+            "{text}"
+        );
+    }
+    assert_eq!(mode(settings), 0o600);
 }
 
 fn panel(pair: &Pair) -> VirtualDeckPanel {
@@ -105,9 +114,14 @@ fn wait_phase(panel: &VirtualDeckPanel, phase: Phase) {
     });
 }
 
+/// Turns the deck on, typing [`PASSWORD`] when the menu asks for this
+/// session's password, and waits until the hub serves it.
 pub(super) fn turn_on_and_wait(pair: &Pair) -> VirtualDeckPanel {
     let panel = panel(pair);
     panel.test_widgets().switch.set_active(true);
+    if panel.test_widgets().first_time.get_visible() {
+        save_and_turn_on(&panel, PASSWORD);
+    }
     wait_phase(&panel, Phase::On);
     let registry = pair.registry.clone();
     wait_until("the hub to serve the virtual Classic", move || {
@@ -284,8 +298,13 @@ fn login(port: u16, password: &str) -> Result<String, u16> {
 }
 
 impl ViewerClient {
+    /// A page that logs in with [`PASSWORD`].
     fn connect(port: u16, user_agent: &str) -> Self {
-        let cookie = login(port, PASSWORD).expect("the right password logs in");
+        Self::connect_with(port, user_agent, PASSWORD)
+    }
+
+    fn connect_with(port: u16, user_agent: &str, password: &str) -> Self {
+        let cookie = login(port, password).expect("the right password logs in");
         let mut request = format!("ws://127.0.0.1:{port}/ws")
             .into_client_request()
             .unwrap();
@@ -396,7 +415,7 @@ fn hidden_passwords_show_small_bullets_in_every_password_field() {
 fn the_menu_offers_the_switch_below_export_configuration_and_it_starts_off() {
     run_gtk_test(|| {
         let [port] = free_ports();
-        // A password and port remembered from an earlier run change nothing at start.
+        // A port remembered from an earlier run changes nothing at start.
         let Some(pair) = start_pair_with("virtual-menu", remember(port)) else {
             return;
         };
@@ -446,7 +465,7 @@ fn the_menu_offers_the_switch_below_export_configuration_and_it_starts_off() {
 }
 
 #[test]
-fn turning_on_without_a_password_asks_for_one_and_checks_it_first() {
+fn the_first_turn_on_of_a_session_asks_for_a_password_and_checks_it_first() {
     run_gtk_test(|| {
         let Some(pair) = start_pair_with("virtual-first-time", |_| {}) else {
             return;
@@ -456,14 +475,18 @@ fn turning_on_without_a_password_asks_for_one_and_checks_it_first() {
         let panel = panel(&pair);
         let w = panel.test_widgets();
         w.switch.set_active(true);
-        assert!(!w.switch.is_active(), "no password: the switch stays off");
+        assert!(
+            !w.switch.is_active(),
+            "no password for this session: the switch stays off"
+        );
         assert!(w.first_time.get_visible());
         assert!(!w.running.get_visible());
         assert_eq!(
             label_texts(w.first_time.upcast_ref())[..3],
-            [virtual_deck_ui::NEEDS_PASSWORD, "New password", "Repeat it"]
+            [SESSION_MESSAGE, "New password", "Repeat it"]
         );
-        assert_eq!(w.first_warning.text(), virtual_deck_ui::NEEDS_PASSWORD);
+        assert_eq!(w.first_warning.text(), SESSION_MESSAGE);
+        assert_eq!(virtual_deck_ui::SESSION_PASSWORD, SESSION_MESSAGE);
         let form = &w.first_form;
         assert_eq!(button_caption(&form.cancel).as_deref(), Some("Cancel"));
         assert_eq!(
@@ -499,60 +522,93 @@ fn turning_on_without_a_password_asks_for_one_and_checks_it_first() {
     });
 }
 
-/// What an older version wrote: an Argon2id PHC string.
+/// What an earlier build wrote: an Argon2id PHC string.
 const OLD_HASH: &str =
     "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
 
-/// A settings file from an older version keeps its port, but its Argon2id
-/// hash cannot log in over plain HTTP: the switch asks for a new password and
-/// says why, and the file changes only when the new password is saved.
+/// Settings files earlier builds wrote with a password in them on `port`: an
+/// Argon2id hash, and the verifier of [`PASSWORD`] (salt, iterations,
+/// StoredKey, ServerKey), which those builds would have logged in with.
+fn files_with_a_password(port: u16) -> [(serde_json::Value, &'static str); 2] {
+    let salt = [7u8; 16];
+    let iterations = 10_000;
+    let salted = salted_password(PASSWORD, &salt, iterations);
+    let client_key = hmac_sha256(&salted, b"Client Key");
+    let stored_key = digest::digest(&digest::SHA256, &client_key);
+    let server_key = hmac_sha256(&salted, b"Server Key");
+    [
+        (
+            serde_json::json!({"port": port, "password_hash": OLD_HASH}),
+            "an Argon2id hash",
+        ),
+        (
+            serde_json::json!({
+                "port": port,
+                "salt": STANDARD.encode(salt),
+                "iterations": iterations,
+                "stored_key": STANDARD.encode(stored_key.as_ref()),
+                "server_key": STANDARD.encode(server_key),
+            }),
+            "the verifier of a password",
+        ),
+    ]
+}
+
+/// L40: the password lives in memory for the session. Whatever password an
+/// earlier build left in the settings file, the first turn-on asks for this
+/// session's password; the file stays as it is until Save and turn on, which
+/// keeps its port and drops the old password, which no longer logs in.
 #[test]
-fn an_old_argon2_password_asks_for_a_new_one_and_keeps_the_port() {
+fn the_first_turn_on_asks_for_the_sessions_password_even_with_one_on_disk() {
     run_gtk_test(|| {
-        let [port] = free_ports();
-        let old = serde_json::json!({"port": port, "password_hash": OLD_HASH}).to_string();
-        let written = old.clone();
-        let Some(pair) = start_pair_with("virtual-old-password", move |roots| {
-            let dir = config_dir(roots);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(FILE_NAME), &written).unwrap();
-        }) else {
-            return;
-        };
-        let settings = config_dir(&pair.roots).join(FILE_NAME);
-        let panel = panel(&pair);
-        let w = panel.test_widgets();
-        w.switch.set_active(true);
-        assert!(
-            !w.switch.is_active(),
-            "no usable password: the switch stays off"
-        );
-        assert_eq!(panel.test_phase(), Phase::Off);
-        assert!(w.first_time.get_visible());
-        assert_eq!(w.first_warning.text(), virtual_deck_ui::OLD_PASSWORD);
-        assert!(!w.feedback.get_visible(), "the old file is not an error");
-        assert!(!listening(port));
-        assert_eq!(
-            std::fs::read_to_string(&settings).unwrap(),
-            old,
-            "kept as it is"
-        );
-        // Cancel and try again: still kept.
-        w.first_form.cancel.emit_clicked();
-        w.switch.set_active(true);
-        assert_eq!(std::fs::read_to_string(&settings).unwrap(), old);
-        w.first_form.new.set_text(PASSWORD);
-        w.first_form.repeat.set_text(PASSWORD);
-        w.first_form.submit.emit_clicked();
-        wait_phase(&panel, Phase::On);
-        assert_eq!(panel.test_port(), Some(port), "on the remembered port");
-        let stored: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
-        assert_eq!(stored["port"], port);
-        assert!(stored.get("password_hash").is_none(), "{stored}");
-        assert!(stored["stored_key"].is_string(), "{stored}");
-        assert!(login(port, PASSWORD).is_ok());
-        assert!(virtual_deck_ui::take_opened().is_empty());
+        for index in 0..2 {
+            let [port] = free_ports();
+            let (contents, why) = files_with_a_password(port)[index].clone();
+            let text = contents.to_string();
+            let written = text.clone();
+            let Some(pair) = start_pair_with("virtual-old-password", move |roots| {
+                let dir = config_dir(roots);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join(FILE_NAME), &written).unwrap();
+            }) else {
+                return;
+            };
+            let _ = virtual_deck_ui::take_opened();
+            let settings = config_dir(&pair.roots).join(FILE_NAME);
+            let panel = panel(&pair);
+            let w = panel.test_widgets();
+            w.switch.set_active(true);
+            assert!(
+                !w.switch.is_active(),
+                "{why}: no password for this session, the switch stays off"
+            );
+            assert_eq!(panel.test_phase(), Phase::Off, "{why}");
+            assert!(w.first_time.get_visible(), "{why}");
+            assert_eq!(w.first_warning.text(), SESSION_MESSAGE, "{why}");
+            assert!(!w.feedback.get_visible(), "{why}: the file is not an error");
+            assert!(!listening(port), "{why}");
+            assert_eq!(
+                std::fs::read_to_string(&settings).unwrap(),
+                text,
+                "{why}: kept as it is until saved"
+            );
+            // Cancel and try again: still kept, still asked.
+            w.first_form.cancel.emit_clicked();
+            w.switch.set_active(true);
+            assert!(w.first_time.get_visible(), "{why}");
+            assert_eq!(std::fs::read_to_string(&settings).unwrap(), text, "{why}");
+            save_and_turn_on(&panel, NEW_PASSWORD);
+            wait_phase(&panel, Phase::On);
+            assert_eq!(panel.test_port(), Some(port), "{why}: the remembered port");
+            assert_port_only(&settings, port);
+            assert!(login(port, NEW_PASSWORD).is_ok(), "{why}");
+            assert_eq!(
+                login(port, PASSWORD),
+                Err(401),
+                "{why}: a password on disk never logs in"
+            );
+            assert!(virtual_deck_ui::take_opened().is_empty(), "{why}");
+        }
     });
 }
 
@@ -578,19 +634,10 @@ fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
         form.submit.emit_clicked();
         wait_phase(&panel, Phase::On);
         let url = format!("http://127.0.0.1:{port}/");
-        // S4: only the verifier is stored, owner-only.
+        // S4 (L40): nothing about the password is written; the file keeps
+        // the port only, owner-only.
         let settings = config.join(FILE_NAME);
-        let stored: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
-        assert_eq!(stored["port"], port);
-        assert_eq!(stored["iterations"], sdeck_plus::virtual_deck::ITERATIONS);
-        for key in ["salt", "stored_key", "server_key"] {
-            assert!(stored[key].is_string(), "{key}: {stored}");
-        }
-        assert!(stored.get("password_hash").is_none(), "{stored}");
-        let text = std::fs::read_to_string(&settings).unwrap();
-        assert!(!text.contains(PASSWORD) && !text.contains(&STANDARD.encode(PASSWORD)));
-        assert_eq!(mode(&settings), 0o600);
+        assert_port_only(&settings, port);
         assert!(!w.first_time.get_visible());
         // S5: the server listens on the remembered port over plain HTTP: no
         // certificate, no fingerprint.
@@ -799,6 +846,46 @@ fn a_viewer_is_listed_presses_keys_sees_pictures_and_disconnect_ends_it() {
     });
 }
 
+/// L40: the session's password stays in memory: turned off and on again in
+/// the same session, the deck starts at once without the form, viewers log in
+/// with that password, and nothing about it is on disk.
+#[test]
+fn off_and_on_again_reuses_the_sessions_password_without_asking() {
+    run_gtk_test(|| {
+        let [port] = free_ports();
+        let Some(pair) = start_pair_with("virtual-session", remember(port)) else {
+            return;
+        };
+        let settings = config_dir(&pair.roots).join(FILE_NAME);
+        let panel = turn_on_and_wait(&pair);
+        let w = panel.test_widgets();
+        assert!(login(port, PASSWORD).is_ok());
+        assert_port_only(&settings, port);
+        w.switch.set_active(false);
+        wait_phase(&panel, Phase::Off);
+        assert!(!listening(port));
+        // On again: no form, it starts with the same password.
+        w.switch.set_active(true);
+        assert!(!w.first_time.get_visible(), "no password form this time");
+        assert!(w.switch.is_active());
+        assert_eq!(panel.test_phase(), Phase::Starting);
+        wait_phase(&panel, Phase::On);
+        assert!(!w.first_time.get_visible());
+        let registry = pair.registry.clone();
+        wait_until("the virtual Classic is served again", move || {
+            registry.live_devices(&VIRTUAL_CLASSIC) == 1
+        });
+        let viewer = ViewerClient::connect(port, ANDROID_CHROME);
+        viewer.next_of("reset");
+        let heading = w.viewers_heading.clone();
+        wait_until("the viewer is listed", move || {
+            heading.text() == "Viewers (1)"
+        });
+        assert_eq!(login(port, NEW_PASSWORD), Err(401));
+        assert_port_only(&settings, port);
+    });
+}
+
 #[test]
 fn changing_the_password_asks_first_then_disconnects_every_viewer() {
     run_gtk_test(|| {
@@ -860,9 +947,23 @@ fn changing_the_password_asks_first_then_disconnects_every_viewer() {
             heading.text() == "Viewers (0)"
         });
         assert!(!form.root.get_visible());
-        assert_ne!(std::fs::read(&settings).unwrap(), before);
+        // L40: the new password replaces the old one in memory only.
+        assert_eq!(
+            std::fs::read(&settings).unwrap(),
+            before,
+            "nothing about the password is written"
+        );
+        assert_port_only(&settings, port);
         assert_eq!(login(port, PASSWORD), Err(401), "the old one is refused");
-        assert!(login(port, "another secret").is_ok());
+        assert!(login(port, NEW_PASSWORD).is_ok());
+        // Off and on again, the session keeps the new password.
+        w.switch.set_active(false);
+        wait_phase(&panel, Phase::Off);
+        w.switch.set_active(true);
+        assert!(!w.first_time.get_visible(), "no password form");
+        wait_phase(&panel, Phase::On);
+        assert_eq!(login(port, PASSWORD), Err(401));
+        assert!(login(port, NEW_PASSWORD).is_ok());
     });
 }
 
@@ -1001,24 +1102,18 @@ fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_ser
         dialog.response(gtk::ResponseType::Accept);
         hold.release();
         wait_port(&panel, second);
-        // The live server accepts exactly the password the app keeps.
-        let stored = stored_verifier(&config).unwrap();
-        let (kept, other) = if stored == password_verifier() {
-            (PASSWORD, NEW_PASSWORD)
-        } else {
-            (NEW_PASSWORD, PASSWORD)
-        };
+        // Nothing was confirmed while restarting: the new server takes the
+        // session's password, still the first one.
         assert!(
-            login(second, kept).is_ok(),
-            "the new server accepts the password the app keeps ({kept:?})"
+            login(second, PASSWORD).is_ok(),
+            "the new server takes the session's password"
         );
-        assert_eq!(login(second, other), Err(401));
-        // While restarting nothing changed: Change… and the confirmation waited and said why.
         assert_eq!(
-            stored,
-            password_verifier(),
+            login(second, NEW_PASSWORD),
+            Err(401),
             "nothing was confirmed while restarting"
         );
+        // Change… and the confirmation waited and said why.
         assert_eq!(
             while_restarting,
             (
@@ -1050,7 +1145,7 @@ fn a_password_confirmed_while_the_server_restarts_waits_then_reaches_the_new_ser
         assert!(!form.root.get_visible());
         assert_eq!(login(second, PASSWORD), Err(401), "the old one is refused");
         assert!(login(second, NEW_PASSWORD).is_ok());
-        assert_ne!(stored_verifier(&config), Some(password_verifier()));
+        assert_port_only(&config.join(FILE_NAME), second);
     });
 }
 
@@ -1083,52 +1178,200 @@ fn a_new_password_is_refused_while_the_server_restarts() {
         let watched = panel.clone();
         wait_until("every worker is joined", move || watched.test_idle());
         assert!(panel.test_confirmation().is_none());
-        assert_eq!(stored_verifier(&config), Some(password_verifier()));
+        // The session keeps the password it had.
+        assert!(login(second, PASSWORD).is_ok());
+        assert_eq!(login(second, NEW_PASSWORD), Err(401));
+        assert_port_only(&config.join(FILE_NAME), second);
     });
 }
 
-/// A server that starts or restarts takes the password the app keeps, even
-/// when it changed while the server was starting.
+/// A server that restarts on another port takes the session's current
+/// password, the one Change… set, never an older one.
 #[test]
-fn a_server_that_starts_or_restarts_takes_the_password_the_app_keeps() {
+fn a_server_that_restarts_takes_the_sessions_current_password() {
     run_gtk_test(|| {
         let [first, second] = free_ports();
         let Some(pair) = start_pair_with("virtual-password-resync", remember(first)) else {
             return;
         };
         let config = config_dir(&pair.roots);
-        let panel = panel(&pair);
+        let panel = turn_on_and_wait(&pair);
         let w = panel.test_widgets();
-        let hold = panel.test_hold_servers();
-        w.switch.set_active(true);
-        assert_eq!(panel.test_phase(), Phase::Starting);
-        SettingsStore::open(&config)
-            .set_verifier(new_password_verifier())
-            .unwrap();
-        hold.release();
-        wait_phase(&panel, Phase::On);
-        assert_eq!(
-            login(first, PASSWORD),
-            Err(401),
-            "the started server refuses the old password"
-        );
+        w.change.emit_clicked();
+        let form = &w.change_form;
+        form.new.set_text(NEW_PASSWORD);
+        form.repeat.set_text(NEW_PASSWORD);
+        form.submit.emit_clicked();
+        let watched = panel.clone();
+        wait_until("the confirmation", move || {
+            watched.test_confirmation().is_some()
+        });
+        accept_button(&panel.test_confirmation().unwrap()).emit_clicked();
         assert!(login(first, NEW_PASSWORD).is_ok());
-        // And while it moves to another port.
-        let hold = panel.test_hold_servers();
         w.port.set_text(&second.to_string());
         w.port.emit_activate();
-        assert_eq!(panel.test_phase(), Phase::Restarting);
-        SettingsStore::open(&config)
-            .set_verifier(password_verifier())
-            .unwrap();
-        hold.release();
         wait_port(&panel, second);
         assert_eq!(
-            login(second, NEW_PASSWORD),
+            login(second, PASSWORD),
             Err(401),
-            "the restarted server refuses the old password"
+            "the restarted server refuses the older password"
         );
-        assert!(login(second, PASSWORD).is_ok());
+        assert!(login(second, NEW_PASSWORD).is_ok());
+        assert_port_only(&config.join(FILE_NAME), second);
+    });
+}
+
+/// A scratch folder outside every window's roots, removed when dropped.
+struct Kept(PathBuf);
+
+impl Drop for Kept {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Copies the folder `from` to `to`: folders, files (with their modes) and links.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let (source, target) = (entry.path(), to.join(entry.file_name()));
+        let kind = entry.file_type().unwrap();
+        if kind.is_dir() {
+            copy_tree(&source, &target);
+        } else if kind.is_symlink() {
+            std::os::unix::fs::symlink(std::fs::read_link(&source).unwrap(), &target).unwrap();
+        } else {
+            std::fs::copy(&source, &target).unwrap();
+        }
+    }
+}
+
+/// The user: "que el password expire no significa que la configuracion del
+/// virtual no se persista." A restart forgets only the session's password:
+/// the port and the virtual Classic's own data (a binding and the page's
+/// keypad background, changed while it ran) are there in the next run, which
+/// asks for a password again and runs that data.
+#[test]
+fn a_restart_forgets_the_password_but_keeps_the_port_and_the_virtual_classics_data() {
+    run_gtk_test(|| {
+        let [first, second] = free_ports();
+        let kept = Kept(scratch("virtual-restart-kept"));
+        {
+            let Some(pair) = start_pair_with("virtual-restart-before", move |roots| {
+                remember(first)(roots);
+                seed_virtual_classic(roots);
+            }) else {
+                return;
+            };
+            let panel = turn_on_and_wait(&pair);
+            let w = panel.test_widgets();
+            let root = pair.roots.root_for(&VIRTUAL_CLASSIC);
+            // While it runs: key 2 goes to page "A", and the page gets a
+            // keypad background.
+            let runtime = pair.runtime(&VIRTUAL_CLASSIC);
+            let snapshot = {
+                let mut layers = runtime.layers().borrow_mut();
+                layers
+                    .bind(
+                        "Base",
+                        Trigger::KeyPress(2),
+                        Action::SwitchLayer("A".into()),
+                    )
+                    .unwrap();
+                layers.clone()
+            };
+            runtime.persist(snapshot);
+            let saved = root.clone();
+            wait_until("the binding is saved", move || {
+                stored_binding(&saved, &VIRTUAL_CLASSIC, 2)
+            });
+            let picture = pair.base.join("background.png");
+            let image = Pixbuf::new(Colorspace::Rgb, false, 8, 480, 272).unwrap();
+            image.fill(0xff0000ff);
+            image.savev(&picture, "png", &[]).unwrap();
+            let artwork = runtime.artwork_ui();
+            artwork
+                .selected_target
+                .set(ArtworkTarget::TouchStripBackground);
+            artwork.import(&artwork.capture_owner(), &picture).unwrap();
+            assert!(root.join(KEYPAD_BACKGROUND_FILE).is_file());
+            // A new port, remembered.
+            w.port.set_text(&second.to_string());
+            w.port.emit_activate();
+            wait_port(&panel, second);
+            // Quit: the server stops and every pending save lands.
+            pair.app.emit_by_name::<()>("shutdown", &[]);
+            assert!(!listening(second));
+            let settings = config_dir(&pair.roots).join(FILE_NAME);
+            assert_port_only(&settings, second);
+            std::fs::copy(&settings, kept.0.join(FILE_NAME)).unwrap();
+            copy_tree(&root, &kept.0.join("virtual-classic"));
+        }
+        // The next run, over the same files.
+        let source = kept.0.clone();
+        let Some(pair) = start_pair_with("virtual-restart-after", move |roots| {
+            std::fs::copy(source.join(FILE_NAME), config_dir(roots).join(FILE_NAME)).unwrap();
+            copy_tree(
+                &source.join("virtual-classic"),
+                &roots.root_for(&VIRTUAL_CLASSIC),
+            );
+        }) else {
+            return;
+        };
+        let settings = config_dir(&pair.roots).join(FILE_NAME);
+        assert_port_only(&settings, second);
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        assert!(!w.switch.is_active(), "off at launch");
+        // The password did not survive: this run asks for one.
+        w.switch.set_active(true);
+        assert!(!w.switch.is_active(), "no password for this session yet");
+        assert!(w.first_time.get_visible());
+        assert_eq!(w.first_warning.text(), SESSION_MESSAGE);
+        assert!(!listening(second));
+        save_and_turn_on(&panel, NEW_PASSWORD);
+        // The port did.
+        wait_port(&panel, second);
+        assert_eq!(
+            login(second, PASSWORD),
+            Err(401),
+            "the last run's password is gone"
+        );
+        assert!(login(second, NEW_PASSWORD).is_ok());
+        assert_port_only(&settings, second);
+        // So did the virtual Classic's data, and it runs.
+        let registry = pair.registry.clone();
+        wait_until("the virtual Classic connects", move || {
+            registry.live_devices(&VIRTUAL_CLASSIC) == 1
+        });
+        let runtime = pair.runtime(&VIRTUAL_CLASSIC);
+        assert_eq!(
+            runtime
+                .layers()
+                .borrow()
+                .binding("Base", &Trigger::KeyPress(2)),
+            Some(Action::SwitchLayer("A".into()))
+        );
+        let root = pair.roots.root_for(&VIRTUAL_CLASSIC);
+        let background = runtime
+            .artwork_ui()
+            .store
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .assigned_path_in_layer("Base", ArtworkTarget::TouchStripBackground)
+            .expect("the page keeps its keypad background");
+        assert!(
+            background.starts_with(&root) && background.is_file(),
+            "{background:?}"
+        );
+        assert_eq!(active(&runtime), "Base");
+        let viewer = ViewerClient::connect_with(second, ANDROID_CHROME, NEW_PASSWORD);
+        viewer.next_of("reset");
+        viewer.press(2, true);
+        viewer.press(2, false);
+        wait_layer("the kept binding switches to A", &runtime, "A");
     });
 }
 
@@ -1222,15 +1465,31 @@ fn an_unusable_settings_file_or_a_busy_port_leaves_the_switch_off_and_says_why()
             std::fs::read(config.join(FILE_NAME)).unwrap(),
             b"edited by hand"
         );
-        // Repaired, but its port is taken: the switch returns off with the reason.
+        // Repaired, but its port is taken: once the session's password is
+        // set, the switch returns off with the reason.
         std::fs::remove_file(config.join(FILE_NAME)).unwrap();
         let blocker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let busy = blocker.local_addr().unwrap().port();
         remember(busy)(&pair.roots);
         w.switch.set_active(true);
+        assert!(w.first_time.get_visible(), "the session's password first");
+        save_and_turn_on(&panel, PASSWORD);
+        let reason = format!("Port {busy} is already in use.");
+        let (feedback, watched, expected) = (w.feedback.clone(), panel.clone(), reason.clone());
+        wait_until("the busy port is reported", move || {
+            watched.test_phase() == Phase::Off
+                && feedback.get_visible()
+                && feedback.text() == expected
+        });
+        assert!(!w.switch.is_active() && w.switch.is_sensitive());
+        assert!(!w.first_time.get_visible());
+        // The session keeps its password: on again, no form, the same reason.
+        w.switch.set_active(true);
+        assert!(!w.first_time.get_visible(), "no password form");
+        assert_eq!(panel.test_phase(), Phase::Starting);
         wait_phase(&panel, Phase::Off);
         assert!(!w.switch.is_active() && w.switch.is_sensitive());
-        assert_eq!(w.feedback.text(), format!("Port {busy} is already in use."));
+        assert_eq!(w.feedback.text(), reason);
         assert!(w.feedback.get_visible());
         assert_eq!(pair.registry.live_devices(&VIRTUAL_CLASSIC), 0);
         assert!(!badge(&pair).is_visible());

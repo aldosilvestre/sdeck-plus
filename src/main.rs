@@ -516,8 +516,9 @@ fn build_ui_in(
 
     let toast = ui::Toast::new();
     let header = build_header(&window);
-    // The header menu's virtual deck: off on every launch; its settings and
-    // certificate live in the config folder, beside device.json.
+    // The header menu's virtual deck: off on every launch; its settings (the
+    // port only) live in the config folder, beside device.json, and its
+    // password only in the panel's memory, for this run.
     let virtual_deck = virtual_deck_ui::VirtualDeckPanel::new(
         virtual_deck_ui::Environment {
             config_dir: roots

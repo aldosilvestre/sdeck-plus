@@ -15,15 +15,19 @@ All notable changes to this project are documented here. The format follows
   `devices/virtual-classic/`, so it runs beside a real Classic. The switch is off at every launch;
   turning it on starts the server (no browser window opens by itself: use **Open** or the QR code)
   and shows the header badge "Virtual deck on · N viewers"; turning it off (or quitting) stops the
-  server and removes the device. The first time it asks for a password (8 to 128 characters, "At
-  least 8 characters.", "At most 128 characters.", "The passwords do not match."); the server never
-  starts without one. The password itself is never stored: `virtual-deck.json` in the config folder
-  (0600) keeps only the port and a verifier derived from it (salt, iterations and two keys).
-  Password fields, in the app and on the web login, hide characters as small bullets and reveal
+  server and removes the device. The first time it is turned on after sdeck-plus starts it asks for
+  a password for the session ("Set a password for this session. It is forgotten when sdeck-plus
+  closes."; 8 to 128 characters, "At least 8 characters.", "At most 128 characters.", "The
+  passwords do not match."); the server never starts without one. The password is never written to
+  disk: the app holds only a verifier derived from it (salt, iterations and two keys) in memory,
+  turns the deck off and on again with it without asking, and forgets it when sdeck-plus closes.
+  Everything else is remembered: `virtual-deck.json` in the config folder (0600) keeps the port
+  only, and the virtual Classic's profiles, pages, bindings and pictures stay in
+  `devices/virtual-classic/`. Password fields, in the app and on the web login, hide characters as small bullets and reveal
   them with an eye button.
 - **Menu section for the virtual deck:** while on, the menu shows a QR code of the page address
-  (never the password) with **Copy** and **Open**, **Change…** for the password (it asks first,
-  because "Changing the password disconnects every viewer."), the **Port** (default 8765, 1024 to
+  (never the password) with **Copy** and **Open**, **Change…** for the session's password (in memory
+  only; it asks first, because "Changing the password disconnects every viewer."), the **Port** (default 8765, 1024 to
   65535; Enter moves the server and the new port is remembered, the old server keeps running if the
   new one cannot start) and **Viewers (n)**: each page's browser, address and start time with a
   **Disconnect** button, which ends that login. The header's connection line reads "Virtual Stream
@@ -48,8 +52,10 @@ All notable changes to this project are documented here. The format follows
   presses a second per viewer (releases always arrive); size limits and deadlines on every
   request. The server listens on every IPv4 interface. Anyone on the network who knows the
   password can press the keys and run their actions, including **Command**. A settings file
-  written by an earlier development build (an Argon2id `password_hash`) keeps its port but counts
-  as no password: the menu asks for a new one. Validated with automated tests (a real server on
+  written by an earlier development build that still holds a password (an Argon2id
+  `password_hash`, or a `salt`, `iterations`, `stored_key` and `server_key` verifier) keeps its
+  port; those fields are ignored and dropped the next time the file is saved (**Save and turn on**
+  or a port change). Validated with automated tests (a real server on
   127.0.0.1, the login page's JavaScript run with Node.js against it, the GTK menu on an off-screen
   display) and headless browsers at phone sizes only; **not yet tried on real phones**. New
   dependencies: `ring`, `getrandom` and `qrcode`.

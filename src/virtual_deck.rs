@@ -2,7 +2,7 @@
 //! the LAN, so no browser ever shows a certificate warning.
 //!
 //! A phone or browser opens `http://<lan-ip>:<port>/`, logs in with the
-//! password the app set, and gets the deck page; the page then opens
+//! password the app set for this session, and gets the deck page; the page then opens
 //! `ws://<lan-ip>:<port>/ws` and exchanges JSON text frames:
 //!
 //! - server to page: `{"type":"key","key":n,"jpeg":"<base64>"}`,
@@ -27,8 +27,10 @@
 //! login expired. Try again."}`; a locked-out address 429 `{"error":"Too many
 //! tries.","retry_after":30}`.
 //!
-//! Security: only the verifier (salt, iterations, StoredKey, ServerKey) is
-//! held, never the password; each address gets five wrong proofs, then must
+//! Security: the app sets the password for each session and gives the
+//! server only its verifier (salt, iterations, StoredKey, ServerKey), held in
+//! memory, never the password; nothing about the password is written to disk
+//! (the [`settings`] file keeps the port only); each address gets five wrong proofs, then must
 //! wait 30 seconds; a session is a random 32-byte cookie (`HttpOnly;
 //! SameSite=Strict`, no `Secure` on plain HTTP); the login requests and
 //! `POST /logout` refuse a foreign or `null` `Origin`, and the WebSocket
@@ -147,7 +149,7 @@ pub struct VirtualDeckServer {
 
 impl VirtualDeckServer {
     /// Starts listening and returns once the port is bound. `verifier`
-    /// comes from [`build_verifier`] (or the settings file).
+    /// comes from [`build_verifier`]; the server keeps it in memory only.
     pub fn start(
         config: ServerConfig,
         verifier: Verifier,

@@ -993,15 +993,18 @@ two columns fit.
     Password fields (here and on the web login) hide characters as small bullets (`•`, 2px apart in
     the app; 13px with 0.24em spacing on the web, 16px on iOS so focus does not zoom) and reveal them
     with an eye icon (eye-off while shown), never a "Show" caption.
-  - **First time** (no stored password): turning the switch on leaves it off and opens an inline
-    form instead: the warning line "Set a password before turning the virtual deck on." (when the
-    settings still hold an older version's Argon2id hash, which the plain HTTP login cannot use:
-    "Passwords saved by an older version no longer work. Set a new one before turning the virtual
-    deck on."), the labelled password entries "New password" and "Repeat it" (peek icon), an
-    error line, then the right-aligned Cancel and suggested **Save and turn on**. Enter in either
-    entry submits. While the password's verifier is derived (on a worker) the whole form is
-    insensitive. Errors read "At least 8 characters.", "At most 128 characters." (length first)
-    and "The passwords do not match."
+  - **First time in a session:** the password is never stored; its verifier lives in the panel's
+    memory for the session. The first time the switch is turned on after launch it stays off and
+    opens an inline form instead: the warning line "Set a password for this session. It is
+    forgotten when sdeck-plus closes.", the labelled password entries "New password" and "Repeat
+    it" (peek icon), an error line, then the right-aligned Cancel and suggested **Save and turn
+    on**. Enter in either entry submits. While the password's verifier is derived (on a worker)
+    the whole form is insensitive. Errors read "At least 8 characters.", "At most 128
+    characters." (length first) and "The passwords do not match." Save and turn on rewrites the
+    settings with the port only (dropping any password an earlier build left there) and starts;
+    turning the switch off and on again in the same session starts at once with that password,
+    without the form; quitting forgets it, so the next launch asks again. The port and the virtual
+    Classic's own data are remembered as usual.
   - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
     with 8px corners, a two-module quiet zone; never the password) beside the address in a
     selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
@@ -1009,7 +1012,8 @@ two columns fit.
     HTTP (the chip is 30 characters wide, so "http://192.168.100.200:65535/" fits on one line)
     and the chip's tooltip lists every address the page answers at. There is no certificate and
     no fingerprint. Then two rows with 70px headings so their values line up: **Password** "Set"
-    and **Change…**, which opens the same password form with **Change password**; and **Port**, a
+    and **Change…**, which opens the same password form with **Change password** (it replaces the
+    session's password in memory; nothing is saved); and **Port**, a
     six-character digits entry ("1024 to 65535; press Enter to restart the server on it") and the
     helper "Restarts the server", with its own error banner ("Use a port from 1024 to 65535.",
     "Port N is already in use."). Then the "Viewers (n)" heading and a boxed list in the folder

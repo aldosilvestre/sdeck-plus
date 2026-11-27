@@ -2,15 +2,19 @@
 //! design/virtual-classic/04-all-in-menu.html: a "Virtual deck (Classic)"
 //! switch below Export configuration..., and everything the switch needs.
 //!
-//! The switch is off on every launch. Turned on without a stored password it
-//! shows an inline form first (the server never starts without one); a
-//! password saved by an older version (an Argon2id hash) cannot log in over
-//! plain HTTP, so it counts as none and the form says why. While on, the menu
-//! shows the page address (`http://…`: QR code, Copy, Open), the password
-//! (Change…), the port ("Restarts the server") and the viewers, each with
-//! Disconnect; the header says "Virtual deck on · N viewers". The password
-//! changes only while the deck is on, and a server that starts or restarts
-//! takes the stored password before it serves.
+//! The switch is off on every launch. The password lives in memory for the
+//! session only (L40): the first time the switch is turned on, it shows an
+//! inline form (the server never starts without a password); after **Save and
+//! turn on** the panel holds the password's verifier, so turning the deck off
+//! and on again reuses it without asking, Change… replaces it, and quitting
+//! forgets it. Nothing about the password is ever written to disk: the
+//! settings file keeps the port, and Save and turn on rewrites it with the
+//! port only, dropping any password an earlier build left there. While on,
+//! the menu shows the page address (`http://…`: QR code, Copy, Open), the
+//! password (Change…), the port ("Restarts the server") and the viewers, each
+//! with Disconnect; the header says "Virtual deck on · N viewers". The
+//! password changes only while the deck is on, so a server that starts or
+//! restarts always serves the session's current password.
 //!
 //! Turning it on starts the plain HTTP server, attaches a virtual Stream Deck
 //! Classic to the HID hub (no browser window opens by itself; the Open button
@@ -53,10 +57,9 @@ pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
 pub(crate) const TITLE: &str = "Virtual deck (Classic)";
-pub(crate) const NEEDS_PASSWORD: &str = "Set a password before turning the virtual deck on.";
-/// The first-time form's warning when the settings hold an older version's password.
-pub(crate) const OLD_PASSWORD: &str =
-    "Passwords saved by an older version no longer work. Set a new one before turning the virtual deck on.";
+/// The first-time form's warning: the password is set for each session.
+pub(crate) const SESSION_PASSWORD: &str =
+    "Set a password for this session. It is forgotten when sdeck-plus closes.";
 pub(crate) const MISMATCH: &str = "The passwords do not match.";
 pub(crate) const NO_VIEWERS: &str = "No one is viewing the deck yet.";
 pub(crate) const CHANGE_TITLE: &str = "Change the password?";
@@ -329,7 +332,8 @@ pub(crate) struct Widgets {
     /// Why turning on (or opening the browser) failed.
     pub(crate) feedback: Label,
     pub(crate) first_time: GtkBox,
-    /// "Set a password…", or why an older version's password no longer works.
+    /// "Set a password for this session…"; it never changes, so only tests read it.
+    #[cfg(test)]
     pub(crate) first_warning: Label,
     pub(crate) first_form: PasswordForm,
     pub(crate) running: GtkBox,
@@ -424,10 +428,10 @@ fn build_widgets() -> Widgets {
     let feedback = feedback_line();
     content.append(&feedback);
 
-    // First time: no password yet.
+    // First time in this session: no password yet.
     let first_time = GtkBox::new(Orientation::Vertical, 8);
     first_time.set_size_request(CONTENT_WIDTH, -1);
-    let first_warning = Label::new(Some(NEEDS_PASSWORD));
+    let first_warning = Label::new(Some(SESSION_PASSWORD));
     first_warning.add_css_class("feedback-warning");
     first_warning.set_xalign(0.0);
     first_warning.set_wrap(true);
@@ -558,6 +562,7 @@ fn build_widgets() -> Widgets {
         switch,
         feedback,
         first_time,
+        #[cfg(test)]
         first_warning,
         first_form,
         running,
@@ -593,7 +598,6 @@ struct Started {
     deck: VirtualDeck,
     link: VirtualDeckLink,
     inputs: mpsc::Receiver<DeckInput>,
-    verifier: Verifier,
 }
 
 /// Start the server on `config` for a new virtual deck. Runs on a worker.
@@ -608,13 +612,12 @@ fn start_server(config: ServerConfig, verifier: Verifier) -> Result<Started, Str
             .map(glue::deck_frame)
             .collect()
     });
-    let server = VirtualDeckServer::start(config, verifier.clone(), sender, snapshot)?;
+    let server = VirtualDeckServer::start(config, verifier, sender, snapshot)?;
     Ok(Started {
         server,
         deck,
         link,
         inputs,
-        verifier,
     })
 }
 
@@ -623,8 +626,6 @@ struct Running {
     server: Arc<VirtualDeckServer>,
     glue: glue::Glue,
     url: String,
-    /// The password verifier the server checks, kept for a port change.
-    verifier: Verifier,
     /// Tells this server's events from an earlier one's.
     generation: u64,
 }
@@ -664,6 +665,9 @@ struct State {
     badge: Label,
     toast: Option<ui::Toast>,
     phase: Cell<Phase>,
+    /// This session's password, as its verifier: set by Save and turn on,
+    /// replaced by Change…, held in memory only and forgotten at quit.
+    session: RefCell<Option<Verifier>>,
     running: RefCell<Option<Running>>,
     generation: Cell<u64>,
     /// Set while the app moves the switch itself.
@@ -699,6 +703,8 @@ impl State {
                 drop(outcome);
             }
         }
+        // Quitting forgets the session's password.
+        self.session.take();
         self.phase.set(Phase::Off);
     }
 }
@@ -723,6 +729,7 @@ impl VirtualDeckPanel {
             badge,
             toast,
             phase: Cell::new(Phase::Off),
+            session: RefCell::default(),
             running: RefCell::default(),
             generation: Cell::new(0),
             syncing: Cell::new(false),
@@ -996,7 +1003,8 @@ impl VirtualDeckPanel {
         }
     }
 
-    /// The switch was turned on: start, or ask for a password first.
+    /// The switch was turned on: start with the session's password, or ask
+    /// for one first.
     fn turn_on(&self) {
         if self.phase() != Phase::Off {
             return;
@@ -1010,16 +1018,12 @@ impl VirtualDeckPanel {
                 return;
             }
         };
-        match store.settings().verifier.clone() {
+        let session = self.0.session.borrow().clone();
+        match session {
             Some(verifier) => self.start(store.settings().port, verifier),
             None => {
                 self.set_switch(false);
                 let w = self.widgets();
-                w.first_warning.set_text(if store.has_old_password() {
-                    OLD_PASSWORD
-                } else {
-                    NEEDS_PASSWORD
-                });
                 w.first_time.set_visible(true);
                 w.first_form.open();
             }
@@ -1045,11 +1049,7 @@ impl VirtualDeckPanel {
         if self.phase() != Phase::Starting {
             return;
         }
-        let installed = result.and_then(|mut started| {
-            self.take_stored_password(&mut started);
-            self.launch(started)
-        });
-        match installed {
+        match result.and_then(|started| self.launch(started)) {
             Ok(running) => {
                 // No browser window opens by itself: the page opens only from
                 // the panel's Open button (or the QR code on a phone).
@@ -1064,24 +1064,6 @@ impl VirtualDeckPanel {
         }
     }
 
-    /// The password may have changed while `started` was starting: before it
-    /// is installed, the server takes the stored verifier (which disconnects
-    /// every viewer it may already have), so it never accepts an older
-    /// password. An unusable settings file keeps the verifier it started
-    /// with: nothing can be saved over that file either.
-    fn take_stored_password(&self, started: &mut Started) {
-        let stored = self
-            .open_store()
-            .ok()
-            .and_then(|store| store.settings().verifier.clone());
-        if let Some(stored) = stored {
-            if stored != started.verifier {
-                started.server.set_password(stored.clone());
-                started.verifier = stored;
-            }
-        }
-    }
-
     /// Wire a started server to the hub: glue thread, then the deck. On
     /// failure the server stops as it drops.
     fn launch(&self, started: Started) -> Result<Running, String> {
@@ -1090,7 +1072,6 @@ impl VirtualDeckPanel {
             deck,
             link,
             inputs,
-            verifier,
         } = started;
         let url = server
             .url_candidates()
@@ -1115,7 +1096,6 @@ impl VirtualDeckPanel {
             server,
             glue,
             url,
-            verifier,
             generation,
         })
     }
@@ -1298,12 +1278,16 @@ impl VirtualDeckPanel {
             Ok(store) => store,
             Err(error) => return form.show_error(&error),
         };
-        if let Err(error) = store.set_verifier(verifier.clone()) {
+        // Saving keeps the port and drops any password an earlier build left
+        // in the file; the password itself stays in memory.
+        let port = store.settings().port;
+        if let Err(error) = store.set_port(port) {
             return form.show_error(&error);
         }
+        self.0.session.replace(Some(verifier.clone()));
         form.clear();
         self.widgets().first_time.set_visible(false);
-        self.start(store.settings().port, verifier);
+        self.start(port, verifier);
     }
 
     fn submit_change(&self) {
@@ -1378,24 +1362,17 @@ impl VirtualDeckPanel {
         dialog.present();
     }
 
-    /// Remember the new verifier, then give it to the server, which
-    /// disconnects every viewer. Only while on: a server still starting
-    /// would miss it.
+    /// Make the new verifier the session's (in memory only), then give it to
+    /// the server, which disconnects every viewer. Only while on: a server
+    /// still starting would miss it.
     fn apply_password(&self, verifier: Verifier) {
         let form = &self.widgets().change_form;
         if self.phase() != Phase::On {
             return form.show_error(CHANGE_WAIT);
         }
-        let mut store = match self.open_store() {
-            Ok(store) => store,
-            Err(error) => return form.show_error(&error),
-        };
-        if let Err(error) = store.set_verifier(verifier.clone()) {
-            return form.show_error(&error);
-        }
-        if let Some(running) = self.0.running.borrow_mut().as_mut() {
-            running.server.set_password(verifier.clone());
-            running.verifier = verifier;
+        self.0.session.replace(Some(verifier.clone()));
+        if let Some(running) = self.0.running.borrow().as_ref() {
+            running.server.set_password(verifier);
         }
         form.clear();
         form.root.set_visible(false);
@@ -1414,9 +1391,18 @@ impl VirtualDeckPanel {
         if self.phase() != Phase::On {
             return;
         }
-        let (current, verifier) = match self.0.running.borrow().as_ref() {
-            Some(running) => (running.server.local_port(), running.verifier.clone()),
-            None => return,
+        let Some(current) = self
+            .0
+            .running
+            .borrow()
+            .as_ref()
+            .map(|running| running.server.local_port())
+        else {
+            return;
+        };
+        // The new server takes the session's password.
+        let Some(verifier) = self.0.session.borrow().clone() else {
+            return;
         };
         ui::clear_feedback(&w.port_feedback);
         w.port_feedback.set_visible(false);
@@ -1443,11 +1429,10 @@ impl VirtualDeckPanel {
             return;
         }
         self.set_phase(Phase::On);
-        let mut started = match result {
+        let started = match result {
             Ok(started) => started,
             Err(error) => return self.port_error(&error),
         };
-        self.take_stored_password(&mut started);
         let old = self.0.running.borrow_mut().take();
         match self.launch(started) {
             Ok(running) => {

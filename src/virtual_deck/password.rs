@@ -1,7 +1,7 @@
 //! The password verifier and the login proof (SCRAM-SHA-256 style, RFC 5802
-//! and RFC 7677): the app keeps only a salt, an iteration count and two keys
-//! derived from the password, never the password, and a page proves it knows
-//! the password without sending it.
+//! and RFC 7677): the app holds in memory only a salt, an iteration count and
+//! two keys derived from the password, never the password, and never writes
+//! them to disk; a page proves it knows the password without sending it.
 //!
 //! ```text
 //! SaltedPassword  = PBKDF2-HMAC-SHA-256(password, salt, iterations), 32 bytes
@@ -18,7 +18,6 @@
 //! accepts when SHA-256(ClientKey) equals StoredKey (compared in constant
 //! time). The page computes the same in plain JavaScript (`page/login.html`),
 //! because `crypto.subtle` needs HTTPS.
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ring::{digest, hmac, pbkdf2};
 use std::{fmt, num::NonZeroU32};
 
@@ -28,26 +27,20 @@ const MIN_CHARACTERS: usize = 8;
 const MAX_CHARACTERS: usize = 128;
 /// Bytes of random salt in a new verifier.
 const SALT_BYTES: usize = 16;
-/// Salts read back from the settings file may be this long at most.
-const MAX_SALT_BYTES: usize = 64;
 /// PBKDF2 iterations of a new verifier. The page runs them in plain
 /// JavaScript: about 0.12 s on a fast laptop (Ryzen 9 5900HX, Node 26), so
 /// roughly 0.5 to 1.2 s on a mid-range or older phone, 4 to 10 times slower.
 /// Every iteration also slows down a guess at a login someone recorded on
 /// the LAN.
 pub const ITERATIONS: u32 = 200_000;
-/// Iteration counts accepted from the settings file: below this a recorded
-/// login is too cheap to guess at, above it a phone takes too long.
-const MIN_ITERATIONS: u32 = 10_000;
-const MAX_ITERATIONS: u32 = 2_000_000;
 /// StoredKey, ServerKey, a proof and a signature are all SHA-256 sized.
 const KEY_BYTES: usize = 32;
-const INVALID: &str = "The password verifier is not valid.";
 
 pub(super) type Key = [u8; KEY_BYTES];
 
-/// What the app keeps instead of the password: a salt, an iteration count,
-/// StoredKey and ServerKey. Built by [`build_verifier`].
+/// What the app holds in memory instead of the password, for one session: a
+/// salt, an iteration count, StoredKey and ServerKey. Built by
+/// [`build_verifier`]; never written to disk.
 ///
 /// Keep it private: with StoredKey and one recorded login, someone could
 /// log in; with ServerKey, pass for the server.
@@ -110,44 +103,6 @@ impl Verifier {
         self.iterations
     }
 
-    /// A verifier read back from the settings file: base64 salt (16 to 64
-    /// bytes) and keys (32 bytes each), iterations within the accepted range.
-    pub(super) fn from_stored(
-        salt: &str,
-        iterations: u32,
-        stored_key: &str,
-        server_key: &str,
-    ) -> Result<Self, String> {
-        let salt = STANDARD.decode(salt).map_err(|_| INVALID.to_string())?;
-        let key = |text: &str| -> Result<Key, String> {
-            STANDARD
-                .decode(text)
-                .ok()
-                .and_then(|bytes| Key::try_from(bytes).ok())
-                .ok_or_else(|| INVALID.to_string())
-        };
-        let usable = (SALT_BYTES..=MAX_SALT_BYTES).contains(&salt.len())
-            && (MIN_ITERATIONS..=MAX_ITERATIONS).contains(&iterations);
-        if !usable {
-            return Err(INVALID.to_string());
-        }
-        Ok(Self {
-            salt,
-            iterations,
-            stored_key: key(stored_key)?,
-            server_key: key(server_key)?,
-        })
-    }
-
-    /// The salt, StoredKey and ServerKey in base64, as the settings file keeps them.
-    pub(super) fn stored(&self) -> (String, String, String) {
-        (
-            STANDARD.encode(&self.salt),
-            STANDARD.encode(self.stored_key),
-            STANDARD.encode(self.server_key),
-        )
-    }
-
     /// Checks a page's ClientProof for `auth_message`; returns the
     /// ServerSignature to answer with when the proof is right.
     pub(super) fn check_proof(&self, auth_message: &[u8], proof: &Key) -> Option<Key> {
@@ -199,6 +154,7 @@ fn same(left: &Key, right: &Key) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -273,11 +229,12 @@ mod tests {
         assert_eq!(first.iterations(), ITERATIONS);
         assert_ne!(first, second, "every verifier has its own salt");
         let shown = format!("{first:?}");
-        let (_, stored, server) = first.stored();
-        assert!(
-            !shown.contains(&stored) && !shown.contains(&server),
-            "{shown}"
-        );
+        for key in [first.stored_key, first.server_key] {
+            assert!(
+                !shown.contains(&STANDARD.encode(key)) && !shown.contains(&hex(&key)),
+                "{shown}"
+            );
+        }
         assert!(!shown.contains("12345678"), "{shown}");
     }
 
@@ -296,34 +253,5 @@ mod tests {
             Err("At most 128 characters.".to_string())
         );
         assert!(build_verifier(&"ñ".repeat(128)).is_ok());
-    }
-
-    #[test]
-    fn a_stored_verifier_round_trips_and_bad_values_are_refused() {
-        let verifier = build_verifier("correct horse").unwrap();
-        let (salt, stored, server) = verifier.stored();
-        assert_eq!(
-            Verifier::from_stored(&salt, ITERATIONS, &stored, &server),
-            Ok(verifier)
-        );
-        let short_salt = STANDARD.encode([1u8; 8]);
-        let short_key = STANDARD.encode([1u8; 31]);
-        for (salt, iterations, stored, server) in [
-            (
-                short_salt.as_str(),
-                ITERATIONS,
-                stored.as_str(),
-                server.as_str(),
-            ),
-            (salt.as_str(), MIN_ITERATIONS - 1, &stored, &server),
-            (&salt, MAX_ITERATIONS + 1, &stored, &server),
-            (&salt, ITERATIONS, &short_key, &server),
-            (&salt, ITERATIONS, &stored, "not base64!"),
-        ] {
-            assert_eq!(
-                Verifier::from_stored(salt, iterations, stored, server),
-                Err(INVALID.to_string())
-            );
-        }
     }
 }
