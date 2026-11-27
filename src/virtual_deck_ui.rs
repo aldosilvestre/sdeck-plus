@@ -3,13 +3,17 @@
 //! switch below Export configuration..., and everything the switch needs.
 //!
 //! The switch is off on every launch. The password lives in memory for the
-//! session only (L40): the first time the switch is turned on, it shows an
-//! inline form (the server never starts without a password); after **Save and
-//! turn on** the panel holds the password's verifier, so turning the deck off
-//! and on again reuses it without asking, Change… replaces it, and quitting
-//! forgets it. Nothing about the password is ever written to disk: the
-//! settings file keeps the port, and Save and turn on rewrites it with the
-//! port only, dropping any password an earlier build left there. While on,
+//! session only (L40): the first time the switch is turned on, it stays on and
+//! shows an inline form below it (L45), and nothing runs yet (the server never
+//! starts without a password); **Save and turn on** starts the server, and
+//! once the deck is on the panel holds the password's verifier, so turning the
+//! deck off and on again reuses it without asking, Change… replaces it, and
+//! quitting forgets it. Cancel, or turning the switch off while the form
+//! asks, closes the form and turns the switch off; when the server cannot
+//! start after Save and turn on, the switch stays on and the form says why.
+//! Nothing about the password is ever written to disk: the settings file
+//! keeps the port, and Save and turn on rewrites it with the port only,
+//! dropping any password an earlier build left there. While on,
 //! the menu shows the page address (`http://…`: QR code, Copy, Open), the
 //! password (Change…), the port ("Restarts the server") and the viewers, each
 //! with Disconnect; the header says "Virtual deck on · N viewers". The
@@ -57,7 +61,7 @@ pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
 pub(crate) const TITLE: &str = "Virtual deck (Classic)";
-/// The first-time form's warning: the password is set for each session.
+/// The first-time form's neutral notice: the password is set for each session.
 pub(crate) const SESSION_PASSWORD: &str =
     "Set a password for this session. It is forgotten when sdeck-plus closes.";
 pub(crate) const MISMATCH: &str = "The passwords do not match.";
@@ -334,7 +338,7 @@ pub(crate) struct Widgets {
     pub(crate) first_time: GtkBox,
     /// "Set a password for this session…"; it never changes, so only tests read it.
     #[cfg(test)]
-    pub(crate) first_warning: Label,
+    pub(crate) first_notice: Label,
     pub(crate) first_form: PasswordForm,
     pub(crate) running: GtkBox,
     pub(crate) qr: qr::QrView,
@@ -428,15 +432,16 @@ fn build_widgets() -> Widgets {
     let feedback = feedback_line();
     content.append(&feedback);
 
-    // First time in this session: no password yet.
+    // First time in this session: no password yet. The notice informs; it is
+    // no warning, since nothing went wrong.
     let first_time = GtkBox::new(Orientation::Vertical, 8);
     first_time.set_size_request(CONTENT_WIDTH, -1);
-    let first_warning = Label::new(Some(SESSION_PASSWORD));
-    first_warning.add_css_class("feedback-warning");
-    first_warning.set_xalign(0.0);
-    first_warning.set_wrap(true);
-    first_warning.set_max_width_chars(38);
-    first_time.append(&first_warning);
+    let first_notice = Label::new(Some(SESSION_PASSWORD));
+    first_notice.add_css_class("helper");
+    first_notice.set_xalign(0.0);
+    first_notice.set_wrap(true);
+    first_notice.set_max_width_chars(38);
+    first_time.append(&first_notice);
     let first_form = PasswordForm::new("Save and turn on");
     first_time.append(&first_form.root);
     first_time.set_visible(false);
@@ -563,7 +568,7 @@ fn build_widgets() -> Widgets {
         feedback,
         first_time,
         #[cfg(test)]
-        first_warning,
+        first_notice,
         first_form,
         running,
         qr,
@@ -585,6 +590,9 @@ fn build_widgets() -> Widgets {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Off,
+    /// Switched on without this session's password: the form below the
+    /// switch asks for it and nothing runs yet.
+    NeedsPassword,
     Starting,
     On,
     /// On, moving to another port.
@@ -649,7 +657,8 @@ enum Outcome {
     Stopped {
         last: bool,
     },
-    FirstPassword(Result<Verifier, String>),
+    /// The first-time form's verifier, for the form opened `round`th.
+    FirstPassword(u64, Result<Verifier, String>),
     NewPassword(Result<Verifier, String>),
 }
 
@@ -665,9 +674,15 @@ struct State {
     badge: Label,
     toast: Option<ui::Toast>,
     phase: Cell<Phase>,
-    /// This session's password, as its verifier: set by Save and turn on,
-    /// replaced by Change…, held in memory only and forgotten at quit.
+    /// This session's password, as its verifier: set once the server Save
+    /// and turn on started is on, replaced by Change…, held in memory only and
+    /// forgotten at quit.
     session: RefCell<Option<Verifier>>,
+    /// The verifier Save and turn on accepted, while its server starts.
+    pending: RefCell<Option<Verifier>>,
+    /// Counts the first-time form's openings and closings, so a verifier
+    /// derived for an earlier one starts nothing.
+    form_round: Cell<u64>,
     running: RefCell<Option<Running>>,
     generation: Cell<u64>,
     /// Set while the app moves the switch itself.
@@ -705,6 +720,7 @@ impl State {
         }
         // Quitting forgets the session's password.
         self.session.take();
+        self.pending.take();
         self.phase.set(Phase::Off);
     }
 }
@@ -730,6 +746,8 @@ impl VirtualDeckPanel {
             toast,
             phase: Cell::new(Phase::Off),
             session: RefCell::default(),
+            pending: RefCell::default(),
+            form_round: Cell::new(0),
             running: RefCell::default(),
             generation: Cell::new(0),
             syncing: Cell::new(false),
@@ -789,9 +807,11 @@ impl VirtualDeckPanel {
         });
         let submit = self.on(Self::save_first_password);
         w.first_form.submit.connect_clicked(move |_| submit());
+        // Cancel closes the form and turns the switch off: nothing runs yet.
         let cancel = self.on(|panel| {
-            panel.widgets().first_form.clear();
-            panel.widgets().first_time.set_visible(false);
+            if panel.phase() == Phase::NeedsPassword {
+                panel.set_phase(Phase::Off);
+            }
         });
         w.first_form.cancel.connect_clicked(move |_| cancel());
         let copy = self.on(Self::copy_address);
@@ -834,13 +854,22 @@ impl VirtualDeckPanel {
         let on = matches!(phase, Phase::On | Phase::Restarting);
         self.set_switch(matches!(
             phase,
-            Phase::Starting | Phase::On | Phase::Restarting
+            Phase::NeedsPassword | Phase::Starting | Phase::On | Phase::Restarting
         ));
-        w.switch
-            .set_sensitive(matches!(phase, Phase::Off | Phase::On));
+        w.switch.set_sensitive(matches!(
+            phase,
+            Phase::Off | Phase::NeedsPassword | Phase::On
+        ));
         w.port.set_sensitive(phase == Phase::On);
         // The password changes only while on, never for a server still starting.
         w.change.set_sensitive(phase == Phase::On);
+        // The first-time form shows while it asks for the session's password,
+        // and stays (insensitive) while the server it saved starts.
+        let asking = phase == Phase::NeedsPassword
+            || (phase == Phase::Starting && self.0.pending.borrow().is_some());
+        if !asking && w.first_time.get_visible() {
+            self.close_first_form();
+        }
         w.running.set_visible(on);
         self.0.badge.set_visible(on);
         if on {
@@ -861,6 +890,22 @@ impl VirtualDeckPanel {
             dialog.set_response_sensitive(gtk::ResponseType::Accept, ready);
             dialog.set_secondary_text(Some(if ready { CHANGE_WARNING } else { CONFIRM_WAIT }));
         }
+    }
+
+    /// Show the first-time form, empty, below the switch.
+    fn open_first_form(&self) {
+        let w = self.widgets();
+        self.0.form_round.set(self.0.form_round.get() + 1);
+        w.first_time.set_visible(true);
+        w.first_form.open();
+    }
+
+    /// Hide the first-time form and forget what it held.
+    fn close_first_form(&self) {
+        let w = self.widgets();
+        self.0.form_round.set(self.0.form_round.get() + 1);
+        w.first_form.clear();
+        w.first_time.set_visible(false);
     }
 
     fn close_confirmation(&self) {
@@ -998,13 +1043,13 @@ impl VirtualDeckPanel {
                     self.set_phase(Phase::Off);
                 }
             }
-            Outcome::FirstPassword(result) => self.first_password_derived(result),
+            Outcome::FirstPassword(round, result) => self.first_password_derived(round, result),
             Outcome::NewPassword(result) => self.new_password_derived(result),
         }
     }
 
-    /// The switch was turned on: start with the session's password, or ask
-    /// for one first.
+    /// The switch was turned on: start with the session's password, or keep
+    /// the switch on and ask for one first.
     fn turn_on(&self) {
         if self.phase() != Phase::Off {
             return;
@@ -1022,10 +1067,8 @@ impl VirtualDeckPanel {
         match session {
             Some(verifier) => self.start(store.settings().port, verifier),
             None => {
-                self.set_switch(false);
-                let w = self.widgets();
-                w.first_time.set_visible(true);
-                w.first_form.open();
+                self.set_phase(Phase::NeedsPassword);
+                self.open_first_form();
             }
         }
     }
@@ -1049,13 +1092,26 @@ impl VirtualDeckPanel {
         if self.phase() != Phase::Starting {
             return;
         }
+        let pending = self.0.pending.take();
         match result.and_then(|started| self.launch(started)) {
             Ok(running) => {
+                // Saved by Save and turn on: now the session's password.
+                if let Some(verifier) = pending {
+                    self.0.session.replace(Some(verifier));
+                }
                 // No browser window opens by itself: the page opens only from
                 // the panel's Open button (or the QR code on a phone).
                 self.0.running.replace(Some(running));
                 self.set_phase(Phase::On);
                 self.show_running();
+            }
+            // From Save and turn on: the switch stays on and the form says
+            // why, to try again or cancel.
+            Err(error) if pending.is_some() => {
+                self.set_phase(Phase::NeedsPassword);
+                let form = &self.widgets().first_form;
+                form.set_busy(false);
+                form.show_error(&error);
             }
             Err(error) => {
                 self.set_phase(Phase::Off);
@@ -1156,7 +1212,6 @@ impl VirtualDeckPanel {
                 .badge
                 .set_tooltip_text(Some(&format!("Served at {}", running.url)));
         }
-        w.first_time.set_visible(false);
         self.refresh_viewers();
     }
 
@@ -1231,10 +1286,12 @@ impl VirtualDeckPanel {
 
     /// The switch was turned off: drop the deck now, stop the server on a worker.
     fn turn_off(&self) {
-        if self.phase() != Phase::On {
+        match self.phase() {
+            Phase::On => {}
+            // Only the form ran: it closes and nothing has to stop.
+            Phase::NeedsPassword => return self.set_phase(Phase::Off),
             // Starting, restarting and stopping finish first (the switch is insensitive).
-            self.set_phase(self.phase());
-            return;
+            phase => return self.set_phase(phase),
         }
         let Some(running) = self.0.running.borrow_mut().take() else {
             self.set_phase(Phase::Off);
@@ -1255,25 +1312,32 @@ impl VirtualDeckPanel {
 
     fn save_first_password(&self) {
         let form = &self.widgets().first_form;
+        // Asked only while the form asks, once at a time.
+        if self.phase() != Phase::NeedsPassword || !form.submit.is_sensitive() {
+            return;
+        }
         let (new, repeat) = form.texts();
+        let round = self.0.form_round.get();
         form.set_busy(true);
         self.run(
             "virtual-deck-password",
-            move || Outcome::FirstPassword(checked_verifier(&new, &repeat)),
-            |error| Outcome::FirstPassword(Err(error)),
+            move || Outcome::FirstPassword(round, checked_verifier(&new, &repeat)),
+            move |error| Outcome::FirstPassword(round, Err(error)),
         );
     }
 
-    fn first_password_derived(&self, result: Result<Verifier, String>) {
+    fn first_password_derived(&self, round: u64, result: Result<Verifier, String>) {
+        // The form closed (or opened again) meanwhile: this password is no
+        // longer asked for.
+        if self.phase() != Phase::NeedsPassword || round != self.0.form_round.get() {
+            return;
+        }
         let form = &self.widgets().first_form;
         form.set_busy(false);
         let verifier = match result {
             Ok(verifier) => verifier,
             Err(error) => return form.show_error(&error),
         };
-        if self.phase() != Phase::Off {
-            return;
-        }
         let mut store = match self.open_store() {
             Ok(store) => store,
             Err(error) => return form.show_error(&error),
@@ -1284,9 +1348,10 @@ impl VirtualDeckPanel {
         if let Err(error) = store.set_port(port) {
             return form.show_error(&error);
         }
-        self.0.session.replace(Some(verifier.clone()));
-        form.clear();
-        self.widgets().first_time.set_visible(false);
+        // The form waits, insensitive, while the server starts: it says why
+        // if it cannot. The verifier becomes the session's once it is on.
+        self.0.pending.replace(Some(verifier.clone()));
+        form.set_busy(true);
         self.start(port, verifier);
     }
 

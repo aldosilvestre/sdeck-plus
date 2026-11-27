@@ -15,12 +15,16 @@ All notable changes to this project are documented here. The format follows
   `devices/virtual-classic/`, so it runs beside a real Classic. The switch is off at every launch;
   turning it on starts the server (no browser window opens by itself: use **Open** or the QR code)
   and shows the header badge "Virtual deck on · N viewers"; turning it off (or quitting) stops the
-  server and removes the device. The first time it is turned on after sdeck-plus starts it asks for
-  a password for the session ("Set a password for this session. It is forgotten when sdeck-plus
-  closes."; 8 to 128 characters, "At least 8 characters.", "At most 128 characters.", "The
-  passwords do not match."); the server never starts without one. The password is never written to
-  disk: the app holds only a verifier derived from it (salt, iterations and two keys) in memory,
-  turns the deck off and on again with it without asking, and forgets it when sdeck-plus closes.
+  server and removes the device. The first time it is turned on after sdeck-plus starts, the switch
+  stays on and a form below it asks for a password for the session ("Set a password for this
+  session. It is forgotten when sdeck-plus closes.", a plain note rather than a warning; 8 to 128
+  characters, "At least 8 characters.", "At most 128 characters.", "The passwords do not
+  match."); nothing runs until **Save and turn on**, which starts the server and the device (if it
+  cannot, for example on a busy port, the switch stays on and the form says why), and **Cancel**,
+  or turning the switch off, turns it back off. The server never starts without a password. The
+  password is never written to disk: once the deck is on, the app holds only a verifier derived
+  from it (salt, iterations and two keys) in memory, turns the deck off and on again with it
+  without asking, and forgets it when sdeck-plus closes.
   Everything else is remembered: `virtual-deck.json` in the config folder (0600) keeps the port
   only, and the virtual Classic's profiles, pages, bindings and pictures stay in
   `devices/virtual-classic/`. Password fields, in the app and on the web login, hide characters as small bullets and reveal

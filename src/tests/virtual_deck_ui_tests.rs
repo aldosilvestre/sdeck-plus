@@ -8,6 +8,10 @@
 //! replaces it, and a restart forgets it; the settings file keeps the port
 //! only, and the virtual Classic's own data stays in its root.
 //!
+//! L45: asked for the password, the switch stays on with the form below it;
+//! nothing runs until Save and turn on, and Cancel (or the switch) turns it
+//! back off.
+//!
 //! The server is real, plain HTTP, and listens on 127.0.0.1 only (the test
 //! binary's `LAN`); the config folder is scratch; the test binary records the
 //! browser address instead of starting a browser; viewers log in with the
@@ -115,11 +119,14 @@ fn wait_phase(panel: &VirtualDeckPanel, phase: Phase) {
 }
 
 /// Turns the deck on, typing [`PASSWORD`] when the menu asks for this
-/// session's password, and waits until the hub serves it.
+/// session's password (the switch stays on meanwhile), and waits until the
+/// hub serves it.
 pub(super) fn turn_on_and_wait(pair: &Pair) -> VirtualDeckPanel {
     let panel = panel(pair);
     panel.test_widgets().switch.set_active(true);
-    if panel.test_widgets().first_time.get_visible() {
+    if panel.test_phase() == Phase::NeedsPassword {
+        assert!(panel.test_widgets().switch.is_active());
+        assert!(panel.test_widgets().first_time.get_visible());
         save_and_turn_on(&panel, PASSWORD);
     }
     wait_phase(&panel, Phase::On);
@@ -146,6 +153,31 @@ fn badge(pair: &Pair) -> Label {
         None
     }
     find(pair.window.upcast_ref()).expect("the header has the virtual deck badge")
+}
+
+/// Nothing of the virtual deck runs: no server on `port`, no device on the
+/// hub, no header badge or address, no running details.
+fn assert_nothing_runs(pair: &Pair, panel: &VirtualDeckPanel, port: u16, why: &str) {
+    assert!(!listening(port), "{why}: no server");
+    assert_eq!(
+        pair.registry.live_devices(&VIRTUAL_CLASSIC),
+        0,
+        "{why}: no device"
+    );
+    assert!(!badge(pair).is_visible(), "{why}: no header badge");
+    assert_eq!(virtual_deck_ui::served_at(), None, "{why}: no address");
+    assert!(!panel.test_widgets().running.get_visible(), "{why}");
+}
+
+/// Runs what is ready on the main loop, a bounded number of times, so an
+/// outcome a finished worker sent is handled.
+fn handle_pending_events() {
+    let context = glib::MainContext::default();
+    for _ in 0..1000 {
+        if !context.iteration(false) {
+            break;
+        }
+    }
 }
 
 /// The texts of every label below `widget`, in order.
@@ -476,16 +508,17 @@ fn the_first_turn_on_of_a_session_asks_for_a_password_and_checks_it_first() {
         let w = panel.test_widgets();
         w.switch.set_active(true);
         assert!(
-            !w.switch.is_active(),
-            "no password for this session: the switch stays off"
+            w.switch.is_active() && w.switch.is_sensitive(),
+            "no password for this session: the switch stays on and asks"
         );
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
         assert!(w.first_time.get_visible());
         assert!(!w.running.get_visible());
         assert_eq!(
             label_texts(w.first_time.upcast_ref())[..3],
             [SESSION_MESSAGE, "New password", "Repeat it"]
         );
-        assert_eq!(w.first_warning.text(), SESSION_MESSAGE);
+        assert_eq!(w.first_notice.text(), SESSION_MESSAGE);
         assert_eq!(virtual_deck_ui::SESSION_PASSWORD, SESSION_MESSAGE);
         let form = &w.first_form;
         assert_eq!(button_caption(&form.cancel).as_deref(), Some("Cancel"));
@@ -507,13 +540,16 @@ fn the_first_turn_on_of_a_session_asks_for_a_password_and_checks_it_first() {
         form.repeat.set_text("long enougj");
         form.submit.emit_clicked();
         shows(form, virtual_deck_ui::MISMATCH);
-        // Nothing was stored, started, attached or opened.
+        // Nothing was stored, started, attached or opened; the switch stays on.
         assert!(!settings.exists());
-        assert_eq!(panel.test_phase(), Phase::Off);
-        assert!(!w.switch.is_active());
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        assert!(w.switch.is_active() && w.switch.is_sensitive());
         assert_eq!(pair.registry.live_devices(&VIRTUAL_CLASSIC), 0);
+        assert!(!badge(&pair).is_visible());
         assert!(virtual_deck_ui::take_opened().is_empty());
         form.cancel.emit_clicked();
+        assert_eq!(panel.test_phase(), Phase::Off);
+        assert!(!w.switch.is_active() && w.switch.is_sensitive());
         assert!(!w.first_time.get_visible());
         assert_eq!(form.new.text(), "");
         assert_eq!(form.repeat.text(), "");
@@ -579,12 +615,12 @@ fn the_first_turn_on_asks_for_the_sessions_password_even_with_one_on_disk() {
             let w = panel.test_widgets();
             w.switch.set_active(true);
             assert!(
-                !w.switch.is_active(),
-                "{why}: no password for this session, the switch stays off"
+                w.switch.is_active(),
+                "{why}: no password for this session, the switch stays on and asks"
             );
-            assert_eq!(panel.test_phase(), Phase::Off, "{why}");
+            assert_eq!(panel.test_phase(), Phase::NeedsPassword, "{why}");
             assert!(w.first_time.get_visible(), "{why}");
-            assert_eq!(w.first_warning.text(), SESSION_MESSAGE, "{why}");
+            assert_eq!(w.first_notice.text(), SESSION_MESSAGE, "{why}");
             assert!(!w.feedback.get_visible(), "{why}: the file is not an error");
             assert!(!listening(port), "{why}");
             assert_eq!(
@@ -594,7 +630,9 @@ fn the_first_turn_on_asks_for_the_sessions_password_even_with_one_on_disk() {
             );
             // Cancel and try again: still kept, still asked.
             w.first_form.cancel.emit_clicked();
+            assert!(!w.switch.is_active(), "{why}: Cancel turns it off");
             w.switch.set_active(true);
+            assert_eq!(panel.test_phase(), Phase::NeedsPassword, "{why}");
             assert!(w.first_time.get_visible(), "{why}");
             assert_eq!(std::fs::read_to_string(&settings).unwrap(), text, "{why}");
             save_and_turn_on(&panel, NEW_PASSWORD);
@@ -1326,9 +1364,14 @@ fn a_restart_forgets_the_password_but_keeps_the_port_and_the_virtual_classics_da
         assert!(!w.switch.is_active(), "off at launch");
         // The password did not survive: this run asks for one.
         w.switch.set_active(true);
-        assert!(!w.switch.is_active(), "no password for this session yet");
+        assert_eq!(
+            panel.test_phase(),
+            Phase::NeedsPassword,
+            "no password for this session yet"
+        );
+        assert!(w.switch.is_active());
         assert!(w.first_time.get_visible());
-        assert_eq!(w.first_warning.text(), SESSION_MESSAGE);
+        assert_eq!(w.first_notice.text(), SESSION_MESSAGE);
         assert!(!listening(second));
         save_and_turn_on(&panel, NEW_PASSWORD);
         // The port did.
@@ -1437,8 +1480,12 @@ fn a_new_port_that_cannot_be_remembered_is_still_the_one_shown_and_served() {
     });
 }
 
+/// An unusable settings file leaves the switch off with the reason. A busy
+/// port after Save and turn on keeps the switch on and the form open with the
+/// reason, so it can be tried again; with the session's password set, the
+/// switch goes back off with the reason, as before.
 #[test]
-fn an_unusable_settings_file_or_a_busy_port_leaves_the_switch_off_and_says_why() {
+fn an_unusable_settings_file_or_a_busy_port_says_why() {
     run_gtk_test(|| {
         let Some(pair) = start_pair_with("virtual-refused", |roots| {
             let dir = config_dir(roots);
@@ -1465,25 +1512,58 @@ fn an_unusable_settings_file_or_a_busy_port_leaves_the_switch_off_and_says_why()
             std::fs::read(config.join(FILE_NAME)).unwrap(),
             b"edited by hand"
         );
-        // Repaired, but its port is taken: once the session's password is
-        // set, the switch returns off with the reason.
+        // Repaired, but its port is taken: Save and turn on keeps the switch
+        // on and the form open, with the reason.
         std::fs::remove_file(config.join(FILE_NAME)).unwrap();
         let blocker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let busy = blocker.local_addr().unwrap().port();
         remember(busy)(&pair.roots);
         w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
         assert!(w.first_time.get_visible(), "the session's password first");
+        assert!(!w.feedback.get_visible(), "the earlier reason is gone");
         save_and_turn_on(&panel, PASSWORD);
         let reason = format!("Port {busy} is already in use.");
-        let (feedback, watched, expected) = (w.feedback.clone(), panel.clone(), reason.clone());
-        wait_until("the busy port is reported", move || {
-            watched.test_phase() == Phase::Off
-                && feedback.get_visible()
-                && feedback.text() == expected
+        let form = &w.first_form;
+        let (error, watched, expected) = (form.error.clone(), panel.clone(), reason.clone());
+        wait_until("the busy port is said in the form", move || {
+            watched.test_phase() == Phase::NeedsPassword
+                && error.get_visible()
+                && error.text() == expected
         });
-        assert!(!w.switch.is_active() && w.switch.is_sensitive());
+        assert!(form.error.has_css_class("feedback-error"));
+        assert!(
+            w.switch.is_active() && w.switch.is_sensitive(),
+            "the switch stays on"
+        );
+        assert!(w.first_time.get_visible());
+        assert!(form.submit.is_sensitive() && form.cancel.is_sensitive());
+        assert_eq!(form.new.text(), PASSWORD, "kept to try again");
+        assert_eq!(form.repeat.text(), PASSWORD, "kept to try again");
+        assert!(!w.feedback.get_visible());
+        // The blocker holds the port: everything else shows nothing runs.
+        assert_eq!(pair.registry.live_devices(&VIRTUAL_CLASSIC), 0);
+        assert!(!badge(&pair).is_visible());
+        assert_eq!(virtual_deck_ui::served_at(), None);
+        assert!(!w.running.get_visible());
+        // Tried again once the port is free: it turns on.
+        drop(blocker);
+        form.submit.emit_clicked();
+        wait_phase(&panel, Phase::On);
+        assert!(listening(busy));
         assert!(!w.first_time.get_visible());
-        // The session keeps its password: on again, no form, the same reason.
+        assert!(!form.error.get_visible());
+        assert_eq!(form.new.text(), "");
+        assert!(login(busy, PASSWORD).is_ok());
+        // Off, and the port taken again: with the session's password the
+        // switch starts at once and goes back off with the reason.
+        w.switch.set_active(false);
+        wait_phase(&panel, Phase::Off);
+        let registry = pair.registry.clone();
+        wait_until("the virtual Classic goes", move || {
+            registry.live_devices(&VIRTUAL_CLASSIC) == 0
+        });
+        let blocker = TcpListener::bind((Ipv4Addr::LOCALHOST, busy)).unwrap();
         w.switch.set_active(true);
         assert!(!w.first_time.get_visible(), "no password form");
         assert_eq!(panel.test_phase(), Phase::Starting);
@@ -1491,10 +1571,158 @@ fn an_unusable_settings_file_or_a_busy_port_leaves_the_switch_off_and_says_why()
         assert!(!w.switch.is_active() && w.switch.is_sensitive());
         assert_eq!(w.feedback.text(), reason);
         assert!(w.feedback.get_visible());
+        assert!(!w.first_time.get_visible());
         assert_eq!(pair.registry.live_devices(&VIRTUAL_CLASSIC), 0);
         assert!(!badge(&pair).is_visible());
         assert!(virtual_deck_ui::take_opened().is_empty());
         drop(blocker);
+    });
+}
+
+/// L45: "primero se enciende el switch para mostrar que hay que setear el
+/// password, luego cuando haga el saveAndOn recien que corra el servidor."
+/// Turned on without this session's password, the switch stays on with the
+/// form below it (its notice neutral, not a warning) and nothing runs; a
+/// mismatch is said in the form; Save and turn on starts the server and the
+/// device.
+#[test]
+fn turning_on_without_the_sessions_password_keeps_the_switch_on_and_starts_only_on_save() {
+    run_gtk_test(|| {
+        let [port] = free_ports();
+        let Some(pair) = start_pair_with("virtual-needs-password", remember(port)) else {
+            return;
+        };
+        let _ = virtual_deck_ui::take_opened();
+        let settings = config_dir(&pair.roots).join(FILE_NAME);
+        let before = std::fs::read(&settings).unwrap();
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        let form = &w.first_form;
+        w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        assert!(w.switch.is_active() && w.switch.is_sensitive());
+        assert!(w.first_time.get_visible() && form.root.get_visible());
+        assert_eq!(w.first_notice.text(), SESSION_MESSAGE);
+        // A neutral note, not a warning or an error.
+        assert!(w.first_notice.has_css_class("helper"));
+        for tone in ["feedback-warning", "feedback-error", "feedback-success"] {
+            assert!(!w.first_notice.has_css_class(tone), "{tone}");
+        }
+        assert!(!w.feedback.get_visible(), "nothing failed");
+        assert_nothing_runs(&pair, &panel, port, "asking for the password");
+        // A mismatch: said in the form, the switch stays on, nothing starts.
+        form.new.set_text(PASSWORD);
+        form.repeat.set_text("correct horsf");
+        form.submit.emit_clicked();
+        let (error, submit) = (form.error.clone(), form.submit.clone());
+        wait_until("the mismatch", move || {
+            error.get_visible() && submit.is_sensitive()
+        });
+        assert_eq!(form.error.text(), virtual_deck_ui::MISMATCH);
+        assert!(form.error.has_css_class("feedback-error"));
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        assert!(w.switch.is_active() && w.switch.is_sensitive());
+        assert!(w.first_time.get_visible());
+        let watched = panel.clone();
+        wait_until("every worker is joined", move || watched.test_idle());
+        assert_nothing_runs(&pair, &panel, port, "after a mismatch");
+        assert_eq!(std::fs::read(&settings).unwrap(), before, "nothing saved");
+        // Save and turn on: only now the server starts. Held while it
+        // starts, the switch stays on and the form waits.
+        let hold = panel.test_hold_servers();
+        form.repeat.set_text(PASSWORD);
+        form.submit.emit_clicked();
+        let watched = panel.clone();
+        wait_until("the server starting", move || {
+            watched.test_phase() == Phase::Starting
+        });
+        assert!(w.switch.is_active() && !w.switch.is_sensitive());
+        assert!(w.first_time.get_visible() && !form.submit.is_sensitive());
+        assert!(!badge(&pair).is_visible());
+        hold.release();
+        wait_phase(&panel, Phase::On);
+        assert!(listening(port));
+        assert!(w.switch.is_active() && w.switch.is_sensitive());
+        assert!(!w.first_time.get_visible());
+        assert_eq!(form.new.text(), "");
+        assert_eq!(form.repeat.text(), "");
+        assert!(w.running.get_visible());
+        let header = badge(&pair);
+        assert!(header.is_visible());
+        assert_eq!(header.text(), "Virtual deck on · 0 viewers");
+        let registry = pair.registry.clone();
+        wait_until("the virtual Classic connects", move || {
+            registry.live_devices(&VIRTUAL_CLASSIC) == 1
+        });
+        assert!(login(port, PASSWORD).is_ok());
+        assert_port_only(&settings, port);
+        assert!(virtual_deck_ui::take_opened().is_empty());
+    });
+}
+
+/// L45: Cancel, or turning the switch off while the form asks, closes the
+/// form and turns the switch off; nothing ran, so nothing stops. A password
+/// still being checked then starts nothing.
+#[test]
+fn cancel_or_the_switch_while_the_password_is_asked_turns_off_and_starts_nothing() {
+    run_gtk_test(|| {
+        let [port] = free_ports();
+        let Some(pair) = start_pair_with("virtual-needs-password-cancel", remember(port)) else {
+            return;
+        };
+        let settings = config_dir(&pair.roots).join(FILE_NAME);
+        let before = std::fs::read(&settings).unwrap();
+        let panel = panel(&pair);
+        let w = panel.test_widgets();
+        let form = &w.first_form;
+        let assert_off = |why: &str| {
+            assert_eq!(panel.test_phase(), Phase::Off, "{why}");
+            assert!(!w.switch.is_active() && w.switch.is_sensitive(), "{why}");
+            assert!(!w.first_time.get_visible(), "{why}: the form closes");
+            assert_eq!(form.new.text(), "", "{why}: cleared");
+            assert_eq!(form.repeat.text(), "", "{why}: cleared");
+            assert!(!form.error.get_visible(), "{why}");
+            assert_nothing_runs(&pair, &panel, port, why);
+        };
+        // Cancel.
+        w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        form.new.set_text(PASSWORD);
+        form.repeat.set_text("typo");
+        form.cancel.emit_clicked();
+        assert_off("Cancel");
+        // The switch turned off while the form asks.
+        w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        assert!(w.first_time.get_visible());
+        assert_eq!(form.new.text(), "", "the form opens empty");
+        form.new.set_text(PASSWORD);
+        w.switch.set_active(false);
+        assert_off("the switch off");
+        // Off and on again while a password is being checked: that password
+        // is no longer asked for and starts nothing.
+        w.switch.set_active(true);
+        save_and_turn_on(&panel, PASSWORD);
+        w.switch.set_active(false);
+        w.switch.set_active(true);
+        assert_eq!(panel.test_phase(), Phase::NeedsPassword);
+        assert!(form.new.is_sensitive() && form.submit.is_sensitive());
+        let watched = panel.clone();
+        wait_until("every worker is joined", move || watched.test_idle());
+        handle_pending_events();
+        assert_eq!(
+            panel.test_phase(),
+            Phase::NeedsPassword,
+            "the earlier password starts nothing"
+        );
+        assert!(w.switch.is_active() && w.first_time.get_visible());
+        assert_eq!(form.new.text(), "");
+        assert!(panel.test_idle());
+        assert_nothing_runs(&pair, &panel, port, "a dropped password");
+        assert_eq!(std::fs::read(&settings).unwrap(), before, "nothing saved");
+        form.cancel.emit_clicked();
+        assert_off("Cancel at last");
+        assert!(panel.test_idle());
     });
 }
 

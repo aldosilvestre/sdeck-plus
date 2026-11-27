@@ -985,26 +985,35 @@ two columns fit.
     icon (presentation only), the bold title "Virtual deck (Classic)" and a `Switch` at the end,
     named "Virtual deck (Classic)" with the tooltip and description "Serve a virtual Stream Deck
     Classic in a web page on this network". The switch is off at every launch and insensitive while
-    the server starts, moves to another port or stops. Off, the menu ends at the switch row; the
+    the server starts, moves to another port or stops; turned on without this session's password it
+    stays on, and usable, while the form below it asks. Off, the menu ends at the switch row; the
     details below it (10px side and bottom margins, 12px between groups, 344px wide so the menu
     is about 380px like the artboard) show only when there is something to show and scroll past
-    620px or on a short screen. A wrapping feedback banner at their top says why turning on, or
-    opening the browser from **Open**, failed. Turning on never opens a browser window by itself.
+    620px or on a short screen. A wrapping feedback banner at their top says why turning on (an
+    unusable settings file, or a server that cannot start with the session's password), or opening
+    the browser from **Open**, failed. Turning on never opens a browser window by itself.
     Password fields (here and on the web login) hide characters as small bullets (`•`, 2px apart in
     the app; 13px with 0.24em spacing on the web, 16px on iOS so focus does not zoom) and reveal them
     with an eye icon (eye-off while shown), never a "Show" caption.
   - **First time in a session:** the password is never stored; its verifier lives in the panel's
-    memory for the session. The first time the switch is turned on after launch it stays off and
-    opens an inline form instead: the warning line "Set a password for this session. It is
-    forgotten when sdeck-plus closes.", the labelled password entries "New password" and "Repeat
-    it" (peek icon), an error line, then the right-aligned Cancel and suggested **Save and turn
-    on**. Enter in either entry submits. While the password's verifier is derived (on a worker)
-    the whole form is insensitive. Errors read "At least 8 characters.", "At most 128
-    characters." (length first) and "The passwords do not match." Save and turn on rewrites the
-    settings with the port only (dropping any password an earlier build left there) and starts;
-    turning the switch off and on again in the same session starts at once with that password,
-    without the form; quitting forgets it, so the next launch asks again. The port and the virtual
-    Classic's own data are remembered as usual.
+    memory for the session. The first time the switch is turned on after launch it stays on and an
+    inline form opens below it; nothing runs yet (no server, no device, no header badge). The
+    form: the neutral helper line (muted `helper` text, not a warning) "Set a password for this
+    session. It is forgotten when sdeck-plus closes.", the labelled password entries "New
+    password" and "Repeat it" (peek icon), an error line, then the right-aligned Cancel and
+    suggested **Save and turn on**. Enter in either entry submits. While the password's verifier
+    is derived (on a worker) the whole form is insensitive. Errors read "At least 8 characters.",
+    "At most 128 characters." (length first) and "The passwords do not match."; the switch stays
+    on. Save and turn on rewrites the settings with the port only (dropping any password an
+    earlier build left there) and only then starts the server and the device; the form stays,
+    insensitive, until the deck is on, then closes empty. If the server cannot start ("Port N is
+    already in use."), the switch stays on and the form shows the reason and keeps the typed
+    password, to try again. Cancel, or turning the switch off while the form asks, closes and
+    clears the form and turns the switch off; a password still being derived then starts nothing.
+    Once the deck is on, the verifier is the session's: turning the switch off and on again in the
+    same session starts at once with that password, without the form (a failure then turns the
+    switch back off with the reason in the banner); quitting forgets it, so the next launch asks
+    again. The port and the virtual Classic's own data are remembered as usual.
   - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
     with 8px corners, a two-module quiet zone; never the password) beside the address in a
     selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
