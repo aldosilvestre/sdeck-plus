@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="sdeck-page" content="login">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#15191f">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:,">
+<title>Virtual Stream Deck · Log in</title>
+<style>
+:root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--violet-hover:#c7b6f5;--violet-pressed:#a58cde;--cyan:#85dce8;--error:#fb778a;--warning:#f9cc7a;color-scheme:dark}
+*{box-sizing:border-box}
+html{min-height:100%;background:#0b0d10;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));background:radial-gradient(ellipse at 20% 40%,#20262e,#0b0d10 70%);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+main{width:100%;max-width:760px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:40px}
+.mini-deck{display:grid;grid-template-columns:repeat(5,22px);gap:5px;width:max-content;padding:10px;border-radius:10px;background:linear-gradient(135deg,#414951,#272d34);box-shadow:inset 0 1px rgba(255,255,255,.18),inset 0 -1px rgba(0,0,0,.45)}
+.mini-deck i{display:block;height:22px;border-radius:4px;background:#08090b;box-shadow:inset 0 0 0 1px #515b65}
+h1{font-size:22px;font-weight:700;line-height:1.25;margin:10px 0 6px}
+p{margin:0;color:var(--muted);font-size:13px}
+.ask{margin-top:10px}
+form{display:grid;gap:10px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);box-shadow:inset 0 1px rgba(241,244,247,.025)}
+label{font-weight:600;font-size:14px}
+.field{display:flex;gap:6px}
+input{flex:1;min-width:0;height:44px;padding:0 12px;border-radius:8px;border:1px solid var(--control-edge);background:var(--field);color:var(--ink);font:inherit;font-size:16px;caret-color:var(--cyan)}
+input:focus,input:focus-visible{outline:none;border-color:var(--cyan);box-shadow:inset 0 0 0 1px var(--cyan)}
+input::selection{background:var(--violet);color:var(--bg)}
+button{font:inherit;color:inherit}
+.btn{height:44px;min-width:44px;padding:0 16px;border-radius:8px;border:1px solid var(--control-edge);background:var(--field);color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--hover)}
+.btn.primary{border:0;background:var(--violet);color:var(--bg);font-weight:600}
+.btn.primary:hover{background:var(--violet-hover)}
+.btn.primary:active{background:var(--violet-pressed)}
+.btn:disabled,.btn.primary:disabled{background:var(--field);color:var(--muted);border:1px solid var(--edge);cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.banner{display:none;padding:8px 10px;border-radius:8px;background:rgba(251,119,138,.16);font-size:13px;color:var(--ink)}
+.banner.shown{display:block}
+.banner b{color:var(--error)}
+.banner.wait b{color:var(--warning)}
+.banner.wait{background:rgba(249,204,122,.16)}
+[hidden]{display:none!important}
+@media (max-width:599px){main{grid-template-columns:minmax(0,1fr);gap:20px;max-width:420px}}
+@media (max-height:340px) and (min-width:600px){body{padding-top:max(8px,env(safe-area-inset-top));padding-bottom:max(8px,env(safe-area-inset-bottom))}form{gap:8px;padding:12px}h1{font-size:20px;margin-top:8px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="mini-deck" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<h1>Virtual Stream Deck</h1>
+<p>Classic · served by sdeck-plus</p>
+<p class="ask">Ask the person running sdeck-plus for the password.</p>
+</header>
+<form id="login" method="post" action="/login" aria-labelledby="password-label">
+<label for="password" id="password-label">Password</label>
+<div class="field"><input id="password" name="password" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" required aria-describedby="error"><button id="toggle" class="btn" type="button" aria-controls="password" aria-label="Show password" hidden>Show</button></div>
+<div class="banner" id="error" role="alert"></div>
+<button id="submit" class="btn primary" type="submit">Connect</button>
+</form>
+</main>
+<script>
+(function () {
+  "use strict";
+  var form = document.getElementById("login");
+  var input = document.getElementById("password");
+  var toggle = document.getElementById("toggle");
+  var submit = document.getElementById("submit");
+  var banner = document.getElementById("error");
+  var waitTimer = 0;
+  var waitUntil = 0;
+  var busy = false;
+
+  if (!window.fetch || !window.URLSearchParams) {
+    return; // the plain form posts and follows the server's redirect
+  }
+
+  function showPassword(show) {
+    input.type = show ? "text" : "password";
+    toggle.textContent = show ? "Hide" : "Show";
+    toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  }
+
+  toggle.hidden = false;
+  toggle.addEventListener("click", function () {
+    showPassword(input.type === "password");
+  });
+
+  // Title in tone, then the detail; `count` (optional) is a live number
+  // that changes without being announced again.
+  function say(kind, title, detail, count) {
+    banner.textContent = "";
+    banner.className = "banner";
+    if (!title) {
+      return;
+    }
+    var strong = document.createElement("b");
+    strong.textContent = title;
+    banner.append(strong);
+    if (detail) {
+      banner.append(" ");
+      var span = document.createElement("span");
+      span.textContent = detail[0];
+      if (count) {
+        span.append(count);
+      }
+      if (detail[1]) {
+        span.append(detail[1]);
+      }
+      banner.append(span);
+    }
+    banner.className = "banner shown" + (kind === "wait" ? " wait" : "");
+  }
+
+  function triesLeft(n) {
+    if (typeof n !== "number" || !isFinite(n) || n < 0) {
+      return null;
+    }
+    n = Math.floor(n);
+    if (n === 0) {
+      return "No tries left before a 30-second wait.";
+    }
+    return n + (n === 1 ? " try" : " tries") + " left before a 30-second wait.";
+  }
+
+  function stopWait() {
+    clearInterval(waitTimer);
+    waitTimer = 0;
+    submit.disabled = false;
+  }
+
+  function wait(seconds) {
+    if (typeof seconds !== "number" || !isFinite(seconds) || seconds <= 0) {
+      seconds = 30;
+    }
+    stopWait();
+    waitUntil = Date.now() + Math.ceil(seconds) * 1000;
+    submit.disabled = true;
+    var count = document.createElement("span");
+    count.setAttribute("aria-live", "off");
+    count.textContent = String(Math.ceil(seconds));
+    say("wait", "Too many tries.", ["Try again in ", " s."], count);
+    waitTimer = setInterval(function () {
+      var left = Math.ceil((waitUntil - Date.now()) / 1000);
+      if (left <= 0) {
+        stopWait();
+        say();
+        return;
+      }
+      count.textContent = String(left);
+    }, 250);
+  }
+
+  function readJson(response) {
+    return response.json().then(function (data) {
+      return data && typeof data === "object" ? data : {};
+    }, function () {
+      return {};
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (busy || submit.disabled) {
+      return;
+    }
+    busy = true;
+    form.setAttribute("aria-busy", "true");
+    showPassword(false);
+    var body = new URLSearchParams();
+    body.set("password", input.value);
+    fetch("/login", {
+      method: "POST",
+      body: body,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Accept": "application/json" }
+    }).then(function (response) {
+      if (response.status === 401) {
+        return readJson(response).then(function (data) {
+          var detail = triesLeft(data.tries_left);
+          say("error", "Wrong password.", detail ? [detail] : null);
+          input.value = "";
+          input.focus();
+        });
+      }
+      if (response.status === 429) {
+        return readJson(response).then(function (data) {
+          wait(data.retry_after);
+        });
+      }
+      if (response.ok || response.redirected) {
+        say();
+        location.replace("/");
+        return null;
+      }
+      say("error", "Could not log in.", ["sdeck-plus answered " + response.status + ". Try again."]);
+      return null;
+    }, function () {
+      say("error", "Could not reach sdeck-plus.", ["Check that the virtual deck is still on, then try again."]);
+    }).then(function () {
+      busy = false;
+      form.removeAttribute("aria-busy");
+    });
+  });
+
+  if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+    input.focus();
+  }
+})();
+</script>
+</body>
+</html>

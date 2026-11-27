@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="sdeck-page" content="deck">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<meta name="referrer" content="no-referrer">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:,">
+<title>Virtual Stream Deck</title>
+<style>
+:root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--violet-hover:#c7b6f5;--violet-pressed:#a58cde;--selection:#4e426d;--cyan:#85dce8;--error:#fb778a;--success:#7de2b3;--warning:#f9cc7a;--press:#22c55e;--st:max(8px,env(safe-area-inset-top,0px));--sr:max(10px,env(safe-area-inset-right,0px));--sb:max(8px,env(safe-area-inset-bottom,0px));--sl:max(12px,env(safe-area-inset-left,0px));color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:#0b0d10}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{position:fixed;inset:0;color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+html,body,body *{touch-action:none}
+button{font:inherit;color:inherit}
+button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+button:focus:not(:focus-visible){outline:none}
+[hidden]{display:none!important}
+.vh{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+.stage{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:var(--st) calc(var(--sr) + 56px) var(--sb) var(--sl);transition:opacity .2s ease-out,filter .2s ease-out}
+.offline .stage{opacity:.35;filter:grayscale(.6)}
+.grid{--k:64px;--g:8px;--dim:0;display:grid;flex:none;grid-template-columns:repeat(5,var(--k));grid-auto-rows:var(--k);gap:var(--g)}
+.key{--bx:11;--by:5;position:relative;display:block;width:var(--k);height:var(--k);padding:0;border:0;border-radius:clamp(6px,calc(var(--k)*.07),14px);background:#08090b;cursor:pointer}
+.key:nth-child(5n+2){--bx:108}
+.key:nth-child(5n+3){--bx:205}
+.key:nth-child(5n+4){--bx:302}
+.key:nth-child(5n){--bx:399}
+.key:nth-child(n+6){--by:102}
+.key:nth-child(n+11){--by:199}
+.key::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 2px #515b65;pointer-events:none}
+.key.pressed::after{box-shadow:inset 0 0 0 4px var(--press)}
+@media (hover:hover){.key:not(.pressed):hover::after{box-shadow:inset 0 0 0 2px var(--control-edge)}}
+.lcd{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:#08090b;pointer-events:none}
+.key.pressed .lcd{filter:brightness(1.25)}
+.bgwin{position:absolute;inset:0;background-image:var(--bg,none);background-repeat:no-repeat;background-size:calc(var(--k)*480/72) calc(var(--k)*272/72);background-position:calc(var(--k)*var(--bx)/-72) calc(var(--k)*var(--by)/-72)}
+.pic{position:absolute;inset:0}
+.pic img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
+.lcd::after{content:"";position:absolute;inset:0;background:#000;opacity:var(--dim);pointer-events:none}
+.hold{position:absolute;left:8%;right:8%;bottom:7%;height:max(4px,calc(var(--k)*.035));border-radius:999px;background:rgba(241,244,247,.18);box-shadow:0 0 0 1px rgba(0,0,0,.45);opacity:0;pointer-events:none}
+.hold>span{position:absolute;inset:0;border-radius:inherit;background:var(--press);transform:scaleX(0);transform-origin:left center}
+.key.holding .hold{opacity:1}
+.turn{display:none;justify-items:center;gap:12px;max-width:340px;margin:0;text-align:center;color:var(--muted);font-size:16px;line-height:1.4}
+.turn svg{width:56px;height:56px;fill:none;stroke:var(--cyan);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.turn strong{display:block;color:var(--ink);font-size:22px;line-height:1.25}
+.dot{position:absolute;z-index:6;right:calc(var(--sr) + 18px);top:calc(var(--st) + 12px);width:8px;height:8px;border-radius:50%;background:var(--warning)}
+.connected .dot{background:var(--success)}
+.ended .dot{background:var(--error)}
+.icon-btn{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;border:1px solid var(--edge);background:rgba(32,38,46,.86);color:var(--ink);cursor:pointer}
+.icon-btn:hover{background:var(--hover)}
+.icon-btn[aria-expanded="true"]{background:var(--selection);box-shadow:inset 0 0 0 1px var(--violet)}
+.icon-btn svg,.row svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.menu{position:absolute;z-index:6;right:var(--sr);top:50%;margin-top:-22px}
+.sheet{position:absolute;z-index:7;right:calc(var(--sr) + 54px);top:50%;transform:translateY(-50%);display:grid;gap:2px;width:min(280px,calc(100vw - 80px));padding:6px;border-radius:12px;background:var(--surface);border:1px solid var(--edge);box-shadow:0 8px 24px rgba(21,25,31,.55)}
+.sheet .status{display:flex;gap:8px;margin:0;padding:8px 10px 2px;font-size:13px;font-weight:600}
+.sdot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:50%;background:var(--warning)}
+.connected .sdot{background:var(--success)}
+.ended .sdot{background:var(--error)}
+.sheet .host{margin:0;padding:0 10px 8px 26px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.sheet hr{margin:0 0 4px;border:0;border-top:1px solid var(--edge)}
+.row{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:8px;background:transparent;text-align:left;cursor:pointer}
+.row:hover{background:var(--hover)}
+.row.danger{color:var(--error)}
+.overlay{position:absolute;inset:0;z-index:5;display:grid;place-items:center;padding:var(--st) calc(var(--sr) + 56px) var(--sb) var(--sl)}
+.card{display:grid;gap:8px;justify-items:center;max-width:380px;padding:16px 20px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);box-shadow:0 8px 24px rgba(21,25,31,.55);text-align:center}
+.card strong{font-size:15px;line-height:1.35}
+.helper{color:var(--muted);font-size:13px}
+.btn{height:44px;min-width:44px;padding:0 16px;border-radius:8px;border:1px solid var(--control-edge);background:var(--field);color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--hover)}
+.btn.primary{border:0;background:var(--violet);color:var(--bg);font-weight:600}
+.btn.primary:hover{background:var(--violet-hover)}
+.btn.primary:active{background:var(--violet-pressed)}
+.spin{width:22px;height:22px;border-radius:50%;border:3px solid var(--edge);border-top-color:var(--cyan);animation:spin 900ms linear infinite}
+@keyframes spin{to{transform:rotate(1turn)}}
+noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;border-radius:8px;background:rgba(251,119,138,.16);text-align:center}
+@media (orientation:portrait){
+.stage,.overlay{padding:calc(var(--st) + 56px) var(--sr) var(--sb) var(--sl)}
+.turn{display:grid}
+.menu{top:var(--st);margin-top:0}
+.dot{right:calc(var(--sr) + 62px);top:calc(var(--st) + 18px)}
+.sheet{top:calc(var(--st) + 52px);right:var(--sr);transform:none}
+}
+@media (prefers-reduced-motion:reduce){.stage{transition:none}.spin{animation:none;border-right-color:var(--cyan)}}
+</style>
+</head>
+<body class="offline">
+<div class="stage" id="stage">
+<p class="turn" id="turn"><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="22" y="6" width="20" height="36" rx="4"/><rect x="14" y="34" width="36" height="20" rx="4" stroke-dasharray="3 3"/><path d="M50 20a14 14 0 0 1 4 10M54 30l-4-2M54 30l2-4"/></svg><span><strong>Turn your phone sideways</strong> for bigger keys. The deck still works here.</span></p>
+<div class="grid" id="grid" role="group" aria-label="Deck keys">
+<button class="key" type="button" aria-label="Key 1"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 2"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 3"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 4"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 5"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 6"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 7"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 8"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 9"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 10"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 11"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 12"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 13"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 14"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+<button class="key" type="button" aria-label="Key 15"><span class="lcd" aria-hidden="true"><span class="bgwin"></span><span class="pic"></span></span><span class="hold" aria-hidden="true"><span></span></span></button>
+</div>
+</div>
+<span class="dot" id="dot" role="img" aria-label="Connecting"></span>
+<button class="icon-btn menu" id="menu" type="button" aria-label="Deck menu: status, full screen, leave" aria-haspopup="dialog" aria-expanded="false" aria-controls="sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+<div class="sheet" id="sheet" role="dialog" aria-label="Deck menu" hidden>
+<p class="status"><span class="sdot" aria-hidden="true"></span><span id="status">Connecting to sdeck-plus…</span></p>
+<p class="host" id="host"></p>
+<hr>
+<button class="row" id="fullscreen" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span id="fullscreen-label">Full screen</span></button>
+<button class="row danger" id="leave" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg><span>Leave</span></button>
+</div>
+<div class="overlay" id="overlay" hidden><div class="card"><div class="spin" id="spin" aria-hidden="true"></div><strong id="message">Connection lost. Reconnecting…</strong><span class="helper" id="helper"></span><button class="btn" id="action" type="button">Try now</button></div></div>
+<p class="vh" id="live" role="status"></p>
+<noscript><p>The virtual deck needs JavaScript in this browser.</p></noscript>
+<script>
+(function () {
+  "use strict";
+  var HOLD_SHOW_MS = 300;
+  var HOLD_FULL_MS = 2000;
+  var RETRY_MIN_MS = 1000;
+  var RETRY_MAX_MS = 10000;
+  var WS_URL = (location.protocol === "http:" ? "ws://" : "wss://") + location.host + "/ws";
+
+  var body = document.body;
+  var stage = document.getElementById("stage");
+  var grid = document.getElementById("grid");
+  var turn = document.getElementById("turn");
+  var dot = document.getElementById("dot");
+  var menu = document.getElementById("menu");
+  var sheet = document.getElementById("sheet");
+  var statusText = document.getElementById("status");
+  var hostText = document.getElementById("host");
+  var fullButton = document.getElementById("fullscreen");
+  var fullLabel = document.getElementById("fullscreen-label");
+  var leaveButton = document.getElementById("leave");
+  var overlay = document.getElementById("overlay");
+  var spinner = document.getElementById("spin");
+  var message = document.getElementById("message");
+  var helper = document.getElementById("helper");
+  var action = document.getElementById("action");
+  var live = document.getElementById("live");
+  var reducedMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+
+  var keys = Array.prototype.map.call(grid.querySelectorAll(".key"), function (el, index) {
+    return {
+      number: index + 1,
+      el: el,
+      pic: el.querySelector(".pic"),
+      fill: el.querySelector(".hold > span"),
+      holders: 0,
+      seq: 0,
+      url: null,
+      timers: [],
+      animation: null
+    };
+  });
+
+  // ---- connection state ----------------------------------------------------
+
+  var STATES = {
+    connecting: { dot: "Connecting", status: "Connecting to sdeck-plus…" },
+    connected: { dot: "Connected", status: "Connected to sdeck-plus." },
+    lost: {
+      dot: "Reconnecting",
+      status: "Connection lost. Reconnecting…",
+      overlay: {
+        spin: true,
+        message: "Connection lost. Reconnecting…",
+        helper: "Keys are paused until the deck is back. If sdeck-plus turned the virtual deck off, this page waits here.",
+        action: "Try now"
+      }
+    },
+    stopped: {
+      dot: "Reconnecting",
+      status: "The virtual deck was turned off in sdeck-plus.",
+      overlay: {
+        spin: false,
+        message: "The virtual deck was turned off in sdeck-plus.",
+        helper: "Keys are paused. This page connects again when the virtual deck is turned back on.",
+        action: "Try now"
+      }
+    },
+    disconnected: {
+      dot: "Disconnected",
+      ended: true,
+      status: "This device was disconnected from sdeck-plus.",
+      overlay: { spin: false, message: "This device was disconnected from sdeck-plus.", helper: "", action: "Log in again" }
+    },
+    "password-changed": {
+      dot: "Disconnected",
+      ended: true,
+      status: "The password changed. Log in again.",
+      overlay: { spin: false, message: "The password changed. Log in again.", helper: "", action: "Log in again" }
+    },
+    leaving: { dot: "Disconnected", ended: true, status: "Leaving…" }
+  };
+
+  var state = "";
+  var socket = null;
+  var retryTimer = 0;
+  var retryDelay = RETRY_MIN_MS;
+
+  function ended() {
+    return !!(STATES[state] && STATES[state].ended);
+  }
+
+  function isLive() {
+    return state === "connected" && socket !== null && socket.readyState === 1;
+  }
+
+  function setState(name) {
+    var spec = STATES[name];
+    var previous = state;
+    if (!spec) {
+      return;
+    }
+    state = name;
+    body.classList.toggle("connected", name === "connected");
+    body.classList.toggle("offline", name !== "connected");
+    body.classList.toggle("ended", !!spec.ended);
+    stage.inert = name !== "connected";
+    dot.setAttribute("aria-label", spec.dot);
+    statusText.textContent = spec.status;
+    var card = spec.overlay;
+    overlay.hidden = !card;
+    if (card) {
+      spinner.hidden = !card.spin;
+      message.textContent = card.message;
+      helper.textContent = card.helper;
+      helper.hidden = !card.helper;
+      action.textContent = card.action;
+      action.classList.toggle("primary", !!spec.ended);
+    }
+    if (previous !== name) {
+      if (name !== "connecting" && name !== "leaving") {
+        live.textContent = spec.status;
+      }
+      if (spec.ended && card) {
+        closeSheet(false);
+        action.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  function goHome() {
+    setState("leaving");
+    location.replace("/");
+  }
+
+  // A socket that never opened may have met a 403 (session gone): the page
+  // the server gives for "/" then is the login page.
+  function sessionGone() {
+    if (!window.fetch) {
+      return Promise.resolve(false);
+    }
+    return fetch("/", { cache: "no-store", credentials: "same-origin", redirect: "manual" }).then(function (response) {
+      if (response.type === "opaqueredirect" || response.status === 401 || response.status === 403) {
+        return true;
+      }
+      if (!response.ok) {
+        return false;
+      }
+      return response.text().then(function (text) {
+        var page = new DOMParser().parseFromString(text, "text/html").querySelector("meta[name='sdeck-page']");
+        return !!page && page.getAttribute("content") === "login";
+      });
+    }).catch(function () {
+      return false;
+    });
+  }
+
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    if (ended()) {
+      return;
+    }
+    retryTimer = setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  }
+
+  function connectNow() {
+    if (ended() || socket) {
+      return;
+    }
+    connect();
+  }
+
+  function connect() {
+    clearTimeout(retryTimer);
+    retryTimer = 0;
+    if (socket || ended()) {
+      return;
+    }
+    var opened = false;
+    var ws;
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (error) {
+      if (state === "connecting") {
+        setState("lost");
+      }
+      scheduleRetry();
+      return;
+    }
+    socket = ws;
+    ws.onopen = function () {
+      if (socket !== ws) {
+        return;
+      }
+      opened = true;
+      retryDelay = RETRY_MIN_MS;
+      setState("connected");
+      keepAwake();
+    };
+    ws.onmessage = function (event) {
+      if (socket === ws && typeof event.data === "string") {
+        receive(event.data);
+      }
+    };
+    ws.onclose = function () {
+      if (socket !== ws) {
+        return;
+      }
+      socket = null;
+      releaseAll(false);
+      if (ended()) {
+        return;
+      }
+      if (state !== "stopped") {
+        setState("lost");
+      }
+      if (opened) {
+        scheduleRetry();
+        return;
+      }
+      sessionGone().then(function (gone) {
+        if (ended() || socket) {
+          return;
+        }
+        if (gone) {
+          goHome();
+        } else {
+          scheduleRetry();
+        }
+      });
+    };
+  }
+
+  function send(number, pressed) {
+    if (isLive()) {
+      socket.send(JSON.stringify({ type: "key", key: number, pressed: pressed }));
+    }
+  }
+
+  // ---- frames from sdeck-plus ----------------------------------------------
+
+  function receive(text) {
+    var frame;
+    try {
+      frame = JSON.parse(text);
+    } catch (error) {
+      return;
+    }
+    if (!frame || typeof frame !== "object") {
+      return;
+    }
+    if (frame.type === "key") {
+      if (typeof frame.key === "number" && frame.key >= 1 && frame.key <= keys.length && Math.floor(frame.key) === frame.key && typeof frame.jpeg === "string") {
+        showKey(keys[frame.key - 1], frame.jpeg);
+      }
+    } else if (frame.type === "background") {
+      if (typeof frame.jpeg === "string") {
+        showBackground(frame.jpeg);
+      }
+    } else if (frame.type === "brightness") {
+      if (typeof frame.percent === "number" && isFinite(frame.percent)) {
+        setBrightness(frame.percent);
+      }
+    } else if (frame.type === "reset") {
+      resetDeck();
+    } else if (frame.type === "bye") {
+      bye(frame.reason);
+    }
+  }
+
+  function jpegUrl(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  }
+
+  function whenDecoded(img) {
+    var loaded = img.decode ? img.decode() : new Promise(function (resolve, reject) {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+    return loaded.catch(function (error) {
+      if (!(img.complete && img.naturalWidth > 0)) {
+        throw error;
+      }
+    });
+  }
+
+  // Each frame decodes off screen and replaces the shown picture only when
+  // ready, so a key never flashes empty; a newer frame wins over a slower one.
+  function showKey(key, base64) {
+    var seq = ++key.seq;
+    if (!base64) {
+      clearKey(key);
+      return;
+    }
+    var url;
+    try {
+      url = jpegUrl(base64);
+    } catch (error) {
+      return;
+    }
+    var img = new Image();
+    img.alt = "";
+    img.draggable = false;
+    img.src = url;
+    whenDecoded(img).then(function () {
+      if (seq !== key.seq) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      key.pic.textContent = "";
+      key.pic.appendChild(img);
+      if (key.url) {
+        URL.revokeObjectURL(key.url);
+      }
+      key.url = url;
+    }, function () {
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  function clearKey(key) {
+    key.pic.textContent = "";
+    if (key.url) {
+      URL.revokeObjectURL(key.url);
+      key.url = null;
+    }
+  }
+
+  // The Classic's 480x272 keypad background: every key is a window onto its
+  // own part of the picture (CSS --bx/--by), as on the device.
+  var background = { seq: 0, url: null, img: null };
+
+  function showBackground(base64) {
+    var seq = ++background.seq;
+    if (!base64) {
+      setBackground(null, null);
+      return;
+    }
+    var url;
+    try {
+      url = jpegUrl(base64);
+    } catch (error) {
+      return;
+    }
+    var img = new Image();
+    img.src = url;
+    whenDecoded(img).then(function () {
+      if (seq !== background.seq) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      setBackground(url, img);
+    }, function () {
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  function setBackground(url, img) {
+    var old = background.url;
+    background.url = url;
+    background.img = img;
+    if (url) {
+      grid.style.setProperty("--bg", "url(\"" + url + "\")");
+    } else {
+      grid.style.removeProperty("--bg");
+    }
+    if (old) {
+      URL.revokeObjectURL(old);
+    }
+  }
+
+  function setBrightness(percent) {
+    var level = Math.max(0, Math.min(100, percent));
+    grid.style.setProperty("--dim", ((100 - level) / 100 * 0.9).toFixed(3));
+  }
+
+  function resetDeck() {
+    keys.forEach(function (key) {
+      key.seq++;
+      clearKey(key);
+    });
+    background.seq++;
+    setBackground(null, null);
+  }
+
+  function bye(reason) {
+    if (reason === "disconnected" || reason === "password-changed") {
+      clearTimeout(retryTimer);
+      var ws = socket;
+      socket = null;
+      releaseAll(false);
+      setState(reason);
+      if (ws) {
+        ws.close(1000);
+      }
+    } else if (reason === "stopped") {
+      releaseAll(false);
+      setState("stopped");
+    }
+  }
+
+  // ---- pressing keys ---------------------------------------------------------
+
+  function clearHold(key) {
+    key.timers.forEach(clearTimeout);
+    key.timers = [];
+    if (key.animation) {
+      key.animation.cancel();
+      key.animation = null;
+    }
+    key.el.classList.remove("holding");
+    key.fill.style.transform = "";
+  }
+
+  // The bar shows after 0.3 s and is full at 2 s, when sdeck-plus runs the
+  // hold action; with reduced motion it jumps to full at 2 s.
+  function startHold(key) {
+    key.el.classList.add("holding");
+    var rest = HOLD_FULL_MS - HOLD_SHOW_MS;
+    if ((reducedMotion && reducedMotion.matches) || !key.fill.animate) {
+      key.timers.push(setTimeout(function () {
+        key.fill.style.transform = "scaleX(1)";
+      }, rest));
+      return;
+    }
+    key.animation = key.fill.animate(
+      [{ transform: "scaleX(" + HOLD_SHOW_MS / HOLD_FULL_MS + ")" }, { transform: "scaleX(1)" }],
+      { duration: rest, easing: "linear", fill: "forwards" }
+    );
+  }
+
+  function showPressed(key, pressed) {
+    key.el.classList.toggle("pressed", pressed);
+    clearHold(key);
+    if (pressed) {
+      key.timers.push(setTimeout(function () {
+        startHold(key);
+      }, HOLD_SHOW_MS));
+    }
+  }
+
+  function hold(key) {
+    key.holders++;
+    if (key.holders === 1) {
+      showPressed(key, true);
+      send(key.number, true);
+    }
+  }
+
+  function letGo(key) {
+    if (key.holders === 0) {
+      return;
+    }
+    key.holders--;
+    if (key.holders === 0) {
+      showPressed(key, false);
+      send(key.number, false);
+    }
+  }
+
+  var pointers = new Map(); // pointerId -> key
+  var typed = new Set(); // keys held with Enter or Space
+
+  function releaseAll(notify) {
+    pointers.clear();
+    typed.clear();
+    keys.forEach(function (key) {
+      if (key.holders > 0) {
+        key.holders = 0;
+        showPressed(key, false);
+        if (notify) {
+          send(key.number, false);
+        }
+      }
+    });
+  }
+
+  function keyOf(target) {
+    var el = target && target.closest ? target.closest(".key") : null;
+    if (!el || el.parentNode !== grid) {
+      return null;
+    }
+    return keys[Array.prototype.indexOf.call(grid.children, el)] || null;
+  }
+
+  function releasePointer(pointerId) {
+    var key = pointers.get(pointerId);
+    if (!key) {
+      return;
+    }
+    pointers.delete(pointerId);
+    letGo(key);
+  }
+
+  grid.addEventListener("pointerdown", function (event) {
+    var key = keyOf(event.target);
+    if (!key) {
+      return;
+    }
+    event.preventDefault();
+    if ((event.pointerType === "mouse" && event.button !== 0) || pointers.has(event.pointerId) || !isLive()) {
+      return;
+    }
+    try {
+      key.el.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // a synthetic or already released pointer: the press still counts
+    }
+    pointers.set(event.pointerId, key);
+    hold(key);
+    keepAwake();
+  });
+
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (type) {
+    grid.addEventListener(type, function (event) {
+      releasePointer(event.pointerId);
+    });
+  });
+
+  keys.forEach(function (key) {
+    key.el.addEventListener("pointerleave", function (event) {
+      if (pointers.get(event.pointerId) === key) {
+        releasePointer(event.pointerId);
+      }
+    });
+    key.el.addEventListener("focusout", function () {
+      if (typed.has(key)) {
+        typed.delete(key);
+        letGo(key);
+      }
+    });
+  });
+
+  // While a key captures a pointer, moving off the key (past the gap) lets go.
+  grid.addEventListener("pointermove", function (event) {
+    var key = pointers.get(event.pointerId);
+    if (!key) {
+      return;
+    }
+    var box = key.el.getBoundingClientRect();
+    var slack = Math.max(6, parseFloat(grid.style.getPropertyValue("--g")) || 0);
+    if (event.clientX < box.left - slack || event.clientX > box.right + slack || event.clientY < box.top - slack || event.clientY > box.bottom + slack) {
+      try {
+        key.el.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // already released
+      }
+      releasePointer(event.pointerId);
+    }
+  });
+
+  function isPressKey(event) {
+    return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+  }
+
+  grid.addEventListener("keydown", function (event) {
+    var key = keyOf(event.target);
+    if (!key || !isPressKey(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.repeat || typed.has(key) || !isLive()) {
+      return;
+    }
+    typed.add(key);
+    hold(key);
+  });
+
+  grid.addEventListener("keyup", function (event) {
+    var key = keyOf(event.target);
+    if (!key || !isPressKey(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (typed.has(key)) {
+      typed.delete(key);
+      letGo(key);
+    }
+  });
+
+  // No context menu, selection, drag or pinch on the deck.
+  ["contextmenu", "selectstart", "dragstart", "gesturestart"].forEach(function (type) {
+    document.addEventListener(type, function (event) {
+      event.preventDefault();
+    });
+  });
+
+  // ---- layout ----------------------------------------------------------------
+
+  function layout() {
+    var style = getComputedStyle(stage);
+    var width = stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    var height = stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    if (getComputedStyle(turn).display !== "none") {
+      height -= turn.offsetHeight + (parseFloat(style.rowGap) || 0);
+    }
+    var gap = Math.max(6, Math.min(14, Math.round(Math.min(width, height) * 0.025)));
+    var size = Math.floor(Math.min((width - 4 * gap) / 5, (height - 2 * gap) / 3));
+    grid.style.setProperty("--g", gap + "px");
+    grid.style.setProperty("--k", Math.max(24, size) + "px");
+  }
+
+  layout();
+  if (window.ResizeObserver) {
+    new ResizeObserver(layout).observe(stage);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  // ---- menu ------------------------------------------------------------------
+
+  function openSheet() {
+    hostText.textContent = location.host;
+    sheet.hidden = false;
+    menu.setAttribute("aria-expanded", "true");
+    (fullButton.hidden ? leaveButton : fullButton).focus({ preventScroll: true });
+  }
+
+  function closeSheet(returnFocus) {
+    if (sheet.hidden) {
+      return;
+    }
+    sheet.hidden = true;
+    menu.setAttribute("aria-expanded", "false");
+    if (returnFocus) {
+      menu.focus({ preventScroll: true });
+    }
+  }
+
+  menu.addEventListener("click", function () {
+    if (sheet.hidden) {
+      openSheet();
+    } else {
+      closeSheet(true);
+    }
+  });
+
+  // A tap outside the open menu only closes it; it does not press a key.
+  document.addEventListener("pointerdown", function (event) {
+    if (!sheet.hidden && !sheet.contains(event.target) && !menu.contains(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSheet(false);
+    }
+  }, true);
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !sheet.hidden) {
+      event.preventDefault();
+      closeSheet(true);
+    }
+  });
+
+  function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function showFullscreenState() {
+    fullLabel.textContent = fullscreenElement() ? "Exit full screen" : "Full screen";
+  }
+
+  fullButton.hidden = !(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  document.addEventListener("fullscreenchange", showFullscreenState);
+  document.addEventListener("webkitfullscreenchange", showFullscreenState);
+
+  fullButton.addEventListener("click", function () {
+    var root = document.documentElement;
+    closeSheet(true);
+    if (fullscreenElement()) {
+      var exit = document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen && document.webkitExitFullscreen();
+      if (exit && exit.catch) {
+        exit.catch(function () {});
+      }
+      return;
+    }
+    var request = root.requestFullscreen ? root.requestFullscreen({ navigationUI: "hide" }) : root.webkitRequestFullscreen && root.webkitRequestFullscreen();
+    Promise.resolve(request).then(function () {
+      var orientation = screen.orientation;
+      if (/Android/i.test(navigator.userAgent) && orientation && orientation.lock) {
+        orientation.lock("landscape").catch(function () {});
+      }
+    }).catch(function () {});
+  });
+
+  leaveButton.addEventListener("click", function () {
+    releaseAll(true);
+    var ws = socket;
+    socket = null;
+    clearTimeout(retryTimer);
+    setState("leaving");
+    if (ws) {
+      ws.close(1000);
+    }
+    var done = function () {
+      location.replace("/");
+    };
+    if (!window.fetch) {
+      done();
+      return;
+    }
+    fetch("/logout", { method: "POST", credentials: "same-origin", cache: "no-store" }).then(done, done);
+  });
+
+  action.addEventListener("click", function () {
+    if (ended()) {
+      location.assign("/");
+    } else {
+      connectNow();
+    }
+  });
+
+  // ---- keep the screen on, let go when hidden ---------------------------------
+
+  var wakeLock = null;
+  var wakePending = false;
+
+  function keepAwake() {
+    if (wakeLock || wakePending || !navigator.wakeLock || document.visibilityState !== "visible") {
+      return;
+    }
+    wakePending = true;
+    navigator.wakeLock.request("screen").then(function (lock) {
+      wakePending = false;
+      wakeLock = lock;
+      lock.addEventListener("release", function () {
+        if (wakeLock === lock) {
+          wakeLock = null;
+        }
+      });
+    }, function () {
+      wakePending = false;
+    });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") {
+      keepAwake();
+      connectNow();
+    } else {
+      releaseAll(true);
+    }
+  });
+  window.addEventListener("blur", function () {
+    releaseAll(true);
+  });
+  window.addEventListener("pagehide", function () {
+    releaseAll(true);
+  });
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) {
+      connectNow();
+    }
+  });
+  window.addEventListener("online", connectNow);
+
+  setState("connecting");
+  keepAwake();
+  connect();
+})();
+</script>
+</body>
+</html>
