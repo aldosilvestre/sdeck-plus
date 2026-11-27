@@ -827,7 +827,9 @@ noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;bord
       done();
       return;
     }
-    fetch("/logout", { method: "POST", credentials: "same-origin", cache: "no-store" }).then(done, done);
+    // The page's no-referrer policy would make the browser send "Origin: null",
+    // which the server refuses; same-origin sends the page's own origin.
+    fetch("/logout", { method: "POST", credentials: "same-origin", cache: "no-store", referrerPolicy: "same-origin" }).then(done, done);
   });
 
   action.addEventListener("click", function () {
@@ -839,6 +841,8 @@ noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;bord
   });
 
   // ---- keep the screen on, let go when hidden ---------------------------------
+  // Browsers offer the Wake Lock only to secure pages: over the LAN's plain
+  // HTTP this does nothing, and the screen may dim as usual.
 
   var wakeLock = null;
   var wakePending = false;
