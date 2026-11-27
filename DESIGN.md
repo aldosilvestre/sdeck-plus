@@ -1304,7 +1304,10 @@ HTTP, so browsers mark them "Not secure" but show no certificate warning page.
   "Too many tries." with "Try again in N s." counting down while Connect is disabled; a used or
   expired challenge: "Could not log in." with "The login expired. Try again."; a server that
   cannot prove it knows the password: "Could not log in." with "This server could not prove it
-  knows the password. Check the address." (the page then logs that session out); unreachable:
+  knows the password. Check the address." (the page then logs that session out); a browser that
+  did not keep the login cookie (the page loads the deck only once `/` serves it, so it never
+  silently asks for the password again): "Could not log in." with "This browser did not keep the
+  login cookie. Allow cookies for this address, then try again."; unreachable:
   "Could not reach sdeck-plus." with "Check that the virtual deck is still on, then try again."
   The login needs JavaScript and never posts a form (the policy has `form-action 'none'`): the
   form stays hidden and a note reads "This page needs JavaScript to log in." without it, or "This

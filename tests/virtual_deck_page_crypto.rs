@@ -286,7 +286,8 @@ process.stdout.write(JSON.stringify({{
 }
 
 /// A stub DOM and `fetch` for the login page's script; `FAKE` answers in
-/// place of a server, or requests go to the real server at `PORT`.
+/// place of a server, or requests go to the real server at `PORT` with the
+/// last cookie it set, as a browser would (none when `REFUSE_COOKIES`).
 const PAGE_HARNESS: &str = r#"
 var window = globalThis;
 const requests = [];
@@ -322,10 +323,16 @@ globalThis.fetch = function (path, init) {
     headers: init.headers, body: init.body === undefined ? null : init.body });
   if (typeof FAKE === "function") {
     const [status, data] = FAKE(path, init.body === undefined ? null : JSON.parse(init.body));
-    return Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(data) });
+    return Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(data),
+      text: () => Promise.resolve(typeof data === "string" ? data : JSON.stringify(data)) });
+  }
+  const headers = Object.assign({}, init.headers);
+  const refuse = typeof REFUSE_COOKIES !== "undefined" && REFUSE_COOKIES;
+  if (cookies.length && !refuse) {
+    headers.Cookie = cookies[cookies.length - 1].split(";")[0];
   }
   return realFetch("http://127.0.0.1:" + PORT + path,
-    { method: init.method, headers: init.headers, body: init.body }).then((response) => {
+    { method: init.method, headers, body: init.body }).then((response) => {
     cookies.push(...response.headers.getSetCookie());
     return response;
   });
@@ -411,9 +418,12 @@ fn the_login_page_logs_in_to_the_real_server_without_sending_the_password() {
             "/login/start",
             "/login/finish",
             "/login/start",
-            "/login/finish"
-        ]
+            "/login/finish",
+            "/"
+        ],
+        "after the login, the page checks the browser kept the session"
     );
+    assert_eq!(requests[4]["method"], "GET");
     let sent = serde_json::to_string(requests).unwrap();
     let escaped = serde_json::to_string(PASSWORD).unwrap();
     for form in [
@@ -426,7 +436,7 @@ fn the_login_page_logs_in_to_the_real_server_without_sending_the_password() {
     ] {
         assert!(!sent.contains(form), "{form:?} was sent: {sent}");
     }
-    for request in requests {
+    for request in &requests[..4] {
         assert_eq!(request["method"], "POST");
         assert_eq!(request["referrerPolicy"], "same-origin");
     }
@@ -442,6 +452,57 @@ fn the_login_page_logs_in_to_the_real_server_without_sending_the_password() {
     assert!(
         home.contains("<meta name=\"sdeck-page\" content=\"deck\">"),
         "{home}"
+    );
+    server.stop();
+}
+
+/// A browser that refuses the session cookie (a `Secure` cookie of the same
+/// name left by an HTTPS page, or cookies blocked) would land on the login
+/// page again with no word: the page says so instead and stays.
+#[test]
+fn the_login_page_says_when_the_browser_did_not_keep_the_session() {
+    let (sender, _inputs) = mpsc::channel();
+    let server = VirtualDeckServer::start(
+        ServerConfig {
+            port: 0,
+            bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        },
+        build_verifier(PASSWORD).unwrap(),
+        sender,
+        Box::new(Vec::new),
+    )
+    .unwrap();
+    let port = server.local_port();
+    let driver = format!(
+        r#"
+(async () => {{
+  const outcome = await submit({password});
+  process.stdout.write(JSON.stringify({{ outcome, paths: requests.map((r) => r.path), cookies }}));
+  process.exit(0);
+}})();
+"#,
+        password = Value::from(PASSWORD)
+    );
+    let prelude = format!("const PORT = {port};\nconst REFUSE_COOKIES = true;");
+    let Some(results) = node(&page_script(&prelude, &driver)) else {
+        return;
+    };
+    assert_eq!(
+        results["outcome"],
+        json!({
+            "banner": "Could not log in. This browser did not keep the login cookie. \
+                       Allow cookies for this address, then try again.",
+            "replaced": null
+        })
+    );
+    assert_eq!(
+        results["paths"],
+        json!(["/login/start", "/login/finish", "/"])
+    );
+    assert_eq!(
+        results["cookies"].as_array().unwrap().len(),
+        1,
+        "the server did set it"
     );
     server.stop();
 }

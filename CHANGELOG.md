@@ -59,12 +59,23 @@ All notable changes to this project are documented here. The format follows
   written by an earlier development build that still holds a password (an Argon2id
   `password_hash`, or a `salt`, `iterations`, `stored_key` and `server_key` verifier) keeps its
   port; those fields are ignored and dropped the next time the file is saved (**Save and turn on**
-  or a port change). Validated with automated tests (a real server on
-  127.0.0.1, the login page's JavaScript run with Node.js against it, the GTK menu on an off-screen
-  display) and headless browsers at phone sizes only; **not yet tried on real phones**. New
-  dependencies: `ring`, `getrandom` and `qrcode`.
+  or a port change). The login is a session cookie named `sdeck_http_session`; the login page
+  moves to the deck only once the browser shows it kept that cookie, and otherwise says "Could not
+  log in." with "This browser did not keep the login cookie. Allow cookies for this address, then
+  try again." Validated with automated tests (a real server on 127.0.0.1, the login page's
+  JavaScript run with Node.js against it, the login and deck pages in headless Chromium as an
+  Android phone against it, the GTK menu on an off-screen display) and headless browsers at phone
+  sizes only; **not yet tried on real phones**. New dependencies: `ring`, `getrandom` and
+  `qrcode`.
 
 ### Fixed
+
+- The virtual deck's login no longer returns to the password page after the right password in a
+  browser that had opened an earlier development build served over HTTPS (seen on an iPhone with
+  Safari and on a PC with Brave). That build left a `Secure` cookie named `sdeck_session`, and
+  browsers never let a plain HTTP page replace a `Secure` cookie of the same name nor send it over
+  HTTP, so the new login cookie was dropped and the deck page was never served. The session cookie
+  is now `sdeck_http_session`, and the login page says so when a browser keeps no login cookie.
 
 - A keypad background no longer breaks the Stream Deck Classic's device preview: the Background
   bar's thumbnail made the device take the picture's own size (a 1920x1080 picture turned the

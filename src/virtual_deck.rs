@@ -22,7 +22,8 @@
 //! /login/finish` with `{"nonce","client_nonce","proof":"<base64>"}`, where
 //! the proof covers AuthMessage = client nonce + server nonce. A right proof
 //! gets 200 `{"server_signature":"<base64>"}`, which the page checks, and the
-//! session cookie; a wrong one 401 `{"error":"Wrong password.","tries_left":n}`;
+//! session cookie; the page then loads `/` only once `GET /` shows that the
+//! browser kept the cookie (it says so otherwise); a wrong one 401 `{"error":"Wrong password.","tries_left":n}`;
 //! an unknown, used, expired or another address's nonce 400 `{"error":"The
 //! login expired. Try again."}`; a locked-out address 429 `{"error":"Too many
 //! tries.","retry_after":30}`.
@@ -31,8 +32,10 @@
 //! server only its verifier (salt, iterations, StoredKey, ServerKey), held in
 //! memory, never the password; nothing about the password is written to disk
 //! (the [`settings`] file keeps the port only); each address gets five wrong proofs, then must
-//! wait 30 seconds; a session is a random 32-byte cookie (`HttpOnly;
-//! SameSite=Strict`, no `Secure` on plain HTTP); the login requests and
+//! wait 30 seconds; a session is a random 32-byte cookie, `sdeck_http_session`
+//! (`HttpOnly; SameSite=Strict`, no `Secure` on plain HTTP; not the
+//! `sdeck_session` of an earlier HTTPS build, whose `Secure` cookie a
+//! browser would never let a plain HTTP page replace); the login requests and
 //! `POST /logout` refuse a foreign or `null` `Origin`, and the WebSocket
 //! needs the cookie and `Origin: http://<Host>`; at most eight viewers; one
 //! address may hold at most eight connections that are not (yet) viewers,

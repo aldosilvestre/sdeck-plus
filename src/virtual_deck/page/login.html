@@ -504,6 +504,22 @@ var SdeckCrypto = (function () {
     return fetch(path, init);
   }
 
+  // Whether the browser kept the session cookie the login just set: the
+  // server answers "/" with the deck page only to a live session. Without
+  // this, a browser that refused the cookie would land on this page again.
+  function keptSession() {
+    return fetch("/", { method: "GET", credentials: "same-origin", cache: "no-store" }).then(function (response) {
+      if (!response.ok) {
+        throw new Error("sdeck-plus answered " + response.status);
+      }
+      return response.text();
+    }).then(function (text) {
+      // The first such tag is the page's own, in its head.
+      var page = /<meta name="sdeck-page" content="([a-z]+)">/.exec(text);
+      return !!page && page[1] === "deck";
+    });
+  }
+
   function usable(challenge) {
     return typeof challenge.salt === "string" && typeof challenge.nonce === "string" &&
       /^[0-9a-f]{64}$/.test(challenge.nonce) && typeof challenge.iterations === "number" &&
@@ -561,9 +577,15 @@ var SdeckCrypto = (function () {
                 });
               }
               input.value = "";
-              say();
-              location.replace("/");
-              return null;
+              return keptSession().then(function (kept) {
+                if (!kept) {
+                  say("error", "Could not log in.", ["This browser did not keep the login cookie. Allow cookies for this address, then try again."]);
+                  return null;
+                }
+                say();
+                location.replace("/");
+                return null;
+              });
             });
           });
         });

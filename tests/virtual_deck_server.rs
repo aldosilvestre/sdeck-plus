@@ -621,7 +621,9 @@ fn the_right_proof_sets_a_private_session_cookie_and_proves_the_server() {
     );
     let set_cookie = response.header("Set-Cookie").unwrap();
     let (cookie, attributes) = set_cookie.split_once(';').unwrap();
-    let token = cookie.strip_prefix("sdeck_session=").unwrap();
+    // Not `sdeck_session`: an earlier HTTPS build left a `Secure` cookie of
+    // that name in browsers, which plain HTTP can never replace.
+    let token = cookie.strip_prefix("sdeck_http_session=").unwrap();
     assert_eq!(token.len(), 64, "32 random bytes as hex");
     assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
     let attributes: Vec<&str> = attributes.split(';').map(str::trim).collect();
@@ -881,7 +883,10 @@ fn home_serves_the_login_page_without_a_session_and_the_deck_with_one() {
     assert_eq!(logged_in.status, 200);
     assert_eq!(logged_in.body, deck_page);
 
-    let forged = harness.get("/", Some(&format!("sdeck_session={}", "ab".repeat(32))));
+    let forged = harness.get(
+        "/",
+        Some(&format!("sdeck_http_session={}", "ab".repeat(32))),
+    );
     assert_eq!(forged.body, login_page, "an unknown token is no session");
 
     assert_eq!(harness.get("/missing", None).status, 404);
@@ -896,7 +901,7 @@ fn logout_drops_the_session_and_redirects_home() {
     assert_eq!(response.header("Location"), Some("/"));
     assert_eq!(
         response.header("Set-Cookie"),
-        Some("sdeck_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/")
+        Some("sdeck_http_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/")
     );
     assert_eq!(
         harness

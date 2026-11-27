@@ -8,7 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) const SESSION_COOKIE: &str = "sdeck_session";
+/// The session cookie's name. Not `sdeck_session`: an earlier development
+/// build served the deck over HTTPS and set a `Secure` cookie of that name,
+/// and a browser that still holds it never lets a plain HTTP page replace it
+/// (nor sends it over HTTP), so a right password led back to the login page.
+pub(super) const SESSION_COOKIE: &str = "sdeck_http_session";
 /// Failed logins an address may make before it must wait.
 pub(super) const MAX_TRIES: u32 = 5;
 pub(super) const LOCKOUT: Duration = Duration::from_secs(30);
