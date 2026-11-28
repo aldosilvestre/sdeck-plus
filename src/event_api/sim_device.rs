@@ -9,7 +9,7 @@
 //! can come and go at runtime. No hardware, HID stack or display server is
 //! involved.
 
-use super::*;
+use super::{wire::input_report, *};
 use crate::device_model::ProtocolFamily;
 use gtk::gdk_pixbuf::Pixbuf;
 use std::collections::VecDeque;
@@ -262,28 +262,16 @@ impl SimDevice {
         if report[1] == 0x08 {
             assert_eq!(report[2], 0, "reserved byte of a full screen image");
         }
-        match report[1] {
-            0x07 | 0x08 | 0x0b => (
-                report[2],
-                None,
-                report[3] == 1,
-                u16::from_le_bytes([report[6], report[7]]),
-                usize::from(u16::from_le_bytes([report[4], report[5]])),
-                self.model.key_header_len,
-            ),
-            0x0c => {
-                let word = |at: usize| u16::from_le_bytes([report[at], report[at + 1]]);
-                (
-                    0,
-                    Some((word(2), word(4), word(6), word(8))),
-                    report[10] == 1,
-                    word(11),
-                    usize::from(word(13)),
-                    self.model.zone_header_len,
-                )
-            }
-            other => panic!("unexpected output command {other:#04x}"),
-        }
+        let chunk = super::wire::expanded_chunk(self.model, report)
+            .unwrap_or_else(|| panic!("unexpected output command {:#04x}", report[1]));
+        (
+            chunk.slot,
+            chunk.window,
+            chunk.last,
+            chunk.index,
+            chunk.length,
+            chunk.header,
+        )
     }
 
     /// A Legacy Mini `02 01` report, as Elgato's Mini page lays it out: chunk
@@ -323,15 +311,6 @@ impl SimDevice {
     pub fn image_count(&self) -> usize {
         self.assemble().0.len()
     }
-}
-
-/// An input report: id 1, command, little-endian payload length, payload.
-fn input_report(model: &DeviceModel, command: u8, payload: &[u8]) -> Vec<u8> {
-    let mut report = vec![1, command];
-    report.extend_from_slice(&(payload.len() as u16).to_le_bytes());
-    report.extend_from_slice(payload);
-    report.resize(report.len().max(model.input_report_len), 0);
-    report
 }
 
 /// `(slot, window, last, chunk index, data length, header length)`.

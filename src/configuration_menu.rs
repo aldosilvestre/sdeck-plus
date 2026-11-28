@@ -1,5 +1,5 @@
 //! Configuration transfer entry points; persistence belongs to the runtime worker.
-use crate::{feature_runtime::FeatureRuntime, ui};
+use crate::{feature_runtime::FeatureRuntime, ui, virtual_deck_ui::VirtualDeckPanel};
 use gtk::{glib, prelude::*, ResponseType};
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
@@ -15,6 +15,8 @@ struct MenuState {
     runtime: RefCell<Option<FeatureRuntime>>,
     chooser: RefCell<Option<gtk::FileChooserNative>>,
     confirmation: RefCell<Option<gtk::Dialog>>,
+    /// The "Virtual Deck" section, once the window gives it one.
+    virtual_deck: RefCell<Option<VirtualDeckPanel>>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +99,7 @@ impl ConfigurationMenu {
             runtime: RefCell::new(None),
             chooser: RefCell::new(None),
             confirmation: RefCell::new(None),
+            virtual_deck: RefCell::new(None),
         }));
         let weak = Rc::downgrade(&menu.0);
         help.connect_clicked(move |_| {
@@ -128,6 +131,41 @@ impl ConfigurationMenu {
 
     pub(crate) fn add_updates(&self, body: &gtk::Box) {
         self.0.updates_content.append(body);
+    }
+
+    /// Put the Virtual Deck's switch and details below Export configuration...,
+    /// after a hairline, as in design/virtual-classic/04-all-in-menu.html. Only
+    /// the app's window has one; the menu keeps it alive.
+    pub(crate) fn attach_virtual_deck(&self, panel: &VirtualDeckPanel) {
+        let Some(list) = self
+            .0
+            .button
+            .popover()
+            .and_then(|popover| popover.child())
+            .and_downcast::<gtk::Box>()
+        else {
+            return;
+        };
+        if let Some(previous) = self.0.virtual_deck.replace(Some(panel.clone())) {
+            list.remove(previous.section());
+            if let Some(separator) = list.last_child() {
+                list.remove(&separator);
+            }
+        }
+        list.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        list.append(panel.section());
+        let what =
+            "Menu: help, updates, importing or exporting the configuration, and the Virtual Deck.";
+        self.0.button.set_tooltip_text(Some(what));
+        self.0
+            .button
+            .update_property(&[gtk::accessible::Property::Description(what)]);
+    }
+
+    /// The virtual deck section, when the menu has one.
+    #[cfg(test)]
+    pub(crate) fn virtual_deck(&self) -> Option<VirtualDeckPanel> {
+        self.0.virtual_deck.borrow().clone()
     }
 
     pub(crate) fn present_updates(&self) {

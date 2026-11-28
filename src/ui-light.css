@@ -26,3 +26,5 @@ popover > contents, tooltip { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
 popover.organize-popover > contents, .form-popover > contents { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
 .help-popover > contents { box-shadow: 0 8px 24px alpha(@desk_ink, 0.18); }
 .toast { box-shadow: 0 4px 16px alpha(@desk_ink, 0.18); }
+/* The virtual deck's white QR square needs an edge on the white menu. */
+.virtual-deck-qr { border: 1px solid @desk_edge; }

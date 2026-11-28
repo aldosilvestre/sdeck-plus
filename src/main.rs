@@ -48,6 +48,7 @@ mod ui;
 mod update_check;
 mod update_install;
 mod update_preference;
+mod virtual_deck_ui;
 // Layout containers live beside ui.rs but are mounted here, because the
 // ui_showcase example includes ui.rs by path.
 #[path = "ui/binding_icon.rs"]
@@ -338,6 +339,34 @@ fn install_device_cleanup(app: &Application, lifecycle: Rc<RefCell<DeviceLifecyc
     app.connect_shutdown(move |_| lifecycle.borrow_mut().shutdown());
 }
 
+/// The virtual deck's way into the HID hub the window owns.
+struct LifecycleHub(std::rc::Weak<RefCell<DeviceLifecycle>>);
+
+impl virtual_deck_ui::DeckHub for LifecycleHub {
+    fn attach(&self, deck: event_api::VirtualDeck) -> Result<(), String> {
+        let closed = || "Could not attach the Virtual Deck: the device monitor is closed.";
+        let lifecycle = self.0.upgrade().ok_or_else(closed)?;
+        let lifecycle = lifecycle.try_borrow().map_err(|_| closed())?;
+        lifecycle
+            .hid
+            .as_ref()
+            .ok_or_else(closed)?
+            .attach_virtual(deck);
+        Ok(())
+    }
+
+    fn detach(&self) {
+        // At quit the hub has already unplugged it.
+        if let Some(lifecycle) = self.0.upgrade() {
+            if let Ok(lifecycle) = lifecycle.try_borrow() {
+                if let Some(hid) = &lifecycle.hid {
+                    hid.detach_virtual();
+                }
+            }
+        }
+    }
+}
+
 fn configuration_window(app: &Application) -> Option<ApplicationWindow> {
     app.windows()
         .into_iter()
@@ -487,6 +516,26 @@ fn build_ui_in(
 
     let toast = ui::Toast::new();
     let header = build_header(&window);
+    // The header menu's virtual deck: off on every launch; its settings (the
+    // port only) live in the config folder, beside device.json, and its
+    // password only in the panel's memory, for this run.
+    let virtual_deck = virtual_deck_ui::VirtualDeckPanel::new(
+        virtual_deck_ui::Environment {
+            config_dir: roots
+                .preference
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .ok_or_else(|| "The configuration folder is unknown.".to_string()),
+            bind: virtual_deck_ui::LAN,
+            hub: Rc::new(LifecycleHub(Rc::downgrade(&lifecycle))),
+            open: virtual_deck_ui::browser_opener(),
+        },
+        header.virtual_badge.clone(),
+        Some(toast.clone()),
+    );
+    header.configuration_menu.attach_virtual_deck(&virtual_deck);
+    // After the hub's own cleanup (connected above): stop the server, join the glue.
+    app.connect_shutdown(move |_| virtual_deck.shutdown());
     // Only the shown session's size counts, as it did with one session.
     let stack = gtk::Stack::builder()
         .hhomogeneous(false)
@@ -797,6 +846,8 @@ struct MonitorWidgets {
 struct Header {
     root: GtkBox,
     status: Label,
+    /// "Virtual Deck on · N viewers" while the Virtual Deck is on.
+    virtual_badge: Label,
     connection_detail: Label,
     selector: ModelSelector,
     configuration_menu: configuration_menu::ConfigurationMenu,
@@ -827,6 +878,13 @@ fn build_header(window: &ApplicationWindow) -> Header {
     status.add_css_class("status");
     status.set_visible(false);
     title_row.append(&status);
+    // Shown by the virtual deck while it is on, in the badge style, violet.
+    let virtual_badge = Label::new(None);
+    virtual_badge.add_css_class("status");
+    virtual_badge.add_css_class("status-virtual");
+    virtual_badge.set_valign(gtk::Align::Center);
+    virtual_badge.set_visible(false);
+    title_row.append(&virtual_badge);
     let selector = ModelSelector::new();
     let help_body = GtkBox::new(Orientation::Vertical, 16);
     let mut steps = Vec::new();
@@ -878,6 +936,7 @@ fn build_header(window: &ApplicationWindow) -> Header {
     Header {
         root: header,
         status,
+        virtual_badge,
         connection_detail,
         selector,
         configuration_menu,
@@ -5249,7 +5308,9 @@ fn show_connection_state(
                 .join(", "),
         )
     };
+    // The virtual deck has no USB ids: the app serves it in a web page.
     let usb_id = |model: Option<&DeviceModel>| match model {
+        Some(model) if model.is_virtual() => virtual_deck_line(model),
         Some(model) => usb_ids(model.pid_list(" or ")),
         None => every_model(),
     };
@@ -5276,11 +5337,28 @@ fn show_connection_state(
             format!("{name} found but unavailable — hover for details"),
             format!("{reason}\n{}", usb_id(last)),
         ),
+        ConnectionState::Disconnected { reason, model, .. } if model.is_virtual() => (
+            "Disconnected",
+            "status-idle",
+            format!("{} turned off — turn it on from the Menu", model.name),
+            format!("{reason}\n{}", virtual_deck_line(model)),
+        ),
         ConnectionState::Disconnected { reason, .. } => (
             "Disconnected",
             "status-idle",
             format!("{name} disconnected — plug it back in"),
             format!("{reason}\n{}", usb_id(last)),
+        ),
+        ConnectionState::Connected { model, .. } if model.is_virtual() => (
+            "Connected",
+            "status-online",
+            virtual_deck_line(model),
+            format!(
+                "{} connected — {} are live\n{} · web page input and artwork active",
+                model.name,
+                model.live_controls(),
+                virtual_deck_line(model)
+            ),
         ),
         ConnectionState::Connected { model, .. } => (
             "Connected",
@@ -5295,6 +5373,15 @@ fn show_connection_state(
     };
     paint_status(status, detail, (badge, tone), &text, &hint);
     state.is_connected()
+}
+
+/// "Virtual Deck — served at http://192.168.1.50:8765/" while the Virtual
+/// Deck is on, in place of USB ids (the model's name, L50).
+fn virtual_deck_line(model: &sdeck_plus::device_model::DeviceModel) -> String {
+    match virtual_deck_ui::served_at() {
+        Some(url) => format!("{} — served at {url}", model.name),
+        None => format!("{} — served by this app in a web page", model.name),
+    }
 }
 
 fn paint_status(
@@ -5322,9 +5409,9 @@ fn show_connected_devices(
     detail: &Label,
     models: &[&'static sdeck_plus::device_model::DeviceModel],
 ) {
-    // Supported order, whichever plugged in first.
+    // Supported order, whichever plugged in first; the virtual deck comes last.
     let grouped: Vec<(&'static sdeck_plus::device_model::DeviceModel, usize)> =
-        sdeck_plus::device_model::DeviceModel::supported()
+        sdeck_plus::device_model::DeviceModel::connectable()
             .filter_map(|model| {
                 let count = models.iter().filter(|known| **known == model).count();
                 (count > 0).then_some((model, count))
@@ -5344,6 +5431,7 @@ fn show_connected_devices(
     };
     let pids: Vec<String> = grouped
         .iter()
+        .filter(|(model, _)| !model.is_virtual())
         .map(|(model, _)| model.pid_list(" or "))
         .collect();
     let connected: Vec<_> = grouped.iter().map(|(model, _)| *model).collect();
@@ -5352,10 +5440,17 @@ fn show_connected_devices(
         sdeck_plus::device_model::DeviceModel::live_controls_of(&connected)
     );
     // The line may be ellipsized: the tooltip carries the whole sentence.
-    let hint = format!(
-        "{text}\nUSB device VID 0FD9 / PID {} · HID input and artwork active",
-        pids.join(" and ")
-    );
+    let mut hint = text.clone();
+    if !pids.is_empty() {
+        hint.push_str(&format!(
+            "\nUSB device VID 0FD9 / PID {} · HID input and artwork active",
+            pids.join(" and ")
+        ));
+    }
+    for (model, _) in grouped.iter().filter(|(model, _)| model.is_virtual()) {
+        hint.push('\n');
+        hint.push_str(&virtual_deck_line(model));
+    }
     paint_status(status, detail, ("Connected", "status-online"), &text, &hint);
 }
 
@@ -5651,6 +5746,8 @@ mod tests {
     mod ui_refresh_tests;
     mod update_check;
     mod update_install;
+    mod virtual_background_preview_tests;
+    mod virtual_deck_ui_tests;
     mod volume_step_tests;
     mod xl_editor_tests;
     mod xl_event_safety_tests;

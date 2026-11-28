@@ -315,6 +315,12 @@ window.popup-dialog, window.profile-dialog {
     background-color: alpha(@desk_error, 0.16);
     border: 1px solid alpha(@desk_error, 0.55);
 }
+/* The virtual deck while it is on ("Virtual deck on · 2 viewers"): the badge style, violet. */
+.status-virtual {
+    color: @desk_violet;
+    background-color: alpha(@desk_violet, 0.16);
+    border: 1px solid alpha(@desk_violet, 0.55);
+}
 /* 'Current' sits beside the connection badge and reads as secondary to it. */
 .model-selector label.muted {
     font-size: 12px;
@@ -684,6 +690,36 @@ popover.command-menu button.command-row.destructive:disabled { opacity: 0.45; }
 /* An action beside a toast message, as in "Binding removed.  Undo". */
 .toast .toast-action { color: @desk_violet; font-weight: 600; border-radius: 999px; padding: 0 10px; min-height: 28px; }
 .toast .toast-action:hover { background-color: alpha(@desk_ink, 0.08); }
+
+/* Header menu: the virtual deck (design/virtual-classic/04-all-in-menu.html). The switch row
+   is as high as the command rows above it; the details sit 4px 10px 10px inside the menu. */
+.virtual-deck-row { min-height: 22px; padding: 8px 10px; }
+.virtual-deck-title { font-weight: 700; }
+.virtual-deck-qr { border-radius: 8px; }
+.virtual-deck-password text { letter-spacing: 2px; }
+/* Switches: a field with a control edge when off, violet when on; a muted knob turns bg-coloured. */
+switch {
+    background-color: @desk_field;
+    background-image: none;
+    border: 1px solid @desk_control_edge;
+    border-radius: 999px;
+    box-shadow: none;
+    color: @desk_ink;
+}
+switch:checked { background-color: @desk_violet; border-color: @desk_violet; }
+switch > slider {
+    background-color: @desk_muted;
+    background-image: none;
+    border: none;
+    border-radius: 999px;
+    box-shadow: none;
+    min-width: 16px;
+    min-height: 16px;
+    margin: 2px;
+}
+switch:checked > slider { background-color: @desk_bg; }
+switch:focus-visible { outline: 2px solid @desk_cyan; outline-offset: 2px; }
+switch:disabled { opacity: 0.6; }
 
 /* The dial event menu: compact rows that fill on hover and keep the keyboard focus ring. */
 .dial-event-choice button.flat { min-height: 20px; padding: 8px 10px; border-radius: 8px; border-color: transparent; background-color: transparent; }

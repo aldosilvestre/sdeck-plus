@@ -10,6 +10,12 @@
 //! [`Support::Planned`] entry is data only: promoting it is a table edit plus
 //! verification (see `DEVICES.md`). Every entry is supported today; the
 //! Classic, XL, Neo and Mini are validated with the simulator only.
+//!
+//! Beside the table, [`VIRTUAL_CLASSIC`] is a [`Support::Virtual`] model: a
+//! Stream Deck Classic the application serves itself (a web page). It is found
+//! by id and runs a session like hardware, but it has no product id, so USB
+//! discovery, udev rules, previews and screenshots (which iterate
+//! [`DeviceModel::supported`]) never see it.
 
 use std::ops::RangeInclusive;
 
@@ -60,6 +66,9 @@ pub enum Support {
     Supported,
     /// Described from Elgato's documentation only; discovery never matches it.
     Planned,
+    /// Served by the application itself, never discovered over USB: no product
+    /// id and no udev rule. Live only while the application attaches it.
+    Virtual,
 }
 
 /// Encoding of the pictures a model's displays take.
@@ -252,7 +261,10 @@ const EXPANDED: DeviceModel = DeviceModel {
 /// by Index, `03 13`, is on the XL page only), so it is not used. Key 1 sits
 /// 11 px from the left and 5 px from the top, keys 72 px with 25 px between
 /// them ("Unit Pixel Layout"). Validated with the simulator only.
-pub static CLASSIC: DeviceModel = DeviceModel {
+pub static CLASSIC: DeviceModel = CLASSIC_FACTS;
+
+/// The Classic's row, shared by [`CLASSIC`] and [`VIRTUAL_CLASSIC`].
+const CLASSIC_FACTS: DeviceModel = DeviceModel {
     id: "classic",
     name: "Stream Deck Classic",
     support: Support::Supported,
@@ -269,6 +281,24 @@ pub static CLASSIC: DeviceModel = DeviceModel {
     }),
     ..EXPANDED
 };
+
+/// The Virtual Deck: a deck the application serves itself (shown in a web
+/// page). Internally it is a Stream Deck Classic (the Classic's keys, keypad
+/// background, images and reports) under an identity of its own, so it keeps
+/// its own data root (`devices/virtual-classic/`) and session and runs
+/// alongside a real Classic. It has no product id: USB discovery never finds
+/// it and no udev rule names it. Users only ever see its name, "Virtual Deck"
+/// (L50); the id `virtual-classic` and the data root stay, so no data moves.
+pub static VIRTUAL_CLASSIC: DeviceModel = DeviceModel {
+    id: "virtual-classic",
+    name: "Virtual Deck",
+    aliases: &[],
+    support: Support::Virtual,
+    pids: &[],
+    ..CLASSIC_FACTS
+};
+
+static VIRTUAL: [&DeviceModel; 1] = [&VIRTUAL_CLASSIC];
 
 /// Facts from the Stream Deck XL page. Validated with the simulator only.
 /// Elgato documents a 1024 x 600 Full LCD Image for it too; the application
@@ -344,14 +374,26 @@ pub static MINI: DeviceModel = DeviceModel {
 static ALL: [&DeviceModel; 6] = [&PLUS, &PLUS_XL, &CLASSIC, &XL, &NEO, &MINI];
 
 impl DeviceModel {
-    /// Every model in the table, Supported or Planned.
+    /// Every model in the table, Supported or Planned. Virtual models are not
+    /// part of it (see [`Self::virtual_models`]).
     pub fn all() -> &'static [&'static DeviceModel] {
         &ALL
     }
 
-    /// The models the application detects and drives.
+    /// The models the application detects and drives over USB.
     pub fn supported() -> impl Iterator<Item = &'static DeviceModel> {
         ALL.into_iter().filter(|model| model.is_supported())
+    }
+
+    /// The models the application serves itself instead of finding them.
+    pub fn virtual_models() -> &'static [&'static DeviceModel] {
+        &VIRTUAL
+    }
+
+    /// Every model a session can run: the supported hardware in table order,
+    /// then the virtual models.
+    pub fn connectable() -> impl Iterator<Item = &'static DeviceModel> {
+        Self::supported().chain(VIRTUAL)
     }
 
     /// The model assumed when nothing else is known.
@@ -375,19 +417,24 @@ impl DeviceModel {
         ALL.into_iter().find(|model| model.pids.contains(&pid))
     }
 
-    /// Any registry entry by id, Planned or not.
+    /// Any model by id: a registry entry, Planned or not, or a virtual model.
     pub fn by_id(id: &str) -> Option<&'static DeviceModel> {
-        ALL.into_iter().find(|model| model.id == id)
+        ALL.into_iter().chain(VIRTUAL).find(|model| model.id == id)
     }
 
     /// A Supported entry by id. Preferences and anything that must name a
-    /// connectable model use this; [`Self::by_id`] also finds Planned ones.
+    /// USB model use this; [`Self::by_id`] also finds Planned and virtual ones.
     pub fn by_id_supported(id: &str) -> Option<&'static DeviceModel> {
         Self::by_id(id).filter(|model| model.is_supported())
     }
 
     pub fn is_supported(&self) -> bool {
         self.support == Support::Supported
+    }
+
+    /// Whether the application serves the model itself (see [`Support::Virtual`]).
+    pub fn is_virtual(&self) -> bool {
+        self.support == Support::Virtual
     }
 
     /// The primary product id.

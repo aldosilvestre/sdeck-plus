@@ -22,6 +22,13 @@ base64 = "0.22"
 async-channel = "2"
 ksni = { version = "0.3", features = ["blocking"] }
 tokio = { version = "1.53.3", features = ["rt", "time"] }
+# Virtual deck login (plain HTTP): PBKDF2/HMAC-SHA-256 password verifier and
+# challenge-response (SCRAM-SHA-256 style); OS random bytes for salts, nonces
+# and session tokens.
+ring = { version = "0.17", default-features = false }
+getrandom = "0.3"
+# QR code of the virtual deck's address in the header menu; no image/svg renderers.
+qrcode = { version = "0.14", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "=0.2.189"

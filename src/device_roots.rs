@@ -2,8 +2,10 @@
 //!
 //! The Stream Deck + keeps the data directory it has always used. Every other
 //! model owns `<data>/devices/<model id>/`, a complete independent copy of the
-//! stores, so two models never share a file. Nothing is created here: a root
-//! appears only when its stores are first opened.
+//! stores, so two models never share a file. That includes the virtual models
+//! (`devices/virtual-classic/`), whose roots are apart from the hardware they
+//! imitate. Nothing is created here: a root appears only when its stores are
+//! first opened.
 
 use crate::device_model::DeviceModel;
 use std::{
@@ -44,7 +46,8 @@ pub fn data_root_in(plus_root: &Path, model: &DeviceModel) -> PathBuf {
     }
 }
 
-/// The model whose private root is exactly `root`, if it is one.
+/// The model, hardware or virtual, whose private root is exactly `root`, if it
+/// is one.
 ///
 /// `root` is compared both as written (with `.` and `..` folded away) and with
 /// every existing symlink resolved, so an alias of `devices/<id>` is still that

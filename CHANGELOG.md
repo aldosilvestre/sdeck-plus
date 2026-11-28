@@ -5,7 +5,82 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Virtual Deck in a web page:** the switch **Menu > Virtual Deck** serves a 15-key deck (five
+  columns, three rows, with a 480x272 background picture) that phones and browsers on the local
+  network open at `http://<lan-ip>:8765/`. It runs through the same hub, actions and two-second
+  key hold as a plugged-in Stream Deck, is listed as "Virtual Deck" in the **Current** selector
+  while on (its device preview is titled "VIRTUAL DECK"), and keeps its own profiles in
+  `devices/virtual-classic/`, so it runs beside any plugged-in Stream Deck. The switch is off at every launch;
+  turning it on starts the server (no browser window opens by itself: use **Open** or the QR code)
+  and shows the header badge "Virtual Deck on · N viewers"; turning it off (or quitting) stops the
+  server and removes the device. The first time it is turned on after sdeck-plus starts, the switch
+  stays on and a form below it asks for a password for the session ("Set a password for this
+  session. It is forgotten when sdeck-plus closes.", a plain note rather than a warning; 8 to 128
+  characters, "At least 8 characters.", "At most 128 characters.", "The passwords do not
+  match."); nothing runs until **Save and turn on**, which starts the server and the device (if it
+  cannot, for example on a busy port, the switch stays on and the form says why), and **Cancel**,
+  or turning the switch off, turns it back off. The server never starts without a password. The
+  password is never written to disk: once the deck is on, the app holds only a verifier derived
+  from it (salt, iterations and two keys) in memory, turns the deck off and on again with it
+  without asking, and forgets it when sdeck-plus closes.
+  Everything else is remembered: `virtual-deck.json` in the config folder (0600) keeps the port
+  only, and the Virtual Deck's profiles, pages, bindings and pictures stay in
+  `devices/virtual-classic/`. Password fields, in the app and on the web login, hide characters as small bullets and reveal
+  them with an eye button.
+- **Menu section for the Virtual Deck:** while on, the menu shows a QR code of the page address
+  (never the password) with **Copy** and **Open**, **Change…** for the session's password (in memory
+  only; it asks first, because "Changing the password disconnects every viewer."), the **Port** (default 8765, 1024 to
+  65535; Enter moves the server and the new port is remembered, the old server keeps running if the
+  new one cannot start) and **Viewers (n)**: each page's browser, address and start time with a
+  **Disconnect** button, which ends that login. The header's connection line reads "Virtual
+  Deck — served at <address>" instead of USB ids. The web pages are titled "Virtual Deck" too.
+- **The deck page:** keys first, filling a phone held sideways (no zoom, no page scroll, safe
+  areas, several fingers at once, no context menu on a long press) and usable with a mouse; a bar
+  fills to the two-second hold; one menu button holds the status, **Full screen** (where the
+  browser offers it) and **Leave**; it says when the connection is lost or the deck was turned off,
+  disconnected or its password changed, and asks to turn a phone held upright. It cannot keep the
+  screen on: browsers offer the Screen Wake Lock only to HTTPS pages. The login page needs
+  JavaScript ("This page needs JavaScript to log in.") and says how many tries are left.
+- **Plain HTTP with a challenge-response login:** the server speaks plain HTTP and WebSocket on the
+  local network, with no certificate, so no browser shows a certificate warning page; browsers do
+  mark the page "Not secure" and may warn on its password field. The password never travels: the
+  page asks `POST /login/start` for the salt, the iteration count and a single-use server nonce
+  (valid 30 seconds), computes PBKDF2-HMAC-SHA-256 (200,000 iterations) in its own JavaScript
+  (`crypto.subtle` is missing on plain HTTP), sends only a proof to `POST /login/finish`
+  (SCRAM-SHA-256 style) and checks the server's proof in return. The key pictures, the presses and
+  the session cookie still cross the network readable, and a recorded login lets someone test
+  password guesses offline, so use a long passphrase. Limits: five wrong passwords per address,
+  then 30 seconds; at most eight viewers; at most eight unfinished connections per address; 50 key
+  presses a second per viewer (releases always arrive); size limits and deadlines on every
+  request. The server listens on every IPv4 interface. Anyone on the network who knows the
+  password can press the keys and run their actions, including **Command**. A settings file
+  written by an earlier development build that still holds a password (an Argon2id
+  `password_hash`, or a `salt`, `iterations`, `stored_key` and `server_key` verifier) keeps its
+  port; those fields are ignored and dropped the next time the file is saved (**Save and turn on**
+  or a port change). The login is a session cookie named `sdeck_http_session`; the login page
+  moves to the deck only once the browser shows it kept that cookie, and otherwise says "Could not
+  log in." with "This browser did not keep the login cookie. Allow cookies for this address, then
+  try again." Validated with automated tests (a real server on 127.0.0.1, the login page's
+  JavaScript run with Node.js against it, the login and deck pages in headless Chromium as an
+  Android phone against it, the GTK menu on an off-screen display) and headless browsers at phone
+  sizes only; **not yet tried on real phones**. New dependencies: `ring`, `getrandom` and
+  `qrcode`.
+
 ### Fixed
+
+- The Virtual Deck's login no longer returns to the password page after the right password in a
+  browser that had opened an earlier development build served over HTTPS (seen on an iPhone with
+  Safari and on a PC with Brave). That build left a `Secure` cookie named `sdeck_session`, and
+  browsers never let a plain HTTP page replace a `Secure` cookie of the same name nor send it over
+  HTTP, so the new login cookie was dropped and the deck page was never served. The session cookie
+  is now `sdeck_http_session`, and the login page says so when a browser keeps no login cookie.
+
+- A keypad background no longer breaks the Stream Deck Classic's device preview: the Background
+  bar's thumbnail made the device take the picture's own size (a 1920x1080 picture turned the
+  348x250 Classic into 2057x1282). A picture of any size now fills only the bar's 42x24
+  thumbnail and each key's share, on the Classic and the Virtual Deck alike.
 
 - The **Audio input device** live reading now shows when the microphone is muted: its microphone
   icon is crossed out and dimmed, like **Microphone volume and mute**. Before, it read only the

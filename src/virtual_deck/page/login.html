@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="sdeck-page" content="login">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#15191f">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:,">
+<title>Virtual Deck · Log in</title>
+<style>
+:root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--violet-hover:#c7b6f5;--violet-pressed:#a58cde;--cyan:#85dce8;--error:#fb778a;--warning:#f9cc7a;color-scheme:dark}
+*{box-sizing:border-box}
+html{min-height:100%;background:#0b0d10;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));background:radial-gradient(ellipse at 20% 40%,#20262e,#0b0d10 70%);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+main{width:100%;max-width:760px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:40px}
+.mini-deck{display:grid;grid-template-columns:repeat(5,22px);gap:5px;width:max-content;padding:10px;border-radius:10px;background:linear-gradient(135deg,#414951,#272d34);box-shadow:inset 0 1px rgba(255,255,255,.18),inset 0 -1px rgba(0,0,0,.45)}
+.mini-deck i{display:block;height:22px;border-radius:4px;background:#08090b;box-shadow:inset 0 0 0 1px #515b65}
+h1{font-size:22px;font-weight:700;line-height:1.25;margin:10px 0 6px}
+p{margin:0;color:var(--muted);font-size:13px}
+.ask{margin-top:10px}
+form{display:grid;gap:10px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);box-shadow:inset 0 1px rgba(241,244,247,.025)}
+label{font-weight:600;font-size:14px}
+.field{display:flex;gap:6px}
+input{flex:1;min-width:0;height:44px;padding:0 12px;border-radius:8px;border:1px solid var(--control-edge);background:var(--field);color:var(--ink);font:inherit;font-size:16px;caret-color:var(--cyan)}
+input:focus,input:focus-visible{outline:none;border-color:var(--cyan);box-shadow:inset 0 0 0 1px var(--cyan)}
+input::selection{background:var(--violet);color:var(--bg)}
+button{font:inherit;color:inherit}
+.btn{height:44px;min-width:44px;padding:0 16px;border-radius:8px;border:1px solid var(--control-edge);background:var(--field);color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--hover)}
+.btn.primary{border:0;background:var(--violet);color:var(--bg);font-weight:600}
+.btn.primary:hover{background:var(--violet-hover)}
+.btn.primary:active{background:var(--violet-pressed)}
+.btn.eye{width:44px;padding:0;display:grid;place-items:center}
+.btn.eye svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.btn.eye .eye-off,.btn.eye.is-shown .eye-on{display:none}
+.btn.eye.is-shown .eye-off{display:block}
+/* Hidden characters: smaller dots, spaced (16px on iOS so focusing does not zoom). */
+input[type=password]{font-size:13px;letter-spacing:.24em}
+@supports (-webkit-touch-callout:none){input[type=password]{font-size:16px}}
+.btn:disabled,.btn.primary:disabled{background:var(--field);color:var(--muted);border:1px solid var(--edge);cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.banner{display:none;padding:8px 10px;border-radius:8px;background:rgba(251,119,138,.16);font-size:13px;color:var(--ink)}
+.banner.shown{display:block}
+.banner b{color:var(--error)}
+.banner.wait b{color:var(--warning)}
+.banner.wait{background:rgba(249,204,122,.16)}
+.needs{margin:0;padding:14px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);color:var(--ink);font-size:14px}
+[hidden]{display:none!important}
+@media (max-width:599px){main{grid-template-columns:minmax(0,1fr);gap:20px;max-width:420px}}
+@media (max-height:340px) and (min-width:600px){body{padding-top:max(8px,env(safe-area-inset-top));padding-bottom:max(8px,env(safe-area-inset-bottom))}form{gap:8px;padding:12px}h1{font-size:20px;margin-top:8px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="mini-deck" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<h1>Virtual Deck</h1>
+<p>Served by sdeck-plus</p>
+<p class="ask">Ask the person running sdeck-plus for the password.</p>
+</header>
+<noscript><p class="needs">This page needs JavaScript to log in.</p></noscript>
+<p class="needs" id="needs" role="alert" hidden></p>
+<form id="login" aria-labelledby="password-label" hidden>
+<label for="password" id="password-label">Password</label>
+<div class="field"><input id="password" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" required aria-describedby="error"><button id="toggle" class="btn eye" type="button" aria-controls="password" aria-label="Show password" aria-pressed="false"><svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.8 9.8 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button></div>
+<div class="banner" id="error" role="alert"></div>
+<button id="submit" class="btn primary" type="submit">Connect</button>
+</form>
+</main>
+<script>
+// The login never sends the password (SCRAM-SHA-256 style, see the server's
+// src/virtual_deck/password.rs). Plain HTTP has no crypto.subtle, so this is
+// SHA-256 (FIPS 180-4), HMAC-SHA-256 (RFC 2104) and PBKDF2-HMAC-SHA-256
+// (RFC 8018) in plain JavaScript, checked against the RFC test vectors by
+// tests/virtual_deck_page_crypto.rs.
+var SdeckCrypto = (function () {
+  "use strict";
+
+  var K = new Int32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ]);
+  var IV = new Int32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ]);
+  // The message schedule; words 0 to 15 are the block being hashed.
+  var W = new Int32Array(64);
+
+  // One SHA-256 compression of the block in W[0..16] into `state`.
+  function compress(state) {
+    var i, x, y, t1, t2;
+    for (i = 16; i < 64; i++) {
+      x = W[i - 15];
+      y = W[i - 2];
+      W[i] = (((x >>> 7 | x << 25) ^ (x >>> 18 | x << 14) ^ (x >>> 3)) +
+        ((y >>> 17 | y << 15) ^ (y >>> 19 | y << 13) ^ (y >>> 10)) + W[i - 16] + W[i - 7]) | 0;
+    }
+    var a = state[0], b = state[1], c = state[2], d = state[3];
+    var e = state[4], f = state[5], g = state[6], h = state[7];
+    for (i = 0; i < 64; i++) {
+      t1 = (h + ((e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7)) +
+        ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0;
+      t2 = (((a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10)) +
+        ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + t1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) | 0;
+    }
+    state[0] = (state[0] + a) | 0;
+    state[1] = (state[1] + b) | 0;
+    state[2] = (state[2] + c) | 0;
+    state[3] = (state[3] + d) | 0;
+    state[4] = (state[4] + e) | 0;
+    state[5] = (state[5] + f) | 0;
+    state[6] = (state[6] + g) | 0;
+    state[7] = (state[7] + h) | 0;
+  }
+
+  function wordsToBytes(words) {
+    var bytes = new Uint8Array(words.length * 4);
+    for (var i = 0; i < words.length; i++) {
+      bytes[4 * i] = words[i] >>> 24;
+      bytes[4 * i + 1] = words[i] >>> 16;
+      bytes[4 * i + 2] = words[i] >>> 8;
+      bytes[4 * i + 3] = words[i];
+    }
+    return bytes;
+  }
+
+  function bytesToWords(bytes) {
+    var words = new Int32Array(bytes.length >>> 2);
+    for (var i = 0; i < words.length; i++) {
+      words[i] = bytes[4 * i] << 24 | bytes[4 * i + 1] << 16 | bytes[4 * i + 2] << 8 | bytes[4 * i + 3];
+    }
+    return words;
+  }
+
+  // SHA-256 of `data`, continuing from `start` after `before` bytes (a multiple of 64).
+  function digestFrom(start, before, data) {
+    var state = new Int32Array(start);
+    var blocks = ((data.length + 8) >>> 6) + 1;
+    var padded = new Uint8Array(blocks * 64);
+    padded.set(data);
+    padded[data.length] = 0x80;
+    var total = before + data.length;
+    var end = padded.length;
+    var high = Math.floor(total / 0x20000000);
+    var low = (total * 8) >>> 0;
+    padded[end - 8] = high >>> 24;
+    padded[end - 7] = high >>> 16;
+    padded[end - 6] = high >>> 8;
+    padded[end - 5] = high;
+    padded[end - 4] = low >>> 24;
+    padded[end - 3] = low >>> 16;
+    padded[end - 2] = low >>> 8;
+    padded[end - 1] = low;
+    for (var block = 0; block < blocks; block++) {
+      W.set(bytesToWords(padded.subarray(block * 64, block * 64 + 64)));
+      compress(state);
+    }
+    return wordsToBytes(state);
+  }
+
+  function sha256(data) {
+    return digestFrom(IV, 0, data);
+  }
+
+  // The SHA-256 states after HMAC's inner and outer padded keys.
+  function hmacKey(key) {
+    if (key.length > 64) {
+      key = sha256(key);
+    }
+    var block = new Uint8Array(64);
+    block.set(key);
+    var words = bytesToWords(block);
+    var inner = new Int32Array(IV);
+    var outer = new Int32Array(IV);
+    var i;
+    for (i = 0; i < 16; i++) {
+      W[i] = words[i] ^ 0x36363636;
+    }
+    compress(inner);
+    for (i = 0; i < 16; i++) {
+      W[i] = words[i] ^ 0x5c5c5c5c;
+    }
+    compress(outer);
+    return { inner: inner, outer: outer };
+  }
+
+  function hmacWith(key, data) {
+    return digestFrom(key.outer, 64, digestFrom(key.inner, 64, data));
+  }
+
+  function hmac(key, data) {
+    return hmacWith(hmacKey(key), data);
+  }
+
+  // PBKDF2-HMAC-SHA-256 of `password` and `salt` (bytes) into `length`
+  // bytes, a few iterations per `run`, so the page can breathe in between.
+  function Derivation(password, salt, iterations, length) {
+    this.key = hmacKey(password);
+    this.salt = salt;
+    this.iterations = iterations;
+    this.length = length;
+    this.output = new Uint8Array(Math.ceil(length / 32) * 32);
+    this.block = 0;
+    this.left = 0;
+    this.u = new Int32Array(8);
+    this.t = new Int32Array(8);
+    this.state = new Int32Array(8);
+  }
+
+  // Runs at most `budget` iterations; returns whether the key is complete.
+  Derivation.prototype.run = function (budget) {
+    var u = this.u, t = this.t, state = this.state, key = this.key, i;
+    while (budget > 0) {
+      if (this.left === 0) {
+        if (this.block * 32 >= this.length) {
+          return true;
+        }
+        // U1 = HMAC(P, S || INT(block)).
+        this.block += 1;
+        var first = new Uint8Array(this.salt.length + 4);
+        first.set(this.salt);
+        first[this.salt.length] = this.block >>> 24;
+        first[this.salt.length + 1] = this.block >>> 16;
+        first[this.salt.length + 2] = this.block >>> 8;
+        first[this.salt.length + 3] = this.block;
+        u.set(bytesToWords(hmacWith(key, first)));
+        t.set(u);
+        this.left = this.iterations - 1;
+        budget -= 1;
+      }
+      // Un = HMAC(P, Un-1): a 32-byte message is one padded block per hash.
+      for (; budget > 0 && this.left > 0; budget--, this.left--) {
+        for (i = 0; i < 8; i++) {
+          W[i] = u[i];
+        }
+        W[8] = 0x80000000;
+        for (i = 9; i < 15; i++) {
+          W[i] = 0;
+        }
+        W[15] = (64 + 32) * 8;
+        state.set(key.inner);
+        compress(state);
+        for (i = 0; i < 8; i++) {
+          W[i] = state[i];
+        }
+        W[8] = 0x80000000;
+        for (i = 9; i < 15; i++) {
+          W[i] = 0;
+        }
+        W[15] = (64 + 32) * 8;
+        state.set(key.outer);
+        compress(state);
+        for (i = 0; i < 8; i++) {
+          u[i] = state[i];
+          t[i] ^= state[i];
+        }
+      }
+      if (this.left === 0) {
+        this.output.set(wordsToBytes(t), (this.block - 1) * 32);
+      }
+    }
+    return this.left === 0 && this.block * 32 >= this.length;
+  };
+
+  Derivation.prototype.result = function () {
+    return this.output.slice(0, this.length);
+  };
+
+  function pbkdf2(password, salt, iterations, length) {
+    var derivation = new Derivation(password, salt, iterations, length);
+    while (!derivation.run(1 << 30)) {
+      // to the end
+    }
+    return derivation.result();
+  }
+
+  function utf8(text) {
+    if (typeof TextEncoder === "function") {
+      return new TextEncoder().encode(text);
+    }
+    var binary = unescape(encodeURIComponent(text));
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function toBase64(bytes) {
+    var binary = "";
+    for (var i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  function fromBase64(text) {
+    var binary = atob(text);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function toHex(bytes) {
+    var hex = "";
+    for (var i = 0; i < bytes.length; i++) {
+      hex += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
+    }
+    return hex;
+  }
+
+  function randomHex(count) {
+    var bytes = new Uint8Array(count);
+    window.crypto.getRandomValues(bytes);
+    return toHex(bytes);
+  }
+
+  // Runs `derivation` in slices of about 25 ms, so the page stays responsive.
+  function deriveLater(derivation, done) {
+    function slice() {
+      var until = Date.now() + 25;
+      while (!derivation.run(2000)) {
+        if (Date.now() >= until) {
+          setTimeout(slice, 0);
+          return;
+        }
+      }
+      done(derivation.result());
+    }
+    setTimeout(slice, 0);
+  }
+
+  // The answer to a login challenge `{salt, iterations, nonce}` with
+  // `clientNonce`: done({proof, serverSignature}), both base64.
+  //   SaltedPassword = PBKDF2(password, salt, iterations)
+  //   ClientKey = HMAC(SaltedPassword, "Client Key"); StoredKey = SHA-256(ClientKey)
+  //   AuthMessage = clientNonce + nonce
+  //   ClientProof = ClientKey XOR HMAC(StoredKey, AuthMessage)
+  //   ServerSignature = HMAC(HMAC(SaltedPassword, "Server Key"), AuthMessage)
+  function respond(password, challenge, clientNonce, done) {
+    var derivation = new Derivation(utf8(password), fromBase64(challenge.salt), challenge.iterations, 32);
+    deriveLater(derivation, function (salted) {
+      var clientKey = hmac(salted, utf8("Client Key"));
+      var authMessage = utf8(clientNonce + challenge.nonce);
+      var signature = hmac(sha256(clientKey), authMessage);
+      var proof = new Uint8Array(32);
+      for (var i = 0; i < 32; i++) {
+        proof[i] = clientKey[i] ^ signature[i];
+      }
+      var serverKey = hmac(salted, utf8("Server Key"));
+      done({ proof: toBase64(proof), serverSignature: toBase64(hmac(serverKey, authMessage)) });
+    });
+  }
+
+  return {
+    sha256: sha256,
+    hmac: hmac,
+    pbkdf2: pbkdf2,
+    utf8: utf8,
+    toHex: toHex,
+    randomHex: randomHex,
+    respond: respond
+  };
+})();
+</script>
+<script>
+(function () {
+  "use strict";
+  var MAX_ITERATIONS = 10000000;
+  var form = document.getElementById("login");
+  var needs = document.getElementById("needs");
+  var input = document.getElementById("password");
+  var toggle = document.getElementById("toggle");
+  var submit = document.getElementById("submit");
+  var banner = document.getElementById("error");
+  var waitTimer = 0;
+  var waitUntil = 0;
+  var busy = false;
+
+  if (!window.fetch || !window.Promise || !window.Uint8Array || !window.Int32Array ||
+      !window.crypto || !window.crypto.getRandomValues || !window.atob || !window.btoa) {
+    needs.textContent = "This browser cannot log in here. Try a newer browser.";
+    needs.hidden = false;
+    return;
+  }
+  form.hidden = false;
+
+  function showPassword(show) {
+    input.type = show ? "text" : "password";
+    toggle.classList.toggle("is-shown", show);
+    toggle.setAttribute("aria-pressed", show ? "true" : "false");
+    toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  }
+
+  toggle.addEventListener("click", function () {
+    showPassword(input.type === "password");
+  });
+
+  // Title in tone, then the detail; `count` (optional) is a live number
+  // that changes without being announced again.
+  function say(kind, title, detail, count) {
+    banner.textContent = "";
+    banner.className = "banner";
+    if (!title) {
+      return;
+    }
+    var strong = document.createElement("b");
+    strong.textContent = title;
+    banner.append(strong);
+    if (detail) {
+      banner.append(" ");
+      var span = document.createElement("span");
+      span.textContent = detail[0];
+      if (count) {
+        span.append(count);
+      }
+      if (detail[1]) {
+        span.append(detail[1]);
+      }
+      banner.append(span);
+    }
+    banner.className = "banner shown" + (kind === "wait" ? " wait" : "");
+  }
+
+  function triesLeft(n) {
+    if (typeof n !== "number" || !isFinite(n) || n < 0) {
+      return null;
+    }
+    n = Math.floor(n);
+    if (n === 0) {
+      return "No tries left before a 30-second wait.";
+    }
+    return n + (n === 1 ? " try" : " tries") + " left before a 30-second wait.";
+  }
+
+  function stopWait() {
+    clearInterval(waitTimer);
+    waitTimer = 0;
+    submit.disabled = false;
+  }
+
+  function wait(seconds) {
+    if (typeof seconds !== "number" || !isFinite(seconds) || seconds <= 0) {
+      seconds = 30;
+    }
+    stopWait();
+    waitUntil = Date.now() + Math.ceil(seconds) * 1000;
+    submit.disabled = true;
+    var count = document.createElement("span");
+    count.setAttribute("aria-live", "off");
+    count.textContent = String(Math.ceil(seconds));
+    say("wait", "Too many tries.", ["Try again in ", " s."], count);
+    waitTimer = setInterval(function () {
+      var left = Math.ceil((waitUntil - Date.now()) / 1000);
+      if (left <= 0) {
+        stopWait();
+        say();
+        return;
+      }
+      count.textContent = String(left);
+    }, 250);
+  }
+
+  function readJson(response) {
+    return response.json().then(function (data) {
+      return data && typeof data === "object" ? data : {};
+    }, function () {
+      return {};
+    });
+  }
+
+  // A POST to the server. The page's no-referrer policy would make the
+  // browser send "Origin: null"; the server wants the page's own origin.
+  function post(path, body) {
+    var init = {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      referrerPolicy: "same-origin",
+      headers: { "Accept": "application/json" }
+    };
+    if (body) {
+      init.body = JSON.stringify(body);
+      init.headers["Content-Type"] = "application/json";
+    }
+    return fetch(path, init);
+  }
+
+  // Whether the browser kept the session cookie the login just set: the
+  // server answers "/" with the deck page only to a live session. Without
+  // this, a browser that refused the cookie would land on this page again.
+  function keptSession() {
+    return fetch("/", { method: "GET", credentials: "same-origin", cache: "no-store" }).then(function (response) {
+      if (!response.ok) {
+        throw new Error("sdeck-plus answered " + response.status);
+      }
+      return response.text();
+    }).then(function (text) {
+      // The first such tag is the page's own, in its head.
+      var page = /<meta name="sdeck-page" content="([a-z]+)">/.exec(text);
+      return !!page && page[1] === "deck";
+    });
+  }
+
+  function usable(challenge) {
+    return typeof challenge.salt === "string" && typeof challenge.nonce === "string" &&
+      /^[0-9a-f]{64}$/.test(challenge.nonce) && typeof challenge.iterations === "number" &&
+      Math.floor(challenge.iterations) === challenge.iterations &&
+      challenge.iterations >= 1 && challenge.iterations <= MAX_ITERATIONS;
+  }
+
+  // Says why the server refused a step.
+  function refused(response) {
+    return readJson(response).then(function (data) {
+      if (response.status === 401) {
+        var detail = triesLeft(data.tries_left);
+        say("error", "Wrong password.", detail ? [detail] : null);
+        input.value = "";
+        input.focus();
+      } else if (response.status === 429) {
+        wait(data.retry_after);
+      } else if (response.status === 400 && typeof data.error === "string") {
+        say("error", "Could not log in.", [data.error]);
+      } else {
+        say("error", "Could not log in.", ["sdeck-plus answered " + response.status + ". Try again."]);
+      }
+    });
+  }
+
+  // Challenge, proof computed here, then the server's own proof: the
+  // password itself never leaves the page.
+  function logIn(password) {
+    return post("/login/start").then(function (response) {
+      if (!response.ok) {
+        return refused(response);
+      }
+      return readJson(response).then(function (challenge) {
+        if (!usable(challenge)) {
+          say("error", "Could not log in.", ["sdeck-plus sent an unusable challenge. Try again."]);
+          return null;
+        }
+        var clientNonce = SdeckCrypto.randomHex(32);
+        return new Promise(function (resolve) {
+          SdeckCrypto.respond(password, challenge, clientNonce, resolve);
+        }).then(function (answer) {
+          return post("/login/finish", {
+            nonce: challenge.nonce,
+            client_nonce: clientNonce,
+            proof: answer.proof
+          }).then(function (response) {
+            if (!response.ok) {
+              return refused(response);
+            }
+            return readJson(response).then(function (data) {
+              if (data.server_signature !== answer.serverSignature) {
+                say("error", "Could not log in.", ["This server could not prove it knows the password. Check the address."]);
+                return post("/logout").then(null, function () {}).then(function () {
+                  return null;
+                });
+              }
+              input.value = "";
+              return keptSession().then(function (kept) {
+                if (!kept) {
+                  say("error", "Could not log in.", ["This browser did not keep the login cookie. Allow cookies for this address, then try again."]);
+                  return null;
+                }
+                say();
+                location.replace("/");
+                return null;
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (busy || submit.disabled) {
+      return;
+    }
+    if (!input.value) {
+      input.focus();
+      return;
+    }
+    busy = true;
+    form.setAttribute("aria-busy", "true");
+    showPassword(false);
+    say();
+    submit.textContent = "Checking…";
+    logIn(input.value).then(null, function () {
+      say("error", "Could not reach sdeck-plus.", ["Check that the Virtual Deck is still on, then try again."]);
+    }).then(function () {
+      busy = false;
+      submit.textContent = "Connect";
+      form.removeAttribute("aria-busy");
+    });
+  });
+
+  if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+    input.focus();
+  }
+})();
+</script>
+</body>
+</html>

@@ -227,7 +227,8 @@ its own literals. The graphite hardware is identical in both modes.
 
 Status badges pair semantic tones with visible text, a low-alpha fill and a
 55%-alpha edge of the same token: warning for Not connected/Disconnected, error
-for Unavailable and success for Connected. Color alone never communicates state. Hardware uses a graphite chassis
+for Unavailable and success for Connected; the Virtual Deck's "Virtual Deck on · N
+viewers" badge is violet (`.status-virtual`). Color alone never communicates state. Hardware uses a graphite chassis
 (`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
 (`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
 and neutral encoders (`#68737e` to `#343c44`). Subtle inset lighting gives the
@@ -420,6 +421,9 @@ as them and 12px below the last row (252x28, key material with the key's inset
 edge, `.background-surface`): the page's background picture (42x24, cover) and
 the caption "Background" (11px/600). It is a selectable control named
 "Background" (see "Keypad background" below); the Classic chassis is 348x250.
+A background of any size or shape (a 1920x1080 photo, a tall 600x1200 one)
+fills only that thumbnail and each key's share: the bar, the chassis, the card
+and the window keep their size, on the Classic and the Virtual Deck alike.
 
 **Models without dials or a touch strip.** The Stream Deck Classic (15 keys,
 5x3) and XL (32 keys, 8x4) have keys only, and the Neo keys, two touch buttons
@@ -556,8 +560,9 @@ secondary to the tabs. Menu is the window's one configuration menu button and li
 header, not the rail: on the title row, completely at the right edge and vertically centred on the
 "SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
 ("Menu: ..."), accessible name and description and headerless popover, and the same button serves
-every model shown. The header has two rows: the title row (title, update indicator when shown,
-Current selector when two models are connected, Menu) and, under it, the connection detail.
+every model shown. The header has two rows: the title row (title, the Virtual Deck badge while
+it is on, update indicator when shown, Current selector when two models are connected, Menu) and,
+under it, the connection detail.
 The Current selector sits immediately to the left of Menu on the same line. Only the content column (page bar, preview,
 editor, side panel) scrolls; `rail_tests` guards the order, the fixed rail and that the tools stay
 inside the window, and `profile_row_tests` the per-row icons. The page bar separates navigation from
@@ -971,7 +976,74 @@ two columns fit.
   confirmation uses the same layout with an **Import** button.
 - **Menu popover:** the header's Menu is a headerless command menu (6px padding, 38px rows, no
   title row, no arrow and no Close button) of Help, Updates, Import configuration... and Export
-  configuration...; Escape or a click outside dismisses it.
+  configuration..., then a 1px separator and the **Virtual Deck** section below;
+  Escape or a click outside dismisses it. The Menu's tooltip and accessible description read
+  "Menu: help, updates, importing or exporting the configuration, and the Virtual Deck."
+- **Virtual Deck** (`src/virtual_deck_ui.rs`; source artboard
+  `design/virtual-classic/04-all-in-menu.html`): the menu's last section.
+  - **Switch row:** 38px like a command row (8px 10px padding): a 16px `input-dialpad-symbolic`
+    icon (presentation only), the bold title "Virtual Deck" and a `Switch` at the end,
+    named "Virtual Deck" with the tooltip and description "Serve the Virtual Deck in a web page
+    on this network". The menu, the header and the web pages never call it "Classic" (L50);
+    internally it is the model `virtual-classic`, with the Classic's geometry. The switch is off at every launch and insensitive while
+    the server starts, moves to another port or stops; turned on without this session's password it
+    stays on, and usable, while the form below it asks. Off, the menu ends at the switch row; the
+    details below it (10px side and bottom margins, 12px between groups, 344px wide so the menu
+    is about 380px like the artboard) show only when there is something to show and scroll past
+    620px or on a short screen. A wrapping feedback banner at their top says why turning on (an
+    unusable settings file, or a server that cannot start with the session's password), or opening
+    the browser from **Open**, failed. Turning on never opens a browser window by itself.
+    Password fields (here and on the web login) hide characters as small bullets (`•`, 2px apart in
+    the app; 13px with 0.24em spacing on the web, 16px on iOS so focus does not zoom) and reveal them
+    with an eye icon (eye-off while shown), never a "Show" caption.
+  - **First time in a session:** the password is never stored; its verifier lives in the panel's
+    memory for the session. The first time the switch is turned on after launch it stays on and an
+    inline form opens below it; nothing runs yet (no server, no device, no header badge). The
+    form: the neutral helper line (muted `helper` text, not a warning) "Set a password for this
+    session. It is forgotten when sdeck-plus closes.", the labelled password entries "New
+    password" and "Repeat it" (peek icon), an error line, then the right-aligned Cancel and
+    suggested **Save and turn on**. Enter in either entry submits. While the password's verifier
+    is derived (on a worker) the whole form is insensitive. Errors read "At least 8 characters.",
+    "At most 128 characters." (length first) and "The passwords do not match."; the switch stays
+    on. Save and turn on rewrites the settings with the port only (dropping any password an
+    earlier build left there) and only then starts the server and the device; the form stays,
+    insensitive, until the deck is on, then closes empty. If the server cannot start ("Port N is
+    already in use."), the switch stays on and the form shows the reason and keeps the typed
+    password, to try again. Cancel, or turning the switch off while the form asks, closes and
+    clears the form and turns the switch off; a password still being derived then starts nothing.
+    Once the deck is on, the verifier is the session's: turning the switch off and on again in the
+    same session starts at once with that password, without the form (a failure then turns the
+    switch back off with the reason in the banner); quitting forgets it, so the next launch asks
+    again. The port and the Virtual Deck's own data are remembered as usual.
+  - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
+    with 8px corners, a two-module quiet zone; never the password) beside the address in a
+    selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
+    copied.") and **Open** ("Open the address in the browser") buttons; the address is plain
+    HTTP (the chip is 30 characters wide, so "http://192.168.100.200:65535/" fits on one line)
+    and the chip's tooltip lists every address the page answers at. There is no certificate and
+    no fingerprint. Then two rows with 70px headings so their values line up: **Password** "Set"
+    and **Change…**, which opens the same password form with **Change password** (it replaces the
+    session's password in memory; nothing is saved); and **Port**, a
+    six-character digits entry ("1024 to 65535; press Enter to restart the server on it") and the
+    helper "Restarts the server", with its own error banner ("Use a port from 1024 to 65535.",
+    "Port N is already in use."). Then the "Viewers (n)" heading and a boxed list in the folder
+    list style, named "Viewers": each 40px row a `phone-symbolic` (Android, iOS, iPadOS) or
+    `computer-symbolic` icon, the browser ("Android · Chrome 131", ellipsized) over the muted
+    "192.168.1.73 · since 21:04", and a **Disconnect** button named "Disconnect <browser> at
+    <address>". Past four rows the list scrolls inside the menu; empty, it reads "No one is viewing
+    the deck yet."
+  - **Changing the password** confirms first in the shared dialog frame: "Change the password?",
+    "Changing the password disconnects every viewer." (while the server restarts: "The server is restarting. Confirm once it is on; changing the password disconnects every viewer." with the accept button disabled; the form itself refuses with "The server is restarting. Change the password once it is on."), Cancel (the default) and a red **Change
+    password**; success toasts "Password changed. Every viewer was disconnected."
+  - **Header:** while on, the title row shows the badge "Virtual Deck on · N viewers" ("1
+    viewer"; violet, tooltip "Served at <address>") right after the title. The Virtual Deck's
+    connection line reads "Virtual Deck — served at <address>" in place of USB ids
+    (with other devices connected it is the last line of the tooltip), "Virtual Deck turned
+    off — turn it on from the Menu" once off, and the model comes last, as "Virtual Deck", in the
+    connected list and the Current selector. It is never remembered as the last shown model.
+  - **Threads:** GTK never waits: deriving the password verifier, starting, moving and stopping
+    the server run on owned worker threads, presses and pictures cross an owned glue thread, and
+    results and server events reach GTK through async channels. Quitting stops the server and joins every thread.
 - **Feedback:** countdown, completion, connection and errors use inline text
   with semantic style. Busy workers do not block GTK.
 - **OBS:** visible endpoint/password labels, masked password, Save settings
@@ -1028,13 +1100,13 @@ two columns fit.
   not offered in the selector. The menu's import and export, OBS and Test
   action act on the shown session; the focused application reaches every
   session. Each preview's brand line is the model's name in capitals ("STREAM
-  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC"), and the setup help
-  follows the shown model.
+  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC", and "VIRTUAL DECK" for
+  the Virtual Deck), and the setup help follows the shown model.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
   color alone. The Menu lists Help, Updates, Import configuration... and Export
-  configuration...; Updates opens a modal dialog (same width, margins and Close
+  configuration... (then the Virtual Deck section); Updates opens a modal dialog (same width, margins and Close
   button as Help) that groups its status, Check for updates button and Check
   for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
   scrolled window: text wraps at the shared helper measure and installer output
@@ -1172,3 +1244,73 @@ existing accessible error explanation, including how to enable a StatusNotifier
 tray and that closing the window exits. Do not change saved preferences or leave
 an inaccessible background process. Shutdown cancels registration, retries and
 GTK callbacks, releases the application hold and joins the owned worker.
+
+## 10. Virtual Deck web page
+
+The Virtual Deck's pages (`src/virtual_deck/page/index.html` and `login.html`,
+served by `src/virtual_deck.rs`) follow the chosen artboard "02 · Keys first"
+(`design/virtual-classic/02-keys-first.html`); 01 and 03 are rejected alternatives. They are
+self-contained (inline CSS and script, no external URL), dark only (`color-scheme: dark`, the
+`desk_*` dark values as CSS variables) and in English. Validated in headless Chromium only (844x390,
+915x412, 390x844, 1280x720), never on a real phone; the login page's scripts also run under
+Node.js with a stand-in page in `tests/virtual_deck_page_crypto.rs`. They are served over plain
+HTTP, so browsers mark them "Not secure" but show no certificate warning page.
+
+- **Keys first:** no chassis. The 5x3 keys fill a phone held sideways: the key side is the
+  largest that fits five columns and three rows in the stage (gap 2.5% of the shorter side,
+  6 to 14px; at least 24px), inside `env(safe-area-inset-*)` with at least 8px top and bottom,
+  10px right and 12px left, and 56px kept free at the right for the menu button. No zoom
+  (`user-scalable=no`), no page scroll (fixed body, `overflow: hidden`), `touch-action: none`,
+  and no context menu, selection, drag or pinch.
+- **Key:** black `#08090b` with corners of 7% of the key (6 to 14px) and the device's inset
+  `#515b65` 2px edge; the picture covers it. The deck's 480x272 background shows through every
+  key at its own place (key 1 at 11,5, a 97px pitch), as on the device. Pressed: a 4px green
+  `#22c55e` inset edge and the picture 25% brighter; with a mouse, hover shows the control edge.
+  Brightness dims the pictures (0% darkens them by 90%).
+- **Hold bar:** a key held for 0.3s shows a bar at its foot (8% side insets, 7% from the bottom,
+  at least 4px high, a pale track) whose green fill grows linearly to full at 2s, when
+  sdeck-plus runs the hold action. With reduced motion it jumps to full at 2s. Releasing hides it.
+- **Input:** pointer events, one key per pointer, several at once; a key pressed by two pointers
+  goes up when the last lets go; moving off a key past the gap (at least 6px of slack) lets go;
+  only the mouse's left button presses; Enter or Space presses a focused key. Hiding the page,
+  leaving the window or losing the connection lets go of every key.
+- **Chrome behind one button:** a single 44px icon button at the right edge, vertically centred,
+  named "Deck menu: status, full screen, leave", opens a sheet (role dialog "Deck menu", 280px,
+  12px corners, 44px rows): the status with its dot ("Connected to sdeck-plus."), the address,
+  then **Full screen** / **Exit full screen** (hidden where the browser has no Fullscreen API;
+  on Android it also asks to lock landscape) and a red **Leave**, which logs out. Escape or a tap
+  outside closes the sheet without pressing a key. An 8px dot by the button is amber while
+  connecting or reconnecting, green while connected and red once disconnected, and has an
+  accessible name ("Connecting", "Connected", "Reconnecting", "Disconnected").
+- **Overlays:** while not connected the keys are inert, dimmed to 35% and partly greyed, and a
+  centred card says why: "Connection lost. Reconnecting…" with a spinner, "Keys are paused until
+  the deck is back. If sdeck-plus turned the Virtual Deck off, this page waits here." and **Try
+  now** (retries back off from 1s to 10s); "The Virtual Deck was turned off in sdeck-plus." with
+  "Keys are paused. This page connects again when the Virtual Deck is turned back on."; "This
+  device was disconnected from sdeck-plus." or "The password changed. Log in again." with a violet
+  **Log in again**. Status changes are announced in a polite live region.
+- **Portrait:** above the keys, "Turn your phone sideways for bigger keys. The deck still works
+  here." with a rotate glyph; the menu button and its sheet move to the top right.
+- **Screen:** the page asks for a Screen Wake Lock when it opens, connects, takes a press or is
+  shown again, where the browser offers it. Browsers offer it only to HTTPS pages, so over plain
+  HTTP the request does nothing and the screen dims and locks as usual.
+- **Titles:** the browser tab reads "Virtual Deck · Log in" on the login page and "Virtual
+  Deck" on the deck page; neither page says "Classic" (L50; the artboards' "Virtual Stream
+  Deck" / "Classic · served by …" heading predates that).
+- **Login page:** "Virtual Deck", "Served by sdeck-plus" (no host name), "Ask
+  the person running sdeck-plus for the password.", a labelled **Password** entry (small spaced
+  bullets) with a 44px eye button (named "Show password" or "Hide password", `aria-pressed`,
+  eye-off while shown), an alert banner and a violet **Connect**, which reads "Checking…" while
+  the page derives the proof from the password (PBKDF2 in slices of about 25ms, so the page stays
+  responsive). Wrong: "Wrong password." with "N tries left before a 30-second wait."; locked:
+  "Too many tries." with "Try again in N s." counting down while Connect is disabled; a used or
+  expired challenge: "Could not log in." with "The login expired. Try again."; a server that
+  cannot prove it knows the password: "Could not log in." with "This server could not prove it
+  knows the password. Check the address." (the page then logs that session out); a browser that
+  did not keep the login cookie (the page loads the deck only once `/` serves it, so it never
+  silently asks for the password again): "Could not log in." with "This browser did not keep the
+  login cookie. Allow cookies for this address, then try again."; unreachable:
+  "Could not reach sdeck-plus." with "Check that the Virtual Deck is still on, then try again."
+  The login needs JavaScript and never posts a form (the policy has `form-action 'none'`): the
+  form stays hidden and a note reads "This page needs JavaScript to log in." without it, or "This
+  browser cannot log in here. Try a newer browser." when the browser lacks what the login uses.

@@ -1,7 +1,7 @@
 //! The preview geometry of every registry model: the Stream Deck + reproduces
 //! the shipped numbers exactly, and every other model is laid out sanely.
 use sdeck_plus::{
-    device_model::{DeviceModel, PLUS, PLUS_XL},
+    device_model::{DeviceModel, CLASSIC, PLUS, PLUS_XL, VIRTUAL_CLASSIC},
     preview_layout::{ControlRef, PreviewLayout, Rect, MIN_HIT_PX},
 };
 
@@ -41,6 +41,19 @@ fn plus_layout_reproduces_the_shipped_geometry() {
     assert_eq!(rail.icons[0], r(68, 320, 20, 20));
     assert_eq!(rail.legends[0], r(35, 357, 86, 16));
     assert_eq!(rail.legends[3], r(308, 357, 86, 16));
+}
+
+/// L33 + L50: the virtual deck's preview reads "VIRTUAL DECK", never
+/// "Classic"; the real Classic keeps its name.
+#[test]
+fn the_virtual_deck_preview_is_titled_virtual_deck_and_the_classic_keeps_its_name() {
+    let brand = PreviewLayout::for_model(&VIRTUAL_CLASSIC).brand;
+    assert_eq!(brand, "VIRTUAL DECK");
+    assert!(!brand.to_lowercase().contains("classic"), "{brand}");
+    assert_eq!(
+        PreviewLayout::for_model(&CLASSIC).brand,
+        "STREAM DECK CLASSIC"
+    );
 }
 
 #[test]

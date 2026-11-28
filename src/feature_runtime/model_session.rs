@@ -209,7 +209,7 @@ pub(crate) enum SwitchReason {
 }
 
 /// Which model the window shows. `connected` lists the distinct connected
-/// models in `DeviceModel::supported()` order.
+/// models in `DeviceModel::connectable()` order.
 ///
 /// Automatic (`user_chose` false): the last used model when it is connected,
 /// else the first connected one. After a pick (`user_chose` true) the choice
@@ -554,12 +554,9 @@ impl ModelSession {
         self.sync_selector();
     }
 
-    /// The distinct models with a connected device, in `supported()` order.
+    /// The distinct models with a connected device (see [`connected_in_order`]).
     fn connected_models(&self) -> Vec<&'static DeviceModel> {
-        let devices = self.devices.borrow();
-        DeviceModel::supported()
-            .filter(|model| devices.iter().any(|(_, connected)| connected == model))
-            .collect()
+        connected_in_order(&self.devices.borrow())
     }
 
     /// Apply the selection rules after the connected devices changed.
@@ -664,7 +661,12 @@ impl ModelSession {
         self.header.help.follow(model);
         self.apply_read_only();
         // Remembered only once the session really opened.
-        if let Err(error) = device_preference::save_to(&self.roots.preference, model) {
+        let saved = if remembers_choice(model) {
+            device_preference::save_to(&self.roots.preference, model)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = saved {
             session.runtime.report(
                 &format!("Could not remember the selected model: {error}"),
                 true,
@@ -747,5 +749,64 @@ impl ModelSession {
         self.syncing.set(true);
         selector.set_entries(&connected, shown);
         self.syncing.set(false);
+    }
+}
+
+/// The distinct models of `devices`, in `DeviceModel::connectable()` order:
+/// the hardware in table order, then the virtual decks.
+fn connected_in_order(devices: &[(DeviceId, &'static DeviceModel)]) -> Vec<&'static DeviceModel> {
+    DeviceModel::connectable()
+        .filter(|model| devices.iter().any(|(_, connected)| connected == model))
+        .collect()
+}
+
+/// Whether showing `model` is remembered for the next start. A virtual deck is
+/// off on every launch, and the strict preference file (which names hardware
+/// only) would refuse it and every later save.
+fn remembers_choice(model: &DeviceModel) -> bool {
+    !model.is_virtual()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sdeck_plus::device_model::{CLASSIC, PLUS, VIRTUAL_CLASSIC, XL};
+
+    fn device(path: &str, model: &'static DeviceModel) -> (DeviceId, &'static DeviceModel) {
+        (DeviceId::from_path(path), model)
+    }
+
+    #[test]
+    fn the_virtual_classic_is_listed_after_the_hardware_whenever_it_connected() {
+        let devices = [
+            device("virtual:classic", &VIRTUAL_CLASSIC),
+            device("b", &CLASSIC),
+            device("a", &PLUS),
+            device("c", &CLASSIC),
+        ];
+        let ids: Vec<_> = connected_in_order(&devices)
+            .into_iter()
+            .map(|model| model.id)
+            .collect();
+        assert_eq!(ids, ["plus", "classic", "virtual-classic"]);
+        assert_eq!(
+            connected_in_order(&[device("virtual:classic", &VIRTUAL_CLASSIC)]),
+            [&VIRTUAL_CLASSIC]
+        );
+        // Hardware alone keeps the order it always had.
+        assert_eq!(
+            connected_in_order(&[device("x", &XL), device("p", &PLUS)]),
+            [&PLUS, &XL]
+        );
+    }
+
+    #[test]
+    fn showing_the_virtual_classic_is_not_remembered_for_the_next_start() {
+        // It is off on every launch, and the strict preference file would
+        // refuse a model it cannot connect.
+        assert!(!remembers_choice(&VIRTUAL_CLASSIC));
+        for model in DeviceModel::supported() {
+            assert!(remembers_choice(model), "{}", model.id);
+        }
     }
 }
