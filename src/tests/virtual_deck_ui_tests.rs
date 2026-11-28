@@ -137,7 +137,7 @@ pub(super) fn turn_on_and_wait(pair: &Pair) -> VirtualDeckPanel {
     panel
 }
 
-/// The header's "Virtual deck on · N viewers" label.
+/// The header's "Virtual Deck on · N viewers" label.
 fn badge(pair: &Pair) -> Label {
     fn find(widget: &gtk::Widget) -> Option<Label> {
         if widget.has_css_class("status-virtual") {
@@ -192,6 +192,37 @@ fn label_texts(widget: &gtk::Widget) -> Vec<String> {
         child = current.next_sibling();
     }
     found
+}
+
+/// What `widget` and everything below it show: label texts and tooltips (the
+/// section gives its controls the same accessible names), in order.
+fn shown_texts(widget: &gtk::Widget) -> Vec<String> {
+    let mut found = Vec::new();
+    if let Some(label) = widget.downcast_ref::<Label>() {
+        found.push(label.text().to_string());
+    }
+    if let Some(tip) = widget.tooltip_text() {
+        found.push(tip.to_string());
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        found.extend(shown_texts(&current));
+        child = current.next_sibling();
+    }
+    found
+}
+
+/// L50: the virtual deck is "Virtual Deck" wherever it shows: no text or
+/// tooltip below `widget` says "Classic".
+fn assert_no_classic(widget: &gtk::Widget, why: &str) {
+    let shown = shown_texts(widget);
+    assert!(!shown.is_empty(), "{why}: nothing shown");
+    for text in &shown {
+        assert!(
+            !text.to_lowercase().contains("classic"),
+            "{why}: {text:?} in {shown:?}"
+        );
+    }
 }
 
 fn buttons_in(widget: &gtk::Widget) -> Vec<Button> {
@@ -484,6 +515,14 @@ fn the_menu_offers_the_switch_below_export_configuration_and_it_starts_off() {
             label_texts(panel.section().first_child().unwrap().upcast_ref()),
             [virtual_deck_ui::TITLE]
         );
+        // L50: the menu names it "Virtual Deck", never "Classic".
+        assert_eq!(virtual_deck_ui::TITLE, "Virtual Deck");
+        assert_eq!(
+            w.switch.tooltip_text().as_deref(),
+            Some("Serve the Virtual Deck in a web page on this network")
+        );
+        assert_no_classic(panel.section().upcast_ref(), "the menu section");
+        assert_no_classic(menu.button().upcast_ref(), "the Menu button");
         assert!(!w.switch.is_active(), "off on every launch (S1)");
         assert!(w.switch.is_sensitive() && w.switch.is_focusable());
         assert!(!w.first_time.get_visible() && !w.running.get_visible());
@@ -707,12 +746,13 @@ fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
         let header = badge(&pair);
         assert!(header.is_visible());
         assert!(header.has_css_class("status"));
-        assert_eq!(header.text(), "Virtual deck on · 0 viewers");
+        assert_eq!(header.text(), "Virtual Deck on · 0 viewers");
         assert_eq!(w.viewers_heading.text(), "Viewers (0)");
         assert!(w.no_viewers.get_visible());
         assert_eq!(w.no_viewers.text(), virtual_deck_ui::NO_VIEWERS);
         assert!(!w.viewers_scroll.get_visible());
-        let line = format!("Virtual Stream Deck Classic — served at {url}");
+        assert_no_classic(panel.section().upcast_ref(), "the running menu");
+        let line = format!("Virtual Deck — served at {url}");
         let window = pair.window.clone();
         let expected = line.clone();
         wait_until("the header names the address", move || {
@@ -724,6 +764,7 @@ fn save_and_turn_on_serves_the_virtual_classic_and_turning_off_removes_it() {
             .to_string();
         assert!(!tooltip.contains("PID"), "no USB ids: {tooltip}");
         assert!(tooltip.contains(&line), "{tooltip}");
+        assert!(!tooltip.contains("Classic"), "{tooltip}");
         // Off: the server stops, the device goes and the header says so.
         w.switch.set_active(false);
         assert!(!badge(&pair).is_visible());
@@ -767,25 +808,25 @@ fn the_connection_line_of_the_virtual_classic_names_its_address_not_usb_ids() {
         assert_eq!(status.text(), "Connected");
         assert_eq!(
             detail.text(),
-            "Virtual Stream Deck Classic — served by this app in a web page"
+            "Virtual Deck — served by this app in a web page"
         );
         let tooltip = detail.tooltip_text().unwrap().to_string();
         assert_eq!(
             tooltip,
-            "Virtual Stream Deck Classic connected — keys are live\n\
-             Virtual Stream Deck Classic — served by this app in a web page · \
+            "Virtual Deck connected — keys are live\n\
+             Virtual Deck — served by this app in a web page · \
              web page input and artwork active"
         );
         let gone = ConnectionState::Disconnected {
             device,
             model,
-            reason: "virtual deck detached".into(),
+            reason: "Virtual Deck detached".into(),
         };
         assert!(!show_connection_state(&status, &detail, &gone, Some(model)));
         assert_eq!(status.text(), "Disconnected");
         assert_eq!(
             detail.text(),
-            "Virtual Stream Deck Classic turned off — turn it on from the Menu"
+            "Virtual Deck turned off — turn it on from the Menu"
         );
         let tooltip = detail.tooltip_text().unwrap().to_string();
         assert!(!tooltip.contains("PID"), "{tooltip}");
@@ -794,7 +835,7 @@ fn the_connection_line_of_the_virtual_classic_names_its_address_not_usb_ids() {
         let tooltip = detail.tooltip_text().unwrap().to_string();
         assert_eq!(
             tooltip,
-            "broken\nVirtual Stream Deck Classic — served by this app in a web page"
+            "broken\nVirtual Deck — served by this app in a web page"
         );
         // Hardware keeps its USB ids.
         let plus = ConnectionState::Disconnected {
@@ -854,7 +895,7 @@ fn a_viewer_is_listed_presses_keys_sees_pictures_and_disconnect_ends_it() {
         let row = label_texts(w.viewers.upcast_ref());
         assert_eq!(row[0], "Android · Chrome 131");
         assert!(row[1].starts_with("127.0.0.1 · since "), "{row:?}");
-        assert_eq!(badge(&pair).text(), "Virtual deck on · 1 viewer");
+        assert_eq!(badge(&pair).text(), "Virtual Deck on · 1 viewer");
         // A press on the page runs the virtual Classic's binding like the real key.
         let runtime = pair.registry.runtime_of(&VIRTUAL_CLASSIC).unwrap();
         assert_eq!(active(&runtime), "Base");
@@ -880,7 +921,7 @@ fn a_viewer_is_listed_presses_keys_sees_pictures_and_disconnect_ends_it() {
         let heading = w.viewers_heading.clone();
         wait_until("the list empties", move || heading.text() == "Viewers (0)");
         assert!(w.no_viewers.get_visible());
-        assert_eq!(badge(&pair).text(), "Virtual deck on · 0 viewers");
+        assert_eq!(badge(&pair).text(), "Virtual Deck on · 0 viewers");
     });
 }
 
@@ -1062,7 +1103,7 @@ fn a_new_port_restarts_the_server_and_a_busy_one_is_reported() {
             registry.live_devices(&VIRTUAL_CLASSIC) == 1
         });
         let window = pair.window.clone();
-        let line = format!("Virtual Stream Deck Classic — served at {url}");
+        let line = format!("Virtual Deck — served at {url}");
         wait_until("the header names the new address", move || {
             header_label(&window, "muted").text() == line
         });
@@ -1649,7 +1690,7 @@ fn turning_on_without_the_sessions_password_keeps_the_switch_on_and_starts_only_
         assert!(w.running.get_visible());
         let header = badge(&pair);
         assert!(header.is_visible());
-        assert_eq!(header.text(), "Virtual deck on · 0 viewers");
+        assert_eq!(header.text(), "Virtual Deck on · 0 viewers");
         let registry = pair.registry.clone();
         wait_until("the virtual Classic connects", move || {
             registry.live_devices(&VIRTUAL_CLASSIC) == 1
@@ -1747,19 +1788,17 @@ fn the_current_selector_lists_the_virtual_classic_while_it_is_on() {
         let panel = turn_on_and_wait(&pair);
         pair.wait_devices(2);
         assert!(pair.registry.selector().root.is_visible());
-        assert_eq!(
-            entries(&pair),
-            ["Stream Deck +", "Virtual Stream Deck Classic"]
-        );
+        // L50: the Current selector names it "Virtual Deck".
+        assert_eq!(entries(&pair), ["Stream Deck +", "Virtual Deck"]);
         let detail = header_label(&pair.window, "muted");
-        let sentence = "Stream Deck + and Virtual Stream Deck Classic connected — \
+        let sentence = "Stream Deck + and Virtual Deck connected — \
                         keys, dials and touch strip are live";
         assert_eq!(detail.text(), sentence);
         assert_eq!(
             detail.tooltip_text().unwrap().as_str(),
             format!(
                 "{sentence}\nUSB device VID 0FD9 / PID 0084 · HID input and artwork active\n\
-                 Virtual Stream Deck Classic — served at http://127.0.0.1:{port}/"
+                 Virtual Deck — served at http://127.0.0.1:{port}/"
             )
         );
         panel.test_widgets().switch.set_active(false);

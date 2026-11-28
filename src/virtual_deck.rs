@@ -1,5 +1,7 @@
-//! The virtual Stream Deck Classic's web server: plain HTTP + WebSocket on
-//! the LAN, so no browser ever shows a certificate warning.
+//! The Virtual Deck's web server (internally a Stream Deck Classic: 15 keys
+//! and its keypad background): plain HTTP + WebSocket on the LAN, so no
+//! browser ever shows a certificate warning. Its pages call it "Virtual
+//! Deck" only (L50).
 //!
 //! A phone or browser opens `http://<lan-ip>:<port>/`, logs in with the
 //! password the app set for this session, and gets the deck page; the page then opens
@@ -229,5 +231,24 @@ impl VirtualDeckServer {
 impl Drop for VirtualDeckServer {
     fn drop(&mut self) {
         self.running.stop();
+    }
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::{INDEX_PAGE, LOGIN_PAGE};
+
+    /// L50: both pages, served as they are, name the deck "Virtual Deck" and
+    /// never "Classic".
+    #[test]
+    fn the_pages_say_virtual_deck_and_never_classic() {
+        assert!(LOGIN_PAGE.contains("<title>Virtual Deck · Log in</title>"));
+        assert!(LOGIN_PAGE.contains("<h1>Virtual Deck</h1>"));
+        assert!(LOGIN_PAGE.contains("<p>Served by sdeck-plus</p>"));
+        assert!(INDEX_PAGE.contains("<title>Virtual Deck</title>"));
+        for (name, page) in [("login", LOGIN_PAGE), ("index", INDEX_PAGE)] {
+            assert!(!page.to_lowercase().contains("classic"), "{name}");
+            assert!(!page.contains("Stream Deck"), "{name}");
+        }
     }
 }

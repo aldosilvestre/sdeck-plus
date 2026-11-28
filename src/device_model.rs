@@ -282,14 +282,16 @@ const CLASSIC_FACTS: DeviceModel = DeviceModel {
     ..EXPANDED
 };
 
-/// A Stream Deck Classic the application serves itself (shown in a web
-/// page): the Classic's keys, keypad background, images and reports, under an
-/// identity of its own, so it keeps its own data root (`devices/virtual-classic/`)
-/// and session and runs alongside a real Classic. It has no product id: USB
-/// discovery never finds it and no udev rule names it.
+/// The Virtual Deck: a deck the application serves itself (shown in a web
+/// page). Internally it is a Stream Deck Classic (the Classic's keys, keypad
+/// background, images and reports) under an identity of its own, so it keeps
+/// its own data root (`devices/virtual-classic/`) and session and runs
+/// alongside a real Classic. It has no product id: USB discovery never finds
+/// it and no udev rule names it. Users only ever see its name, "Virtual Deck"
+/// (L50); the id `virtual-classic` and the data root stay, so no data moves.
 pub static VIRTUAL_CLASSIC: DeviceModel = DeviceModel {
     id: "virtual-classic",
-    name: "Virtual Stream Deck Classic",
+    name: "Virtual Deck",
     aliases: &[],
     support: Support::Virtual,
     pids: &[],

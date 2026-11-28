@@ -344,7 +344,7 @@ struct LifecycleHub(std::rc::Weak<RefCell<DeviceLifecycle>>);
 
 impl virtual_deck_ui::DeckHub for LifecycleHub {
     fn attach(&self, deck: event_api::VirtualDeck) -> Result<(), String> {
-        let closed = || "Could not attach the virtual deck: the device monitor is closed.";
+        let closed = || "Could not attach the Virtual Deck: the device monitor is closed.";
         let lifecycle = self.0.upgrade().ok_or_else(closed)?;
         let lifecycle = lifecycle.try_borrow().map_err(|_| closed())?;
         lifecycle
@@ -846,7 +846,7 @@ struct MonitorWidgets {
 struct Header {
     root: GtkBox,
     status: Label,
-    /// "Virtual deck on · N viewers" while the virtual deck is on.
+    /// "Virtual Deck on · N viewers" while the Virtual Deck is on.
     virtual_badge: Label,
     connection_detail: Label,
     selector: ModelSelector,
@@ -5375,8 +5375,8 @@ fn show_connection_state(
     state.is_connected()
 }
 
-/// "Virtual Stream Deck Classic — served at http://192.168.1.50:8765/" while
-/// the virtual deck is on, in place of USB ids.
+/// "Virtual Deck — served at http://192.168.1.50:8765/" while the Virtual
+/// Deck is on, in place of USB ids (the model's name, L50).
 fn virtual_deck_line(model: &sdeck_plus::device_model::DeviceModel) -> String {
     match virtual_deck_ui::served_at() {
         Some(url) => format!("{} — served at {url}", model.name),

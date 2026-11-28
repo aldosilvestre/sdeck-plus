@@ -81,14 +81,18 @@ physical keys to press.
 
 ## Virtual models
 
-`VIRTUAL_CLASSIC` (`src/device_model.rs`) is the Stream Deck Classic the
-application serves in a web page (the header Menu's "Virtual deck (Classic)"
-switch; user docs: the "Virtual Stream Deck Classic" group of `docs/docs.html`).
-It shares the Classic's row (`CLASSIC_FACTS`: Expanded family, 5x3 keys of 72
-px JPEG rotated 180, the 480x272 keypad background) under an identity of its
-own:
+`VIRTUAL_CLASSIC` (`src/device_model.rs`) is the Virtual Deck, the deck the
+application serves in a web page (the header Menu's "Virtual Deck" switch;
+user docs: the "Virtual Deck" group of `docs/docs.html`). Internally it is a
+Stream Deck Classic: it shares the Classic's row (`CLASSIC_FACTS`: Expanded
+family, 5x3 keys of 72 px JPEG rotated 180, the 480x272 keypad background)
+under an identity of its own. Users only ever see the name "Virtual Deck"
+(menu, header, Current selector, preview "VIRTUAL DECK", web pages); the id
+`virtual-classic`, the constant `VIRTUAL_CLASSIC` and the data root keep the
+word, and must not be renamed, since renaming them would move users' data and
+refuse their bundles:
 
-- id `virtual-classic`, name "Virtual Stream Deck Classic", no aliases,
+- id `virtual-classic`, name "Virtual Deck", no aliases,
   `support: Support::Virtual`, `pids: &[]`; `is_virtual()` is true and
   `is_supported()` false.
 - It is not in `ALL`, so `all()`, `supported()`, `by_pid*`, discovery, udev
@@ -273,7 +277,7 @@ comparison.
 | xl | Stream Deck XL | Supported, simulator only | Expanded | 0x006C 0x008F 0x00BA | 8x4 | 96 JPEG, 180 | none | 0 |
 | neo | Stream Deck Neo | Supported, simulator only | Expanded | 0x009A | 4x2 | 96 JPEG, 180 | 248x58 info window, no touch, JPEG 180 (`02 0B`) | 2, after the keys |
 | mini | Stream Deck Mini | Supported, simulator only | Legacy Mini | 0x0063 0x0090 0x00B3 0x00B8 | 3x2 | 80 BMP, transposed (`Ccw90` + `key_flip_y`) | none | 0 |
-| virtual-classic | Virtual Stream Deck Classic | Virtual (web page), automated tests only | Expanded | none | 5x3 | as `classic` | as `classic` | 0 |
+| virtual-classic | Virtual Deck | Virtual (web page), automated tests only | Expanded | none | 5x3 | as `classic` | as `classic` | 0 |
 
 Sources (the `plus` and `plus-xl` pages follow the site's naming pattern and
 were not opened):
@@ -337,7 +341,7 @@ until a real unit confirms it.
 ## Pitfalls
 
 - `by_id`, stored preferences and bundles can name Planned models, and `by_id`
-  also finds the virtual Classic. Consumers that need a USB model must use
+  also finds the Virtual Deck (`virtual-classic`). Consumers that need a USB model must use
   `by_pid_supported` / `by_id_supported`; lists of what a session can run use
   `connectable()`, never `supported()` alone.
 - Neo sensors arrive as `Event::Key` indexes beyond `keys()`; the layers level

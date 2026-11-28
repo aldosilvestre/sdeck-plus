@@ -115,20 +115,6 @@ fn placeholder(model: &sdeck_plus::device_model::DeviceModel) -> &'static str {
     }
 }
 
-/// The preview title of the virtual models (L33). Their name stays
-/// everywhere else (connection line, Current selector).
-const VIRTUAL_TITLE: &str = "VIRTUAL DECK";
-
-/// The title over the keys: the model's name in capitals (`layout.brand`),
-/// [`VIRTUAL_TITLE`] for a virtual model.
-fn title(model: &DeviceModel, layout: &PreviewLayout) -> String {
-    if model.is_virtual() {
-        VIRTUAL_TITLE.to_owned()
-    } else {
-        layout.brand.clone()
-    }
-}
-
 /// One model's chassis subtree.
 struct Built {
     chassis: gtk::Fixed,
@@ -329,7 +315,7 @@ impl PreviewView {
     }
 
     fn install(self: &Rc<Self>, model: &'static DeviceModel) {
-        let built = self.build(model, PreviewLayout::for_model(model));
+        let built = self.build(PreviewLayout::for_model(model));
         self.card.append(&built.chassis);
         *self.built.borrow_mut() = Some(built);
         let selected = self.selected.get();
@@ -388,7 +374,7 @@ impl PreviewView {
         self.ui.load_selected_binding(&self.layers);
     }
 
-    fn build(self: &Rc<Self>, model: &DeviceModel, layout: PreviewLayout) -> Built {
+    fn build(self: &Rc<Self>, layout: PreviewLayout) -> Built {
         let chassis = gtk::Fixed::new();
         chassis.set_halign(gtk::Align::Center);
         chassis.set_valign(gtk::Align::Center);
@@ -402,7 +388,9 @@ impl PreviewView {
             handlers: Vec::new(),
             bindings: Vec::new(),
         };
-        let brand = Label::new(Some(&title(model, &layout)));
+        // The model's name in capitals: "VIRTUAL DECK" for the virtual deck
+        // (L33, L50).
+        let brand = Label::new(Some(&layout.brand));
         brand.add_css_class("hardware-brand");
         brand.set_size_request(layout.brand_rect.w, layout.brand_rect.h);
         chassis.put(

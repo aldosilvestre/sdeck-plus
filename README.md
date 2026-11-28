@@ -74,11 +74,11 @@ permissions on its own.
   [docs/plugins.md](docs/plugins.md)); to write one, follow the
   [plugin SDK guide](docs/plugin-sdk.html) and the starter in `examples/plugin-template` (an AI agent
   can follow [docs/SKILL.md](docs/SKILL.md)).
-- **Virtual Stream Deck Classic:** **Menu > Virtual deck (Classic)** serves a 15-key Classic in a
+- **Virtual Deck:** **Menu > Virtual Deck** serves a 15-key deck in a
   web page that phones and browsers on your local network open (landscape on phones, a QR code of
   the address) after typing a password you set in the app for the session: it is kept only in
   memory, never saved, and asked for again after sdeck-plus restarts, while the port and the deck's
-  own profiles are remembered. It runs the same actions as a plugged-in Classic and lists who is
+  own profiles are remembered. It runs the same actions as a plugged-in Stream Deck and lists who is
   connected so you can disconnect them. It is
   served over plain HTTP on your local network, so no certificate warning appears, but browsers
   mark the page "Not secure": the password itself never crosses the network (the page proves it
@@ -86,7 +86,7 @@ permissions on its own.
   network, so use a long passphrase. It is off at every launch, and anyone on your network with
   the password can run that deck's actions, including commands. Validated with automated tests
   and headless browsers only, not yet on real phones; see the
-  [virtual deck documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#virtual-deck).
+  [Virtual Deck documentation](https://aldosilvestre.github.io/sdeck-plus/docs.html#virtual-deck).
 - **System tray** with optional start at login.
 - **Light and dark GTK themes** following the desktop.
 - **Configuration backup and restore** through a single readable metadata-only export file (no base64);

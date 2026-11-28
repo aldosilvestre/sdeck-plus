@@ -44,7 +44,7 @@ const FRAME_BACKLOG: usize = 256;
 /// The largest picture the deck reassembles.
 const IMAGE_LIMIT: usize = 4 << 20;
 /// Why reads and writes fail once the deck is gone or the connection is stale.
-const DETACHED: &str = "virtual deck detached";
+const DETACHED: &str = "Virtual Deck detached";
 
 /// What the virtual deck shows, for its viewers.
 #[derive(Clone, Debug, PartialEq, Eq)]

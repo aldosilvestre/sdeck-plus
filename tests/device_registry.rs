@@ -778,6 +778,31 @@ fn the_virtual_classic_is_a_classic_the_application_serves_itself() {
     assert_eq!(model.live_controls(), "keys");
 }
 
+/// L50: "para el virtual deck saca las referencias donde diga classic. Solo
+/// que quede 'Virtual Deck'". The name every screen shows (Current
+/// selector, connection line, preview, exports' refusal) is "Virtual Deck";
+/// the internal id and data root stay, so no user data moves, and the real
+/// Classic keeps its name.
+#[test]
+fn the_virtual_deck_is_named_virtual_deck_and_keeps_its_internal_id_and_root() {
+    assert_eq!(VIRTUAL_CLASSIC.name, "Virtual Deck");
+    assert!(
+        !VIRTUAL_CLASSIC.name.to_lowercase().contains("classic"),
+        "{}",
+        VIRTUAL_CLASSIC.name
+    );
+    assert_eq!(VIRTUAL_CLASSIC.id, "virtual-classic");
+    assert_eq!(
+        DeviceModel::by_id("virtual-classic"),
+        Some(&VIRTUAL_CLASSIC)
+    );
+    assert_eq!(
+        data_root_in(Path::new("/data/sdeck-plus"), &VIRTUAL_CLASSIC),
+        Path::new("/data/sdeck-plus/devices/virtual-classic")
+    );
+    assert_eq!(CLASSIC.name, "Stream Deck Classic");
+}
+
 #[test]
 fn the_virtual_classic_is_never_discovered_over_usb_or_listed_with_the_hardware() {
     let is_virtual = |model: &&DeviceModel| model.id == "virtual-classic";

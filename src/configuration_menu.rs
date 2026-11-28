@@ -15,7 +15,7 @@ struct MenuState {
     runtime: RefCell<Option<FeatureRuntime>>,
     chooser: RefCell<Option<gtk::FileChooserNative>>,
     confirmation: RefCell<Option<gtk::Dialog>>,
-    /// The "Virtual deck (Classic)" section, once the window gives it one.
+    /// The "Virtual Deck" section, once the window gives it one.
     virtual_deck: RefCell<Option<VirtualDeckPanel>>,
 }
 
@@ -133,7 +133,7 @@ impl ConfigurationMenu {
         self.0.updates_content.append(body);
     }
 
-    /// Put the virtual deck's switch and details below Export configuration...,
+    /// Put the Virtual Deck's switch and details below Export configuration...,
     /// after a hairline, as in design/virtual-classic/04-all-in-menu.html. Only
     /// the app's window has one; the menu keeps it alive.
     pub(crate) fn attach_virtual_deck(&self, panel: &VirtualDeckPanel) {
@@ -155,7 +155,7 @@ impl ConfigurationMenu {
         list.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         list.append(panel.section());
         let what =
-            "Menu: help, updates, importing or exporting the configuration, and the virtual deck.";
+            "Menu: help, updates, importing or exporting the configuration, and the Virtual Deck.";
         self.0.button.set_tooltip_text(Some(what));
         self.0
             .button

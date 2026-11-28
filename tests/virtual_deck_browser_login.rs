@@ -349,9 +349,12 @@ function state() {
     const meta = document.querySelector("meta[name='sdeck-page']");
     const banner = document.getElementById("error");
     const dot = document.getElementById("dot");
+    const heading = document.querySelector("h1");
     return {
       url: location.href,
       page: meta ? meta.content : null,
+      title: document.title,
+      heading: heading ? heading.textContent : null,
       banner: banner ? banner.textContent : null,
       body: document.body ? document.body.className : null,
       dot: dot ? dot.getAttribute("aria-label") : null,
@@ -651,6 +654,9 @@ fn a_phone_with_the_right_password_reaches_the_deck_and_a_wrong_one_sees_the_err
 
     let opened = &report.step("opened")["state"];
     assert_eq!(opened["page"], "login", "{report}");
+    // L50: the browser shows "Virtual Deck", never "Classic".
+    assert_eq!(opened["title"], "Virtual Deck · Log in", "{report}");
+    assert_eq!(opened["heading"], "Virtual Deck", "{report}");
     assert_eq!(
         opened["secure_context"], false,
         "like a phone at a LAN address: {report}"
@@ -670,6 +676,7 @@ fn a_phone_with_the_right_password_reaches_the_deck_and_a_wrong_one_sees_the_err
     assert_eq!(report.outcome(), "deck", "{report}");
     let end = &report.step("end")["state"];
     assert_eq!(end["page"], "deck", "{report}");
+    assert_eq!(end["title"], "Virtual Deck", "{report}");
     assert_eq!(end["dot"], "Connected", "{report}");
     let finishes = report.requests("POST", &format!("{origin}/login/finish"));
     assert_eq!(finishes.len(), 2, "{report}");

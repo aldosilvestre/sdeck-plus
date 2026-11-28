@@ -7,14 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Virtual Stream Deck Classic in a web page:** the switch **Menu > Virtual deck (Classic)**
-  serves a 15-key Stream Deck Classic (with its 480x272 background picture) that phones and
-  browsers on the local network open at `http://<lan-ip>:8765/`. It runs through the same hub,
-  actions and two-second key hold as a plugged-in Classic, is listed in the **Current** selector
+- **Virtual Deck in a web page:** the switch **Menu > Virtual Deck** serves a 15-key deck (five
+  columns, three rows, with a 480x272 background picture) that phones and browsers on the local
+  network open at `http://<lan-ip>:8765/`. It runs through the same hub, actions and two-second
+  key hold as a plugged-in Stream Deck, is listed as "Virtual Deck" in the **Current** selector
   while on (its device preview is titled "VIRTUAL DECK"), and keeps its own profiles in
-  `devices/virtual-classic/`, so it runs beside a real Classic. The switch is off at every launch;
+  `devices/virtual-classic/`, so it runs beside any plugged-in Stream Deck. The switch is off at every launch;
   turning it on starts the server (no browser window opens by itself: use **Open** or the QR code)
-  and shows the header badge "Virtual deck on · N viewers"; turning it off (or quitting) stops the
+  and shows the header badge "Virtual Deck on · N viewers"; turning it off (or quitting) stops the
   server and removes the device. The first time it is turned on after sdeck-plus starts, the switch
   stays on and a form below it asks for a password for the session ("Set a password for this
   session. It is forgotten when sdeck-plus closes.", a plain note rather than a warning; 8 to 128
@@ -26,16 +26,16 @@ All notable changes to this project are documented here. The format follows
   from it (salt, iterations and two keys) in memory, turns the deck off and on again with it
   without asking, and forgets it when sdeck-plus closes.
   Everything else is remembered: `virtual-deck.json` in the config folder (0600) keeps the port
-  only, and the virtual Classic's profiles, pages, bindings and pictures stay in
+  only, and the Virtual Deck's profiles, pages, bindings and pictures stay in
   `devices/virtual-classic/`. Password fields, in the app and on the web login, hide characters as small bullets and reveal
   them with an eye button.
-- **Menu section for the virtual deck:** while on, the menu shows a QR code of the page address
+- **Menu section for the Virtual Deck:** while on, the menu shows a QR code of the page address
   (never the password) with **Copy** and **Open**, **Change…** for the session's password (in memory
   only; it asks first, because "Changing the password disconnects every viewer."), the **Port** (default 8765, 1024 to
   65535; Enter moves the server and the new port is remembered, the old server keeps running if the
   new one cannot start) and **Viewers (n)**: each page's browser, address and start time with a
-  **Disconnect** button, which ends that login. The header's connection line reads "Virtual Stream
-  Deck Classic — served at <address>" instead of USB ids.
+  **Disconnect** button, which ends that login. The header's connection line reads "Virtual
+  Deck — served at <address>" instead of USB ids. The web pages are titled "Virtual Deck" too.
 - **The deck page:** keys first, filling a phone held sideways (no zoom, no page scroll, safe
   areas, several fingers at once, no context menu on a long press) and usable with a mouse; a bar
   fills to the two-second hold; one menu button holds the status, **Full screen** (where the
@@ -70,7 +70,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- The virtual deck's login no longer returns to the password page after the right password in a
+- The Virtual Deck's login no longer returns to the password page after the right password in a
   browser that had opened an earlier development build served over HTTPS (seen on an iPhone with
   Safari and on a PC with Brave). That build left a `Secure` cookie named `sdeck_session`, and
   browsers never let a plain HTTP page replace a `Secure` cookie of the same name nor send it over
@@ -80,7 +80,7 @@ All notable changes to this project are documented here. The format follows
 - A keypad background no longer breaks the Stream Deck Classic's device preview: the Background
   bar's thumbnail made the device take the picture's own size (a 1920x1080 picture turned the
   348x250 Classic into 2057x1282). A picture of any size now fills only the bar's 42x24
-  thumbnail and each key's share, on the Classic and the virtual Classic alike.
+  thumbnail and each key's share, on the Classic and the Virtual Deck alike.
 
 - The **Audio input device** live reading now shows when the microphone is muted: its microphone
   icon is crossed out and dimmed, like **Microphone volume and mute**. Before, it read only the

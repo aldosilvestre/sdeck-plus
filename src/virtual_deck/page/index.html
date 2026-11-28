@@ -10,7 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="icon" href="data:,">
-<title>Virtual Stream Deck</title>
+<title>Virtual Deck</title>
 <style>
 :root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--violet-hover:#c7b6f5;--violet-pressed:#a58cde;--selection:#4e426d;--cyan:#85dce8;--error:#fb778a;--success:#7de2b3;--warning:#f9cc7a;--press:#22c55e;--st:max(8px,env(safe-area-inset-top,0px));--sr:max(10px,env(safe-area-inset-right,0px));--sb:max(8px,env(safe-area-inset-bottom,0px));--sl:max(12px,env(safe-area-inset-left,0px));color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
@@ -120,7 +120,7 @@ noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;bord
 </div>
 <div class="overlay" id="overlay" hidden><div class="card"><div class="spin" id="spin" aria-hidden="true"></div><strong id="message">Connection lost. Reconnecting…</strong><span class="helper" id="helper"></span><button class="btn" id="action" type="button">Try now</button></div></div>
 <p class="vh" id="live" role="status"></p>
-<noscript><p>The virtual deck needs JavaScript in this browser.</p></noscript>
+<noscript><p>The Virtual Deck needs JavaScript in this browser.</p></noscript>
 <script>
 (function () {
   "use strict";
@@ -175,17 +175,17 @@ noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;bord
       overlay: {
         spin: true,
         message: "Connection lost. Reconnecting…",
-        helper: "Keys are paused until the deck is back. If sdeck-plus turned the virtual deck off, this page waits here.",
+        helper: "Keys are paused until the deck is back. If sdeck-plus turned the Virtual Deck off, this page waits here.",
         action: "Try now"
       }
     },
     stopped: {
       dot: "Reconnecting",
-      status: "The virtual deck was turned off in sdeck-plus.",
+      status: "The Virtual Deck was turned off in sdeck-plus.",
       overlay: {
         spin: false,
-        message: "The virtual deck was turned off in sdeck-plus.",
-        helper: "Keys are paused. This page connects again when the virtual deck is turned back on.",
+        message: "The Virtual Deck was turned off in sdeck-plus.",
+        helper: "Keys are paused. This page connects again when the Virtual Deck is turned back on.",
         action: "Try now"
       }
     },
@@ -455,7 +455,7 @@ noscript p{position:absolute;inset:auto 16px 16px;margin:0;padding:8px 10px;bord
     }
   }
 
-  // The Classic's 480x272 keypad background: every key is a window onto its
+  // The deck's 480x272 keypad background: every key is a window onto its
   // own part of the picture (CSS --bx/--by), as on the device.
   var background = { seq: 0, url: null, img: null };
 

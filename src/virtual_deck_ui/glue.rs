@@ -111,7 +111,7 @@ impl Glue {
         let handle = thread::Builder::new()
             .name("virtual-deck-glue".into())
             .spawn(move || run(&flag, &wires, &ends))
-            .map_err(|error| format!("Could not start the virtual deck: {error}"))?;
+            .map_err(|error| format!("Could not start the Virtual Deck: {error}"))?;
         Ok(Self {
             stop,
             handle: Some(handle),

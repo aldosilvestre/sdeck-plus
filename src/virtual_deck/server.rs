@@ -301,7 +301,7 @@ impl Shared {
         let browser = browser::describe(request.header("user-agent").unwrap_or_default());
         let mut registry = self.registry();
         if registry.stopping {
-            return Err(Reply::error(503, "The virtual deck is stopping."));
+            return Err(Reply::error(503, "The Virtual Deck is stopping."));
         }
         let Some(session) = registry
             .access
@@ -444,7 +444,7 @@ impl Running {
                 let connections = connections.clone();
                 move || accept_loop(&listener, &shared, &connections, &stop)
             })
-            .map_err(|error| format!("Could not start the virtual deck: {error}"))?;
+            .map_err(|error| format!("Could not start the Virtual Deck: {error}"))?;
         Ok(Self {
             shared,
             port,
@@ -533,7 +533,7 @@ fn accept_loop(
                 ) => {}
             Err(error) => {
                 shared.emit(ServerEvent::Error(format!(
-                    "The virtual deck could not accept a connection: {error}"
+                    "The Virtual Deck could not accept a connection: {error}"
                 )));
                 if let Err(RecvTimeoutError::Disconnected) = stop.recv_timeout(ACCEPT_BACKOFF) {
                     return;
@@ -579,7 +579,7 @@ fn admit(tcp: TcpStream, peer: IpAddr, shared: &Arc<Shared>, connections: &Mutex
             upgraded,
         }),
         Err(error) => shared.emit(ServerEvent::Error(format!(
-            "The virtual deck could not serve a connection: {error}"
+            "The Virtual Deck could not serve a connection: {error}"
         ))),
     }
 }

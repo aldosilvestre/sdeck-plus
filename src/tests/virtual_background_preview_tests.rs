@@ -361,17 +361,17 @@ fn the_virtual_classic_shown_over_the_real_hub_keeps_its_preview_with_a_backgrou
         };
         let _panel = turn_on_and_wait(&pair);
         let runtime = shown_session(&pair, &VIRTUAL_CLASSIC);
-        // L33: the preview is titled "VIRTUAL DECK"; the header keeps the
-        // model's name.
+        // L33 + L50: the preview is titled "VIRTUAL DECK" and the header
+        // names it "Virtual Deck", never "Classic".
         assert_eq!(
             header_label(&pair.window, "hardware-brand").text(),
             "VIRTUAL DECK"
         );
         let window = pair.window.clone();
-        wait_until("the header names the virtual Classic", move || {
+        wait_until("the header names the Virtual Deck", move || {
             header_label(&window, "muted")
                 .text()
-                .starts_with("Virtual Stream Deck Classic — served at ")
+                .starts_with("Virtual Deck — served at ")
         });
         let preview = runtime.preview().unwrap();
         check_backgrounds(

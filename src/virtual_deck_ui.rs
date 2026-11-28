@@ -1,6 +1,8 @@
-//! The header menu's virtual deck, as drawn in
-//! design/virtual-classic/04-all-in-menu.html: a "Virtual deck (Classic)"
-//! switch below Export configuration..., and everything the switch needs.
+//! The header menu's Virtual Deck, as drawn in
+//! design/virtual-classic/04-all-in-menu.html: a "Virtual Deck" switch below
+//! Export configuration..., and everything the switch needs. Users only see
+//! the name "Virtual Deck" (L50); internally it is the `virtual-classic`
+//! model, a Stream Deck Classic the app serves.
 //!
 //! The switch is off on every launch. The password lives in memory for the
 //! session only (L40): the first time the switch is turned on, it stays on and
@@ -16,13 +18,13 @@
 //! dropping any password an earlier build left there. While on,
 //! the menu shows the page address (`http://…`: QR code, Copy, Open), the
 //! password (Change…), the port ("Restarts the server") and the viewers, each
-//! with Disconnect; the header says "Virtual deck on · N viewers". The
+//! with Disconnect; the header says "Virtual Deck on · N viewers". The
 //! password changes only while the deck is on, so a server that starts or
 //! restarts always serves the session's current password.
 //!
-//! Turning it on starts the plain HTTP server, attaches a virtual Stream Deck
-//! Classic to the HID hub (no browser window opens by itself; the Open button
-//! does that); turning it off
+//! Turning it on starts the plain HTTP server, attaches the virtual deck
+//! (Classic geometry) to the HID hub (no browser window opens by itself; the
+//! Open button does that); turning it off
 //! (or quitting) stops the server, detaches the deck and joins the glue thread
 //! that carries presses and pictures between the two. GTK never waits for any
 //! of it: deriving the password verifier, starting and stopping run on owned
@@ -60,7 +62,7 @@ pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 #[cfg(test)]
 pub(crate) const LAN: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-pub(crate) const TITLE: &str = "Virtual deck (Classic)";
+pub(crate) const TITLE: &str = "Virtual Deck";
 /// The first-time form's neutral notice: the password is set for each session.
 pub(crate) const SESSION_PASSWORD: &str =
     "Set a password for this session. It is forgotten when sdeck-plus closes.";
@@ -73,7 +75,7 @@ pub(crate) const CONFIRM_WAIT: &str =
     "The server is restarting. Confirm once it is on; changing the password disconnects every viewer.";
 /// Why a new password is refused while the server restarts.
 pub(crate) const CHANGE_WAIT: &str = "The server is restarting. Change the password once it is on.";
-const SWITCH_TIP: &str = "Serve a virtual Stream Deck Classic in a web page on this network";
+const SWITCH_TIP: &str = "Serve the Virtual Deck in a web page on this network";
 /// The QR code's side, as in the artboard.
 const QR_SIZE: i32 = 112;
 /// Viewer rows shown before the list scrolls inside the menu.
@@ -165,11 +167,11 @@ fn set_served_at(url: Option<String>) {
     SERVED_AT.with(|served| *served.borrow_mut() = url);
 }
 
-/// "Virtual deck on · 2 viewers" (one viewer is "1 viewer").
+/// "Virtual Deck on · 2 viewers" (one viewer is "1 viewer").
 pub(crate) fn badge_text(viewers: usize) -> String {
     match viewers {
-        1 => "Virtual deck on · 1 viewer".to_string(),
-        count => format!("Virtual deck on · {count} viewers"),
+        1 => "Virtual Deck on · 1 viewer".to_string(),
+        count => format!("Virtual Deck on · {count} viewers"),
     }
 }
 
@@ -670,7 +672,7 @@ struct Worker {
 struct State {
     env: Environment,
     widgets: Widgets,
-    /// The header's "Virtual deck on · N viewers".
+    /// The header's "Virtual Deck on · N viewers".
     badge: Label,
     toast: Option<ui::Toast>,
     phase: Cell<Phase>,
@@ -976,7 +978,7 @@ impl VirtualDeckPanel {
             Ok(handle) => handle,
             Err(error) => {
                 self.finish(failed(format!(
-                    "Could not start the virtual deck worker: {error}"
+                    "Could not start the Virtual Deck worker: {error}"
                 )));
                 return;
             }
@@ -1133,7 +1135,7 @@ impl VirtualDeckPanel {
             .url_candidates()
             .into_iter()
             .next()
-            .ok_or("The virtual deck has no address to offer.")?;
+            .ok_or("The Virtual Deck has no address to offer.")?;
         let server = Arc::new(server);
         let generation = self.0.generation.get() + 1;
         self.0.generation.set(generation);
@@ -1180,7 +1182,7 @@ impl VirtualDeckPanel {
         match event {
             ServerEvent::ViewersChanged => self.refresh_viewers(),
             ServerEvent::Error(error) => {
-                let message = format!("Virtual deck: {error}");
+                let message = format!("Virtual Deck: {error}");
                 match &self.0.toast {
                     Some(toast) => toast.show(&message, true),
                     None => self.report(&message),
@@ -1582,9 +1584,9 @@ mod tests {
 
     #[test]
     fn the_header_counts_viewers_in_words() {
-        assert_eq!(badge_text(0), "Virtual deck on · 0 viewers");
-        assert_eq!(badge_text(1), "Virtual deck on · 1 viewer");
-        assert_eq!(badge_text(2), "Virtual deck on · 2 viewers");
+        assert_eq!(badge_text(0), "Virtual Deck on · 0 viewers");
+        assert_eq!(badge_text(1), "Virtual Deck on · 1 viewer");
+        assert_eq!(badge_text(2), "Virtual Deck on · 2 viewers");
     }
 
     #[test]

@@ -227,7 +227,7 @@ its own literals. The graphite hardware is identical in both modes.
 
 Status badges pair semantic tones with visible text, a low-alpha fill and a
 55%-alpha edge of the same token: warning for Not connected/Disconnected, error
-for Unavailable and success for Connected; the virtual deck's "Virtual deck on · N
+for Unavailable and success for Connected; the Virtual Deck's "Virtual Deck on · N
 viewers" badge is violet (`.status-virtual`). Color alone never communicates state. Hardware uses a graphite chassis
 (`#414951` to `#272d34`), pale branding (`#e1e6eb`), black key/strip material
 (`#08090b`), inset key edge (`#515b65`), recessed rail (`#22282e` to `#343c44`)
@@ -423,7 +423,7 @@ the caption "Background" (11px/600). It is a selectable control named
 "Background" (see "Keypad background" below); the Classic chassis is 348x250.
 A background of any size or shape (a 1920x1080 photo, a tall 600x1200 one)
 fills only that thumbnail and each key's share: the bar, the chassis, the card
-and the window keep their size, on the Classic and the virtual Classic alike.
+and the window keep their size, on the Classic and the Virtual Deck alike.
 
 **Models without dials or a touch strip.** The Stream Deck Classic (15 keys,
 5x3) and XL (32 keys, 8x4) have keys only, and the Neo keys, two touch buttons
@@ -560,7 +560,7 @@ secondary to the tabs. Menu is the window's one configuration menu button and li
 header, not the rail: on the title row, completely at the right edge and vertically centred on the
 "SDECK-PLUS" line (not on the detail line below). It keeps its icon + "Menu" caption, tooltip
 ("Menu: ..."), accessible name and description and headerless popover, and the same button serves
-every model shown. The header has two rows: the title row (title, the virtual deck badge while
+every model shown. The header has two rows: the title row (title, the Virtual Deck badge while
 it is on, update indicator when shown, Current selector when two models are connected, Menu) and,
 under it, the connection detail.
 The Current selector sits immediately to the left of Menu on the same line. Only the content column (page bar, preview,
@@ -976,15 +976,16 @@ two columns fit.
   confirmation uses the same layout with an **Import** button.
 - **Menu popover:** the header's Menu is a headerless command menu (6px padding, 38px rows, no
   title row, no arrow and no Close button) of Help, Updates, Import configuration... and Export
-  configuration..., then a 1px separator and the **Virtual deck (Classic)** section below;
+  configuration..., then a 1px separator and the **Virtual Deck** section below;
   Escape or a click outside dismisses it. The Menu's tooltip and accessible description read
-  "Menu: help, updates, importing or exporting the configuration, and the virtual deck."
-- **Virtual deck (Classic)** (`src/virtual_deck_ui.rs`; source artboard
+  "Menu: help, updates, importing or exporting the configuration, and the Virtual Deck."
+- **Virtual Deck** (`src/virtual_deck_ui.rs`; source artboard
   `design/virtual-classic/04-all-in-menu.html`): the menu's last section.
   - **Switch row:** 38px like a command row (8px 10px padding): a 16px `input-dialpad-symbolic`
-    icon (presentation only), the bold title "Virtual deck (Classic)" and a `Switch` at the end,
-    named "Virtual deck (Classic)" with the tooltip and description "Serve a virtual Stream Deck
-    Classic in a web page on this network". The switch is off at every launch and insensitive while
+    icon (presentation only), the bold title "Virtual Deck" and a `Switch` at the end,
+    named "Virtual Deck" with the tooltip and description "Serve the Virtual Deck in a web page
+    on this network". The menu, the header and the web pages never call it "Classic" (L50);
+    internally it is the model `virtual-classic`, with the Classic's geometry. The switch is off at every launch and insensitive while
     the server starts, moves to another port or stops; turned on without this session's password it
     stays on, and usable, while the form below it asks. Off, the menu ends at the switch row; the
     details below it (10px side and bottom margins, 12px between groups, 344px wide so the menu
@@ -1013,7 +1014,7 @@ two columns fit.
     Once the deck is on, the verifier is the session's: turning the switch off and on again in the
     same session starts at once with that password, without the form (a failure then turns the
     switch back off with the reason in the banner); quitting forgets it, so the next launch asks
-    again. The port and the virtual Classic's own data are remembered as usual.
+    again. The port and the Virtual Deck's own data are remembered as usual.
   - **Running:** a 112px QR code of the page address (dark `desk_bg` modules on a white square
     with 8px corners, a two-module quiet zone; never the password) beside the address in a
     selectable monospace chip and the captioned **Copy** ("Copy the address", toast "Address
@@ -1034,11 +1035,11 @@ two columns fit.
   - **Changing the password** confirms first in the shared dialog frame: "Change the password?",
     "Changing the password disconnects every viewer." (while the server restarts: "The server is restarting. Confirm once it is on; changing the password disconnects every viewer." with the accept button disabled; the form itself refuses with "The server is restarting. Change the password once it is on."), Cancel (the default) and a red **Change
     password**; success toasts "Password changed. Every viewer was disconnected."
-  - **Header:** while on, the title row shows the badge "Virtual deck on · N viewers" ("1
-    viewer"; violet, tooltip "Served at <address>") right after the title. The virtual Classic's
-    connection line reads "Virtual Stream Deck Classic — served at <address>" in place of USB ids
-    (with other devices connected it is the last line of the tooltip), "Virtual Stream Deck
-    Classic turned off — turn it on from the Menu" once off, and the model comes last in the
+  - **Header:** while on, the title row shows the badge "Virtual Deck on · N viewers" ("1
+    viewer"; violet, tooltip "Served at <address>") right after the title. The Virtual Deck's
+    connection line reads "Virtual Deck — served at <address>" in place of USB ids
+    (with other devices connected it is the last line of the tooltip), "Virtual Deck turned
+    off — turn it on from the Menu" once off, and the model comes last, as "Virtual Deck", in the
     connected list and the Current selector. It is never remembered as the last shown model.
   - **Threads:** GTK never waits: deriving the password verifier, starting, moving and stopping
     the server run on owned worker threads, presses and pictures cross an owned glue thread, and
@@ -1099,15 +1100,13 @@ two columns fit.
   not offered in the selector. The menu's import and export, OBS and Test
   action act on the shown session; the focused application reaches every
   session. Each preview's brand line is the model's name in capitals ("STREAM
-  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC"), except the virtual
-  Classic's, which reads "VIRTUAL DECK" (its full name stays in the header's
-  connection line and the Current selector), and the setup help follows the
-  shown model.
+  DECK +", "STREAM DECK + XL", "STREAM DECK CLASSIC", and "VIRTUAL DECK" for
+  the Virtual Deck), and the setup help follows the shown model.
 - **Release updates:** beside the connection badge, a keyboard-operable text
   button reads "Update available: vX.Y.Z" only when a newer stable release is
   known, and opens the Updates dialog. It uses the shared cyan token in both palettes, never
   color alone. The Menu lists Help, Updates, Import configuration... and Export
-  configuration... (then the virtual deck section); Updates opens a modal dialog (same width, margins and Close
+  configuration... (then the Virtual Deck section); Updates opens a modal dialog (same width, margins and Close
   button as Help) that groups its status, Check for updates button and Check
   for updates automatically checkbox with 8px gaps. The Updates dialog never uses a
   scrolled window: text wraps at the shared helper measure and installer output
@@ -1246,9 +1245,9 @@ tray and that closing the window exits. Do not change saved preferences or leave
 an inaccessible background process. Shutdown cancels registration, retries and
 GTK callbacks, releases the application hold and joins the owned worker.
 
-## 10. Virtual deck web page
+## 10. Virtual Deck web page
 
-The virtual Stream Deck Classic's pages (`src/virtual_deck/page/index.html` and `login.html`,
+The Virtual Deck's pages (`src/virtual_deck/page/index.html` and `login.html`,
 served by `src/virtual_deck.rs`) follow the chosen artboard "02 · Keys first"
 (`design/virtual-classic/02-keys-first.html`); 01 and 03 are rejected alternatives. They are
 self-contained (inline CSS and script, no external URL), dark only (`color-scheme: dark`, the
@@ -1264,7 +1263,7 @@ HTTP, so browsers mark them "Not secure" but show no certificate warning page.
   (`user-scalable=no`), no page scroll (fixed body, `overflow: hidden`), `touch-action: none`,
   and no context menu, selection, drag or pinch.
 - **Key:** black `#08090b` with corners of 7% of the key (6 to 14px) and the device's inset
-  `#515b65` 2px edge; the picture covers it. The Classic's 480x272 background shows through every
+  `#515b65` 2px edge; the picture covers it. The deck's 480x272 background shows through every
   key at its own place (key 1 at 11,5, a 97px pitch), as on the device. Pressed: a 4px green
   `#22c55e` inset edge and the picture 25% brighter; with a mouse, hover shows the control edge.
   Brightness dims the pictures (0% darkens them by 90%).
@@ -1285,9 +1284,9 @@ HTTP, so browsers mark them "Not secure" but show no certificate warning page.
   accessible name ("Connecting", "Connected", "Reconnecting", "Disconnected").
 - **Overlays:** while not connected the keys are inert, dimmed to 35% and partly greyed, and a
   centred card says why: "Connection lost. Reconnecting…" with a spinner, "Keys are paused until
-  the deck is back. If sdeck-plus turned the virtual deck off, this page waits here." and **Try
-  now** (retries back off from 1s to 10s); "The virtual deck was turned off in sdeck-plus." with
-  "Keys are paused. This page connects again when the virtual deck is turned back on."; "This
+  the deck is back. If sdeck-plus turned the Virtual Deck off, this page waits here." and **Try
+  now** (retries back off from 1s to 10s); "The Virtual Deck was turned off in sdeck-plus." with
+  "Keys are paused. This page connects again when the Virtual Deck is turned back on."; "This
   device was disconnected from sdeck-plus." or "The password changed. Log in again." with a violet
   **Log in again**. Status changes are announced in a polite live region.
 - **Portrait:** above the keys, "Turn your phone sideways for bigger keys. The deck still works
@@ -1295,7 +1294,10 @@ HTTP, so browsers mark them "Not secure" but show no certificate warning page.
 - **Screen:** the page asks for a Screen Wake Lock when it opens, connects, takes a press or is
   shown again, where the browser offers it. Browsers offer it only to HTTPS pages, so over plain
   HTTP the request does nothing and the screen dims and locks as usual.
-- **Login page:** "Virtual Stream Deck", "Classic · served by sdeck-plus" (no host name), "Ask
+- **Titles:** the browser tab reads "Virtual Deck · Log in" on the login page and "Virtual
+  Deck" on the deck page; neither page says "Classic" (L50; the artboards' "Virtual Stream
+  Deck" / "Classic · served by …" heading predates that).
+- **Login page:** "Virtual Deck", "Served by sdeck-plus" (no host name), "Ask
   the person running sdeck-plus for the password.", a labelled **Password** entry (small spaced
   bullets) with a 44px eye button (named "Show password" or "Hide password", `aria-pressed`,
   eye-off while shown), an alert banner and a violet **Connect**, which reads "Checking…" while
@@ -1308,7 +1310,7 @@ HTTP, so browsers mark them "Not secure" but show no certificate warning page.
   did not keep the login cookie (the page loads the deck only once `/` serves it, so it never
   silently asks for the password again): "Could not log in." with "This browser did not keep the
   login cookie. Allow cookies for this address, then try again."; unreachable:
-  "Could not reach sdeck-plus." with "Check that the virtual deck is still on, then try again."
+  "Could not reach sdeck-plus." with "Check that the Virtual Deck is still on, then try again."
   The login needs JavaScript and never posts a form (the policy has `form-action 'none'`): the
   form stays hidden and a note reads "This page needs JavaScript to log in." without it, or "This
   browser cannot log in here. Try a newer browser." when the browser lacks what the login uses.

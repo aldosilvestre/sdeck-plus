@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#15191f">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" href="data:,">
-<title>Virtual Stream Deck · Log in</title>
+<title>Virtual Deck · Log in</title>
 <style>
 :root{--bg:#15191f;--surface:#20262e;--field:#191e25;--hover:#303943;--edge:#353e49;--control-edge:#76828f;--ink:#f1f4f7;--muted:#b0bac6;--violet:#b6a1ef;--violet-hover:#c7b6f5;--violet-pressed:#a58cde;--cyan:#85dce8;--error:#fb778a;--warning:#f9cc7a;color-scheme:dark}
 *{box-sizing:border-box}
@@ -56,8 +56,8 @@ button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 <main>
 <header>
 <div class="mini-deck" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-<h1>Virtual Stream Deck</h1>
-<p>Classic · served by sdeck-plus</p>
+<h1>Virtual Deck</h1>
+<p>Served by sdeck-plus</p>
 <p class="ask">Ask the person running sdeck-plus for the password.</p>
 </header>
 <noscript><p class="needs">This page needs JavaScript to log in.</p></noscript>
@@ -608,7 +608,7 @@ var SdeckCrypto = (function () {
     say();
     submit.textContent = "Checking…";
     logIn(input.value).then(null, function () {
-      say("error", "Could not reach sdeck-plus.", ["Check that the virtual deck is still on, then try again."]);
+      say("error", "Could not reach sdeck-plus.", ["Check that the Virtual Deck is still on, then try again."]);
     }).then(function () {
       busy = false;
       submit.textContent = "Connect";
